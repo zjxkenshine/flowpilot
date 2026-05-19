@@ -349,6 +349,68 @@
       return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
     }
 
+    function normalizeEmailValue(value = '') {
+      const email = normalizeString(value);
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+    }
+
+    function decodeCodexBase64UrlSegment(segment = '') {
+      const normalized = normalizeString(segment)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      if (!normalized) {
+        return '';
+      }
+      const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+      try {
+        if (typeof Buffer !== 'undefined') {
+          return Buffer.from(padded, 'base64').toString('utf8');
+        }
+        if (typeof atob === 'function') {
+          const binary = atob(padded);
+          const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+          if (typeof TextDecoder !== 'undefined') {
+            return new TextDecoder().decode(bytes);
+          }
+          return binary;
+        }
+      } catch {
+        return '';
+      }
+      return '';
+    }
+
+    function parseCodexAccessTokenClaims(accessToken = '') {
+      const token = normalizeString(accessToken);
+      if (!token) {
+        return null;
+      }
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        return null;
+      }
+      try {
+        return JSON.parse(decodeCodexBase64UrlSegment(parts[1]));
+      } catch {
+        return null;
+      }
+    }
+
+    function resolveCodexSessionImportAccountName(state = {}, session = null, accessToken = '') {
+      const sessionObject = normalizeCodexSessionObject(session);
+      const claims = parseCodexAccessTokenClaims(accessToken || sessionObject?.accessToken);
+      const accountIdentifierType = normalizeString(state?.accountIdentifierType).toLowerCase();
+      const accountIdentifierEmail = accountIdentifierType === 'email'
+        ? normalizeEmailValue(state?.accountIdentifier)
+        : '';
+
+      return normalizeEmailValue(sessionObject?.user?.email)
+        || normalizeEmailValue(sessionObject?.email)
+        || normalizeEmailValue(claims?.email)
+        || normalizeEmailValue(state?.email)
+        || accountIdentifierEmail;
+    }
+
     function buildCodexSessionImportContent(session, accessToken = '') {
       const normalizedAccessToken = normalizeString(accessToken);
       const sessionObject = normalizeCodexSessionObject(session);
@@ -666,6 +728,7 @@
       );
       const importContent = buildCodexSessionImportContent(session, accessToken);
       const importExpiresAt = resolveCodexSessionImportExpiresAt(session);
+      const preferredAccountName = resolveCodexSessionImportAccountName(state, session, accessToken);
 
       await logWithOptions(`${logLabel}：正在通过 SUB2API 管理接口登录并准备导入当前 ChatGPT 会话...`, 'info', options);
       const { origin, token } = await loginSub2Api(state, options);
@@ -689,6 +752,7 @@
         group_ids: groups
           .map((group) => Number(group?.id))
           .filter((id) => Number.isFinite(id) && id > 0),
+        ...(preferredAccountName ? { name: preferredAccountName } : {}),
         priority: accountPriority,
         auto_pause_on_expired: true,
         update_existing: true,

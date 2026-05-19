@@ -20,6 +20,21 @@ function loadSub2ApiSessionImportModule() {
   return new Function('self', `${source}; return self.MultiPageBackgroundSub2ApiSessionImport;`)({});
 }
 
+function encodeBase64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function createJwtToken(payload = {}) {
+  return [
+    encodeBase64UrlJson({ alg: 'HS256', typ: 'JWT' }),
+    encodeBase64UrlJson(payload),
+    'signature',
+  ].join('.');
+}
+
 test('sub2api api imports current ChatGPT session through codex-session endpoint', async () => {
   const apiModule = loadSub2ApiApiModule();
   const fetchCalls = [];
@@ -70,6 +85,7 @@ test('sub2api api imports current ChatGPT session through codex-session endpoint
         const parsedContent = JSON.parse(body.content);
         assert.equal(parsedContent.accessToken, 'access-token-from-state');
         assert.equal(parsedContent.user?.email, 'flow@example.com');
+        assert.equal(body.name, 'flow@example.com');
         assert.equal(body.priority, 3);
         assert.equal(body.proxy_id, 7);
         assert.deepStrictEqual(body.group_ids, [5]);
@@ -108,9 +124,11 @@ test('sub2api api imports current ChatGPT session through codex-session endpoint
       expires: '2026-05-20T12:34:56.000Z',
       user: {
         email: 'flow@example.com',
+        name: 'dyson willion',
       },
     },
     accessToken: 'access-token-from-state',
+    email: 'registration@example.com',
   }, {
     logLabel: '步骤 10',
     logOptions: { step: 10, stepKey: 'sub2api-session-import' },
@@ -125,6 +143,115 @@ test('sub2api api imports current ChatGPT session through codex-session endpoint
     logs.some((entry) => entry.level === 'warn' && /refresh_token/.test(entry.message)),
     true
   );
+});
+
+test('sub2api session import falls back to JWT email before registration email', async () => {
+  const apiModule = loadSub2ApiApiModule();
+  const jwtToken = createJwtToken({ email: 'jwt@example.com' });
+  let importBody = null;
+
+  const api = apiModule.createSub2ApiApi({
+    addLog: async () => {},
+    normalizeSub2ApiUrl: (value) => value,
+    DEFAULT_SUB2API_GROUP_NAME: 'codex',
+    fetchImpl: async (url, options = {}) => {
+      const parsed = new URL(url);
+      const body = options.body ? JSON.parse(options.body) : null;
+
+      if (parsed.pathname === '/api/v1/auth/login') {
+        return createJsonResponse({ code: 0, data: { access_token: 'admin-token' } });
+      }
+      if (parsed.pathname === '/api/v1/admin/groups/all') {
+        return createJsonResponse({
+          code: 0,
+          data: [{ id: 5, name: 'codex', platform: 'openai' }],
+        });
+      }
+      if (parsed.pathname === '/api/v1/admin/accounts/import/codex-session') {
+        importBody = body;
+        return createJsonResponse({
+          code: 0,
+          data: { total: 1, created: 1, updated: 0, skipped: 0, failed: 0 },
+        });
+      }
+
+      return createJsonResponse({ code: 1, message: `unexpected path ${parsed.pathname}` }, 404);
+    },
+  });
+
+  await api.importCurrentChatGptSession({
+    sub2apiUrl: 'https://sub.example/admin/accounts',
+    sub2apiEmail: 'admin@example.com',
+    sub2apiPassword: 'secret',
+    sub2apiGroupName: 'codex',
+    session: {
+      accessToken: jwtToken,
+      user: {
+        name: 'dyson willion',
+      },
+    },
+    accessToken: jwtToken,
+    email: 'registration@example.com',
+    accountIdentifierType: 'email',
+    accountIdentifier: 'identifier@example.com',
+  });
+
+  assert.ok(importBody, 'expected codex-session import call');
+  assert.equal(importBody.name, 'jwt@example.com');
+});
+
+test('sub2api session import falls back to registration email when session has no readable email', async () => {
+  const apiModule = loadSub2ApiApiModule();
+  let importBody = null;
+
+  const api = apiModule.createSub2ApiApi({
+    addLog: async () => {},
+    normalizeSub2ApiUrl: (value) => value,
+    DEFAULT_SUB2API_GROUP_NAME: 'codex',
+    fetchImpl: async (url, options = {}) => {
+      const parsed = new URL(url);
+      const body = options.body ? JSON.parse(options.body) : null;
+
+      if (parsed.pathname === '/api/v1/auth/login') {
+        return createJsonResponse({ code: 0, data: { access_token: 'admin-token' } });
+      }
+      if (parsed.pathname === '/api/v1/admin/groups/all') {
+        return createJsonResponse({
+          code: 0,
+          data: [{ id: 5, name: 'codex', platform: 'openai' }],
+        });
+      }
+      if (parsed.pathname === '/api/v1/admin/accounts/import/codex-session') {
+        importBody = body;
+        return createJsonResponse({
+          code: 0,
+          data: { total: 1, created: 1, updated: 0, skipped: 0, failed: 0 },
+        });
+      }
+
+      return createJsonResponse({ code: 1, message: `unexpected path ${parsed.pathname}` }, 404);
+    },
+  });
+
+  await api.importCurrentChatGptSession({
+    sub2apiUrl: 'https://sub.example/admin/accounts',
+    sub2apiEmail: 'admin@example.com',
+    sub2apiPassword: 'secret',
+    sub2apiGroupName: 'codex',
+    session: {
+      accessToken: 'opaque-token',
+      user: {
+        name: 'dyson willion',
+      },
+    },
+    accessToken: 'opaque-token',
+    email: 'registration@example.com',
+    accountIdentifierType: 'email',
+    accountIdentifier: 'identifier@example.com',
+  });
+
+  assert.ok(importBody, 'expected codex-session import call');
+  assert.equal(importBody.name, 'registration@example.com');
 });
 
 test('session import step reads current ChatGPT session and completes node', async () => {
