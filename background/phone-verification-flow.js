@@ -548,6 +548,25 @@
       return String(value || '').trim() || fallback;
     }
 
+    function normalizeHeroSmsOperatorByCountry(value = {}) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+      }
+      const normalized = {};
+      Object.entries(value).forEach(([rawCountryId, rawOperator]) => {
+        const countryId = normalizeCountryId(rawCountryId, 0);
+        if (countryId <= 0) {
+          return;
+        }
+        const operator = String(rawOperator || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+        if (!operator || operator === 'any') {
+          return;
+        }
+        normalized[String(countryId)] = operator;
+      });
+      return normalized;
+    }
+
     function inferHeroSmsCountryFromPhoneNumber(phoneNumber = '') {
       const digits = String(phoneNumber || '').replace(/\D+/g, '');
       if (!digits) {
@@ -1353,12 +1372,14 @@
             : normalizeCountryId(rawCountryId, fallbackCountryId)
         );
       const ignoredPhoneCodeKeys = normalizeStringList(record.ignoredPhoneCodeKeys);
+      const operator = String(record.operator || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
       return {
         activationId,
         phoneNumber,
         provider,
         serviceCode,
         countryId,
+        ...(operator ? { operator } : {}),
         ...(provider === PHONE_SMS_PROVIDER_FIVE_SIM ? { countryCode: countryId } : {}),
         ...(countryLabel ? { countryLabel } : {}),
         successfulUses: normalizeUseCount(record.successfulUses),
@@ -1546,6 +1567,7 @@
         : Math.floor(Number(rawCountryId));
       const countryLabel = String(record.countryLabel || '').trim();
       const statusAction = String(record.statusAction || '').trim();
+      const operator = String(record.operator || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
 
       if (provider) {
         fallback.provider = provider;
@@ -1574,6 +1596,9 @@
       }
       if (statusAction) {
         fallback.statusAction = statusAction;
+      }
+      if (operator) {
+        fallback.operator = operator;
       }
 
       return Object.keys(fallback).length ? fallback : null;
@@ -2101,6 +2126,7 @@
         apiKey,
         baseUrl: normalizeUrl(state.heroSmsBaseUrl, DEFAULT_HERO_SMS_BASE_URL),
         countryCandidates: resolveCountryCandidates(state),
+        heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
       };
     }
 
@@ -2114,6 +2140,7 @@
         apiKey,
         baseUrl: normalizeUrl(state.heroSmsBaseUrl, DEFAULT_HERO_SMS_BASE_URL),
         countryCandidates: resolveCountryCandidates(state),
+        heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
       };
     }
 
@@ -2127,6 +2154,7 @@
             provider: normalizedFallback?.provider || directActivation.provider,
             serviceCode: normalizedFallback?.serviceCode || directActivation.serviceCode,
             countryId: normalizedFallback?.countryId || directActivation.countryId,
+            ...(normalizedFallback?.operator ? { operator: normalizedFallback.operator } : {}),
             ...(
               normalizedFallback?.countryLabel || directActivation.countryLabel
                 ? { countryLabel: normalizedFallback?.countryLabel || directActivation.countryLabel }
@@ -2147,6 +2175,7 @@
             provider: normalizedFallback?.provider || PHONE_SMS_PROVIDER_HERO,
             serviceCode: normalizedFallback?.serviceCode || HERO_SMS_SERVICE_CODE,
             countryId: normalizedFallback?.countryId || HERO_SMS_COUNTRY_ID,
+            ...(normalizedFallback?.operator ? { operator: normalizedFallback.operator } : {}),
             ...(normalizedFallback?.countryLabel ? { countryLabel: normalizedFallback.countryLabel } : {}),
             successfulUses: normalizedFallback?.successfulUses ?? 0,
             maxUses: normalizedFallback?.maxUses ?? DEFAULT_PHONE_NUMBER_MAX_USES,
@@ -2289,6 +2318,11 @@
 
     function isHeroSmsNoNumbersPayload(payload) {
       return /\bNO_NUMBERS\b/i.test(describeHeroSmsPayload(payload));
+    }
+
+    function isHeroSmsOperatorUnavailablePayload(payload) {
+      const text = describeHeroSmsPayload(payload);
+      return /bad\s+operator|invalid\s+operator|operator\s+unavailable|wrong\s+operator|unsupported\s+operator/i.test(text);
     }
 
     function extractHeroSmsWrongMaxPrice(payload) {
@@ -2537,6 +2571,10 @@
         service: HERO_SMS_SERVICE_CODE,
         country: countryConfig.id,
       };
+      const operator = String(options.operator || '').trim();
+      if (operator) {
+        query.operator = operator;
+      }
       if (options.maxPrice !== null && options.maxPrice !== undefined) {
         query.maxPrice = options.maxPrice;
         if (options.fixedPrice !== false) {
@@ -2552,12 +2590,14 @@
       let retriedWithoutPrice = false;
       const userLimit = normalizeHeroSmsPriceLimit(options.userLimit);
       const userMinLimit = normalizeHeroSmsPriceLimit(options.userMinLimit);
+      const operator = String(options.operator || '').trim();
 
       while (true) {
         try {
           return await fetchPhoneActivationPayload(config, countryConfig, action, {
             maxPrice: nextMaxPrice,
             fixedPrice: options.fixedPrice,
+            operator,
           });
         } catch (error) {
           const updatedMaxPrice = extractHeroSmsWrongMaxPrice(error?.payload || error?.message);
@@ -3721,8 +3761,10 @@
           const countryConfig = attempt.countryConfig;
           const countryIdKey = String(normalizeCountryId(countryConfig?.id, 0));
           const countryPriceFloor = countryPriceFloorByCountryId.get(countryIdKey) ?? null;
+          const preferredOperator = String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim();
           const buildFallbackActivation = (requestAction) => ({
             countryId: countryConfig.id,
+            ...(preferredOperator ? { operator: preferredOperator } : {}),
             ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
           });
           const pricePlan = attempt.pricePlan || await resolvePhoneActivationPricePlan(config, countryConfig, state);
@@ -3825,6 +3867,7 @@
                     userLimit: pricePlan.userLimit,
                     userMinLimit: minPriceLimit,
                     fixedPrice,
+                    operator: preferredOperator,
                   }
                 );
                 const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
@@ -3837,6 +3880,36 @@
                   };
                 }
                 const payloadText = describeHeroSmsPayload(payload);
+                if (preferredOperator && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
+                  const fallbackPayload = await requestPhoneActivationWithPrice(
+                    config,
+                    countryConfig,
+                    requestAction,
+                    maxPrice,
+                    {
+                      userLimit: pricePlan.userLimit,
+                      userMinLimit: minPriceLimit,
+                      fixedPrice,
+                    }
+                  );
+                  const fallbackActivation = parseActivationPayload(fallbackPayload, {
+                    countryId: countryConfig.id,
+                    ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
+                  });
+                  if (fallbackActivation) {
+                    const numericPrice = Number(maxPrice);
+                    rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
+                    return {
+                      ...fallbackActivation,
+                      countryId: countryConfig.id,
+                    };
+                  }
+                  if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
+                    noNumbersObservedInCountry = true;
+                    lastFailureText = describeHeroSmsPayload(fallbackPayload) || payloadText || lastFailureText;
+                    continue;
+                  }
+                }
                 if (isHeroSmsNoNumbersPayload(payload)) {
                   noNumbersObservedInCountry = true;
                   lastFailureText = payloadText || lastFailureText;
@@ -3854,6 +3927,51 @@
                 const payloadOrMessage = error?.payload || error?.message;
                 if (isHeroSmsTerminalError(payloadOrMessage)) {
                   throw createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response');
+                }
+                if (preferredOperator && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
+                  try {
+                    const fallbackPayload = await requestPhoneActivationWithPrice(
+                      config,
+                      countryConfig,
+                      requestAction,
+                      maxPrice,
+                      {
+                        userLimit: pricePlan.userLimit,
+                        userMinLimit: minPriceLimit,
+                        fixedPrice,
+                      }
+                    );
+                    const fallbackActivation = parseActivationPayload(fallbackPayload, {
+                      countryId: countryConfig.id,
+                      ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
+                    });
+                    if (fallbackActivation) {
+                      const numericPrice = Number(maxPrice);
+                      rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
+                      return {
+                        ...fallbackActivation,
+                        countryId: countryConfig.id,
+                      };
+                    }
+                    if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
+                      noNumbersObservedInCountry = true;
+                      lastFailureText = describeHeroSmsPayload(fallbackPayload) || lastFailureText;
+                      continue;
+                    }
+                  } catch (fallbackError) {
+                    const fallbackPayloadOrMessage = fallbackError?.payload || fallbackError?.message;
+                    if (isHeroSmsTerminalError(fallbackPayloadOrMessage)) {
+                      throw createHeroSmsActionFailureError(requestAction, fallbackPayloadOrMessage || 'empty response');
+                    }
+                    if (isHeroSmsNoNumbersPayload(fallbackPayloadOrMessage)) {
+                      noNumbersObservedInCountry = true;
+                      lastFailureText = describeHeroSmsPayload(fallbackPayloadOrMessage) || lastFailureText;
+                      continue;
+                    }
+                    lastFailureText = describeHeroSmsPayload(fallbackPayloadOrMessage) || lastFailureText;
+                    lastError = fallbackError;
+                    continue;
+                  }
                 }
                 if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
                   noNumbersObservedInCountry = true;

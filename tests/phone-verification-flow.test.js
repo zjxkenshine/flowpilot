@@ -83,6 +83,98 @@ test('phone verification helper requests HeroSMS numbers with fixed OpenAI and T
   assert.equal(requests[1].searchParams.get('api_key'), 'demo-key');
 });
 
+test('phone verification helper sends HeroSMS operator for the selected country and records it on activation', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload(),
+        };
+      }
+      return {
+        ok: true,
+        text: async () => 'ACCESS_NUMBER:123456:66959916439',
+      };
+    },
+    getState: async () => ({
+      heroSmsApiKey: 'demo-key',
+      heroSmsOperatorByCountry: { 52: 'ais' },
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsOperatorByCountry: { 52: 'ais' },
+  });
+
+  assert.equal(requests[1].searchParams.get('operator'), 'ais');
+  assert.equal(activation.operator, 'ais');
+});
+
+test('phone verification helper retries HeroSMS without operator in the same country when operator has no supply', async () => {
+  const requests = [];
+  let firstNumberAttempt = true;
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload(),
+        };
+      }
+      if (action === 'getNumber') {
+        if (firstNumberAttempt) {
+          firstNumberAttempt = false;
+          return {
+            ok: true,
+            text: async () => 'NO_NUMBERS',
+          };
+        }
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:654321:66951112233',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({
+      heroSmsApiKey: 'demo-key',
+      heroSmsOperatorByCountry: { 52: 'ais' },
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsOperatorByCountry: { 52: 'ais' },
+  });
+
+  const getNumberCalls = requests.filter((entry) => entry.searchParams.get('action') === 'getNumber');
+  assert.equal(getNumberCalls.length, 2);
+  assert.equal(getNumberCalls[0].searchParams.get('operator'), 'ais');
+  assert.equal(getNumberCalls[1].searchParams.get('operator'), null);
+  assert.equal(activation.operator, undefined);
+});
+
 test('signup phone helper persists signup runtime state without touching add-phone activation', async () => {
   const setStateCalls = [];
   let currentState = {

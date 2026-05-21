@@ -93,6 +93,8 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /<option value="5sim">5sim<\/option>/);
   assert.match(html, /id="row-hero-sms-country"/);
   assert.match(html, /id="row-hero-sms-country-fallback"/);
+  assert.match(html, /id="row-hero-sms-operator"/);
+  assert.match(html, /id="hero-sms-operator-list"/);
   assert.match(html, /id="row-hero-sms-acquire-priority"/);
   assert.match(html, /id="select-hero-sms-acquire-priority"/);
   assert.match(html, /id="select-hero-sms-country"[^>]*multiple/);
@@ -1095,6 +1097,9 @@ ${extractFunction('getStoredFreePhoneReuseAutoEnabled')}
 function syncHeroSmsFallbackSelectionOrderFromSelect() {
   return [{ id: 52, label: 'Thailand' }, { id: 16, label: 'United Kingdom' }];
 }
+function getHeroSmsOperatorByCountryPayload() {
+  return { 52: 'ais', 16: 'vodafone' };
+}
 function getSelectedSignupMethod() { return 'phone'; }
 ${extractFunction('normalizePanelMode')}
 ${extractFunction('getSelectedPanelMode')}
@@ -1149,6 +1154,7 @@ return { collectSettingsPayload };
   assert.equal(payload.heroSmsCountryId, 52);
   assert.equal(payload.heroSmsCountryLabel, 'Thailand');
   assert.deepStrictEqual(payload.heroSmsCountryFallback, [{ id: 16, label: 'United Kingdom' }]);
+  assert.deepStrictEqual(payload.heroSmsOperatorByCountry, { 52: 'ais', 16: 'vodafone' });
   assert.equal(payload.fiveSimApiKey, 'five-sim-key');
   assert.equal(payload.fiveSimCountryId, 'vietnam');
   assert.equal(payload.fiveSimMinPrice, '0.3333');
@@ -1167,6 +1173,7 @@ let latestState = {
   heroSmsCountryId: 52,
   heroSmsCountryLabel: 'Thailand',
   heroSmsCountryFallback: [],
+  heroSmsOperatorByCountry: { 52: 'ais' },
   fiveSimCountryId: 'vietnam',
   fiveSimCountryLabel: '越南 (Vietnam)',
   fiveSimCountryFallback: [],
@@ -1218,8 +1225,10 @@ function syncHeroSmsFallbackSelectionOrderFromSelect() {
     : [{ id: 52, label: 'Thailand' }];
 }
 function syncLatestState(patch) { latestState = { ...latestState, ...patch }; }
+function getHeroSmsOperatorByCountryPayload() { return { 52: 'ais' }; }
 function loadHeroSmsCountries() { return Promise.resolve(); }
 function applyHeroSmsFallbackSelection() {}
+function syncHeroSmsOperatorSelectionState() {}
 function updatePhoneVerificationSettingsUI() {}
 function markSettingsDirty() {}
 function saveSettings() { savedPayload = { ...latestState }; return Promise.resolve(); }

@@ -1352,6 +1352,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   heroSmsCountryId: HERO_SMS_COUNTRY_ID,
   heroSmsCountryLabel: HERO_SMS_COUNTRY_LABEL,
   heroSmsCountryFallback: [],
+  heroSmsOperatorByCountry: {},
   fiveSimApiKey: '',
   fiveSimProduct: DEFAULT_FIVE_SIM_PRODUCT,
   fiveSimCountryId: FIVE_SIM_COUNTRY_ID,
@@ -3441,6 +3442,8 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || HERO_SMS_COUNTRY_LABEL).trim() || HERO_SMS_COUNTRY_LABEL;
     case 'heroSmsCountryFallback':
       return normalizeHeroSmsCountryFallback(value);
+    case 'heroSmsOperatorByCountry':
+      return normalizeHeroSmsOperatorByCountry(value);
     case 'fiveSimApiKey':
       return String(value || '');
     case 'fiveSimProduct':
@@ -3469,6 +3472,25 @@ function normalizePersistentSettingValue(key, value) {
     default:
       return value;
   }
+}
+
+function normalizeHeroSmsOperatorByCountry(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const normalized = {};
+  Object.entries(value).forEach(([rawCountryId, rawOperator]) => {
+    const countryId = Math.floor(Number(rawCountryId));
+    if (!Number.isFinite(countryId) || countryId <= 0) {
+      return;
+    }
+    const operator = String(rawOperator || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+    if (!operator || operator === 'any') {
+      return;
+    }
+    normalized[String(countryId)] = operator;
+  });
+  return normalized;
 }
 
 function buildPersistentSettingsPayload(input = {}, options = {}) {

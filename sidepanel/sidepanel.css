@@ -2357,6 +2357,37 @@ header {
   color: var(--text-muted);
 }
 
+.hero-sms-operator-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hero-sms-operator-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hero-sms-operator-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.hero-sms-operator-select {
+  width: 100%;
+}
+
+.hero-sms-operator-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .hero-sms-reuse-max-inline {
   width: 100%;
   display: flex;

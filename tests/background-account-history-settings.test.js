@@ -73,6 +73,7 @@ test('background account history settings are normalized independently from hotm
     extractFunction('normalizePhoneCodePollMaxRounds'),
     extractFunction('normalizeHeroSmsMaxPrice'),
     extractFunction('normalizeHeroSmsCountryFallback'),
+    extractFunction('normalizeHeroSmsOperatorByCountry'),
     extractFunction('normalizePhoneSmsProvider'),
     extractFunction('normalizeFiveSimCountryId'),
     extractFunction('normalizeFiveSimCountryLabel'),
@@ -311,6 +312,16 @@ return {
   assert.deepStrictEqual(
     api.normalizePersistentSettingValue('heroSmsCountryFallback', [{ id: 16, label: 'United Kingdom' }, { id: 52 }]),
     [{ id: 16, label: 'United Kingdom' }, { id: 52, label: 'Country #52' }]
+  );
+  assert.deepStrictEqual(
+    api.normalizePersistentSettingValue('heroSmsOperatorByCountry', {
+      52: ' AIS ',
+      16: '',
+      xx: 'vodafone',
+      6: 'any',
+      10: 'viettel',
+    }),
+    { 52: 'ais', 10: 'viettel' }
   );
   assert.equal(
     api.normalizePersistentSettingValue('accountRunHistoryHelperBaseUrl', 'http://127.0.0.1:17373/append-account-log'),
