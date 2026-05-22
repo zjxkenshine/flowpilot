@@ -779,6 +779,40 @@ function normalizeIpProxyEntriesFromObjectCandidate(candidate, provider = DEFAUL
   };
 }
 
+function collectIpProxyPayloadCandidateEntries(payload) {
+  const queue = Array.isArray(payload) ? [...payload] : [payload];
+  const seen = new Set();
+  const results = [];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    results.push(current);
+    const candidateArrays = [
+      current.data,
+      current.list,
+      current.items,
+      current.proxies,
+      current.result,
+      current.rows,
+      current.records,
+    ];
+    candidateArrays.forEach((entry) => {
+      if (Array.isArray(entry)) {
+        queue.push(...entry);
+      } else if (entry && typeof entry === 'object') {
+        queue.push(entry);
+      }
+    });
+  }
+  return results;
+}
+
 function parseIpProxyLine(line, provider = DEFAULT_IP_PROXY_SERVICE) {
   const text = String(line || '').trim();
   if (!text) {
@@ -1019,18 +1053,10 @@ function normalizeIpProxyListFromPayload(payload, provider = DEFAULT_IP_PROXY_SE
     return [];
   }
 
-  const candidateArrays = [
-    payload.data,
-    payload.list,
-    payload.items,
-    payload.proxies,
-    payload.result,
-    payload.rows,
-  ];
-  for (const candidate of candidateArrays) {
-    if (Array.isArray(candidate) && candidate.length > 0) {
-      return normalizeProxyPoolEntries(candidate, provider);
-    }
+  const nestedCandidates = collectIpProxyPayloadCandidateEntries(payload);
+  const normalized = normalizeProxyPoolEntries(nestedCandidates, provider);
+  if (normalized.length) {
+    return normalized;
   }
 
   const singleCandidate = normalizeIpProxyEntriesFromObjectCandidate(payload, provider);
@@ -2759,6 +2785,12 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
   }
 
   const provider = normalizeIpProxyProviderValue(state?.ipProxyService);
+  if (provider === '711proxy' && typeof validate711ProxyApiConfig === 'function') {
+    const validation = validate711ProxyApiConfig({ apiUrl });
+    if (!validation?.valid) {
+      throw new Error(String(validation?.errors?.[0] || '711Proxy API 参数无效。'));
+    }
+  }
   const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : IP_PROXY_FETCH_TIMEOUT_MS;
   const response = await fetchWithTimeout(apiUrl, {
     method: 'GET',
@@ -2766,6 +2798,9 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
     headers: { Accept: 'application/json, text/plain, */*' },
   }, timeoutMs);
   if (!response.ok) {
+    if (provider === '711proxy' && (response.status === 401 || response.status === 403 || response.status === 407)) {
+      throw new Error(`711Proxy API 请求失败（HTTP ${response.status}）。请确认当前出口 IP 已加入 711Proxy 白名单，且生成链接仍然有效。`);
+    }
     throw new Error(`代理 API 请求失败（HTTP ${response.status}）。`);
   }
 

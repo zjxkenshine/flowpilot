@@ -20,7 +20,7 @@
   - 出口探测与状态诊断
   - `SYNC/NEXT/CHANGE/PROBE` 主流程
 - `background/ip-proxy-provider-711proxy.js`
-  - Provider 级别参数处理（当前重点是 711 账号串 token 规则）
+  - Provider 级别参数处理（711 账号串 token 规则 + 711 API URL 参数解析/回写）
 - `background/message-router.js`
   - 暴露消息接口：
     - `REFRESH_IP_PROXY_POOL`
@@ -39,6 +39,7 @@
   - 按钮行为（同步/下一条/Change/检测出口）
   - 运行态文案和诊断详情展示
   - 711 账号参数双向同步（`session/sessTime/region`）
+  - 711 API 参数结构化编辑与 URL 自动回写
 - `sidepanel/ip-proxy-provider-711proxy.js`
   - Provider 级输入辅助（地区推断）
 - `sidepanel/sidepanel.html`
@@ -54,13 +55,34 @@
 
 1. 启用/禁用代理接管（PAC + 认证回填）。
 2. 固定账号模式（Host/Port/Username/Password/Region）。
-3. 出口探测与状态卡（当前代理、当前出口、诊断详情）。
-4. 四个动作按钮：
+3. 711 API 模式（结构化参数 + 完整 URL 回填）。
+4. 出口探测与状态卡（当前代理、当前出口、诊断详情）。
+5. 四个动作按钮：
    - `同步`：应用当前配置并刷新运行态
    - `下一条`：切到下一个可用节点
    - `Change`：保持 session 的前提下重绑并换出口（711）
    - `检测出口`：只做出口复测，不改节点
-5. `检查IP`：打开 `https://ipinfo.io/what-is-my-ip`
+6. `检查IP`：打开 `https://ipinfo.io/what-is-my-ip`
+
+### 3.3 711 API 模式
+
+支持围绕 711 后台生成链接进行结构化编辑，当前参数口径如下：
+
+- `count`：1-900
+- `region`：可空，2 位国家码
+- `proto`：`http / https / socks4 / socks5`
+- `stype`：`text / json`
+- `split`：直接填写实际分隔符；默认 `\r\n`
+- `zone`：必填
+- `ptype`：必填，正整数
+- `sessType`：可空，或 `rotating / sticky`
+- `sessTime`：仅 `sticky` 时生效，1-180
+- `sessAuto`：仅 `sticky` 时生效，`0 / 1`
+
+真实 URL 示例：
+
+- `http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\r\n&sessType=rotating`
+- `http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\r\n&sessType=sticky&sessTime=5&sessAuto=1`
 
 ### 3.2 711 账号串参数联动
 
@@ -76,7 +98,7 @@
 - 修改时长 -> 更新 `sessTime-*`
 - 修改地区 -> 更新 `region-*`
 
-### 3.3 同步后的自动复测
+### 3.4 同步后的自动复测
 
 为避免“同步后还要手动点检测出口”：
 
@@ -87,39 +109,42 @@
 本 PR 是“先可用，再扩展”的第一阶段：
 
 1. 服务商主路径按 `711` 优先。
-2. `API 模式`在 UI 中保留但禁用（暂未开放）。
+2. `API 模式`已开放，当前只针对 711Proxy 的官方生成链接做结构化编辑。
 3. `账号列表模式`目前关闭（防止多条目与鉴权缓存复用带来的不稳定）。
 
 对应开关位于：
 
-- `sidepanel/sidepanel.js`：`IP_PROXY_API_MODE_ENABLED = false`
+- `sidepanel/sidepanel.js`：`IP_PROXY_API_MODE_ENABLED = true`
 - `sidepanel/sidepanel.js`：`IP_PROXY_ACCOUNT_LIST_ENABLED = false`
 - `background.js`：`IP_PROXY_ACCOUNT_LIST_ENABLED = false`
 
 ## 5. 使用方式（操作步骤）
 
 1. 打开侧边栏 `IP代理` 开关。
-2. 选择账号模式，填写：
+2. 选择账号模式或 API 模式。
+3. 账号模式填写：
    - Host
    - Port
    - Username
    - Password
    - Region（可选）
-3. 点击 `同步`。
-4. 查看状态卡：
+4. API 模式先粘贴 711 后台生成链接，再按需修改 `count / region / proto / stype / split / zone / ptype / sessType / sessTime / sessAuto`。
+5. 点击 `同步`。
+6. 查看状态卡：
    - 当前代理
    - 当前出口
    - 是否有校验提示
-5. 需要换出口时：
+7. 需要换出口时：
    - 711 + session 场景优先用 `Change`
    - 或使用 `下一条`
-6. 需要手动复核时点击 `检测出口` 或 `检查IP`。
+8. 需要手动复核时点击 `检测出口` 或 `检查IP`。
 
 ## 6. 已知限制
 
 1. 某些代理链路不会返回标准 `407`，扩展无法触发认证回填，这类链路可能不稳定。
 2. 地区“期望值”和“实际出口”不一致时，模块会保留接管并提示校验告警（不直接判定全失败）。
 3. 不同探测源（页面探测/后台兜底）在网络波动时可能短时出现差异，状态卡会显示来源与诊断。
+4. 711 API 模式依赖当前出口 IP 已加入 711Proxy 白名单；否则常见表现是 HTTP `401/403/407`。
 
 ## 7. 回归建议
 

@@ -44,20 +44,25 @@ ${coreSource}
 return {
   applyExitRegionExpectation,
   buildIpProxyPacScript,
+  build711ProxyApiUrl,
   chrome,
   createAutomationScopedTab,
   buildIpProxyRoutingStatePatch,
   applyTargetReachabilityExpectation,
   getAccountModeProxyPoolFromState,
+  normalize711ProxyApiConfig,
   normalizeIpProxyAccountList,
+  normalizeIpProxyListFromPayload,
   normalizeProxyPoolEntries,
   parseProxyExitProbePayload,
+  parse711ProxyApiConfigFromUrl,
   parseIpProxyLine,
   queryAutomationScopedTabs,
   resolveExitProbeEndpoints,
   resolveIpProxyAutoSwitchThreshold,
   resolveTargetReachabilityEndpoints,
   shouldEnableIpProxyLeakGuardForStatus,
+  validate711ProxyApiConfig,
 };
 `)();
 }
@@ -286,6 +291,115 @@ test('711 sticky session keeps IP probe on ipinfo but separately checks ChatGPT 
   );
 
   assert.deepStrictEqual(api.resolveTargetReachabilityEndpoints(), ['https://chatgpt.com/']);
+});
+
+test('711 API URL parser supports real split and sticky/rotating session types', () => {
+  const api = loadIpProxyCore();
+
+  const rotating = api.parse711ProxyApiConfigFromUrl(
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&sessType=rotating'
+  );
+  assert.equal(rotating.isValidUrl, true);
+  assert.equal(rotating.zone, 'custom');
+  assert.equal(rotating.ptype, '1');
+  assert.equal(rotating.count, '1');
+  assert.equal(rotating.proto, 'http');
+  assert.equal(rotating.stype, 'text');
+  assert.equal(rotating.split, '\r\n');
+  assert.equal(rotating.sessType, 'rotating');
+  assert.equal(rotating.sessTime, '');
+  assert.equal(rotating.sessAuto, '');
+
+  const sticky = api.parse711ProxyApiConfigFromUrl(
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&sessType=sticky&sessTime=5&sessAuto=1'
+  );
+  assert.equal(sticky.sessType, 'sticky');
+  assert.equal(sticky.sessTime, '5');
+  assert.equal(sticky.sessAuto, '1');
+});
+
+test('711 API URL builder preserves host and omits sticky-only fields for rotating or empty session type', () => {
+  const api = loadIpProxyCore();
+
+  const stickyUrl = api.build711ProxyApiUrl(
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&trace=keepme',
+    {
+      count: '3',
+      zone: 'custom',
+      ptype: '1',
+      proto: 'http',
+      stype: 'text',
+      split: '\\r\\n',
+      sessType: 'sticky',
+      sessTime: '5',
+      sessAuto: '1',
+    }
+  );
+  assert.match(stickyUrl, /^http:\/\/global\.rotgbapi\.711proxy\.com:8089\/gen\?/);
+  assert.match(stickyUrl, /trace=keepme/);
+  assert.match(stickyUrl, /split=%5Cr%5Cn/);
+  assert.match(stickyUrl, /sessType=sticky/);
+  assert.match(stickyUrl, /sessTime=5/);
+  assert.match(stickyUrl, /sessAuto=1/);
+
+  const rotatingUrl = api.build711ProxyApiUrl(stickyUrl, {
+    sessType: 'rotating',
+  });
+  assert.match(rotatingUrl, /sessType=rotating/);
+  assert.doesNotMatch(rotatingUrl, /sessTime=/);
+  assert.doesNotMatch(rotatingUrl, /sessAuto=/);
+
+  const optionalSessTypeUrl = api.build711ProxyApiUrl(stickyUrl, {
+    sessType: '',
+  });
+  assert.doesNotMatch(optionalSessTypeUrl, /sessType=/);
+  assert.doesNotMatch(optionalSessTypeUrl, /sessTime=/);
+  assert.doesNotMatch(optionalSessTypeUrl, /sessAuto=/);
+});
+
+test('711 API validation requires count proto zone and ptype but allows empty sessType', () => {
+  const api = loadIpProxyCore();
+
+  const valid = api.validate711ProxyApiConfig({
+    apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n',
+  });
+  assert.equal(valid.valid, true);
+
+  const invalid = api.validate711ProxyApiConfig({
+    apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&proto=http&stype=text&split=\\r\\n',
+  });
+  assert.equal(invalid.valid, false);
+  assert.match(String(invalid.errors[0] || ''), /count/);
+});
+
+test('711 JSON API payload normalization supports wrapped object candidates', () => {
+  const api = loadIpProxyCore();
+
+  assert.deepEqual(
+    api.normalizeIpProxyListFromPayload({ data: [{ ip: '1.2.3.4', port: 9000 }] }, '711proxy'),
+    [{
+      host: '1.2.3.4',
+      port: 9000,
+      username: '',
+      password: '',
+      protocol: 'http',
+      region: '',
+      provider: '711proxy',
+    }]
+  );
+
+  assert.deepEqual(
+    api.normalizeIpProxyListFromPayload({ result: { ip: '5.6.7.8', port: 10000 } }, '711proxy'),
+    [{
+      host: '5.6.7.8',
+      port: 10000,
+      username: '',
+      password: '',
+      protocol: 'http',
+      region: '',
+      provider: '711proxy',
+    }]
+  );
 });
 
 test('target reachability failure turns detected exit IP into connectivity_failed', () => {

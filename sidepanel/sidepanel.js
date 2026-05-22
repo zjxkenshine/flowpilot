@@ -133,6 +133,26 @@ const ipProxyApiPanel = document.getElementById('ip-proxy-api-panel');
 const rowIpProxyApiUrl = document.getElementById('row-ip-proxy-api-url');
 const inputIpProxyApiUrl = document.getElementById('input-ip-proxy-api-url');
 const btnToggleIpProxyApiUrl = document.getElementById('btn-toggle-ip-proxy-api-url');
+const rowIpProxyApiCount = document.getElementById('row-ip-proxy-api-count');
+const inputIpProxyApiCount = document.getElementById('input-ip-proxy-api-count');
+const rowIpProxyApiRegion = document.getElementById('row-ip-proxy-api-region');
+const inputIpProxyApiRegion = document.getElementById('input-ip-proxy-api-region');
+const rowIpProxyApiProto = document.getElementById('row-ip-proxy-api-proto');
+const selectIpProxyApiProto = document.getElementById('select-ip-proxy-api-proto');
+const rowIpProxyApiStype = document.getElementById('row-ip-proxy-api-stype');
+const selectIpProxyApiStype = document.getElementById('select-ip-proxy-api-stype');
+const rowIpProxyApiSplit = document.getElementById('row-ip-proxy-api-split');
+const inputIpProxyApiSplit = document.getElementById('input-ip-proxy-api-split');
+const rowIpProxyApiZone = document.getElementById('row-ip-proxy-api-zone');
+const inputIpProxyApiZone = document.getElementById('input-ip-proxy-api-zone');
+const rowIpProxyApiPtype = document.getElementById('row-ip-proxy-api-ptype');
+const inputIpProxyApiPtype = document.getElementById('input-ip-proxy-api-ptype');
+const rowIpProxyApiSessType = document.getElementById('row-ip-proxy-api-sess-type');
+const selectIpProxyApiSessType = document.getElementById('select-ip-proxy-api-sess-type');
+const rowIpProxyApiSessTime = document.getElementById('row-ip-proxy-api-sess-time');
+const inputIpProxyApiSessTime = document.getElementById('input-ip-proxy-api-sess-time');
+const rowIpProxyApiSessAuto = document.getElementById('row-ip-proxy-api-sess-auto');
+const selectIpProxyApiSessAuto = document.getElementById('select-ip-proxy-api-sess-auto');
 const rowIpProxyAccountList = document.getElementById('row-ip-proxy-account-list');
 const inputIpProxyAccountList = document.getElementById('input-ip-proxy-account-list');
 const rowIpProxyAccountSessionPrefix = document.getElementById('row-ip-proxy-account-session-prefix');
@@ -1284,7 +1304,7 @@ const DEFAULT_IP_PROXY_MODE = 'account';
 const SUPPORTED_IP_PROXY_MODES = ['api', 'account'];
 const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const SUPPORTED_IP_PROXY_PROTOCOLS = ['http', 'https', 'socks4', 'socks5'];
-const IP_PROXY_API_MODE_ENABLED = false;
+const IP_PROXY_API_MODE_ENABLED = true;
 const IP_PROXY_ACCOUNT_LIST_ENABLED = false;
 
 function getManagedAliasUtils() {
@@ -15828,12 +15848,6 @@ ipProxyModeButtons.forEach((button) => {
     const apiModeAvailable = typeof isIpProxyApiModeAvailable === 'function'
       ? Boolean(isIpProxyApiModeAvailable())
       : (typeof IP_PROXY_API_MODE_ENABLED !== 'undefined' ? Boolean(IP_PROXY_API_MODE_ENABLED) : false);
-    if (!apiModeAvailable && nextMode === 'api') {
-      setIpProxyMode('account');
-      updateIpProxyUI(latestState);
-      showToast('API 模式暂未开放，请先使用账号密码模式。', 'info', 1800);
-      return;
-    }
     if (getSelectedIpProxyMode() === nextMode) {
       return;
     }
@@ -16086,6 +16100,54 @@ inputCodex2ApiAdminKey.addEventListener('blur', () => {
     scheduleSettingsAutoSave();
   });
   input?.addEventListener('blur', () => {
+    saveSettings({ silent: true }).catch(() => {});
+  });
+});
+
+inputIpProxyApiUrl?.addEventListener('input', () => {
+  if (typeof sync711ApiFieldsFromUrlForPanel === 'function') {
+    sync711ApiFieldsFromUrlForPanel();
+    syncCurrentIpProxyServiceProfileToLatestState();
+    updateIpProxyUI(latestState);
+  }
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+[
+  inputIpProxyApiCount,
+  inputIpProxyApiRegion,
+  selectIpProxyApiProto,
+  selectIpProxyApiStype,
+  inputIpProxyApiSplit,
+  inputIpProxyApiZone,
+  inputIpProxyApiPtype,
+  selectIpProxyApiSessType,
+  inputIpProxyApiSessTime,
+  selectIpProxyApiSessAuto,
+].forEach((input) => {
+  input?.addEventListener('input', () => {
+    if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+      rebuild711ApiUrlFromFieldsForPanel();
+    }
+    syncCurrentIpProxyServiceProfileToLatestState();
+    updateIpProxyUI(latestState);
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('change', () => {
+    if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+      rebuild711ApiUrlFromFieldsForPanel();
+    }
+    syncCurrentIpProxyServiceProfileToLatestState();
+    updateIpProxyUI(latestState);
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('blur', () => {
+    if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+      rebuild711ApiUrlFromFieldsForPanel();
+    }
     saveSettings({ silent: true }).catch(() => {});
   });
 });

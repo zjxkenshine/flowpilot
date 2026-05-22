@@ -1241,7 +1241,7 @@
               <span class="data-label">代理模式</span>
               <div id="ip-proxy-mode-group" class="choice-group" role="group" aria-label="IP代理模式">
                 <button type="button" class="choice-btn" data-ip-proxy-mode="account">账号密码</button>
-                <button type="button" class="choice-btn" data-ip-proxy-mode="api" disabled title="首版暂未开放">API 拉取（暂未开放）</button>
+                <button type="button" class="choice-btn" data-ip-proxy-mode="api">API 拉取</button>
               </div>
             </div>
             <div class="data-row ip-proxy-layout-row" id="row-ip-proxy-layout" style="display:none;">
@@ -1338,13 +1338,77 @@
                 <div class="ip-proxy-column ip-proxy-column-api" id="ip-proxy-api-panel">
                   <div class="ip-proxy-column-header">API 模式</div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-url" style="display:none;">
-                    <span class="data-label">代理API</span>
+                    <span class="data-label">代理 API</span>
                     <div class="input-with-icon">
                       <input type="password" id="input-ip-proxy-api-url" class="data-input data-input-with-icon"
                         placeholder="粘贴完整 API 链接" />
                       <button id="btn-toggle-ip-proxy-api-url" class="input-icon-btn" type="button" aria-label="显示代理 API"
                         title="显示代理 API"></button>
                     </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-count" style="display:none;">
+                    <span class="data-label">提取数量</span>
+                    <input type="number" id="input-ip-proxy-api-count" class="data-input" min="1" max="900" step="1"
+                      placeholder="1-900" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-region" style="display:none;">
+                    <span class="data-label">地区参数</span>
+                    <input type="text" id="input-ip-proxy-api-region" class="data-input" placeholder="可空，例如 US / DE / HK" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-proto" style="display:none;">
+                    <span class="data-label">代理协议</span>
+                    <select id="select-ip-proxy-api-proto" class="data-select">
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                      <option value="socks5">SOCKS5</option>
+                      <option value="socks4">SOCKS4</option>
+                    </select>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-stype" style="display:none;">
+                    <span class="data-label">返回格式</span>
+                    <select id="select-ip-proxy-api-stype" class="data-select">
+                      <option value="text">TEXT</option>
+                      <option value="json">JSON</option>
+                    </select>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-split" style="display:none;">
+                    <span class="data-label">分隔符</span>
+                    <input type="text" id="input-ip-proxy-api-split" class="data-input mono"
+                      placeholder="默认 \r\n；text 模式生效" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-zone" style="display:none;">
+                    <span class="data-label">代理池</span>
+                    <input type="text" id="input-ip-proxy-api-zone" class="data-input mono"
+                      placeholder="例如 custom" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-ptype" style="display:none;">
+                    <span class="data-label">套餐类型</span>
+                    <input type="number" id="input-ip-proxy-api-ptype" class="data-input" min="1" step="1"
+                      placeholder="例如 1" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-sess-type" style="display:none;">
+                    <span class="data-label">会话类型</span>
+                    <select id="select-ip-proxy-api-sess-type" class="data-select">
+                      <option value="">不指定</option>
+                      <option value="rotating">Rotating</option>
+                      <option value="sticky">Sticky</option>
+                    </select>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-sess-time" style="display:none;">
+                    <span class="data-label">会话时长</span>
+                    <div class="data-inline">
+                      <input type="number" id="input-ip-proxy-api-sess-time" class="data-input" min="1" max="180" step="1"
+                        placeholder="1-180" />
+                      <span class="data-unit">分钟</span>
+                    </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-sess-auto" style="display:none;">
+                    <span class="data-label">提前换 IP</span>
+                    <select id="select-ip-proxy-api-sess-auto" class="data-select">
+                      <option value="">不指定</option>
+                      <option value="0">0</option>
+                      <option value="1">1</option>
+                    </select>
                   </div>
                 </div>
               </div>
