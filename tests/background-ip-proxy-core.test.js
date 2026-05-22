@@ -15,6 +15,8 @@ const DEFAULT_IP_PROXY_MODE = 'account';
 const IP_PROXY_MODE_VALUES = ['api', 'account'];
 const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const IP_PROXY_PROTOCOL_VALUES = ['http', 'https', 'socks4', 'socks5'];
+const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
+const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
 const IP_PROXY_FETCH_TIMEOUT_MS = 20000;
 const IP_PROXY_SETTINGS_SCOPE = 'regular';
 const IP_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
@@ -229,6 +231,34 @@ test('IP proxy PAC keeps local traffic direct and routes target traffic through 
   assert.match(pac, /forceDirectPatterns/);
   assert.match(pac, /PROXY 127\.0\.0\.1:7897/);
   assert.doesNotMatch(pac, /PROXY 127\.0\.0\.1:7897; DIRECT/);
+});
+
+test('IP proxy PAC can route special domains through current provider proxy', () => {
+  const api = loadIpProxyCore();
+  const pac = api.buildIpProxyPacScript({
+    host: 'global.rotgb.711proxy.com',
+    port: 10000,
+    protocol: 'http',
+  }, {
+    specialDomainFallback: 'PROXY global.rotgb.711proxy.com:10000',
+  });
+
+  assert.match(pac, /return "PROXY global\.rotgb\.711proxy\.com:10000";/);
+  assert.doesNotMatch(pac, /PROXY 127\.0\.0\.1:7897/);
+});
+
+test('IP proxy PAC can route special domains direct', () => {
+  const api = loadIpProxyCore();
+  const pac = api.buildIpProxyPacScript({
+    host: 'global.rotgb.711proxy.com',
+    port: 10000,
+    protocol: 'http',
+  }, {
+    specialDomainFallback: 'DIRECT',
+  });
+
+  assert.match(pac, /return "DIRECT";/);
+  assert.doesNotMatch(pac, /PROXY 127\.0\.0\.1:7897/);
 });
 
 test('sidepanel loads IP proxy scripts before sidepanel bootstrap', () => {

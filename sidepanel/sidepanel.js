@@ -127,6 +127,8 @@ const selectIpProxyService = document.getElementById('select-ip-proxy-service');
 const btnIpProxyServiceLogin = document.getElementById('btn-ip-proxy-service-login');
 const rowIpProxyMode = document.getElementById('row-ip-proxy-mode');
 const ipProxyModeButtons = Array.from(document.querySelectorAll('[data-ip-proxy-mode]'));
+const rowIpProxySpecialDomainRouteMode = document.getElementById('row-ip-proxy-special-domain-route-mode');
+const selectIpProxySpecialDomainRouteMode = document.getElementById('select-ip-proxy-special-domain-route-mode');
 const rowIpProxyLayout = document.getElementById('row-ip-proxy-layout');
 const ipProxyLayout = document.getElementById('ip-proxy-layout');
 const ipProxyApiPanel = document.getElementById('ip-proxy-api-panel');
@@ -4330,6 +4332,7 @@ function collectSettingsPayload() {
         username: String(fallbackState?.ipProxyUsername || '').trim(),
         password: String(fallbackState?.ipProxyPassword || ''),
         region: String(fallbackState?.ipProxyRegion || '').trim(),
+        specialDomainRouteMode: String(fallbackState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
       };
       const result = {};
       services.forEach((service) => {
@@ -4350,6 +4353,7 @@ function collectSettingsPayload() {
           username: String(source.username || fallbackProfile.username || '').trim(),
           password: String(source.password || fallbackProfile.password || ''),
           region: String(source.region || fallbackProfile.region || '').trim(),
+          specialDomainRouteMode: String(source.specialDomainRouteMode || fallbackProfile.specialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
         };
       });
       return result;
@@ -4396,6 +4400,9 @@ function collectSettingsPayload() {
   const ipProxyRegionRawValue = typeof inputIpProxyRegion !== 'undefined'
     ? inputIpProxyRegion?.value
     : '';
+  const ipProxySpecialDomainRouteModeRawValue = typeof selectIpProxySpecialDomainRouteMode !== 'undefined'
+    ? selectIpProxySpecialDomainRouteMode?.value
+    : '';
   const selectedIpProxyService = normalizeIpProxyServiceSafe(
     ipProxyServiceRawValue || latestState?.ipProxyService || '711proxy'
   );
@@ -4416,6 +4423,7 @@ function collectSettingsPayload() {
     username: String(ipProxyUsernameRawValue || '').trim(),
     password: String(ipProxyPasswordRawValue || ''),
     region: String(ipProxyRegionRawValue || '').trim(),
+    specialDomainRouteMode: String(ipProxySpecialDomainRouteModeRawValue || latestState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
   };
   const ipProxyServiceProfiles = normalizeIpProxyServiceProfilesSafe({
     ...(latestState?.ipProxyServiceProfiles || {}),
@@ -4435,6 +4443,7 @@ function collectSettingsPayload() {
     ipProxyUsername: currentIpProxyServiceProfile.username,
     ipProxyPassword: currentIpProxyServiceProfile.password,
     ipProxyRegion: currentIpProxyServiceProfile.region,
+    ipProxySpecialDomainRouteMode: currentIpProxyServiceProfile.specialDomainRouteMode,
   });
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
     ? Boolean(inputMail2925UseAccountPool?.checked)
@@ -4890,6 +4899,7 @@ function collectSettingsPayload() {
     ipProxyUsername: currentIpProxyServiceProfile.username,
     ipProxyPassword: currentIpProxyServiceProfile.password,
     ipProxyRegion: currentIpProxyServiceProfile.region,
+    ipProxySpecialDomainRouteMode: currentIpProxyServiceProfile.specialDomainRouteMode,
     codex2apiUrl: inputCodex2ApiUrl.value.trim(),
     codex2apiAdminKey: inputCodex2ApiAdminKey.value.trim(),
     plusModeEnabled: effectivePlusModeEnabled,
@@ -11190,6 +11200,7 @@ function applySettingsState(state) {
       username: String(state?.ipProxyUsername || '').trim(),
       password: String(state?.ipProxyPassword || ''),
       region: String(state?.ipProxyRegion || '').trim(),
+      specialDomainRouteMode: String(state?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
     };
   if (typeof selectIpProxyService !== 'undefined' && selectIpProxyService) {
     selectIpProxyService.value = normalizedIpProxyService;
@@ -11235,6 +11246,9 @@ function applySettingsState(state) {
   }
   if (typeof inputIpProxyRegion !== 'undefined' && inputIpProxyRegion) {
     inputIpProxyRegion.value = activeIpProxyProfile.region;
+  }
+  if (typeof selectIpProxySpecialDomainRouteMode !== 'undefined' && selectIpProxySpecialDomainRouteMode) {
+    selectIpProxySpecialDomainRouteMode.value = String(activeIpProxyProfile.specialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy';
   }
   if (typeof setIpProxyMode === 'function') {
     setIpProxyMode(activeIpProxyProfile.mode);
@@ -15822,6 +15836,7 @@ selectIpProxyService?.addEventListener('change', () => {
       username: String(latestState?.ipProxyUsername || '').trim(),
       password: String(latestState?.ipProxyPassword || ''),
       region: String(latestState?.ipProxyRegion || '').trim(),
+      specialDomainRouteMode: String(latestState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
     };
 
   if (typeof applyIpProxyServiceProfileToInputs === 'function') {
@@ -15860,6 +15875,13 @@ ipProxyModeButtons.forEach((button) => {
 });
 
 selectIpProxyProtocol?.addEventListener('change', () => {
+  syncCurrentIpProxyServiceProfileToLatestState();
+  updateIpProxyUI(latestState);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+selectIpProxySpecialDomainRouteMode?.addEventListener('change', () => {
   syncCurrentIpProxyServiceProfileToLatestState();
   updateIpProxyUI(latestState);
   markSettingsDirty(true);

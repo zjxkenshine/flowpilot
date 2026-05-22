@@ -181,6 +181,12 @@ function normalizeIpProxyProtocol(value = '') {
   return SUPPORTED_IP_PROXY_PROTOCOLS.includes(normalized) ? normalized : DEFAULT_IP_PROXY_PROTOCOL;
 }
 
+function normalizeIpProxySpecialDomainRouteMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  const supported = ['local_proxy', 'direct', 'provider_proxy'];
+  return supported.includes(normalized) ? normalized : 'local_proxy';
+}
+
 function normalizeIpProxyPort(value = '') {
   const numeric = Number.parseInt(String(value || '').trim(), 10);
   if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 65535) {
@@ -279,6 +285,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     username: String(raw.username || '').trim(),
     password: String(raw.password || ''),
     region: String(raw.region || '').trim(),
+    specialDomainRouteMode: normalizeIpProxySpecialDomainRouteMode(raw.specialDomainRouteMode),
   };
 }
 
@@ -308,6 +315,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
     username: state?.ipProxyUsername,
     password: state?.ipProxyPassword,
     region: state?.ipProxyRegion,
+    specialDomainRouteMode: state?.ipProxySpecialDomainRouteMode,
   });
 }
 
@@ -497,6 +505,7 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     username: inputIpProxyUsername?.value || '',
     password: inputIpProxyPassword?.value || '',
     region: finalRegion,
+    specialDomainRouteMode: selectIpProxySpecialDomainRouteMode?.value || '',
   });
 }
 
@@ -541,6 +550,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyUsername: normalizedProfile.username,
     ipProxyPassword: normalizedProfile.password,
     ipProxyRegion: normalizedProfile.region,
+    ipProxySpecialDomainRouteMode: normalizedProfile.specialDomainRouteMode,
   };
 }
 
@@ -618,6 +628,9 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (inputIpProxyRegion) {
     inputIpProxyRegion.value = normalizedProfile.region;
+  }
+  if (selectIpProxySpecialDomainRouteMode) {
+    selectIpProxySpecialDomainRouteMode.value = normalizedProfile.specialDomainRouteMode;
   }
 }
 
@@ -1457,6 +1470,9 @@ function updateIpProxyUI(state = latestState) {
   if (rowIpProxyMode) {
     rowIpProxyMode.style.display = showSettings ? '' : 'none';
   }
+  if (typeof rowIpProxySpecialDomainRouteMode !== 'undefined' && rowIpProxySpecialDomainRouteMode) {
+    rowIpProxySpecialDomainRouteMode.style.display = showSettings ? '' : 'none';
+  }
   if (rowIpProxyLayout) {
     rowIpProxyLayout.style.display = showSettings ? '' : 'none';
   }
@@ -1603,6 +1619,9 @@ function updateIpProxyUI(state = latestState) {
   }
   if (selectIpProxyProtocol) {
     selectIpProxyProtocol.disabled = !enabled || (isAccountMode && hasAccountListConfigured);
+  }
+  if (typeof selectIpProxySpecialDomainRouteMode !== 'undefined' && selectIpProxySpecialDomainRouteMode) {
+    selectIpProxySpecialDomainRouteMode.disabled = !enabled;
   }
   if (inputIpProxyUsername) {
     inputIpProxyUsername.disabled = !enabled || !isAccountMode || hasAccountListConfigured;

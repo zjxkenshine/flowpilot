@@ -63,6 +63,10 @@
    - `Change`：保持 session 的前提下重绑并换出口（711）
    - `检测出口`：只做出口复测，不改节点
 6. `检查IP`：打开 `https://ipinfo.io/what-is-my-ip`
+7. 特殊域名链路策略：
+   - `本地代理 127.0.0.1:7897`（默认）
+   - `本地无代理`
+   - `走当前 IP 代理`
 
 ### 3.3 711 API 模式
 
@@ -129,15 +133,16 @@
    - Password
    - Region（可选）
 4. API 模式先粘贴 711 后台生成链接，再按需修改 `count / region / proto / stype / split / zone / ptype / sessType / sessTime / sessAuto`。
-5. 点击 `同步`。
-6. 查看状态卡：
+5. 根据需要选择“特殊域名链路”策略；默认保持 `127.0.0.1:7897`，作用于 `auth.openai.com / auth0.openai.com / accounts.openai.com / pm-redirects.stripe.com / luckyous.com / hwork.pro`。
+6. 点击 `同步`。
+7. 查看状态卡：
    - 当前代理
    - 当前出口
    - 是否有校验提示
-7. 需要换出口时：
+8. 需要换出口时：
    - 711 + session 场景优先用 `Change`
    - 或使用 `下一条`
-8. 需要手动复核时点击 `检测出口` 或 `检查IP`。
+9. 需要手动复核时点击 `检测出口` 或 `检查IP`。
 
 ## 6. 已知限制
 

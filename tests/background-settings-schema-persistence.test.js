@@ -102,6 +102,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyEnabled: false,
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
+  ipProxySpecialDomainRouteMode: 'local_proxy',
   kiroTargetId: 'kiro-rs',
   kiroRsUrl: '',
   kiroRsKey: '',
@@ -140,6 +141,10 @@ function normalizeMailProvider(value = '') { return String(value || '163').trim(
 function normalizeStepExecutionRangeByFlow(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function normalizeIpProxyProviderValue(value) { return String(value || '711proxy').trim() || '711proxy'; }
 function normalizeIpProxyMode(value) { return String(value || 'account').trim() || 'account'; }
+function normalizeIpProxySpecialDomainRouteMode(value) {
+  const normalized = String(value || 'local_proxy').trim().toLowerCase();
+  return ['local_proxy', 'direct', 'provider_proxy'].includes(normalized) ? normalized : 'local_proxy';
+}
 function normalizeIpProxyServiceProfiles(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function buildIpProxyServiceProfileFromState() {
   return {
@@ -155,6 +160,7 @@ function buildIpProxyServiceProfileFromState() {
     username: '',
     password: '',
     region: '',
+    specialDomainRouteMode: 'local_proxy',
   };
 }
 function normalizeIpProxyAccountList(value) { return String(value || ''); }
@@ -658,6 +664,7 @@ function getRemovedKeys() {
     mailProvider: 'cloudflare-temp-email',
     ipProxyEnabled: true,
     ipProxyMode: 'api',
+    ipProxySpecialDomainRouteMode: 'provider_proxy',
     stepExecutionRangeByFlow: {
       openai: { enabled: true, fromStep: 2, toStep: 4 },
     },
@@ -668,6 +675,7 @@ function getRemovedKeys() {
   assert.equal(persisted.mailProvider, 'cloudflare-temp-email');
   assert.equal(persisted.ipProxyEnabled, true);
   assert.equal(persisted.ipProxyMode, 'api');
+  assert.equal(persisted.ipProxySpecialDomainRouteMode, 'provider_proxy');
   assert.deepEqual(persisted.stepExecutionRangeByFlow.openai, {
     enabled: true,
     fromStep: 2,

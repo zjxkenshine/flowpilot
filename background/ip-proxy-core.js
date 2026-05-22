@@ -634,6 +634,19 @@ function isIpProxyAccountListEnabled() {
     : IP_PROXY_ACCOUNT_LIST_ENABLED);
 }
 
+function normalizeIpProxySpecialDomainRouteMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = Array.isArray(globalThis.IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES)
+    ? globalThis.IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES
+    : ['local_proxy', 'direct', 'provider_proxy'];
+  if (allowed.includes(normalized)) {
+    return normalized;
+  }
+  return typeof DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE === 'string'
+    ? DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE
+    : 'local_proxy';
+}
+
 function normalizeIpProxyServiceProfile(rawValue = {}) {
   const raw = (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue))
     ? rawValue
@@ -664,6 +677,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     username: String(raw.username || '').trim(),
     password: String(raw.password || ''),
     region: String(raw.region || '').trim(),
+    specialDomainRouteMode: normalizeIpProxySpecialDomainRouteMode(raw.specialDomainRouteMode),
   };
 }
 
@@ -683,6 +697,7 @@ function buildIpProxyServiceProfileFromState(state = {}) {
     username: state?.ipProxyUsername,
     password: state?.ipProxyPassword,
     region: state?.ipProxyRegion,
+    specialDomainRouteMode: state?.ipProxySpecialDomainRouteMode,
   });
 }
 
@@ -2957,7 +2972,7 @@ function validateProxyControlAfterApply(details, entry) {
   };
 }
 
-function buildIpProxyPacScript(entry) {
+function resolveIpProxyPacProxyEndpoint(entry = {}) {
   const normalizedProtocol = normalizeIpProxyProtocol(entry?.protocol || DEFAULT_IP_PROXY_PROTOCOL);
   const host = String(entry?.host || '').trim();
   const port = normalizeIpProxyPort(entry?.port);
@@ -2972,6 +2987,29 @@ function buildIpProxyPacScript(entry) {
   } else if (normalizedProtocol === 'socks5') {
     pacScheme = 'SOCKS5';
   }
+  return `${pacScheme} ${host}:${port}`;
+}
+
+function resolveIpProxySpecialDomainFallback(entry = {}, routeMode = DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE) {
+  const normalizedRouteMode = normalizeIpProxySpecialDomainRouteMode(routeMode);
+  if (normalizedRouteMode === 'direct') {
+    return 'DIRECT';
+  }
+  if (normalizedRouteMode === 'provider_proxy') {
+    return resolveIpProxyPacProxyEndpoint(entry) || 'DIRECT';
+  }
+  return String(
+    typeof IP_PROXY_FORCE_DIRECT_FALLBACK !== 'undefined' && IP_PROXY_FORCE_DIRECT_FALLBACK
+      ? IP_PROXY_FORCE_DIRECT_FALLBACK
+      : 'PROXY 127.0.0.1:7897'
+  ).trim() || 'PROXY 127.0.0.1:7897';
+}
+
+function buildIpProxyPacScript(entry, options = {}) {
+  const proxyEndpoint = resolveIpProxyPacProxyEndpoint(entry);
+  if (!proxyEndpoint) {
+    return '';
+  }
   const targetPatterns = IP_PROXY_TARGET_HOST_PATTERNS.map((pattern) => `'${String(pattern).replace(/'/g, "\\'")}'`).join(', ');
   const bypassList = IP_PROXY_BYPASS_LIST.map((pattern) => `'${String(pattern).replace(/'/g, "\\'")}'`).join(', ');
   const forceDirectPatterns = (typeof IP_PROXY_FORCE_DIRECT_HOST_PATTERNS !== 'undefined' && Array.isArray(IP_PROXY_FORCE_DIRECT_HOST_PATTERNS)
@@ -2980,11 +3018,8 @@ function buildIpProxyPacScript(entry) {
     .map((pattern) => `'${String(pattern).replace(/'/g, "\\'")}'`)
     .join(', ');
   const forceDirectFallback = String(
-    typeof IP_PROXY_FORCE_DIRECT_FALLBACK !== 'undefined' && IP_PROXY_FORCE_DIRECT_FALLBACK
-      ? IP_PROXY_FORCE_DIRECT_FALLBACK
-      : 'DIRECT'
+    options?.specialDomainFallback || resolveIpProxySpecialDomainFallback(entry)
   ).replace(/"/g, '\\"');
-  const proxyEndpoint = `${pacScheme} ${host}:${port}`;
   const routeAllLiteral = (typeof IP_PROXY_ROUTE_ALL_TRAFFIC !== 'undefined' && Boolean(IP_PROXY_ROUTE_ALL_TRAFFIC))
     ? 'true'
     : 'false';
@@ -3249,7 +3284,20 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
     }).catch(() => effectiveEntry);
   }
 
-  const pacScript = buildIpProxyPacScript(effectiveEntry);
+  const activeProfile = normalizeIpProxyServiceProfile(
+    normalizeIpProxyServiceProfiles(
+      resolvedState?.ipProxyServiceProfiles || {},
+      resolvedState || {}
+    )?.[provider]
+      || buildIpProxyServiceProfileFromState(resolvedState)
+  );
+  const specialDomainFallback = resolveIpProxySpecialDomainFallback(
+    effectiveEntry,
+    activeProfile?.specialDomainRouteMode || resolvedState?.ipProxySpecialDomainRouteMode
+  );
+  const pacScript = buildIpProxyPacScript(effectiveEntry, {
+    specialDomainFallback,
+  });
   if (!pacScript) {
     await setIpProxyLeakGuardEnabled(true);
     const status = {

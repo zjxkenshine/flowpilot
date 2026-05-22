@@ -1244,6 +1244,17 @@
                 <button type="button" class="choice-btn" data-ip-proxy-mode="api">API 拉取</button>
               </div>
             </div>
+            <div class="data-row" id="row-ip-proxy-special-domain-route-mode" style="display:none;">
+              <span class="data-label">特殊域名链路</span>
+              <div class="data-inline">
+                <select id="select-ip-proxy-special-domain-route-mode" class="data-select">
+                  <option value="local_proxy">本地代理 127.0.0.1:7897</option>
+                  <option value="direct">本地无代理</option>
+                  <option value="provider_proxy">走当前 IP 代理</option>
+                </select>
+                <span class="data-value">作用于 auth.openai.com、auth0.openai.com、accounts.openai.com、pm-redirects.stripe.com、luckyous.com、hwork.pro</span>
+              </div>
+            </div>
             <div class="data-row ip-proxy-layout-row" id="row-ip-proxy-layout" style="display:none;">
               <div class="ip-proxy-layout" id="ip-proxy-layout">
                 <div class="ip-proxy-column ip-proxy-column-account" id="ip-proxy-account-panel">
