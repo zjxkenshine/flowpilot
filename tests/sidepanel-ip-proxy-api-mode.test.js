@@ -10,6 +10,7 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
   [
     'input-ip-proxy-api-url',
     'input-ip-proxy-api-count',
+    'input-ip-proxy-api-region',
     'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
     'select-ip-proxy-api-stype',
@@ -31,6 +32,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(source, /const IP_PROXY_API_MODE_ENABLED = true;/);
   [
     'inputIpProxyApiCount',
+    'inputIpProxyApiRegion',
     'selectIpProxyApiHost',
     'selectIpProxyApiProto',
     'selectIpProxyApiStype',
@@ -46,5 +48,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
 
   assert.match(panelSource, /sync711ApiFieldsFromUrlForPanel/);
   assert.match(panelSource, /rebuild711ApiUrlFromFieldsForPanel/);
+  assert.match(panelSource, /apiRegion/);
+  assert.match(panelSource, /normalizeIpProxyApiRegionForPanel/);
   assert.match(panelSource, /apiSessType/);
 });

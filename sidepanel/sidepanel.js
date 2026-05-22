@@ -137,6 +137,8 @@ const inputIpProxyApiUrl = document.getElementById('input-ip-proxy-api-url');
 const btnToggleIpProxyApiUrl = document.getElementById('btn-toggle-ip-proxy-api-url');
 const rowIpProxyApiCount = document.getElementById('row-ip-proxy-api-count');
 const inputIpProxyApiCount = document.getElementById('input-ip-proxy-api-count');
+const rowIpProxyApiRegion = document.getElementById('row-ip-proxy-api-region');
+const inputIpProxyApiRegion = document.getElementById('input-ip-proxy-api-region');
 const rowIpProxyApiHost = document.getElementById('row-ip-proxy-api-host');
 const selectIpProxyApiHost = document.getElementById('select-ip-proxy-api-host');
 const rowIpProxyApiProto = document.getElementById('row-ip-proxy-api-proto');
@@ -4411,9 +4413,13 @@ function collectSettingsPayload() {
   const selectedIpProxyMode = (!isIpProxyApiModeEnabledSafe && selectedIpProxyModeRaw === 'api')
     ? 'account'
     : selectedIpProxyModeRaw;
+  const ipProxyApiRegionRawValue = typeof inputIpProxyApiRegion !== 'undefined'
+    ? inputIpProxyApiRegion?.value
+    : '';
   const currentIpProxyServiceProfile = {
     mode: selectedIpProxyMode,
     apiUrl: String(ipProxyApiUrlRawValue || '').trim(),
+    apiRegion: String(ipProxyApiRegionRawValue || '').trim(),
     accountList: normalizeIpProxyAccountListSafe(ipProxyAccountListRawValue || ''),
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(ipProxyAccountSessionPrefixRawValue || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(ipProxyAccountLifeMinutesRawValue || ''),
@@ -4434,6 +4440,7 @@ function collectSettingsPayload() {
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
     ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
+    ipProxyApiRegion: currentIpProxyServiceProfile.apiRegion,
     ipProxyAccountList: currentIpProxyServiceProfile.accountList,
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
@@ -4884,6 +4891,7 @@ function collectSettingsPayload() {
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
     ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
+    ipProxyApiRegion: currentIpProxyServiceProfile.apiRegion,
     ipProxyServiceProfiles,
     ipProxyAccountList: currentIpProxyServiceProfile.accountList,
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
@@ -16172,6 +16180,42 @@ inputIpProxyApiUrl?.addEventListener('input', () => {
     }
     saveSettings({ silent: true }).catch(() => {});
   });
+});
+
+inputIpProxyApiRegion?.addEventListener('input', () => {
+  if (typeof normalizeIpProxyApiRegionForPanel === 'function') {
+    inputIpProxyApiRegion.value = normalizeIpProxyApiRegionForPanel(inputIpProxyApiRegion.value || '');
+  }
+  if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+    rebuild711ApiUrlFromFieldsForPanel();
+  }
+  syncCurrentIpProxyServiceProfileToLatestState();
+  updateIpProxyUI(latestState);
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputIpProxyApiRegion?.addEventListener('change', () => {
+  if (typeof normalizeIpProxyApiRegionForPanel === 'function') {
+    inputIpProxyApiRegion.value = normalizeIpProxyApiRegionForPanel(inputIpProxyApiRegion.value || '');
+  }
+  if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+    rebuild711ApiUrlFromFieldsForPanel();
+  }
+  syncCurrentIpProxyServiceProfileToLatestState();
+  updateIpProxyUI(latestState);
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputIpProxyApiRegion?.addEventListener('blur', () => {
+  if (typeof normalizeIpProxyApiRegionForPanel === 'function') {
+    inputIpProxyApiRegion.value = normalizeIpProxyApiRegionForPanel(inputIpProxyApiRegion.value || '');
+  }
+  if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
+    rebuild711ApiUrlFromFieldsForPanel();
+  }
+  saveSettings({ silent: true }).catch(() => {});
 });
 
 inputIpProxyUsername?.addEventListener('paste', () => {

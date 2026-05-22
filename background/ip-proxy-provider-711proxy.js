@@ -374,7 +374,7 @@
       host,
       hostLabel: normalize711ApiHostLabel(host),
       count: normalize711ApiCount(config?.count ?? parsed.count),
-      region: '',
+      region: normalizeCountryCode(config?.region ?? parsed.region),
       proto: normalize711ApiProtocol(config?.proto ?? parsed.proto),
       protoLabel: normalize711ApiProtocolLabel(config?.proto ?? parsed.proto),
       stype,
@@ -422,6 +422,7 @@
     };
 
     setOrDelete('count', normalized.count);
+    setOrDelete('region', normalized.region);
     setOrDelete('proto', normalized.proto);
     setOrDelete('stype', normalized.stype);
     setOrDelete('zone', DEFAULT_711_API_ZONE);
@@ -445,8 +446,6 @@
       nextUrl.searchParams.delete('sessTime');
       nextUrl.searchParams.delete('sessAuto');
     }
-
-    nextUrl.searchParams.delete('region');
     return nextUrl.toString();
   }
 
