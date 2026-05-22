@@ -923,6 +923,83 @@ header {
   min-width: 0;
 }
 
+.inline-help-tooltip {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.inline-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-base) 92%, var(--blue-soft));
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.inline-help-bubble {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1200;
+  width: min(320px, calc(100vw - 56px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-base) 97%, var(--blue-soft));
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity var(--transition), transform var(--transition), visibility var(--transition);
+}
+
+.inline-help-bubble::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.inline-help-tooltip:hover .inline-help-icon,
+.inline-help-tooltip:focus-visible .inline-help-icon,
+.inline-help-tooltip:focus-within .inline-help-icon {
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--border));
+  background: color-mix(in srgb, var(--bg-base) 88%, var(--blue-soft));
+  color: var(--blue);
+}
+
+.inline-help-tooltip:hover .inline-help-bubble,
+.inline-help-tooltip:focus-visible .inline-help-bubble,
+.inline-help-tooltip:focus-within .inline-help-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 .ip-proxy-fold-row {
   display: block;
 }
