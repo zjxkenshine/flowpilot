@@ -13,7 +13,21 @@
     'sessTime',
     'sessAuto',
   ]);
+  const ALLOWED_711_API_HOSTS = [
+    'http://us.rotgbapi.711proxy.com:8089',
+    'http://global.rotgbapi.711proxy.com:8089',
+    'http://as.rotgbapi.711proxy.com:8089',
+  ];
+  const DEFAULT_711_API_HOST = 'http://global.rotgbapi.711proxy.com:8089';
+  const DEFAULT_711_API_PATHNAME = '/gen';
+  const DEFAULT_711_API_COUNT = '1';
   const DEFAULT_711_API_SPLIT = '\\r\\n';
+  const DEFAULT_711_API_PROTO = 'http';
+  const DEFAULT_711_API_STYLE = 'text';
+  const DEFAULT_711_API_SESSION_TYPE = 'rotating';
+  const DEFAULT_711_API_SESSION_TIME = '5';
+  const DEFAULT_711_API_ZONE = 'custom';
+  const DEFAULT_711_API_PTYPE = '1';
 
   function publish711Exports(exportsObject = {}) {
     Object.keys(exportsObject).forEach((key) => {
@@ -38,25 +52,69 @@
     if (!raw) return '';
     const numeric = Number.parseInt(raw, 10);
     if (!Number.isInteger(numeric)) return '';
-    return String(Math.max(1, Math.min(180, numeric)));
+    return String(Math.max(5, Math.min(180, numeric)));
   }
 
   function normalize711ApiCount(value = '') {
     const raw = String(value ?? '').trim();
-    if (!raw) return '';
+    if (!raw) return DEFAULT_711_API_COUNT;
     const numeric = Number.parseInt(raw, 10);
-    if (!Number.isInteger(numeric) || numeric < 1 || numeric > 900) return '';
-    return String(numeric);
+    if (!Number.isInteger(numeric)) return DEFAULT_711_API_COUNT;
+    return String(Math.max(1, Math.min(200, numeric)));
+  }
+
+  function normalize711ApiHost(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return DEFAULT_711_API_HOST;
+    }
+    let normalizedHost = raw.toLowerCase().replace(/\/+$/, '');
+    try {
+      const urlObject = new URL(raw);
+      normalizedHost = `${urlObject.protocol}//${urlObject.host}`.toLowerCase();
+    } catch {
+      normalizedHost = raw.toLowerCase().replace(/\/+$/, '');
+    }
+    const match = ALLOWED_711_API_HOSTS.find((candidate) => candidate.toLowerCase() === normalizedHost);
+    return match || DEFAULT_711_API_HOST;
+  }
+
+  function normalize711ApiHostLabel(value = '') {
+    const normalized = normalize711ApiHost(value);
+    if (normalized.includes('://us.rotgbapi.711proxy.com:8089')) return 'us';
+    if (normalized.includes('://as.rotgbapi.711proxy.com:8089')) return 'as';
+    return 'global';
+  }
+
+  function build711ApiBaseUrl(host = '') {
+    return `${normalize711ApiHost(host)}${DEFAULT_711_API_PATHNAME}`;
+  }
+
+  function parse711ApiHostFromUrl(apiUrl = '') {
+    const rawUrl = String(apiUrl || '').trim();
+    if (!rawUrl) {
+      return DEFAULT_711_API_HOST;
+    }
+    try {
+      const urlObject = new URL(rawUrl);
+      return normalize711ApiHost(`${urlObject.protocol}//${urlObject.host}`);
+    } catch {
+      return DEFAULT_711_API_HOST;
+    }
   }
 
   function normalize711ApiProtocol(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return ['http', 'https', 'socks4', 'socks5'].includes(normalized) ? normalized : '';
+    return normalized === 'socks5' ? 'socks5' : DEFAULT_711_API_PROTO;
+  }
+
+  function normalize711ApiProtocolLabel(value = '') {
+    return normalize711ApiProtocol(value) === 'socks5' ? 'socks5' : 'http';
   }
 
   function normalize711ApiStyle(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return normalized === 'json' ? 'json' : 'text';
+    return normalized === 'json' ? 'json' : DEFAULT_711_API_STYLE;
   }
 
   function decode711ApiSplitValue(value = '') {
@@ -82,30 +140,37 @@
     return decoded || String(fallback ?? DEFAULT_711_API_SPLIT);
   }
 
-  function normalize711ApiZone(value = '') {
-    return String(value || '').trim();
+  function normalize711ApiSplitOption(value = '', fallback = DEFAULT_711_API_SPLIT) {
+    const normalized = normalize711ApiSplitValue(value, fallback);
+    return ['\r\n', '\r', '\n', '\t'].includes(normalized)
+      ? normalized
+      : String(fallback ?? DEFAULT_711_API_SPLIT);
   }
 
-  function normalize711ApiPlanType(value = '') {
-    const raw = String(value ?? '').trim();
-    if (!raw) return '';
-    const numeric = Number.parseInt(raw, 10);
-    if (!Number.isInteger(numeric) || numeric <= 0) return '';
-    return String(numeric);
+  function normalize711ApiZone() {
+    return DEFAULT_711_API_ZONE;
+  }
+
+  function normalize711ApiPlanType() {
+    return DEFAULT_711_API_PTYPE;
   }
 
   function normalize711ApiSessionType(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized) return '';
     if (normalized === 'sticky' || normalized === 'static') return 'sticky';
-    if (normalized === 'rotating' || normalized === 'rotation') return 'rotating';
-    return '';
+    return DEFAULT_711_API_SESSION_TYPE;
   }
 
-  function normalize711ApiSessionAuto(value = '') {
+  function normalize711ApiSessionTypeLabel(value = '') {
+    return normalize711ApiSessionType(value) === 'sticky' ? 'sticky' : 'rotating';
+  }
+
+  function normalize711ApiSessionAuto(value = '', fallback = '1') {
     const raw = String(value ?? '').trim();
-    if (!raw) return '';
-    return raw === '0' || raw === '1' ? raw : '';
+    if (!raw) return String(fallback || '');
+    if (raw === '0') return '0';
+    if (raw === '1') return '1';
+    return String(fallback || '');
   }
 
   function has711SessionToken(username = '') {
@@ -209,21 +274,42 @@
     return nextEntry;
   }
 
+  function build711ApiRefreshUrl(options = {}) {
+    const host = String(options?.host || '').trim();
+    const port = Number.parseInt(String(options?.port || '').trim(), 10);
+    const key = String(options?.key || '').trim();
+    const ts = Number.isFinite(Number(options?.ts)) ? Number(options.ts) : Date.now();
+    if (!host || !Number.isInteger(port) || port <= 0 || !key) {
+      return '';
+    }
+    const refreshUrl = new URL(`http://${host}:8089/change`);
+    refreshUrl.searchParams.set('key', key);
+    refreshUrl.searchParams.set('ts', String(ts));
+    refreshUrl.searchParams.set('ptype', DEFAULT_711_API_PTYPE);
+    refreshUrl.searchParams.set('zone', DEFAULT_711_API_ZONE);
+    refreshUrl.searchParams.set('port', String(port));
+    return refreshUrl.toString();
+  }
+
   function parse711ProxyApiConfigFromUrl(apiUrl = '') {
     const rawUrl = String(apiUrl || '').trim();
     const defaultResult = {
       apiUrl: rawUrl,
-      baseUrl: '',
+      baseUrl: build711ApiBaseUrl(DEFAULT_711_API_HOST),
       isValidUrl: false,
       urlObject: null,
-      count: '',
+      host: DEFAULT_711_API_HOST,
+      hostLabel: normalize711ApiHostLabel(DEFAULT_711_API_HOST),
+      count: DEFAULT_711_API_COUNT,
       region: '',
-      proto: '',
-      stype: 'text',
+      proto: DEFAULT_711_API_PROTO,
+      protoLabel: normalize711ApiProtocolLabel(DEFAULT_711_API_PROTO),
+      stype: DEFAULT_711_API_STYLE,
       split: DEFAULT_711_API_SPLIT,
-      zone: '',
-      ptype: '',
-      sessType: '',
+      zone: DEFAULT_711_API_ZONE,
+      ptype: DEFAULT_711_API_PTYPE,
+      sessType: DEFAULT_711_API_SESSION_TYPE,
+      sessTypeLabel: normalize711ApiSessionTypeLabel(DEFAULT_711_API_SESSION_TYPE),
       sessTime: '',
       sessAuto: '',
     };
@@ -241,65 +327,91 @@
       return defaultResult;
     }
 
+    const sessType = normalize711ApiSessionType(urlObject.searchParams.get('sessType') || '');
     return {
       apiUrl: rawUrl,
-      baseUrl: `${urlObject.origin}${urlObject.pathname}`,
+      baseUrl: `${normalize711ApiHost(`${urlObject.protocol}//${urlObject.host}`)}${DEFAULT_711_API_PATHNAME}`,
       isValidUrl: true,
       urlObject,
+      host: normalize711ApiHost(`${urlObject.protocol}//${urlObject.host}`),
+      hostLabel: normalize711ApiHostLabel(`${urlObject.protocol}//${urlObject.host}`),
       count: normalize711ApiCount(urlObject.searchParams.get('count') || ''),
       region: normalizeCountryCode(urlObject.searchParams.get('region') || ''),
       proto: normalize711ApiProtocol(urlObject.searchParams.get('proto') || ''),
+      protoLabel: normalize711ApiProtocolLabel(urlObject.searchParams.get('proto') || ''),
       stype: normalize711ApiStyle(urlObject.searchParams.get('stype') || ''),
-      split: normalize711ApiSplitValue(urlObject.searchParams.get('split') || ''),
-      zone: normalize711ApiZone(urlObject.searchParams.get('zone') || ''),
-      ptype: normalize711ApiPlanType(urlObject.searchParams.get('ptype') || ''),
-      sessType: normalize711ApiSessionType(urlObject.searchParams.get('sessType') || ''),
-      sessTime: normalize711SessionMinutes(urlObject.searchParams.get('sessTime') || ''),
-      sessAuto: normalize711ApiSessionAuto(urlObject.searchParams.get('sessAuto') || ''),
+      split: normalize711ApiSplitOption(urlObject.searchParams.get('split') || ''),
+      zone: DEFAULT_711_API_ZONE,
+      ptype: DEFAULT_711_API_PTYPE,
+      sessType,
+      sessTypeLabel: normalize711ApiSessionTypeLabel(sessType),
+      sessTime: sessType === 'sticky'
+        ? normalize711SessionMinutes(urlObject.searchParams.get('sessTime') || '')
+        : '',
+      sessAuto: sessType === 'sticky'
+        ? normalize711ApiSessionAuto(urlObject.searchParams.get('sessAuto') || '', '')
+        : '',
     };
   }
 
   function normalize711ProxyApiConfig(config = {}) {
-    const parsed = parse711ProxyApiConfigFromUrl(config?.apiUrl || config?.baseUrl || '');
+    const host = normalize711ApiHost(
+      config?.host
+      ?? config?.apiHost
+      ?? parse711ApiHostFromUrl(config?.apiUrl || config?.baseUrl || '')
+    );
+    const parsed = parse711ProxyApiConfigFromUrl(
+      config?.apiUrl
+      || config?.baseUrl
+      || build711ApiBaseUrl(host)
+    );
     const sessType = normalize711ApiSessionType(config?.sessType ?? parsed.sessType);
     const stype = normalize711ApiStyle(config?.stype ?? parsed.stype);
     return {
       apiUrl: String(config?.apiUrl ?? parsed.apiUrl ?? '').trim(),
-      baseUrl: String(config?.baseUrl ?? parsed.baseUrl ?? '').trim(),
-      isValidUrl: Boolean(config?.isValidUrl ?? parsed.isValidUrl),
+      baseUrl: build711ApiBaseUrl(host),
+      isValidUrl: Boolean(config?.isValidUrl ?? parsed.isValidUrl ?? true),
+      host,
+      hostLabel: normalize711ApiHostLabel(host),
       count: normalize711ApiCount(config?.count ?? parsed.count),
-      region: normalizeCountryCode(config?.region ?? parsed.region),
+      region: '',
       proto: normalize711ApiProtocol(config?.proto ?? parsed.proto),
+      protoLabel: normalize711ApiProtocolLabel(config?.proto ?? parsed.proto),
       stype,
       split: stype === 'json'
         ? ''
-        : normalize711ApiSplitValue(config?.split ?? parsed.split),
-      zone: normalize711ApiZone(config?.zone ?? parsed.zone),
-      ptype: normalize711ApiPlanType(config?.ptype ?? parsed.ptype),
+        : normalize711ApiSplitOption(config?.split ?? parsed.split),
+      zone: DEFAULT_711_API_ZONE,
+      ptype: DEFAULT_711_API_PTYPE,
       sessType,
+      sessTypeLabel: normalize711ApiSessionTypeLabel(sessType),
       sessTime: sessType === 'sticky'
-        ? normalize711SessionMinutes(config?.sessTime ?? parsed.sessTime)
+        ? normalize711SessionMinutes(config?.sessTime ?? parsed.sessTime ?? DEFAULT_711_API_SESSION_TIME)
         : '',
       sessAuto: sessType === 'sticky'
-        ? normalize711ApiSessionAuto(config?.sessAuto ?? parsed.sessAuto)
+        ? normalize711ApiSessionAuto(config?.sessAuto ?? parsed.sessAuto, '1')
         : '',
     };
   }
 
   function build711ProxyApiUrl(apiUrl = '', config = {}) {
-    const parsed = parse711ProxyApiConfigFromUrl(apiUrl || config?.apiUrl || config?.baseUrl || '');
-    if (!parsed.isValidUrl || !parsed.urlObject) {
-      return String(apiUrl || config?.apiUrl || '').trim();
-    }
-
+    const inputApiUrl = String(apiUrl || config?.apiUrl || '').trim();
+    const parsed = parse711ProxyApiConfigFromUrl(
+      inputApiUrl
+      || config?.baseUrl
+      || build711ApiBaseUrl(config?.host || config?.apiHost || DEFAULT_711_API_HOST)
+    );
     const normalized = normalize711ProxyApiConfig({
       ...parsed,
       ...config,
-      apiUrl: String(apiUrl || config?.apiUrl || parsed.apiUrl || '').trim(),
-      baseUrl: parsed.baseUrl,
-      isValidUrl: parsed.isValidUrl,
+      apiUrl: inputApiUrl || parsed.apiUrl || build711ApiBaseUrl(config?.host || config?.apiHost || DEFAULT_711_API_HOST),
+      isValidUrl: true,
     });
-    const nextUrl = new URL(parsed.urlObject.toString());
+    const existingUrl = parsed?.urlObject ? parsed.urlObject.toString() : normalized.baseUrl;
+    const nextUrl = new URL(existingUrl);
+    nextUrl.protocol = 'http:';
+    nextUrl.host = new URL(normalized.baseUrl).host;
+    nextUrl.pathname = DEFAULT_711_API_PATHNAME;
     const setOrDelete = (key, value) => {
       const normalizedValue = String(value ?? '').trim();
       if (normalizedValue) {
@@ -310,11 +422,10 @@
     };
 
     setOrDelete('count', normalized.count);
-    setOrDelete('region', normalized.region);
     setOrDelete('proto', normalized.proto);
     setOrDelete('stype', normalized.stype);
-    setOrDelete('zone', normalized.zone);
-    setOrDelete('ptype', normalized.ptype);
+    setOrDelete('zone', DEFAULT_711_API_ZONE);
+    setOrDelete('ptype', DEFAULT_711_API_PTYPE);
     setOrDelete('sessType', normalized.sessType);
 
     if (normalized.stype === 'json') {
@@ -325,12 +436,17 @@
 
     if (normalized.sessType === 'sticky') {
       setOrDelete('sessTime', normalized.sessTime);
-      setOrDelete('sessAuto', normalized.sessAuto);
+      if (String(normalized.sessAuto || '').trim() === '1') {
+        nextUrl.searchParams.set('sessAuto', '1');
+      } else {
+        nextUrl.searchParams.delete('sessAuto');
+      }
     } else {
       nextUrl.searchParams.delete('sessTime');
       nextUrl.searchParams.delete('sessAuto');
     }
 
+    nextUrl.searchParams.delete('region');
     return nextUrl.toString();
   }
 
@@ -366,19 +482,13 @@
 
     const errors = [];
     if (missingOrInvalid.length) {
-      errors.push(`711Proxy API 缺少或无效的必填参数：${missingOrInvalid.join(', ')}。请从后台重新生成链接或补齐参数。`);
-    }
-    if (String(config?.region ?? parsed.region ?? '').trim() && !normalized.region) {
-      errors.push('711Proxy API 的 region 仅支持两位国家码，例如 US / DE / HK。');
+      errors.push(`711Proxy API 缺少或无效的必填参数：${missingOrInvalid.join(', ')}。`);
     }
     if (normalized.stype !== 'json' && !String(normalized.split || '')) {
       errors.push('711Proxy API 的 split 不能为空。');
     }
     if (normalized.sessType === 'sticky' && String(config?.sessTime ?? parsed.sessTime ?? '').trim() && !normalized.sessTime) {
-      errors.push('711Proxy API 的 sessTime 仅支持 1-180 分钟。');
-    }
-    if (normalized.sessType === 'sticky' && String(config?.sessAuto ?? parsed.sessAuto ?? '').trim() && !normalized.sessAuto) {
-      errors.push('711Proxy API 的 sessAuto 仅支持 0 或 1。');
+      errors.push('711Proxy API 的 sessTime 仅支持 5-180 分钟。');
     }
 
     return {
@@ -391,23 +501,41 @@
   }
 
   publish711Exports({
+    ALLOWED_711_API_HOSTS,
+    DEFAULT_711_API_COUNT,
+    DEFAULT_711_API_HOST,
+    DEFAULT_711_API_PATHNAME,
+    DEFAULT_711_API_PTYPE,
+    DEFAULT_711_API_SESSION_TIME,
+    DEFAULT_711_API_SESSION_TYPE,
+    DEFAULT_711_API_SPLIT,
+    DEFAULT_711_API_STYLE,
+    DEFAULT_711_API_ZONE,
     apply711RegionToUsername,
     apply711SessionToUsername,
+    build711ApiBaseUrl,
+    build711ApiRefreshUrl,
     build711ProxyApiUrl,
     decode711ApiSplitValue,
     encode711ApiSplitValue,
     has711SessionToken,
     normalize711ApiCount,
+    normalize711ApiHost,
+    normalize711ApiHostLabel,
     normalize711ApiPlanType,
     normalize711ApiProtocol,
+    normalize711ApiProtocolLabel,
     normalize711ApiSessionAuto,
     normalize711ApiSessionType,
+    normalize711ApiSessionTypeLabel,
+    normalize711ApiSplitOption,
     normalize711ApiSplitValue,
     normalize711ApiStyle,
     normalize711ApiZone,
     normalize711ProxyApiConfig,
     normalize711SessionId,
     normalize711SessionMinutes,
+    parse711ApiHostFromUrl,
     parse711ProxyApiConfigFromUrl,
     resolve711ProxyRegionFromInputs,
     transformIpProxyAccountEntryByProvider(provider = '', entry = {}, context = {}) {

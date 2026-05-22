@@ -10,15 +10,15 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
   [
     'input-ip-proxy-api-url',
     'input-ip-proxy-api-count',
-    'input-ip-proxy-api-region',
+    'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
     'select-ip-proxy-api-stype',
-    'input-ip-proxy-api-split',
-    'input-ip-proxy-api-zone',
-    'input-ip-proxy-api-ptype',
+    'select-ip-proxy-api-split',
     'select-ip-proxy-api-sess-type',
     'input-ip-proxy-api-sess-time',
     'select-ip-proxy-api-sess-auto',
+    'input-ip-proxy-api-refresh-key',
+    'input-ip-proxy-api-refresh-url',
   ].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
@@ -31,15 +31,15 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(source, /const IP_PROXY_API_MODE_ENABLED = true;/);
   [
     'inputIpProxyApiCount',
-    'inputIpProxyApiRegion',
+    'selectIpProxyApiHost',
     'selectIpProxyApiProto',
     'selectIpProxyApiStype',
-    'inputIpProxyApiSplit',
-    'inputIpProxyApiZone',
-    'inputIpProxyApiPtype',
+    'selectIpProxyApiSplit',
     'selectIpProxyApiSessType',
     'inputIpProxyApiSessTime',
     'selectIpProxyApiSessAuto',
+    'inputIpProxyApiRefreshKey',
+    'inputIpProxyApiRefreshUrl',
   ].forEach((name) => {
     assert.match(source, new RegExp(`const ${name} = document\\.getElementById\\(`));
   });

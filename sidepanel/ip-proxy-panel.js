@@ -249,6 +249,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     ? normalize711ProxyApiConfig({
       apiUrl: raw.apiUrl || '',
       count: raw.apiCount,
+      host: raw.apiHost,
       region: raw.apiRegion,
       proto: raw.apiProto,
       stype: raw.apiStype,
@@ -262,17 +263,23 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     : null;
   return {
     mode: normalizeIpProxyModeForCurrentRelease(raw.mode),
-    apiUrl: String(normalizedApiConfig?.apiUrl || raw.apiUrl || '').trim(),
+    apiUrl: String(
+      normalizedApiConfig && typeof build711ProxyApiUrl === 'function'
+        ? build711ProxyApiUrl(raw.apiUrl || normalizedApiConfig.apiUrl || '', normalizedApiConfig)
+        : (normalizedApiConfig?.apiUrl || raw.apiUrl || '')
+    ).trim(),
+    apiHost: String(normalizedApiConfig?.host || raw.apiHost || DEFAULT_711_API_HOST || '').trim(),
     apiCount: String(normalizedApiConfig?.count || raw.apiCount || '').trim(),
     apiRegion: String(normalizedApiConfig?.region || raw.apiRegion || '').trim(),
     apiProto: String(normalizedApiConfig?.proto || raw.apiProto || '').trim(),
     apiStype: String(normalizedApiConfig?.stype || raw.apiStype || 'text').trim(),
-    apiSplit: String(normalizedApiConfig?.split || raw.apiSplit || '').replace(/\r/g, '\\r').replace(/\n/g, '\\n'),
+    apiSplit: String(normalizedApiConfig?.split || raw.apiSplit || DEFAULT_711_API_SPLIT || '').replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t'),
     apiZone: String(normalizedApiConfig?.zone || raw.apiZone || '').trim(),
     apiPtype: String(normalizedApiConfig?.ptype || raw.apiPtype || '').trim(),
     apiSessType: String(normalizedApiConfig?.sessType || raw.apiSessType || '').trim(),
     apiSessTime: String(normalizedApiConfig?.sessTime || raw.apiSessTime || '').trim(),
     apiSessAuto: String(normalizedApiConfig?.sessAuto || raw.apiSessAuto || '').trim(),
+    apiRefreshKey: String(raw.apiRefreshKey || '').trim(),
     accountList: normalizeIpProxyAccountList(raw.accountList || ''),
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
@@ -293,6 +300,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
   return normalizeIpProxyServiceProfile({
     mode: state?.ipProxyMode,
     apiUrl: state?.ipProxyApiUrl,
+    apiHost: state?.ipProxyApiHost,
     apiCount: state?.ipProxyApiCount,
     apiRegion: state?.ipProxyApiRegion,
     apiProto: state?.ipProxyApiProto,
@@ -303,6 +311,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
     apiSessType: state?.ipProxyApiSessType,
     apiSessTime: state?.ipProxyApiSessTime,
     apiSessAuto: state?.ipProxyApiSessAuto,
+    apiRefreshKey: state?.ipProxyApiRefreshKey,
     accountList: state?.ipProxyAccountList,
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,
@@ -458,13 +467,11 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
   const normalizedApiConfig = selectedService === '711proxy' && typeof normalize711ProxyApiConfig === 'function'
     ? normalize711ProxyApiConfig({
       apiUrl: inputIpProxyApiUrl?.value || '',
+      host: selectIpProxyApiHost?.value || '',
       count: inputIpProxyApiCount?.value || '',
-      region: inputIpProxyApiRegion?.value || '',
       proto: selectIpProxyApiProto?.value || '',
       stype: selectIpProxyApiStype?.value || '',
-      split: inputIpProxyApiSplit?.value || '',
-      zone: inputIpProxyApiZone?.value || '',
-      ptype: inputIpProxyApiPtype?.value || '',
+      split: selectIpProxyApiSplit?.value || '',
       sessType: selectIpProxyApiSessType?.value || '',
       sessTime: inputIpProxyApiSessTime?.value || '',
       sessAuto: selectIpProxyApiSessAuto?.value || '',
@@ -483,16 +490,18 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     apiUrl: normalizedApiConfig && typeof build711ProxyApiUrl === 'function'
       ? build711ProxyApiUrl(inputIpProxyApiUrl?.value || '', normalizedApiConfig)
       : (inputIpProxyApiUrl?.value || ''),
+    apiHost: normalizedApiConfig?.host || selectIpProxyApiHost?.value || '',
     apiCount: normalizedApiConfig?.count || inputIpProxyApiCount?.value || '',
-    apiRegion: normalizedApiConfig?.region || inputIpProxyApiRegion?.value || '',
+    apiRegion: '',
     apiProto: normalizedApiConfig?.proto || selectIpProxyApiProto?.value || '',
     apiStype: normalizedApiConfig?.stype || selectIpProxyApiStype?.value || '',
-    apiSplit: normalizedApiConfig?.split || inputIpProxyApiSplit?.value || '',
-    apiZone: normalizedApiConfig?.zone || inputIpProxyApiZone?.value || '',
-    apiPtype: normalizedApiConfig?.ptype || inputIpProxyApiPtype?.value || '',
+    apiSplit: normalizedApiConfig?.split || selectIpProxyApiSplit?.value || '',
+    apiZone: normalizedApiConfig?.zone || '',
+    apiPtype: normalizedApiConfig?.ptype || '',
     apiSessType: normalizedApiConfig?.sessType || selectIpProxyApiSessType?.value || '',
     apiSessTime: normalizedApiConfig?.sessTime || inputIpProxyApiSessTime?.value || '',
     apiSessAuto: normalizedApiConfig?.sessAuto || selectIpProxyApiSessAuto?.value || '',
+    apiRefreshKey: inputIpProxyApiRefreshKey?.value || '',
     accountList: isIpProxyAccountListAvailable() ? (inputIpProxyAccountList?.value || '') : '',
     accountSessionPrefix: inputIpProxyAccountSessionPrefix?.value || '',
     accountLifeMinutes: inputIpProxyAccountLifeMinutes?.value || '',
@@ -528,6 +537,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyService: normalizedService,
     ipProxyMode: normalizedProfile.mode,
     ipProxyApiUrl: normalizedProfile.apiUrl,
+    ipProxyApiHost: normalizedProfile.apiHost,
     ipProxyApiCount: normalizedProfile.apiCount,
     ipProxyApiRegion: normalizedProfile.apiRegion,
     ipProxyApiProto: normalizedProfile.apiProto,
@@ -538,6 +548,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyApiSessType: normalizedProfile.apiSessType,
     ipProxyApiSessTime: normalizedProfile.apiSessTime,
     ipProxyApiSessAuto: normalizedProfile.apiSessAuto,
+    ipProxyApiRefreshKey: normalizedProfile.apiRefreshKey,
     ipProxyAccountList: normalizedProfile.accountList,
     ipProxyAccountSessionPrefix: normalizedProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: normalizedProfile.accountLifeMinutes,
@@ -563,11 +574,11 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   if (inputIpProxyApiUrl) {
     inputIpProxyApiUrl.value = normalizedProfile.apiUrl;
   }
+  if (selectIpProxyApiHost) {
+    selectIpProxyApiHost.value = normalizedProfile.apiHost || DEFAULT_711_API_HOST || '';
+  }
   if (inputIpProxyApiCount) {
     inputIpProxyApiCount.value = normalizedProfile.apiCount;
-  }
-  if (inputIpProxyApiRegion) {
-    inputIpProxyApiRegion.value = normalizedProfile.apiRegion;
   }
   if (selectIpProxyApiProto) {
     selectIpProxyApiProto.value = normalizedProfile.apiProto || 'http';
@@ -575,14 +586,8 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   if (selectIpProxyApiStype) {
     selectIpProxyApiStype.value = normalizedProfile.apiStype || 'text';
   }
-  if (inputIpProxyApiSplit) {
-    inputIpProxyApiSplit.value = normalizedProfile.apiSplit || '';
-  }
-  if (inputIpProxyApiZone) {
-    inputIpProxyApiZone.value = normalizedProfile.apiZone;
-  }
-  if (inputIpProxyApiPtype) {
-    inputIpProxyApiPtype.value = normalizedProfile.apiPtype;
+  if (selectIpProxyApiSplit) {
+    selectIpProxyApiSplit.value = normalizedProfile.apiSplit || DEFAULT_711_API_SPLIT || '';
   }
   if (selectIpProxyApiSessType) {
     selectIpProxyApiSessType.value = normalizedProfile.apiSessType;
@@ -592,6 +597,9 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (selectIpProxyApiSessAuto) {
     selectIpProxyApiSessAuto.value = normalizedProfile.apiSessAuto;
+  }
+  if (inputIpProxyApiRefreshKey) {
+    inputIpProxyApiRefreshKey.value = normalizedProfile.apiRefreshKey;
   }
   if (inputIpProxyAccountList) {
     inputIpProxyAccountList.value = normalizedProfile.accountList;
@@ -1060,7 +1068,17 @@ function canChangeIpProxyExitWithCurrentSession(state = latestState) {
   const service = normalizeIpProxyService(
     selectIpProxyService?.value || state?.ipProxyService || DEFAULT_IP_PROXY_SERVICE
   );
-  if (mode !== 'account' || service !== '711proxy') {
+  if (service !== '711proxy') {
+    return false;
+  }
+  if (mode === 'api') {
+    const sessType = String(selectIpProxyApiSessType?.value || getIpProxyServiceProfile(service, state)?.apiSessType || '').trim().toLowerCase();
+    if (sessType !== 'sticky') {
+      return false;
+    }
+    return Boolean(get711ApiRefreshUrlForPanel(state));
+  }
+  if (mode !== 'account') {
     return false;
   }
   const currentEntry = getIpProxyCurrentEntry(state);
@@ -1115,15 +1133,13 @@ function sync711ApiFieldsFromUrlForPanel(options = {}) {
   };
 
   assignIfDifferent(inputIpProxyApiCount, parsed.count);
-  assignIfDifferent(inputIpProxyApiRegion, parsed.region);
+  assignIfDifferent(selectIpProxyApiHost, parsed.host || DEFAULT_711_API_HOST);
   assignIfDifferent(selectIpProxyApiProto, parsed.proto || 'http');
   assignIfDifferent(selectIpProxyApiStype, parsed.stype || 'text');
-  assignIfDifferent(inputIpProxyApiSplit, String(parsed.split || '').replace(/\r/g, '\\r').replace(/\n/g, '\\n'));
-  assignIfDifferent(inputIpProxyApiZone, parsed.zone);
-  assignIfDifferent(inputIpProxyApiPtype, parsed.ptype);
-  assignIfDifferent(selectIpProxyApiSessType, parsed.sessType);
+  assignIfDifferent(selectIpProxyApiSplit, String(parsed.split || DEFAULT_711_API_SPLIT || '').replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
+  assignIfDifferent(selectIpProxyApiSessType, parsed.sessType || 'rotating');
   assignIfDifferent(inputIpProxyApiSessTime, parsed.sessTime);
-  assignIfDifferent(selectIpProxyApiSessAuto, parsed.sessAuto);
+  assignIfDifferent(selectIpProxyApiSessAuto, parsed.sessAuto === '0' ? '0' : '1');
 
   return { updated, config: parsed };
 }
@@ -1139,13 +1155,11 @@ function rebuild711ApiUrlFromFieldsForPanel(options = {}) {
   ).trim();
   const nextApiUrl = build711ProxyApiUrl(currentApiUrl, {
     apiUrl: currentApiUrl,
+    host: selectIpProxyApiHost?.value || '',
     count: inputIpProxyApiCount?.value || '',
-    region: inputIpProxyApiRegion?.value || '',
     proto: selectIpProxyApiProto?.value || '',
     stype: selectIpProxyApiStype?.value || '',
-    split: inputIpProxyApiSplit?.value || '',
-    zone: inputIpProxyApiZone?.value || '',
-    ptype: inputIpProxyApiPtype?.value || '',
+    split: selectIpProxyApiSplit?.value || '',
     sessType: selectIpProxyApiSessType?.value || '',
     sessTime: inputIpProxyApiSessTime?.value || '',
     sessAuto: selectIpProxyApiSessAuto?.value || '',
@@ -1154,6 +1168,41 @@ function rebuild711ApiUrlFromFieldsForPanel(options = {}) {
     inputIpProxyApiUrl.value = nextApiUrl;
   }
   return nextApiUrl;
+}
+
+function get711ApiRefreshUrlForPanel(state = latestState, options = {}) {
+  if (typeof build711ApiRefreshUrl !== 'function') {
+    return '';
+  }
+  const currentEntry = options?.currentEntry || getIpProxyCurrentEntry(state);
+  const refreshKey = String(
+    options?.refreshKey !== undefined
+      ? options.refreshKey
+      : (inputIpProxyApiRefreshKey?.value || getIpProxyServiceProfile('711proxy', state)?.apiRefreshKey || '')
+  ).trim();
+  if (!currentEntry?.host || !currentEntry?.port || !refreshKey) {
+    return '';
+  }
+  return build711ApiRefreshUrl({
+    host: currentEntry.host,
+    port: currentEntry.port,
+    key: refreshKey,
+    ts: options?.ts,
+  });
+}
+
+function update711ApiRefreshUrlForPanel(state = latestState, options = {}) {
+  const refreshUrl = get711ApiRefreshUrlForPanel(state, options);
+  if (inputIpProxyApiRefreshUrl) {
+    inputIpProxyApiRefreshUrl.innerHTML = '';
+    const option = document.createElement('option');
+    option.value = refreshUrl;
+    option.textContent = refreshUrl || '当前 sticky 节点就绪后自动生成';
+    inputIpProxyApiRefreshUrl.appendChild(option);
+    inputIpProxyApiRefreshUrl.value = refreshUrl;
+    inputIpProxyApiRefreshUrl.title = refreshUrl || '当前 sticky 节点就绪后自动生成';
+  }
+  return refreshUrl;
 }
 
 function setIpProxyCurrentDisplay(text = '', hasValue = false) {
@@ -1482,8 +1531,8 @@ function updateIpProxyUI(state = latestState) {
   if (rowIpProxyApiCount) {
     rowIpProxyApiCount.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
   }
-  if (rowIpProxyApiRegion) {
-    rowIpProxyApiRegion.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
+  if (rowIpProxyApiHost) {
+    rowIpProxyApiHost.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
   }
   if (rowIpProxyApiProto) {
     rowIpProxyApiProto.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
@@ -1493,12 +1542,6 @@ function updateIpProxyUI(state = latestState) {
   }
   if (rowIpProxyApiSplit) {
     rowIpProxyApiSplit.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
-  }
-  if (rowIpProxyApiZone) {
-    rowIpProxyApiZone.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
-  }
-  if (rowIpProxyApiPtype) {
-    rowIpProxyApiPtype.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
   }
   if (rowIpProxyApiSessType) {
     rowIpProxyApiSessType.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
@@ -1510,6 +1553,12 @@ function updateIpProxyUI(state = latestState) {
   }
   if (rowIpProxyApiSessAuto) {
     rowIpProxyApiSessAuto.style.display = showSettings && apiModeAvailable && showStickySessionFields ? '' : 'none';
+  }
+  if (rowIpProxyApiRefreshKey) {
+    rowIpProxyApiRefreshKey.style.display = showSettings && apiModeAvailable && showStickySessionFields ? '' : 'none';
+  }
+  if (rowIpProxyApiRefreshUrl) {
+    rowIpProxyApiRefreshUrl.style.display = showSettings && apiModeAvailable && showStickySessionFields ? '' : 'none';
   }
   if (rowIpProxyAccountList) {
     rowIpProxyAccountList.style.display = showSettings && isAccountMode && accountListAvailable ? '' : 'none';
@@ -1590,12 +1639,10 @@ function updateIpProxyUI(state = latestState) {
   }
   [
     inputIpProxyApiCount,
-    inputIpProxyApiRegion,
+    selectIpProxyApiHost,
     selectIpProxyApiProto,
     selectIpProxyApiStype,
     inputIpProxyApiSplit,
-    inputIpProxyApiZone,
-    inputIpProxyApiPtype,
     selectIpProxyApiSessType,
   ].forEach((input) => {
     if (input) {
@@ -1607,6 +1654,12 @@ function updateIpProxyUI(state = latestState) {
   }
   if (selectIpProxyApiSessAuto) {
     selectIpProxyApiSessAuto.disabled = !enabled || !apiModeAvailable || !showStickySessionFields;
+  }
+  if (inputIpProxyApiRefreshKey) {
+    inputIpProxyApiRefreshKey.disabled = !enabled || !apiModeAvailable || !showStickySessionFields;
+  }
+  if (inputIpProxyApiRefreshUrl) {
+    inputIpProxyApiRefreshUrl.disabled = true;
   }
   if (btnToggleIpProxyApiUrl) {
     btnToggleIpProxyApiUrl.disabled = !enabled || !apiModeAvailable;

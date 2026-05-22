@@ -348,7 +348,7 @@ test('711 API URL parser supports real split and sticky/rotating session types',
   assert.equal(sticky.sessAuto, '1');
 });
 
-test('711 API URL builder preserves host and omits sticky-only fields for rotating or empty session type', () => {
+test('711 API URL builder preserves host, keeps rotating sessType, and omits sticky-only fields when not sticky', () => {
   const api = loadIpProxyCore();
 
   const stickyUrl = api.build711ProxyApiUrl(
@@ -382,12 +382,12 @@ test('711 API URL builder preserves host and omits sticky-only fields for rotati
   const optionalSessTypeUrl = api.build711ProxyApiUrl(stickyUrl, {
     sessType: '',
   });
-  assert.doesNotMatch(optionalSessTypeUrl, /sessType=/);
+  assert.match(optionalSessTypeUrl, /sessType=rotating/);
   assert.doesNotMatch(optionalSessTypeUrl, /sessTime=/);
   assert.doesNotMatch(optionalSessTypeUrl, /sessAuto=/);
 });
 
-test('711 API validation requires count proto zone and ptype but allows empty sessType', () => {
+test('711 API validation normalizes missing count to default 1 and still validates required fixed params', () => {
   const api = loadIpProxyCore();
 
   const valid = api.validate711ProxyApiConfig({
@@ -395,11 +395,17 @@ test('711 API validation requires count proto zone and ptype but allows empty se
   });
   assert.equal(valid.valid, true);
 
-  const invalid = api.validate711ProxyApiConfig({
+  const normalizedMissingCount = api.validate711ProxyApiConfig({
     apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&proto=http&stype=text&split=\\r\\n',
   });
-  assert.equal(invalid.valid, false);
-  assert.match(String(invalid.errors[0] || ''), /count/);
+  assert.equal(normalizedMissingCount.valid, true);
+  assert.equal(normalizedMissingCount.config.count, '1');
+
+  const normalizedMissingProto = api.validate711ProxyApiConfig({
+    apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&stype=text&split=\\r\\n',
+  });
+  assert.equal(normalizedMissingProto.valid, true);
+  assert.equal(normalizedMissingProto.config.proto, 'http');
 });
 
 test('711 JSON API payload normalization supports wrapped object candidates', () => {

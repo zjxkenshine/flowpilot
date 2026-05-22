@@ -137,24 +137,25 @@ const inputIpProxyApiUrl = document.getElementById('input-ip-proxy-api-url');
 const btnToggleIpProxyApiUrl = document.getElementById('btn-toggle-ip-proxy-api-url');
 const rowIpProxyApiCount = document.getElementById('row-ip-proxy-api-count');
 const inputIpProxyApiCount = document.getElementById('input-ip-proxy-api-count');
-const rowIpProxyApiRegion = document.getElementById('row-ip-proxy-api-region');
-const inputIpProxyApiRegion = document.getElementById('input-ip-proxy-api-region');
+const rowIpProxyApiHost = document.getElementById('row-ip-proxy-api-host');
+const selectIpProxyApiHost = document.getElementById('select-ip-proxy-api-host');
 const rowIpProxyApiProto = document.getElementById('row-ip-proxy-api-proto');
 const selectIpProxyApiProto = document.getElementById('select-ip-proxy-api-proto');
 const rowIpProxyApiStype = document.getElementById('row-ip-proxy-api-stype');
 const selectIpProxyApiStype = document.getElementById('select-ip-proxy-api-stype');
 const rowIpProxyApiSplit = document.getElementById('row-ip-proxy-api-split');
-const inputIpProxyApiSplit = document.getElementById('input-ip-proxy-api-split');
-const rowIpProxyApiZone = document.getElementById('row-ip-proxy-api-zone');
-const inputIpProxyApiZone = document.getElementById('input-ip-proxy-api-zone');
-const rowIpProxyApiPtype = document.getElementById('row-ip-proxy-api-ptype');
-const inputIpProxyApiPtype = document.getElementById('input-ip-proxy-api-ptype');
+const selectIpProxyApiSplit = document.getElementById('select-ip-proxy-api-split');
+const inputIpProxyApiSplit = selectIpProxyApiSplit;
 const rowIpProxyApiSessType = document.getElementById('row-ip-proxy-api-sess-type');
 const selectIpProxyApiSessType = document.getElementById('select-ip-proxy-api-sess-type');
 const rowIpProxyApiSessTime = document.getElementById('row-ip-proxy-api-sess-time');
 const inputIpProxyApiSessTime = document.getElementById('input-ip-proxy-api-sess-time');
 const rowIpProxyApiSessAuto = document.getElementById('row-ip-proxy-api-sess-auto');
 const selectIpProxyApiSessAuto = document.getElementById('select-ip-proxy-api-sess-auto');
+const rowIpProxyApiRefreshKey = document.getElementById('row-ip-proxy-api-refresh-key');
+const inputIpProxyApiRefreshKey = document.getElementById('input-ip-proxy-api-refresh-key');
+const rowIpProxyApiRefreshUrl = document.getElementById('row-ip-proxy-api-refresh-url');
+const inputIpProxyApiRefreshUrl = document.getElementById('input-ip-proxy-api-refresh-url');
 const rowIpProxyAccountList = document.getElementById('row-ip-proxy-account-list');
 const inputIpProxyAccountList = document.getElementById('input-ip-proxy-account-list');
 const rowIpProxyAccountSessionPrefix = document.getElementById('row-ip-proxy-account-session-prefix');
@@ -16138,15 +16139,14 @@ inputIpProxyApiUrl?.addEventListener('input', () => {
 
 [
   inputIpProxyApiCount,
-  inputIpProxyApiRegion,
+  selectIpProxyApiHost,
   selectIpProxyApiProto,
   selectIpProxyApiStype,
   inputIpProxyApiSplit,
-  inputIpProxyApiZone,
-  inputIpProxyApiPtype,
   selectIpProxyApiSessType,
   inputIpProxyApiSessTime,
   selectIpProxyApiSessAuto,
+  inputIpProxyApiRefreshKey,
 ].forEach((input) => {
   input?.addEventListener('input', () => {
     if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
