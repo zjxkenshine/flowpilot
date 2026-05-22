@@ -1008,6 +1008,8 @@ ${extractFunction('isVerificationPageStillVisible')}
 ${extractFunction('isSignupProfilePageUrl')}
 ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
 ${extractFunction('getStep4PostVerificationState')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
 ${extractFunction('inspectSignupVerificationState')}
 ${extractFunction('waitForSignupVerificationTransition')}
 ${extractFunction('prepareSignupVerificationFlow')}
@@ -1097,6 +1099,8 @@ ${extractFunction('isVerificationPageStillVisible')}
 ${extractFunction('isSignupProfilePageUrl')}
 ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
 ${extractFunction('getStep4PostVerificationState')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
 ${extractFunction('inspectSignupVerificationState')}
 ${extractFunction('waitForSignupVerificationTransition')}
 ${extractFunction('prepareSignupVerificationFlow')}
@@ -1232,6 +1236,453 @@ return {
   assert.equal(result.clicks.length, 0);
   assert.equal(result.error.includes('0/3'), true);
   assert.equal(result.now >= 11000, true);
+});
+
+test('prepareSignupVerificationFlow returns to phone entry and throws step2 retry error on Chinese create-account failure', async () => {
+  const api = new Function(`
+const SIGNUP_PHONE_RETRY_FROM_STEP2_ERROR_PREFIX = 'SIGNUP_PHONE_RETRY_FROM_STEP2::';
+const SIGNUP_PHONE_RETRY_REQUIRED_PATTERN = /创建帐户失败|无法根据该信息创建帐户|请重试|unable\\s+to\\s+create\\s+(?:your\\s+)?account|couldn'?t\\s+create\\s+(?:your\\s+)?account|please\\s+try\\s+again/i;
+const SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN = /编辑|修改|edit|change/i;
+const SIGNUP_PHONE_CONTEXT_PATTERN = /手机|手机号|电话号码|phone|mobile|telephone/i;
+const logs = [];
+const clicks = [];
+let now = 0;
+Date.now = () => now;
+const editButton = {
+  textContent: '编辑',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return '创建帐户失败，请重试。手机号 +8613812345678 编辑'; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return null; }
+function getSignupPasswordSubmitButton() { return null; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return ''; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
+const location = {
+  href: 'https://auth.openai.com/create-account/password',
+  pathname: '/create-account/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: '创建帐户失败，请重试。手机号 +8613812345678 编辑',
+    innerText: '创建帐户失败，请重试。手机号 +8613812345678 编辑',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
+    return [];
+  },
+};
+
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+        signupMethod: 'phone',
+        accountIdentifierType: 'phone',
+        phoneNumber: '+8613812345678',
+      }, 10000);
+      return { threw: false, logs, clicks };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.match(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+  assert.deepStrictEqual(result.clicks, ['编辑']);
+  assert.equal(result.logs.some(({ message }) => /已返回手机号输入页/.test(message)), true);
+});
+
+test('prepareSignupVerificationFlow returns to phone entry and throws step2 retry error on English create-account failure', async () => {
+  const api = new Function(`
+const SIGNUP_PHONE_RETRY_FROM_STEP2_ERROR_PREFIX = 'SIGNUP_PHONE_RETRY_FROM_STEP2::';
+const SIGNUP_PHONE_RETRY_REQUIRED_PATTERN = /创建帐户失败|无法根据该信息创建帐户|请重试|unable\\s+to\\s+create\\s+(?:your\\s+)?account|couldn'?t\\s+create\\s+(?:your\\s+)?account|please\\s+try\\s+again/i;
+const SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN = /编辑|修改|edit|change/i;
+const SIGNUP_PHONE_CONTEXT_PATTERN = /手机|手机号|电话号码|phone|mobile|telephone/i;
+const logs = [];
+const clicks = [];
+let now = 0;
+Date.now = () => now;
+const editButton = {
+  textContent: 'Edit',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return "Couldn't create your account. Please try again. Phone number +15551234567 Edit"; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return null; }
+function getSignupPasswordSubmitButton() { return null; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return ''; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
+const location = {
+  href: 'https://auth.openai.com/create-account/password',
+  pathname: '/create-account/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: "Couldn't create your account. Please try again. Phone number +15551234567 Edit",
+    innerText: "Couldn't create your account. Please try again. Phone number +15551234567 Edit",
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
+    return [];
+  },
+};
+
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+        signupMethod: 'phone',
+        accountIdentifierType: 'phone',
+        phoneNumber: '+15551234567',
+      }, 10000);
+      return { threw: false, logs, clicks };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.match(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+  assert.deepStrictEqual(result.clicks, ['Edit']);
+});
+
+test('prepareSignupVerificationFlow falls back when create-account failure lacks edit button', async () => {
+  const api = new Function(`
+const SIGNUP_PHONE_RETRY_REQUIRED_PATTERN = /创建帐户失败|无法根据该信息创建帐户|请重试|unable\\s+to\\s+create\\s+(?:your\\s+)?account|couldn'?t\\s+create\\s+(?:your\\s+)?account|please\\s+try\\s+again/i;
+const SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN = /编辑|修改|edit|change/i;
+const SIGNUP_PHONE_CONTEXT_PATTERN = /手机|手机号|电话号码|phone|mobile|telephone/i;
+const logs = [];
+let now = 0;
+Date.now = () => now;
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled() { return true; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return '创建帐户失败，请重试。手机号 +8613812345678'; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return { value: 'Secret123!' }; }
+function getSignupPasswordSubmitButton() { return { textContent: 'Continue', getAttribute() { return 'false'; } }; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return ''; }
+function simulateClick() {}
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
+const window = {
+  getComputedStyle() {
+    return { opacity: '0.5', pointerEvents: 'auto' };
+  },
+};
+const location = {
+  href: 'https://auth.openai.com/create-account/password',
+  pathname: '/create-account/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: '创建帐户失败，请重试。手机号 +8613812345678',
+    innerText: '创建帐户失败，请重试。手机号 +8613812345678',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+        signupMethod: 'phone',
+        accountIdentifierType: 'phone',
+        phoneNumber: '+8613812345678',
+      }, 11000);
+      return { threw: false, logs };
+    } catch (error) {
+      return { threw: true, error: error.message, logs };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+});
+
+test('prepareSignupVerificationFlow falls back when edit button cannot return to phone entry', async () => {
+  const api = new Function(`
+const SIGNUP_PHONE_RETRY_REQUIRED_PATTERN = /创建帐户失败|无法根据该信息创建帐户|请重试|unable\\s+to\\s+create\\s+(?:your\\s+)?account|couldn'?t\\s+create\\s+(?:your\\s+)?account|please\\s+try\\s+again/i;
+const SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN = /编辑|修改|edit|change/i;
+const SIGNUP_PHONE_CONTEXT_PATTERN = /手机|手机号|电话号码|phone|mobile|telephone/i;
+const logs = [];
+const clicks = [];
+let now = 0;
+Date.now = () => now;
+const editButton = {
+  textContent: '编辑',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return '创建帐户失败，请重试。手机号 +8613812345678 编辑'; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return { value: 'Secret123!' }; }
+function getSignupPasswordSubmitButton() { return { textContent: 'Continue', getAttribute() { return 'false'; } }; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return ''; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  throw new Error('still on failure page');
+}
+const window = {
+  getComputedStyle() {
+    return { opacity: '0.5', pointerEvents: 'auto' };
+  },
+};
+const location = {
+  href: 'https://auth.openai.com/create-account/password',
+  pathname: '/create-account/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: '创建帐户失败，请重试。手机号 +8613812345678 编辑',
+    innerText: '创建帐户失败，请重试。手机号 +8613812345678 编辑',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
+    return [];
+  },
+};
+
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+        signupMethod: 'phone',
+        accountIdentifierType: 'phone',
+        phoneNumber: '+8613812345678',
+      }, 11000);
+      return { threw: false, logs, clicks };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+  assert.deepStrictEqual(result.clicks, ['编辑']);
 });
 
 test('fillSignupEmailAndContinue reports before deferred submit while submit still waits for operation delay', async () => {

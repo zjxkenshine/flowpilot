@@ -25,6 +25,7 @@ function createRouter(overrides = {}) {
     securityBlocks: [],
     invalidations: [],
     executedSteps: [],
+    executedCompletionNodes: [],
     accountRecords: [],
   };
   const nodeByStep = {
@@ -111,12 +112,14 @@ function createRouter(overrides = {}) {
     deleteIcloudAlias: async () => {},
     deleteUsedIcloudAliases: async () => {},
     disableUsedLuckmailPurchases: async () => {},
-    doesNodeUseCompletionSignal: () => false,
+    doesNodeUseCompletionSignal: overrides.doesNodeUseCompletionSignal || (() => false),
     ensureManualInteractionAllowed: async () => ({}),
     executeNode: async (nodeId) => {
       events.executedSteps.push(getStepForNode(nodeId) || nodeId);
     },
-    executeNodeViaCompletionSignal: async () => {},
+    executeNodeViaCompletionSignal: overrides.executeNodeViaCompletionSignal || (async (nodeId) => {
+      events.executedCompletionNodes.push(nodeId);
+    }),
     exportSettingsBundle: async () => ({}),
     fetchGeneratedEmail: async () => '',
     finalizePhoneActivationAfterSuccessfulFlow: overrides.finalizePhoneActivationAfterSuccessfulFlow || (async (state) => {
@@ -641,6 +644,81 @@ test('message router blocks manual step 4 execution when signup page tab is miss
 
   assert.deepStrictEqual(events.invalidations, []);
   assert.deepStrictEqual(events.executedSteps, []);
+});
+
+test('message router retries step 2 then step 3 when manual fill-password hits phone step2 retry failure', async () => {
+  const { router, events } = createRouter({
+    state: {
+      signupMethod: 'phone',
+      accountIdentifierType: 'phone',
+      accountIdentifier: '+8613812345678',
+      signupPhoneNumber: '+8613812345678',
+      signupPhoneActivation: { activationId: 'act-1', phoneNumber: '+8613812345678' },
+      signupPhoneCompletedActivation: { activationId: 'act-1', phoneNumber: '+8613812345678' },
+      nodeStatuses: { 'fill-password': 'pending' },
+    },
+    doesNodeUseCompletionSignal: () => true,
+    executeNodeViaCompletionSignal: async (nodeId) => {
+      events.executedCompletionNodes.push(nodeId);
+      if (nodeId === 'fill-password' && events.executedCompletionNodes.length === 1) {
+        throw new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::步骤 3：已返回手机号输入页，需要从步骤 2 重新获取手机号。页面提示：创建帐户失败，请重试');
+      }
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    nodeId: 'fill-password',
+    payload: { nodeId: 'fill-password' },
+  }, { tab: { windowId: 1 } });
+
+  assert.deepStrictEqual(response, { ok: true });
+  assert.deepStrictEqual(events.executedCompletionNodes, ['fill-password', 'submit-signup-email', 'fill-password']);
+  assert.deepStrictEqual(events.invalidations, [
+    { step: 3, options: { logLabel: '节点 fill-password 重新执行' } },
+    { step: 2, options: { logLabel: '节点 fill-password 检测到创建帐户失败后已返回手机号输入页，准备从 submit-signup-email 重新获取手机号重试' } },
+  ]);
+  assert.ok(events.stateUpdates.some((updates) => updates.signupPhoneNumber === ''));
+  assert.ok(events.stateUpdates.some((updates) => updates.accountIdentifier === ''));
+  assert.deepStrictEqual(events.notifyErrors, []);
+});
+
+test('message router surfaces final error when manual fill-password phone retry recovery fails again', async () => {
+  const { router, events } = createRouter({
+    state: {
+      signupMethod: 'phone',
+      accountIdentifierType: 'phone',
+      accountIdentifier: '+8613812345678',
+      signupPhoneNumber: '+8613812345678',
+      signupPhoneActivation: { activationId: 'act-1', phoneNumber: '+8613812345678' },
+      signupPhoneCompletedActivation: { activationId: 'act-1', phoneNumber: '+8613812345678' },
+      nodeStatuses: { 'fill-password': 'pending' },
+    },
+    doesNodeUseCompletionSignal: () => true,
+    executeNodeViaCompletionSignal: async (nodeId) => {
+      events.executedCompletionNodes.push(nodeId);
+      if (nodeId === 'fill-password') {
+        if (events.executedCompletionNodes.length === 1) {
+          throw new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::步骤 3：已返回手机号输入页，需要从步骤 2 重新获取手机号。页面提示：创建帐户失败，请重试');
+        }
+        throw new Error('第二次重新执行步骤 3 仍然失败');
+      }
+    },
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'EXECUTE_NODE',
+      source: 'sidepanel',
+      nodeId: 'fill-password',
+      payload: { nodeId: 'fill-password' },
+    }, { tab: { windowId: 1 } }),
+    /第二次重新执行步骤 3 仍然失败/
+  );
+
+  assert.deepStrictEqual(events.executedCompletionNodes, ['fill-password', 'submit-signup-email', 'fill-password']);
+  assert.ok(events.stateUpdates.some((updates) => updates.signupPhoneNumber === ''));
 });
 
 test('message router resolves GPC OTP manual confirmation without completing step early', async () => {

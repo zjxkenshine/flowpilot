@@ -291,6 +291,43 @@
       return appendAccountRunRecord(status, state, reason);
     }
 
+    function getErrorMessage(error) {
+      return String(typeof error === 'string' ? error : error?.message || '');
+    }
+
+    function isSignupPhoneRetryFromStep2Failure(error) {
+      return /SIGNUP_PHONE_RETRY_FROM_STEP2::/i.test(getErrorMessage(error));
+    }
+
+    async function clearSignupPhoneRuntimeForStep2Retry() {
+      await setSignupPhoneStateSilently(null);
+      await setState({
+        signupPhoneNumber: '',
+        signupPhoneActivation: null,
+        signupPhoneCompletedActivation: null,
+        signupPhoneVerificationRequestedAt: null,
+        signupPhoneVerificationPurpose: '',
+        accountIdentifierType: null,
+        accountIdentifier: '',
+      });
+    }
+
+    async function retryManualSignupPhoneFlowFromStep2(nodeId, error) {
+      const normalizedNodeId = String(nodeId || '').trim() || 'fill-password';
+      const errorMessage = getErrorMessage(error);
+      await addLog(
+        `节点 ${normalizedNodeId}：检测到创建帐户失败且已返回手机号输入页，正在自动清空当前号码并从步骤 2 重新获取手机号后继续步骤 3。原因：${errorMessage}`,
+        'warn',
+        { nodeId: normalizedNodeId }
+      );
+      await clearSignupPhoneRuntimeForStep2Retry();
+      await invalidateDownstreamAfterStepRestart(2, {
+        logLabel: `节点 ${normalizedNodeId} 检测到创建帐户失败后已返回手机号输入页，准备从 submit-signup-email 重新获取手机号重试`,
+      });
+      await executeNodeViaCompletionSignal('submit-signup-email');
+      await executeNodeViaCompletionSignal('fill-password');
+    }
+
     async function ensureManualStepPrerequisites(step) {
       if (step !== 4) {
         return;
@@ -1275,10 +1312,18 @@
             await setState({ emailPrefix: message.payload.emailPrefix });
           }
           const executionState = await getState();
-          if (doesNodeUseCompletionSignal(nodeId, executionState)) {
-            await executeNodeViaCompletionSignal(nodeId);
-          } else {
-            await executeNode(nodeId);
+          try {
+            if (doesNodeUseCompletionSignal(nodeId, executionState)) {
+              await executeNodeViaCompletionSignal(nodeId);
+            } else {
+              await executeNode(nodeId);
+            }
+          } catch (error) {
+            if (message.source === 'sidepanel' && nodeId === 'fill-password' && isSignupPhoneRetryFromStep2Failure(error)) {
+              await retryManualSignupPhoneFlowFromStep2(nodeId, error);
+              return { ok: true };
+            }
+            throw error;
           }
           return { ok: true };
         }

@@ -1,4 +1,4 @@
-﻿// background.js — Service Worker: orchestration, state, tab management, message routing
+// background.js — Service Worker: orchestration, state, tab management, message routing
 
 importScripts(
   'shared/flow-registry.js',
@@ -9332,6 +9332,11 @@ function isSignupPhonePasswordMismatchFailure(error) {
   return /SIGNUP_PHONE_PASSWORD_MISMATCH::/i.test(message);
 }
 
+function isSignupPhoneRetryFromStep2Failure(error) {
+  const message = getErrorMessage(error);
+  return /SIGNUP_PHONE_RETRY_FROM_STEP2::/i.test(message);
+}
+
 function getSignupPhonePasswordMismatchRestartPayload(preservedState = {}) {
   const preservedEmail = String(preservedState.email || '').trim();
   const preservedPassword = String(preservedState.password || '').trim();
@@ -9371,6 +9376,39 @@ function getSignupPhonePasswordMismatchRestartPayload(preservedState = {}) {
     restorePayload,
     shouldClearSignupPhoneRuntime,
   };
+}
+
+async function restartSignupPhoneRetryFromStep2AttemptFromNode(nodeId, restartCount, error) {
+  const preservedState = await getState();
+  const {
+    activeSignupPhoneNumber,
+    preservedEmail,
+    restorePayload,
+    shouldClearSignupPhoneRuntime,
+  } = getSignupPhonePasswordMismatchRestartPayload(preservedState);
+  const normalizedNodeId = String(nodeId || '').trim() || 'fill-password';
+  const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
+  const phoneSuffix = activeSignupPhoneNumber ? `当前手机号：${activeSignupPhoneNumber}；` : '';
+  const errorMessage = getErrorMessage(error);
+  await addLog(
+    `节点 ${normalizedNodeId}：检测到创建帐户失败且已返回手机号输入页，准备丢弃当前注册手机号并从节点 submit-signup-email 重新开始（第 ${restartCount} 次重开）。${phoneSuffix}${emailSuffix}原因：${errorMessage}`,
+    'warn'
+  );
+  if (typeof invalidateDownstreamAfterNodeRestart === 'function') {
+    await invalidateDownstreamAfterNodeRestart('submit-signup-email', {
+      logLabel: `节点 ${normalizedNodeId} 检测到创建帐户失败后已返回手机号输入页，准备从 submit-signup-email 重新获取手机号重试（第 ${restartCount} 次重开）`,
+    });
+  } else {
+    await invalidateDownstreamAfterStepRestart(2, {
+      logLabel: `节点 ${normalizedNodeId} 检测到创建帐户失败后已返回手机号输入页，准备从 submit-signup-email 重新获取手机号重试（第 ${restartCount} 次重开）`,
+    });
+  }
+  if (shouldClearSignupPhoneRuntime) {
+    await addLog(`节点 ${normalizedNodeId}：已清空本轮注册手机号与接码订单，下一次将从步骤 2 重新获取号码。`, 'warn');
+  }
+  if (Object.keys(restorePayload).length) {
+    await setState(restorePayload);
+  }
 }
 
 async function restartSignupPhonePasswordMismatchAttemptFromNode(nodeId, restartCount, error) {
@@ -13045,6 +13083,13 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         if (await restartCurrentNodeAfterIdle('fill-password', err)) {
           continue;
         }
+        if (isSignupPhoneRetryFromStep2Failure(err)) {
+          step4RestartCount += 1;
+          await restartSignupPhoneRetryFromStep2AttemptFromNode('fill-password', step4RestartCount, err);
+          setRestartNode('submit-signup-email');
+          restartFromStep1WithCurrentEmail = true;
+          continue;
+        }
         if (isSignupPhonePasswordMismatchFailure(err)) {
           step4RestartCount += 1;
           await restartSignupPhonePasswordMismatchAttemptFromNode('fill-password', step4RestartCount, err);
@@ -13172,6 +13217,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         const isPhoneResendBanned = typeof phoneVerificationHelpers !== 'undefined'
           && typeof phoneVerificationHelpers?.isPhoneResendBannedNumberError === 'function'
           && phoneVerificationHelpers.isPhoneResendBannedNumberError(err);
+        if (isSignupPhoneRetryFromStep2Failure(err)) {
+          await restartSignupPhoneRetryFromStep2AttemptFromNode('fetch-signup-code', step4RestartCount, err);
+          setRestartNode('submit-signup-email');
+          restartFromStep1WithCurrentEmail = true;
+          break;
+        }
         if (isSignupPhonePasswordMismatchFailure(err) || isPhoneResendBanned) {
           await restartSignupPhonePasswordMismatchAttemptFromNode('fetch-signup-code', step4RestartCount, err);
         } else {
@@ -14031,7 +14082,14 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
     return signupFlowHelpers.finalizeSignupPasswordSubmitInTab(
       signupTabId,
       currentState.password || currentState.customPassword || '',
-      3
+      3,
+      {
+        signupMethod: resolveSignupMethod(currentState),
+        accountIdentifierType: currentState.accountIdentifierType || '',
+        phoneNumber: currentState.signupPhoneNumber
+          || (String(currentState.accountIdentifierType || '').trim().toLowerCase() === 'phone' ? currentState.accountIdentifier : '')
+          || '',
+      }
     );
   },
   finalizeIcloudAliasAfterSuccessfulFlow,

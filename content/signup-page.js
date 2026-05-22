@@ -2748,10 +2748,14 @@ const STEP4_405_RECOVERY_ERROR_PREFIX = 'STEP4_405_RECOVERY_LIMIT::';
 const STEP4_405_RECOVERY_LIMIT = 3;
 const SIGNUP_USER_ALREADY_EXISTS_ERROR_PREFIX = 'SIGNUP_USER_ALREADY_EXISTS::';
 const SIGNUP_PHONE_PASSWORD_MISMATCH_ERROR_PREFIX = 'SIGNUP_PHONE_PASSWORD_MISMATCH::';
+const SIGNUP_PHONE_RETRY_FROM_STEP2_ERROR_PREFIX = 'SIGNUP_PHONE_RETRY_FROM_STEP2::';
 const AUTH_MAX_CHECK_ATTEMPTS_ERROR_PREFIX = 'AUTH_MAX_CHECK_ATTEMPTS::';
 const STEP8_EMAIL_IN_USE_ERROR_PREFIX = 'STEP8_EMAIL_IN_USE::';
 const SIGNUP_EMAIL_EXISTS_PATTERN = /与此电子邮件地址相关联的帐户已存在|この(?:メールアドレス|メール|電子メール)(?:に関連付けられた)?アカウントは(?:既に|すでに)存在|メールアドレス.*(?:既に|すでに)存在|account\s+associated\s+with\s+this\s+email\s+address\s+already\s+exists|email\s+address.*already\s+exists/i;
 const SIGNUP_PHONE_PASSWORD_MISMATCH_PATTERN = /incorrect\s+phone\s+number\s+or\s+password|phone\s+number\s+or\s+password|電話番号またはパスワード|電話番号.*アカウントは(?:既に|すでに)存在|与此(?:电话|手机)号码相关联的帐户已存在|account\s+associated\s+with\s+this\s+phone\s+number\s+already\s+exists/i;
+const SIGNUP_PHONE_RETRY_REQUIRED_PATTERN = /创建帐户失败|无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|please\s+try\s+again/i;
+const SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN = /编辑|修改|edit|change/i;
+const SIGNUP_PHONE_CONTEXT_PATTERN = /手机|手机号|电话号码|phone|mobile|telephone/i;
 
 const authPageRecovery = self.MultiPageAuthPageRecovery?.createAuthPageRecovery?.({
   detailPattern: AUTH_TIMEOUT_ERROR_DETAIL_PATTERN,
@@ -2816,6 +2820,14 @@ function createSignupPhonePasswordMismatchError(detailText = '') {
   );
 }
 
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  const detail = String(detailText || '').replace(/\s+/g, ' ').trim();
+  const suffix = detail ? `页面提示：${detail}` : '页面提示创建帐户失败，请重试。';
+  return new Error(
+    `${SIGNUP_PHONE_RETRY_FROM_STEP2_ERROR_PREFIX}步骤 3：已返回手机号输入页，需要从步骤 2 重新获取手机号。${suffix}`
+  );
+}
+
 function createAuthMaxCheckAttemptsError() {
   return new Error(`${AUTH_MAX_CHECK_ATTEMPTS_ERROR_PREFIX}max_check_attempts on auth retry page; restart the current auth step without clicking Retry.`);
 }
@@ -2865,6 +2877,86 @@ function getSignupPasswordFieldErrorText() {
   }
 
   return '';
+}
+
+function findSignupPhoneRetryEditButton() {
+  const editActionPattern = typeof SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN !== 'undefined'
+    ? SIGNUP_PHONE_RETRY_EDIT_ACTION_PATTERN
+    : /编辑|修改|edit|change/i;
+  const candidates = document.querySelectorAll(
+    'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+  );
+  for (const candidate of candidates) {
+    if (!isVisibleElement(candidate) || !isActionEnabled(candidate)) {
+      continue;
+    }
+    const text = getActionText(candidate);
+    if (!text || !editActionPattern.test(text)) {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
+function getSignupPhoneRetryRequiredState(options = {}) {
+  const retryRequiredPattern = typeof SIGNUP_PHONE_RETRY_REQUIRED_PATTERN !== 'undefined'
+    ? SIGNUP_PHONE_RETRY_REQUIRED_PATTERN
+    : /创建帐户失败|无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|please\s+try\s+again/i;
+  const phoneContextPattern = typeof SIGNUP_PHONE_CONTEXT_PATTERN !== 'undefined'
+    ? SIGNUP_PHONE_CONTEXT_PATTERN
+    : /手机|手机号|电话号码|phone|mobile|telephone/i;
+  const signupMethod = String(options?.signupMethod || '').trim().toLowerCase();
+  const accountIdentifierType = String(options?.accountIdentifierType || '').trim().toLowerCase();
+  const phoneNumber = String(options?.phoneNumber || '').trim();
+  const pageText = getPageTextSnapshot();
+  if (!retryRequiredPattern.test(pageText)) {
+    return null;
+  }
+
+  const editButton = findSignupPhoneRetryEditButton();
+  const hasPhoneContext = Boolean(
+    phoneNumber
+    || signupMethod === 'phone'
+    || accountIdentifierType === 'phone'
+    || phoneContextPattern.test(pageText)
+  );
+  if (!editButton && !hasPhoneContext) {
+    return null;
+  }
+
+  return {
+    state: 'phone_retry_required',
+    detailText: pageText,
+    editButton,
+    hasPhoneContext,
+    url: location.href,
+  };
+}
+
+async function tryReturnToSignupPhoneEntryForRetry(requiredState, options = {}) {
+  const editButton = requiredState?.editButton || findSignupPhoneRetryEditButton();
+  if (!editButton) {
+    return null;
+  }
+
+  const visibleStep = Number(options?.visibleStep) || 3;
+  log(`步骤 ${visibleStep}：检测到创建帐户失败，正在点击手机号编辑按钮返回手机号输入页...`, 'warn');
+  await humanPause(350, 900);
+  simulateClick(editButton);
+
+  try {
+    const readyResult = await ensureSignupPhoneEntryReady(25000);
+    const state = String(readyResult?.state || '').trim().toLowerCase();
+    if (state === 'phone_entry') {
+      log(`步骤 ${visibleStep}：已返回手机号输入页，准备从步骤 2 重新获取手机号。`, 'warn');
+      return readyResult;
+    }
+  } catch (_error) {
+    return null;
+  }
+
+  return null;
 }
 
 function isStep5Ready() {
@@ -4695,7 +4787,7 @@ function isSignupEmailAlreadyExistsPage() {
   return isSignupPasswordPage() && SIGNUP_EMAIL_EXISTS_PATTERN.test(getPageTextSnapshot());
 }
 
-function inspectSignupVerificationState() {
+function inspectSignupVerificationState(options = {}) {
   const postVerificationState = getStep4PostVerificationState();
   if (postVerificationState?.state === 'step5') {
     return { state: 'step5' };
@@ -4733,6 +4825,11 @@ function inspectSignupVerificationState() {
     return { state: 'email_exists' };
   }
 
+  const phoneRetryRequiredState = getSignupPhoneRetryRequiredState(options);
+  if (phoneRetryRequiredState) {
+    return phoneRetryRequiredState;
+  }
+
   const passwordInput = getSignupPasswordInput();
   if (passwordInput) {
     return {
@@ -4746,13 +4843,13 @@ function inspectSignupVerificationState() {
   return { state: 'unknown' };
 }
 
-async function waitForSignupVerificationTransition(timeout = 5000) {
+async function waitForSignupVerificationTransition(timeout = 5000, options = {}) {
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
 
-    const snapshot = inspectSignupVerificationState();
+    const snapshot = inspectSignupVerificationState(options);
     if (snapshot.state === 'verification' && !isSignupVerificationPageInteractiveReady(snapshot)) {
       await sleep(200);
       continue;
@@ -4763,6 +4860,7 @@ async function waitForSignupVerificationTransition(timeout = 5000) {
       || snapshot.state === 'verification'
       || snapshot.state === 'error'
       || snapshot.state === 'email_exists'
+      || snapshot.state === 'phone_retry_required'
     ) {
       return snapshot;
     }
@@ -4770,7 +4868,7 @@ async function waitForSignupVerificationTransition(timeout = 5000) {
     await sleep(200);
   }
 
-  return inspectSignupVerificationState();
+  return inspectSignupVerificationState(options);
 }
 
 async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
@@ -4782,6 +4880,9 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
         return typeof gate === 'function' ? gate(metadata, operation) : operation();
       };
   const { password } = payload;
+  const signupMethod = String(payload?.signupMethod || '').trim().toLowerCase();
+  const accountIdentifierType = String(payload?.accountIdentifierType || '').trim().toLowerCase();
+  const phoneNumber = String(payload?.phoneNumber || '').trim();
   const prepareSource = String(payload?.prepareSource || '').trim() || 'step4_execute';
   const prepareLogLabel = String(payload?.prepareLogLabel || '').trim()
     || (prepareSource === 'step3_finalize' ? '步骤 3 收尾' : '步骤 4 执行');
@@ -4838,7 +4939,11 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
 
     const roundNo = recoveryRound + 1;
     log(`${prepareLogLabel}：等待页面进入验证码阶段（第 ${roundNo}/${maxRecoveryRounds} 轮，先等待 5 秒）...`, 'info');
-    const snapshot = await waitForSignupVerificationTransition(5000);
+    const snapshot = await waitForSignupVerificationTransition(5000, {
+      signupMethod,
+      accountIdentifierType,
+      phoneNumber,
+    });
 
     if (snapshot.state === 'step5') {
       log(`${prepareLogLabel}：页面已进入验证码后的下一阶段，本步骤按已完成处理。`, 'ok');
@@ -4865,6 +4970,17 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
 
     if (snapshot.state === 'email_exists') {
       throw new Error('当前邮箱已存在，需要重新开始新一轮。');
+    }
+
+    if (snapshot.state === 'phone_retry_required') {
+      const phoneEntryResult = await tryReturnToSignupPhoneEntryForRetry(snapshot, {
+        visibleStep: prepareSource === 'step4_execute' ? 4 : 3,
+      });
+      if (phoneEntryResult?.state === 'phone_entry') {
+        throw createSignupPhoneRetryFromStep2Error(snapshot.detailText);
+      }
+      log(`${prepareLogLabel}：已识别到创建帐户失败页，但未能成功返回手机号输入页，改为沿用旧的手机号异常重开分支。`, 'warn');
+      throw createSignupPhonePasswordMismatchError(snapshot.detailText);
     }
 
     if (snapshot.state === 'error') {

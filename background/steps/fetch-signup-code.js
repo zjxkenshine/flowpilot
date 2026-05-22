@@ -216,6 +216,11 @@
           password: state.password || state.customPassword || '',
           prepareSource: 'step4_execute',
           prepareLogLabel: '步骤 4 执行',
+          signupMethod: resolveSignupMethod(state),
+          accountIdentifierType: state.accountIdentifierType || '',
+          phoneNumber: state.signupPhoneNumber
+            || (String(state.accountIdentifierType || '').trim().toLowerCase() === 'phone' ? state.accountIdentifier : '')
+            || '',
         },
       };
       const prepareTimeoutMs = 30000;
