@@ -50,13 +50,42 @@
       return String(value || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email';
     }
 
+    function isStep7BoundEmailReloginContext(state = {}) {
+      const nodeId = String(
+        state?.nodeId
+        || state?.stepKey
+        || state?.nodeDefinition?.key
+        || state?.stepDefinition?.key
+        || ''
+      ).trim();
+      const phase = String(state?.authLoginPhase || '').trim();
+      return nodeId === 'relogin-bound-email' || phase === 'bound-email-relogin';
+    }
+
+    function resolveForcedStep7IdentifierType(state = {}) {
+      const forcedIdentifierType = normalizeStep7IdentifierType(state?.forceLoginIdentifierType);
+      if (forcedIdentifierType === 'phone') {
+        return 'phone';
+      }
+      if (isStep7BoundEmailReloginContext(state)) {
+        if (forcedIdentifierType === 'email' || Boolean(state?.forceEmailLogin)) {
+          return 'email';
+        }
+      }
+      return '';
+    }
+
     function shouldForceStep7EmailLogin(state = {}) {
-      return normalizeStep7IdentifierType(state?.forceLoginIdentifierType) === 'email'
-        || Boolean(state?.forceEmailLogin);
+      return resolveForcedStep7IdentifierType(state) === 'email';
+    }
+
+    function isPhoneSignupMethodForStep7(state = {}) {
+      return normalizeStep7SignupMethod(state?.signupMethod) === 'phone'
+        || normalizeStep7SignupMethod(state?.resolvedSignupMethod) === 'phone';
     }
 
     function canUseConfiguredPhoneSignup(state = {}) {
-      return normalizeStep7SignupMethod(state?.signupMethod) === 'phone'
+      return isPhoneSignupMethodForStep7(state)
         && Boolean(state?.phoneVerificationEnabled)
         && !Boolean(state?.plusModeEnabled)
         && !Boolean(state?.accountContributionEnabled);
@@ -80,8 +109,9 @@
     }
 
     function resolveStep7LoginIdentifierType(state = {}, fallbackType = '') {
-      if (shouldForceStep7EmailLogin(state)) {
-        return 'email';
+      const forcedIdentifierType = resolveForcedStep7IdentifierType(state);
+      if (forcedIdentifierType) {
+        return forcedIdentifierType;
       }
 
       if (shouldPreferStep7PhoneSignupIdentity(state)) {
