@@ -187,6 +187,12 @@ function normalizeIpProxySpecialDomainRouteMode(value = '') {
   return supported.includes(normalized) ? normalized : 'local_proxy';
 }
 
+function normalizeIpProxyApiRouteMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  const supported = ['direct', 'local_proxy', 'provider_proxy'];
+  return supported.includes(normalized) ? normalized : 'direct';
+}
+
 function normalizeIpProxyPort(value = '') {
   const numeric = Number.parseInt(String(value || '').trim(), 10);
   if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 65535) {
@@ -280,6 +286,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     apiSessTime: String(normalizedApiConfig?.sessTime || raw.apiSessTime || '').trim(),
     apiSessAuto: String(normalizedApiConfig?.sessAuto || raw.apiSessAuto || '').trim(),
     apiRefreshKey: String(raw.apiRefreshKey || '').trim(),
+    apiRouteMode: normalizeIpProxyApiRouteMode(raw.apiRouteMode),
     accountList: normalizeIpProxyAccountList(raw.accountList || ''),
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
@@ -321,6 +328,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
     apiSessTime: state?.ipProxyApiSessTime,
     apiSessAuto: state?.ipProxyApiSessAuto,
     apiRefreshKey: state?.ipProxyApiRefreshKey,
+    apiRouteMode: state?.ipProxyApiRouteMode,
     accountList: state?.ipProxyAccountList,
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,
@@ -513,6 +521,7 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     apiSessTime: normalizedApiConfig?.sessTime || inputIpProxyApiSessTime?.value || '',
     apiSessAuto: normalizedApiConfig?.sessAuto || selectIpProxyApiSessAuto?.value || '',
     apiRefreshKey: inputIpProxyApiRefreshKey?.value || '',
+    apiRouteMode: selectIpProxyApiRouteMode?.value || '',
     accountList: isIpProxyAccountListAvailable() ? (inputIpProxyAccountList?.value || '') : '',
     accountSessionPrefix: inputIpProxyAccountSessionPrefix?.value || '',
     accountLifeMinutes: inputIpProxyAccountLifeMinutes?.value || '',
@@ -561,6 +570,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyApiSessTime: normalizedProfile.apiSessTime,
     ipProxyApiSessAuto: normalizedProfile.apiSessAuto,
     ipProxyApiRefreshKey: normalizedProfile.apiRefreshKey,
+    ipProxyApiRouteMode: normalizedProfile.apiRouteMode,
     ipProxyAccountList: normalizedProfile.accountList,
     ipProxyAccountSessionPrefix: normalizedProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: normalizedProfile.accountLifeMinutes,
@@ -616,6 +626,9 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (inputIpProxyApiRefreshKey) {
     inputIpProxyApiRefreshKey.value = normalizedProfile.apiRefreshKey;
+  }
+  if (selectIpProxyApiRouteMode) {
+    selectIpProxyApiRouteMode.value = normalizedProfile.apiRouteMode || 'direct';
   }
   if (inputIpProxyAccountList) {
     inputIpProxyAccountList.value = normalizedProfile.accountList;
@@ -1541,6 +1554,9 @@ function updateIpProxyUI(state = latestState) {
   if (rowIpProxyMode) {
     rowIpProxyMode.style.display = showSettings ? '' : 'none';
   }
+  if (typeof rowIpProxyApiRouteMode !== 'undefined' && rowIpProxyApiRouteMode) {
+    rowIpProxyApiRouteMode.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
+  }
   if (typeof rowIpProxySpecialDomainRouteMode !== 'undefined' && rowIpProxySpecialDomainRouteMode) {
     rowIpProxySpecialDomainRouteMode.style.display = showSettings ? '' : 'none';
   }
@@ -1615,7 +1631,7 @@ function updateIpProxyUI(state = latestState) {
     rowIpProxyPort.style.display = showSettings && isAccountMode ? '' : 'none';
   }
   if (rowIpProxyProtocol) {
-    rowIpProxyProtocol.style.display = showSettings ? '' : 'none';
+    rowIpProxyProtocol.style.display = showSettings && isAccountMode ? '' : 'none';
   }
   if (rowIpProxyUsername) {
     rowIpProxyUsername.style.display = showSettings && isAccountMode ? '' : 'none';
@@ -1669,6 +1685,7 @@ function updateIpProxyUI(state = latestState) {
     inputIpProxyApiCount,
     inputIpProxyApiRegion,
     selectIpProxyApiHost,
+    selectIpProxyApiRouteMode,
     selectIpProxyApiProto,
     selectIpProxyApiStype,
     inputIpProxyApiSplit,

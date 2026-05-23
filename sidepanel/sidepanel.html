@@ -1244,6 +1244,20 @@
                 <button type="button" class="choice-btn" data-ip-proxy-mode="api">API 拉取</button>
               </div>
             </div>
+            <div class="data-row" id="row-ip-proxy-api-route-mode" style="display:none;">
+              <span class="data-label">拉取 IP 链路</span>
+              <div class="data-inline">
+                <select id="select-ip-proxy-api-route-mode" class="data-select">
+                  <option value="direct">本地无代理</option>
+                  <option value="local_proxy">本地代理 127.0.0.1:7897</option>
+                  <option value="provider_proxy">走当前 IP 代理</option>
+                </select>
+                <span class="inline-help-tooltip" tabindex="0" aria-label="查看拉取IP链路说明">
+                  <span class="inline-help-icon" aria-hidden="true">?</span>
+                  <span class="inline-help-bubble" role="tooltip">仅影响代理 API 链接本身的请求链路，例如 711Proxy 的 /gen 接口。</span>
+                </span>
+              </div>
+            </div>
             <div class="data-row" id="row-ip-proxy-special-domain-route-mode" style="display:none;">
               <span class="data-label">特殊域名链路</span>
               <div class="data-inline">
@@ -1391,7 +1405,7 @@
                     </select>
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-proto" style="display:none;">
-                    <span class="data-label">代理协议</span>
+                    <span class="data-label">返回节点协议</span>
                     <select id="select-ip-proxy-api-proto" class="data-select">
                       <option value="http">HTTP/HTTPS</option>
                       <option value="socks5">SOCKS5</option>

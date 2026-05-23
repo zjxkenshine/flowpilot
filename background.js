@@ -585,6 +585,8 @@ const DEFAULT_IP_PROXY_MODE = 'account';
 const IP_PROXY_MODE_VALUES = ['api', 'account'];
 const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const IP_PROXY_PROTOCOL_VALUES = ['http', 'https', 'socks4', 'socks5'];
+const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
+const IP_PROXY_API_ROUTE_MODE_VALUES = ['direct', 'local_proxy', 'provider_proxy'];
 const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
 const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
 const IP_PROXY_FETCH_TIMEOUT_MS = 20000;
@@ -1281,6 +1283,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyUsername: '',
   ipProxyPassword: '',
   ipProxyRegion: '',
+  ipProxyApiRouteMode: DEFAULT_IP_PROXY_API_ROUTE_MODE,
   ipProxySpecialDomainRouteMode: DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE,
   codex2apiUrl: DEFAULT_CODEX2API_URL,
   codex2apiAdminKey: '',
@@ -3197,6 +3200,8 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '');
     case 'ipProxyRegion':
       return String(value || '').trim();
+    case 'ipProxyApiRouteMode':
+      return normalizeIpProxyApiRouteMode(value);
     case 'ipProxySpecialDomainRouteMode':
       return normalizeIpProxySpecialDomainRouteMode(value);
     case 'ipProxyApiPool':
@@ -3720,6 +3725,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     payload.ipProxyUsername = String(activeProfile?.username || payload.ipProxyUsername || '').trim();
     payload.ipProxyPassword = String(activeProfile?.password || payload.ipProxyPassword || '');
     payload.ipProxyRegion = String(activeProfile?.region || payload.ipProxyRegion || '').trim();
+    payload.ipProxyApiRouteMode = normalizeIpProxyApiRouteMode(
+      activeProfile?.apiRouteMode || payload.ipProxyApiRouteMode
+    );
     payload.ipProxySpecialDomainRouteMode = normalizeIpProxySpecialDomainRouteMode(
       activeProfile?.specialDomainRouteMode || payload.ipProxySpecialDomainRouteMode
     );

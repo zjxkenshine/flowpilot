@@ -15,8 +15,8 @@ const DEFAULT_IP_PROXY_MODE = 'account';
 const IP_PROXY_MODE_VALUES = ['api', 'account'];
 const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const IP_PROXY_PROTOCOL_VALUES = ['http', 'https', 'socks4', 'socks5'];
-const DEFAULT_IP_PROXY_SYNC_API_ROUTE_MODE = 'direct';
-const IP_PROXY_SYNC_API_ROUTE_MODE_VALUES = ['direct', 'local_proxy'];
+const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
+const IP_PROXY_API_ROUTE_MODE_VALUES = ['direct', 'local_proxy', 'provider_proxy'];
 const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
 const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
 const IP_PROXY_FETCH_TIMEOUT_MS = 20000;
@@ -272,6 +272,24 @@ test('IP proxy PAC can route sync API host through local proxy before route-all 
   assert.match(pac, /global\.rotgbapi\.711proxy\.com/);
   assert.match(pac, /return "PROXY 127\.0\.0\.1:7897";/);
   assert.match(pac, /routeAllTraffic = true/);
+});
+
+test('IP proxy PAC can route sync API host through current provider proxy before route-all traffic', () => {
+  const api = loadIpProxyCore();
+  const pac = api.buildIpProxyPacScript({
+    host: 'global.rotgb.711proxy.com',
+    port: 10000,
+    protocol: 'http',
+  }, {
+    syncApiProfile: {
+      apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=1',
+    },
+    syncApiRouteMode: 'provider_proxy',
+  });
+
+  assert.match(pac, /syncApiHosts/);
+  assert.match(pac, /global\.rotgbapi\.711proxy\.com/);
+  assert.match(pac, /return "PROXY global\.rotgb\.711proxy\.com:10000";/);
 });
 
 test('IP proxy PAC can route special domains through current provider proxy', () => {

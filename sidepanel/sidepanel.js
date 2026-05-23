@@ -127,6 +127,8 @@ const selectIpProxyService = document.getElementById('select-ip-proxy-service');
 const btnIpProxyServiceLogin = document.getElementById('btn-ip-proxy-service-login');
 const rowIpProxyMode = document.getElementById('row-ip-proxy-mode');
 const ipProxyModeButtons = Array.from(document.querySelectorAll('[data-ip-proxy-mode]'));
+const rowIpProxyApiRouteMode = document.getElementById('row-ip-proxy-api-route-mode');
+const selectIpProxyApiRouteMode = document.getElementById('select-ip-proxy-api-route-mode');
 const rowIpProxySpecialDomainRouteMode = document.getElementById('row-ip-proxy-special-domain-route-mode');
 const selectIpProxySpecialDomainRouteMode = document.getElementById('select-ip-proxy-special-domain-route-mode');
 const rowIpProxyLayout = document.getElementById('row-ip-proxy-layout');
@@ -1311,6 +1313,8 @@ const DEFAULT_IP_PROXY_MODE = 'account';
 const SUPPORTED_IP_PROXY_MODES = ['api', 'account'];
 const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const SUPPORTED_IP_PROXY_PROTOCOLS = ['http', 'https', 'socks4', 'socks5'];
+const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
+const SUPPORTED_IP_PROXY_API_ROUTE_MODES = ['direct', 'local_proxy', 'provider_proxy'];
 const IP_PROXY_API_MODE_ENABLED = true;
 const IP_PROXY_ACCOUNT_LIST_ENABLED = false;
 
@@ -4338,6 +4342,7 @@ function collectSettingsPayload() {
         username: String(fallbackState?.ipProxyUsername || '').trim(),
         password: String(fallbackState?.ipProxyPassword || ''),
         region: String(fallbackState?.ipProxyRegion || '').trim(),
+        apiRouteMode: String(fallbackState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
         specialDomainRouteMode: String(fallbackState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
       };
       const result = {};
@@ -4360,6 +4365,7 @@ function collectSettingsPayload() {
           username: String(source.username || fallbackProfile.username || '').trim(),
           password: String(source.password || fallbackProfile.password || ''),
           region: String(source.region || fallbackProfile.region || '').trim(),
+          apiRouteMode: String(source.apiRouteMode || fallbackProfile.apiRouteMode || 'direct').trim().toLowerCase() || 'direct',
           specialDomainRouteMode: String(source.specialDomainRouteMode || fallbackProfile.specialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
         };
       });
@@ -4410,6 +4416,9 @@ function collectSettingsPayload() {
   const ipProxyRegionRawValue = typeof inputIpProxyRegion !== 'undefined'
     ? inputIpProxyRegion?.value
     : '';
+  const ipProxyApiRouteModeRawValue = typeof selectIpProxyApiRouteMode !== 'undefined'
+    ? selectIpProxyApiRouteMode?.value
+    : '';
   const ipProxySpecialDomainRouteModeRawValue = typeof selectIpProxySpecialDomainRouteMode !== 'undefined'
     ? selectIpProxySpecialDomainRouteMode?.value
     : '';
@@ -4438,6 +4447,7 @@ function collectSettingsPayload() {
     username: String(ipProxyUsernameRawValue || '').trim(),
     password: String(ipProxyPasswordRawValue || ''),
     region: String(ipProxyRegionRawValue || '').trim(),
+    apiRouteMode: String(ipProxyApiRouteModeRawValue || latestState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
     specialDomainRouteMode: String(ipProxySpecialDomainRouteModeRawValue || latestState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
   };
   const ipProxyServiceProfiles = normalizeIpProxyServiceProfilesSafe({
@@ -4460,6 +4470,7 @@ function collectSettingsPayload() {
     ipProxyUsername: currentIpProxyServiceProfile.username,
     ipProxyPassword: currentIpProxyServiceProfile.password,
     ipProxyRegion: currentIpProxyServiceProfile.region,
+    ipProxyApiRouteMode: currentIpProxyServiceProfile.apiRouteMode,
     ipProxySpecialDomainRouteMode: currentIpProxyServiceProfile.specialDomainRouteMode,
   });
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
@@ -4918,6 +4929,7 @@ function collectSettingsPayload() {
     ipProxyUsername: currentIpProxyServiceProfile.username,
     ipProxyPassword: currentIpProxyServiceProfile.password,
     ipProxyRegion: currentIpProxyServiceProfile.region,
+    ipProxyApiRouteMode: currentIpProxyServiceProfile.apiRouteMode,
     ipProxySpecialDomainRouteMode: currentIpProxyServiceProfile.specialDomainRouteMode,
     codex2apiUrl: inputCodex2ApiUrl.value.trim(),
     codex2apiAdminKey: inputCodex2ApiAdminKey.value.trim(),
@@ -11220,6 +11232,7 @@ function applySettingsState(state) {
       username: String(state?.ipProxyUsername || '').trim(),
       password: String(state?.ipProxyPassword || ''),
       region: String(state?.ipProxyRegion || '').trim(),
+      apiRouteMode: String(state?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
       specialDomainRouteMode: String(state?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
     };
   if (typeof selectIpProxyService !== 'undefined' && selectIpProxyService) {
@@ -15787,6 +15800,7 @@ function syncCurrentIpProxyServiceProfileToLatestState() {
       username: String(inputIpProxyUsername?.value || '').trim(),
       password: String(inputIpProxyPassword?.value || ''),
       region: String(inputIpProxyRegion?.value || '').trim(),
+      apiRouteMode: String(selectIpProxyApiRouteMode?.value || latestState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
     };
   syncLatestState({
     ipProxyService: selectedService,
@@ -15861,6 +15875,7 @@ selectIpProxyService?.addEventListener('change', () => {
       username: String(latestState?.ipProxyUsername || '').trim(),
       password: String(latestState?.ipProxyPassword || ''),
       region: String(latestState?.ipProxyRegion || '').trim(),
+      apiRouteMode: String(latestState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
       specialDomainRouteMode: String(latestState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
     };
 
@@ -15900,6 +15915,13 @@ ipProxyModeButtons.forEach((button) => {
 });
 
 selectIpProxyProtocol?.addEventListener('change', () => {
+  syncCurrentIpProxyServiceProfileToLatestState();
+  updateIpProxyUI(latestState);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+selectIpProxyApiRouteMode?.addEventListener('change', () => {
   syncCurrentIpProxyServiceProfileToLatestState();
   updateIpProxyUI(latestState);
   markSettingsDirty(true);
@@ -17724,6 +17746,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               username: String(mergedProxyState?.ipProxyUsername || '').trim(),
               password: String(mergedProxyState?.ipProxyPassword || ''),
               region: String(mergedProxyState?.ipProxyRegion || '').trim(),
+              apiRouteMode: String(mergedProxyState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
             };
           if (typeof applyIpProxyServiceProfileToInputs === 'function') {
             applyIpProxyServiceProfileToInputs(activeProxyProfile);
@@ -17737,6 +17760,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             if (inputIpProxyAutoRefreshPoolOnExhausted) inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(activeProxyProfile.autoRefreshPoolOnExhausted);
             if (inputIpProxyHost) inputIpProxyHost.value = activeProxyProfile.host;
             if (inputIpProxyPort) inputIpProxyPort.value = activeProxyProfile.port;
+            if (selectIpProxyApiRouteMode) selectIpProxyApiRouteMode.value = String(activeProxyProfile.apiRouteMode || 'direct').trim().toLowerCase() || 'direct';
             if (selectIpProxyProtocol) selectIpProxyProtocol.value = normalizeIpProxyProtocol(activeProxyProfile.protocol);
             if (inputIpProxyUsername) inputIpProxyUsername.value = activeProxyProfile.username;
             if (inputIpProxyPassword) inputIpProxyPassword.value = activeProxyProfile.password;

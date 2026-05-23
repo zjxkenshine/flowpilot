@@ -8,6 +8,7 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
   assert.match(html, /data-ip-proxy-mode="api"/);
   assert.doesNotMatch(html, /data-ip-proxy-mode="api"[^>]*disabled/);
   [
+    'select-ip-proxy-api-route-mode',
     'input-ip-proxy-api-url',
     'input-ip-proxy-api-count',
     'input-ip-proxy-api-region',
@@ -34,6 +35,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   [
     'inputIpProxyApiCount',
     'inputIpProxyApiRegion',
+    'selectIpProxyApiRouteMode',
     'inputIpProxyAutoRefreshPoolOnExhausted',
     'selectIpProxyApiHost',
     'selectIpProxyApiProto',
@@ -51,6 +53,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(panelSource, /sync711ApiFieldsFromUrlForPanel/);
   assert.match(panelSource, /rebuild711ApiUrlFromFieldsForPanel/);
   assert.match(panelSource, /apiRegion/);
+  assert.match(panelSource, /apiRouteMode/);
   assert.match(panelSource, /normalizeIpProxyApiRegionForPanel/);
   assert.match(panelSource, /apiSessType/);
 });
@@ -59,6 +62,8 @@ test('sidepanel shows success-rotation controls only for 711 API mode', () => {
   const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
 
   assert.match(panelSource, /const is711ApiMode = isApiMode && service === '711proxy';/);
+  assert.match(panelSource, /rowIpProxyApiRouteMode\.style\.display = showSettings && apiModeAvailable && isApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyPoolTargetCount\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyAutoRefreshPoolOnExhausted\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
+  assert.match(panelSource, /rowIpProxyProtocol\.style\.display = showSettings && isAccountMode \? '' : 'none';/);
 });

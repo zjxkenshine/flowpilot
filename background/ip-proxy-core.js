@@ -647,6 +647,19 @@ function normalizeIpProxySpecialDomainRouteMode(value = '') {
     : 'local_proxy';
 }
 
+function normalizeIpProxyApiRouteMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = Array.isArray(globalThis.IP_PROXY_API_ROUTE_MODE_VALUES)
+    ? globalThis.IP_PROXY_API_ROUTE_MODE_VALUES
+    : ['direct', 'local_proxy', 'provider_proxy'];
+  if (allowed.includes(normalized)) {
+    return normalized;
+  }
+  return typeof DEFAULT_IP_PROXY_API_ROUTE_MODE === 'string'
+    ? DEFAULT_IP_PROXY_API_ROUTE_MODE
+    : 'direct';
+}
+
 function normalizeIpProxyServiceProfile(rawValue = {}) {
   const raw = (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue))
     ? rawValue
@@ -678,6 +691,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     username: String(raw.username || '').trim(),
     password: String(raw.password || ''),
     region: String(raw.region || '').trim(),
+    apiRouteMode: normalizeIpProxyApiRouteMode(raw.apiRouteMode),
     specialDomainRouteMode: normalizeIpProxySpecialDomainRouteMode(raw.specialDomainRouteMode),
   };
 }
@@ -699,6 +713,7 @@ function buildIpProxyServiceProfileFromState(state = {}) {
     username: state?.ipProxyUsername,
     password: state?.ipProxyPassword,
     region: state?.ipProxyRegion,
+    apiRouteMode: state?.ipProxyApiRouteMode,
     specialDomainRouteMode: state?.ipProxySpecialDomainRouteMode,
   });
 }
@@ -3007,6 +3022,49 @@ function resolveIpProxySpecialDomainFallback(entry = {}, routeMode = DEFAULT_IP_
   ).trim() || 'PROXY 127.0.0.1:7897';
 }
 
+function collectIpProxyApiHosts(profile = {}) {
+  const hosts = new Set();
+  const pushHost = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) {
+      return;
+    }
+    try {
+      const parsed = new URL(text);
+      if (parsed.hostname) {
+        hosts.add(parsed.hostname.toLowerCase());
+      }
+    } catch {
+      const normalized = text
+        .replace(/^[a-z]+:\/\//i, '')
+        .split(/[/?#:]/)[0]
+        .trim()
+        .toLowerCase();
+      if (normalized) {
+        hosts.add(normalized);
+      }
+    }
+  };
+  pushHost(profile?.apiUrl);
+  pushHost(profile?.apiHost);
+  return Array.from(hosts);
+}
+
+function resolveIpProxyApiRouteFallback(entry = {}, routeMode = DEFAULT_IP_PROXY_API_ROUTE_MODE) {
+  const normalizedRouteMode = normalizeIpProxyApiRouteMode(routeMode);
+  if (normalizedRouteMode === 'local_proxy') {
+    return String(
+      typeof IP_PROXY_FORCE_DIRECT_FALLBACK !== 'undefined' && IP_PROXY_FORCE_DIRECT_FALLBACK
+        ? IP_PROXY_FORCE_DIRECT_FALLBACK
+        : 'PROXY 127.0.0.1:7897'
+    ).trim() || 'PROXY 127.0.0.1:7897';
+  }
+  if (normalizedRouteMode === 'provider_proxy') {
+    return resolveIpProxyPacProxyEndpoint(entry) || 'DIRECT';
+  }
+  return 'DIRECT';
+}
+
 function buildIpProxyPacScript(entry, options = {}) {
   const proxyEndpoint = resolveIpProxyPacProxyEndpoint(entry);
   if (!proxyEndpoint) {
@@ -3021,6 +3079,13 @@ function buildIpProxyPacScript(entry, options = {}) {
     .join(', ');
   const forceDirectFallback = String(
     options?.specialDomainFallback || resolveIpProxySpecialDomainFallback(entry)
+  ).replace(/"/g, '\\"');
+  const syncApiHosts = collectIpProxyApiHosts(options?.syncApiProfile || {});
+  const syncApiHostsLiteral = syncApiHosts
+    .map((pattern) => `'${String(pattern).replace(/'/g, "\\'")}'`)
+    .join(', ');
+  const syncApiRouteFallback = String(
+    options?.syncApiFallback || resolveIpProxyApiRouteFallback(entry, options?.syncApiRouteMode)
   ).replace(/"/g, '\\"');
   const routeAllLiteral = (typeof IP_PROXY_ROUTE_ALL_TRAFFIC !== 'undefined' && Boolean(IP_PROXY_ROUTE_ALL_TRAFFIC))
     ? 'true'
@@ -3049,6 +3114,14 @@ function FindProxyForURL(url, host) {
     }
     if (host === directPattern || dnsDomainIs(host, '.' + directPattern)) {
       return "${forceDirectFallback}";
+    }
+  }
+
+  var syncApiHosts = [${syncApiHostsLiteral}];
+  for (var sh = 0; sh < syncApiHosts.length; sh++) {
+    var syncApiHost = syncApiHosts[sh];
+    if (syncApiHost && (host === syncApiHost || dnsDomainIs(host, '.' + syncApiHost))) {
+      return "${syncApiRouteFallback}";
     }
   }
 
@@ -3298,6 +3371,8 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
     activeProfile?.specialDomainRouteMode || resolvedState?.ipProxySpecialDomainRouteMode
   );
   const pacScript = buildIpProxyPacScript(effectiveEntry, {
+    syncApiProfile: activeProfile,
+    syncApiRouteMode: activeProfile?.apiRouteMode || resolvedState?.ipProxyApiRouteMode,
     specialDomainFallback,
   });
   if (!pacScript) {

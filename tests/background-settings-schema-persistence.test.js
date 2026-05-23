@@ -103,6 +103,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
   ipProxyAutoRefreshPoolOnExhausted: false,
+  ipProxyApiRouteMode: 'direct',
   ipProxySpecialDomainRouteMode: 'local_proxy',
   kiroTargetId: 'kiro-rs',
   kiroRsUrl: '',
@@ -146,6 +147,10 @@ function normalizeIpProxySpecialDomainRouteMode(value) {
   const normalized = String(value || 'local_proxy').trim().toLowerCase();
   return ['local_proxy', 'direct', 'provider_proxy'].includes(normalized) ? normalized : 'local_proxy';
 }
+function normalizeIpProxyApiRouteMode(value) {
+  const normalized = String(value || 'direct').trim().toLowerCase();
+  return ['direct', 'local_proxy', 'provider_proxy'].includes(normalized) ? normalized : 'direct';
+}
 function normalizeIpProxyServiceProfiles(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function buildIpProxyServiceProfileFromState() {
   return {
@@ -163,6 +168,7 @@ function buildIpProxyServiceProfileFromState() {
     password: '',
     region: '',
     specialDomainRouteMode: 'local_proxy',
+    apiRouteMode: 'direct',
   };
 }
 function normalizeIpProxyAccountList(value) { return String(value || ''); }
