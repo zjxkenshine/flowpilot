@@ -4,6 +4,7 @@ const fs = require('node:fs');
 
 test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => {
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
+  const protoSelectMatch = html.match(/<select id="select-ip-proxy-api-proto" class="data-select">[\s\S]*?<\/select>/);
 
   assert.match(html, /data-ip-proxy-mode="api"/);
   assert.doesNotMatch(html, /data-ip-proxy-mode="api"[^>]*disabled/);
@@ -27,6 +28,14 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
   ].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
+  assert.ok(protoSelectMatch);
+  assert.match(
+    protoSelectMatch[0],
+    /<option value="http">HTTP\/HTTPS<\/option>[\s\S]*<option value="socks5">Socks5<\/option>/
+  );
+  assert.doesNotMatch(protoSelectMatch[0], /<option value="https">HTTPS<\/option>/);
+  assert.doesNotMatch(protoSelectMatch[0], /<option value="socks4">SOCKS4<\/option>/);
+  assert.match(html, /<select id="select-ip-proxy-protocol" class="data-select">[\s\S]*<option value="https">HTTPS<\/option>[\s\S]*<option value="socks4">SOCKS4<\/option>/);
 });
 
 test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
@@ -85,4 +94,24 @@ test('sidepanel IP proxy actions send current normalized proxy override payload'
   assert.match(panelSource, /type: 'SWITCH_IP_PROXY'[\s\S]*ipProxyStateOverride/);
   assert.match(panelSource, /type: 'CHANGE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
   assert.match(panelSource, /type: 'PROBE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
+});
+
+test('sidepanel 711 API region input keeps draft typing and only persists complete country codes', () => {
+  const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  assert.match(source, /inputIpProxyApiRegion\?\.addEventListener\('input'[\s\S]*normalizeIpProxyApiRegionDraftForPanel/);
+  assert.match(source, /inputIpProxyApiRegion\?\.addEventListener\('blur'[\s\S]*normalizeIpProxyApiRegionForPanel/);
+  assert.match(panelSource, /function normalizeIpProxyApiRegionDraftForPanel\(value = ''\)/);
+  assert.match(panelSource, /slice\(0, 2\)/);
+  assert.match(panelSource, /if \(draft.length !== 2\) \{\s*return '';/);
+});
+
+test('sidepanel 711 API region sync clears stale region when URL has no region parameter', () => {
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  assert.match(panelSource, /function build711ApiConfigInputForProfile\(rawValue = \{\}\)/);
+  assert.match(panelSource, /if \(parsedApiConfig\?\.isValidUrl\) \{\s*return \{ apiUrl \};\s*\}/);
+  assert.match(panelSource, /assignIfDifferent\(inputIpProxyApiRegion, parsed\.region\);/);
+  assert.match(panelSource, /region: normalizedRegion,/);
 });

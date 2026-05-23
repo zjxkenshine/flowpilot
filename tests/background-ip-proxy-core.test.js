@@ -394,7 +394,7 @@ test('711 API URL parser supports real split and sticky/rotating session types',
   assert.equal(rotating.ptype, '7');
   assert.equal(rotating.count, '1');
   assert.equal(rotating.region, 'US');
-  assert.equal(rotating.proto, 'https');
+  assert.equal(rotating.proto, 'http');
   assert.equal(rotating.stype, 'text');
   assert.equal(rotating.split, '\r\n');
   assert.equal(rotating.sessType, 'rotating');
@@ -408,6 +408,11 @@ test('711 API URL parser supports real split and sticky/rotating session types',
   assert.equal(sticky.sessType, 'sticky');
   assert.equal(sticky.sessTime, '5');
   assert.equal(sticky.sessAuto, '1');
+
+  const noRegion = api.parse711ProxyApiConfigFromUrl(
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&sessType=rotating'
+  );
+  assert.equal(noRegion.region, '');
 });
 
 test('711 API URL builder preserves host, keeps rotating sessType, and omits sticky-only fields when not sticky', () => {
@@ -434,7 +439,7 @@ test('711 API URL builder preserves host, keeps rotating sessType, and omits sti
   assert.match(stickyUrl, /region=JP/);
   assert.match(stickyUrl, /zone=custom-plus/);
   assert.match(stickyUrl, /ptype=7/);
-  assert.match(stickyUrl, /proto=https/);
+  assert.match(stickyUrl, /proto=http/);
   assert.match(stickyUrl, /split=%5Cr%5Cn/);
   assert.match(stickyUrl, /sessType=sticky/);
   assert.match(stickyUrl, /sessTime=5/);
@@ -491,27 +496,35 @@ test('711 API validation normalizes missing count to default 1 and still validat
     apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=socks4&stype=text&split=\\r\\n',
   });
   assert.equal(normalizedProto.valid, true);
-  assert.equal(normalizedProto.config.proto, 'socks4');
+  assert.equal(normalizedProto.config.proto, 'socks5');
 });
 
 test('711 JSON API payload normalization supports wrapped object candidates', () => {
   const api = loadIpProxyCore();
 
   assert.deepEqual(
-    api.normalizeIpProxyListFromPayload({ data: [{ ip: '1.2.3.4', port: 9000 }] }, '711proxy'),
+    api.normalizeIpProxyListFromPayload({ data: [{ ip: '1.2.3.4', port: 9000 }] }, '711proxy', {
+      mode: 'api',
+      apiProtocol: 'socks5',
+    }),
     [{
       host: '1.2.3.4',
       port: 9000,
       username: '',
       password: '',
-      protocol: 'http',
+      protocol: 'socks5',
       region: '',
       provider: '711proxy',
     }]
   );
 
   assert.deepEqual(
-    api.normalizeIpProxyListFromPayload({ result: { ip: '5.6.7.8', port: 10000 } }, '711proxy'),
+    api.normalizeIpProxyListFromPayload({
+      result: { ip: '5.6.7.8', port: 10000, protocol: 'socks4' },
+    }, '711proxy', {
+      mode: 'api',
+      apiProtocol: 'http',
+    }),
     [{
       host: '5.6.7.8',
       port: 10000,
@@ -539,6 +552,9 @@ test('711 API pool normalization preserves duplicate ip:port entries while non-A
   assert.equal(apiPool[0].host, '1.2.3.4');
   assert.equal(apiPool[1].host, '1.2.3.4');
   assert.equal(apiPool[2].host, '5.6.7.8');
+  assert.equal(apiPool[0].protocol, 'http');
+  assert.equal(apiPool[1].protocol, 'http');
+  assert.equal(apiPool[2].protocol, 'http');
 
   const dedupedPool = api.normalizeProxyPoolEntries([
     'http://global.rotgb.711proxy.com:10000:user:pass',
@@ -561,12 +577,13 @@ test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snap
   const pool = await api.pullIpProxyPoolFromApi({
     ipProxyService: '711proxy',
     ipProxyMode: 'api',
-    ipProxyApiUrl: 'http://new.example.com/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+    ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=1&proto=https&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
   });
 
-  assert.equal(fetchCalls[0], 'http://new.example.com/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating');
+  assert.equal(fetchCalls[0], 'http://global.rotgbapi.711proxy.com:8089/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating');
   assert.equal(pool.length, 1);
   assert.equal(pool[0].host, '1.2.3.4');
+  assert.equal(pool[0].protocol, 'http');
 });
 
 test('pullIpProxyPoolFromApi preserves duplicate entries for 711 API mode', async () => {
@@ -587,13 +604,16 @@ test('pullIpProxyPoolFromApi preserves duplicate entries for 711 API mode', asyn
     const pool = await api.pullIpProxyPoolFromApi({
       ipProxyService: '711proxy',
       ipProxyMode: 'api',
-      ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=3&proto=http&stype=json&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+      ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=3&proto=socks4&stype=json&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
     });
 
     assert.equal(pool.length, 3);
     assert.equal(pool[0].host, '1.2.3.4');
     assert.equal(pool[1].host, '1.2.3.4');
     assert.equal(pool[2].host, '5.6.7.8');
+    assert.equal(pool[0].protocol, 'socks5');
+    assert.equal(pool[1].protocol, 'socks5');
+    assert.equal(pool[2].protocol, 'socks5');
   } finally {
     if (originalFetch === undefined) {
       delete global.fetch;

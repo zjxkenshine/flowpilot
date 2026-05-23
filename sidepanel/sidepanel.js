@@ -16070,8 +16070,8 @@ inputIpProxyApiUrl?.addEventListener('input', () => {
 });
 
 inputIpProxyApiRegion?.addEventListener('input', () => {
-  if (typeof normalizeIpProxyApiRegionForPanel === 'function') {
-    inputIpProxyApiRegion.value = normalizeIpProxyApiRegionForPanel(inputIpProxyApiRegion.value || '');
+  if (typeof normalizeIpProxyApiRegionDraftForPanel === 'function') {
+    inputIpProxyApiRegion.value = normalizeIpProxyApiRegionDraftForPanel(inputIpProxyApiRegion.value || '');
   }
   if (typeof rebuild711ApiUrlFromFieldsForPanel === 'function') {
     rebuild711ApiUrlFromFieldsForPanel();

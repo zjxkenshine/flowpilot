@@ -251,8 +251,9 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
   const raw = (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue))
     ? rawValue
     : {};
-  const normalizedApiConfig = typeof normalize711ProxyApiConfig === 'function'
-    ? normalize711ProxyApiConfig({
+  const normalizedApiConfigInput = typeof build711ApiConfigInputForProfile === 'function'
+    ? build711ApiConfigInputForProfile(raw)
+    : {
       apiUrl: raw.apiUrl || '',
       count: raw.apiCount,
       host: raw.apiHost,
@@ -265,7 +266,9 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
       sessType: raw.apiSessType,
       sessTime: raw.apiSessTime,
       sessAuto: raw.apiSessAuto,
-    })
+    };
+  const normalizedApiConfig = typeof normalize711ProxyApiConfig === 'function'
+    ? normalize711ProxyApiConfig(normalizedApiConfigInput)
     : null;
   return {
     mode: normalizeIpProxyModeForCurrentRelease(raw.mode),
@@ -304,12 +307,46 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
   };
 }
 
-function normalizeIpProxyApiRegionForPanel(value = '') {
-  if (typeof normalizeIpProxyCountryCode === 'function') {
-    return normalizeIpProxyCountryCode(value);
+function build711ApiConfigInputForProfile(rawValue = {}) {
+  const raw = (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue))
+    ? rawValue
+    : {};
+  const apiUrl = String(raw.apiUrl || '').trim();
+  const parsedApiConfig = typeof parse711ProxyApiConfigFromUrl === 'function'
+    ? parse711ProxyApiConfigFromUrl(apiUrl)
+    : null;
+  if (parsedApiConfig?.isValidUrl) {
+    return { apiUrl };
   }
-  const raw = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
-  return /^[A-Z]{2}$/.test(raw) ? raw : '';
+  return {
+    apiUrl,
+    count: raw.apiCount ?? raw.count,
+    host: raw.apiHost ?? raw.host,
+    region: raw.apiRegion ?? raw.region,
+    proto: raw.apiProto ?? raw.proto,
+    stype: raw.apiStype ?? raw.stype,
+    split: raw.apiSplit ?? raw.split,
+    zone: raw.apiZone ?? raw.zone,
+    ptype: raw.apiPtype ?? raw.ptype,
+    sessType: raw.apiSessType ?? raw.sessType,
+    sessTime: raw.apiSessTime ?? raw.sessTime,
+    sessAuto: raw.apiSessAuto ?? raw.sessAuto,
+  };
+}
+
+function normalizeIpProxyApiRegionDraftForPanel(value = '') {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+}
+
+function normalizeIpProxyApiRegionForPanel(value = '') {
+  const draft = normalizeIpProxyApiRegionDraftForPanel(value);
+  if (draft.length !== 2) {
+    return '';
+  }
+  if (typeof normalizeIpProxyCountryCode === 'function') {
+    return normalizeIpProxyCountryCode(draft);
+  }
+  return draft;
 }
 
 function normalizeIpProxyApiZoneForPanel(value = '') {
@@ -502,8 +539,8 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
   );
   const selectedMode = normalizeIpProxyMode(getSelectedIpProxyMode());
   const effectiveMode = normalizeIpProxyModeForCurrentRelease(selectedMode);
-  const normalizedApiConfig = selectedService === '711proxy' && typeof normalize711ProxyApiConfig === 'function'
-    ? normalize711ProxyApiConfig({
+  const normalizedApiConfigInput = selectedService === '711proxy' && typeof build711ApiConfigInputForProfile === 'function'
+    ? build711ApiConfigInputForProfile({
       apiUrl: inputIpProxyApiUrl?.value || '',
       host: selectIpProxyApiHost?.value || '',
       count: inputIpProxyApiCount?.value || '',
@@ -517,6 +554,24 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
       sessTime: inputIpProxyApiSessTime?.value || '',
       sessAuto: selectIpProxyApiSessAuto?.value || '',
     })
+    : null;
+  const normalizedApiConfig = selectedService === '711proxy' && typeof normalize711ProxyApiConfig === 'function'
+    ? normalize711ProxyApiConfig(
+      normalizedApiConfigInput || {
+        apiUrl: inputIpProxyApiUrl?.value || '',
+        host: selectIpProxyApiHost?.value || '',
+        count: inputIpProxyApiCount?.value || '',
+        region: inputIpProxyApiRegion?.value || '',
+        zone: inputIpProxyApiZone?.value || '',
+        ptype: inputIpProxyApiPtype?.value || '',
+        proto: selectIpProxyApiProto?.value || '',
+        stype: selectIpProxyApiStype?.value || '',
+        split: selectIpProxyApiSplit?.value || '',
+        sessType: selectIpProxyApiSessType?.value || '',
+        sessTime: inputIpProxyApiSessTime?.value || '',
+        sessAuto: selectIpProxyApiSessAuto?.value || '',
+      }
+    )
     : null;
   const rawRegion = String(inputIpProxyRegion?.value || '').trim();
   const finalRegion = resolveIpProxyRegionFromInputs({
@@ -1239,11 +1294,14 @@ function rebuild711ApiUrlFromFieldsForPanel(options = {}) {
       ? options.apiUrl
       : (inputIpProxyApiUrl?.value || '')
   ).trim();
+  const normalizedRegion = typeof normalizeIpProxyApiRegionForPanel === 'function'
+    ? normalizeIpProxyApiRegionForPanel(inputIpProxyApiRegion?.value || '')
+    : String(inputIpProxyApiRegion?.value || '').trim().toUpperCase();
   const nextApiUrl = build711ProxyApiUrl(currentApiUrl, {
     apiUrl: currentApiUrl,
     host: selectIpProxyApiHost?.value || '',
     count: inputIpProxyApiCount?.value || '',
-    region: inputIpProxyApiRegion?.value || '',
+    region: normalizedRegion,
     zone: inputIpProxyApiZone?.value || '',
     ptype: inputIpProxyApiPtype?.value || '',
     proto: selectIpProxyApiProto?.value || '',

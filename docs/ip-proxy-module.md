@@ -74,7 +74,7 @@
 
 - `count`：1-900
 - `region`：可空，2 位国家码
-- `proto`：`http / https / socks4 / socks5`
+- `proto`：`http（表示 HTTP/HTTPS） / socks5`
 - `stype`：`text / json`
 - `split`：直接填写实际分隔符；默认 `\r\n`
 - `zone`：必填
@@ -82,6 +82,11 @@
 - `sessType`：可空，或 `rotating / sticky`
 - `sessTime`：仅 `sticky` 时生效，1-180
 - `sessAuto`：仅 `sticky` 时生效，`0 / 1`
+
+旧配置兼容规则：
+
+- `proto=https` 会自动收敛为 `http`
+- `proto=socks4` 会自动收敛为 `socks5`
 
 真实 URL 示例：
 

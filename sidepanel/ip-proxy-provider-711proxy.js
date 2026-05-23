@@ -28,6 +28,7 @@
   const DEFAULT_711_API_SESSION_TIME = '5';
   const DEFAULT_711_API_ZONE = 'custom';
   const DEFAULT_711_API_PTYPE = '1';
+  const SUPPORTED_711_API_PROTOCOLS = ['http', 'https', 'socks4', 'socks5'];
 
   function publish711PanelExports(exportsObject = {}) {
     Object.keys(exportsObject).forEach((key) => {
@@ -135,7 +136,13 @@
 
   function normalize711ApiProtocol(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return normalized === 'socks5' ? 'socks5' : DEFAULT_711_API_PROTO;
+    if (!SUPPORTED_711_API_PROTOCOLS.includes(normalized)) {
+      return DEFAULT_711_API_PROTO;
+    }
+    if (normalized === 'socks4' || normalized === 'socks5') {
+      return 'socks5';
+    }
+    return DEFAULT_711_API_PROTO;
   }
 
   function normalize711ApiProtocolLabel(value = '') {

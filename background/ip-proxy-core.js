@@ -1063,10 +1063,20 @@ function shouldDeduplicateProxyPoolEntry(provider = DEFAULT_IP_PROXY_SERVICE, op
   return true;
 }
 
+function resolveForcedProtocolForProxyPool(provider = DEFAULT_IP_PROXY_SERVICE, options = {}) {
+  const normalizedProvider = normalizeIpProxyProviderValue(provider);
+  const normalizedMode = normalizeIpProxyMode(options?.mode || options?.sourceMode || '');
+  if (normalizedProvider !== '711proxy' || normalizedMode !== 'api') {
+    return '';
+  }
+  return normalizeIpProxyProtocol(options?.apiProtocol || '');
+}
+
 function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVICE, options = {}) {
   const result = [];
   const seen = new Set();
   const deduplicate = shouldDeduplicateProxyPoolEntry(provider, options);
+  const forcedProtocol = resolveForcedProtocolForProxyPool(provider, options);
   const append = (entry) => {
     if (!entry || !entry.host || !entry.port) {
       return;
@@ -1076,7 +1086,7 @@ function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVI
       port: normalizeIpProxyPort(entry.port),
       username: String(entry.username || '').trim(),
       password: String(entry.password || ''),
-      protocol: normalizeIpProxyProtocol(entry.protocol || ''),
+      protocol: forcedProtocol || normalizeIpProxyProtocol(entry.protocol || ''),
       region: String(entry.region || '').trim(),
       provider: normalizeIpProxyProviderValue(entry.provider || provider),
     };
@@ -2885,14 +2895,20 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
   }
 
   const provider = normalizeIpProxyProviderValue(state?.ipProxyService);
+  let normalized711ApiConfig = null;
+  let requestUrl = apiUrl;
   if (provider === '711proxy' && typeof validate711ProxyApiConfig === 'function') {
     const validation = validate711ProxyApiConfig({ apiUrl });
     if (!validation?.valid) {
       throw new Error(String(validation?.errors?.[0] || '711Proxy API 参数无效。'));
     }
+    normalized711ApiConfig = validation.config || null;
+    if (normalized711ApiConfig && typeof build711ProxyApiUrl === 'function') {
+      requestUrl = build711ProxyApiUrl(apiUrl, normalized711ApiConfig);
+    }
   }
   const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : IP_PROXY_FETCH_TIMEOUT_MS;
-  const response = await fetchWithTimeout(apiUrl, {
+  const response = await fetchWithTimeout(requestUrl, {
     method: 'GET',
     cache: 'no-store',
     headers: { Accept: 'application/json, text/plain, */*' },
@@ -2913,10 +2929,12 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
   }
   const pool = normalizeIpProxyListFromPayload(payload, provider, {
     mode: state?.ipProxyMode,
+    apiProtocol: normalized711ApiConfig?.proto || '',
   });
   if (!pool.length && typeof payload === 'string') {
     return normalizeProxyPoolEntries(payload, provider, {
       mode: state?.ipProxyMode,
+      apiProtocol: normalized711ApiConfig?.proto || '',
     }).slice(0, Number(options.maxItems) || 100);
   }
   const maxItems = Math.max(1, Math.min(500, Number(options.maxItems) || 100));

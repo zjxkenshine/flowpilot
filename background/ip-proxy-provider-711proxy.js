@@ -108,11 +108,17 @@
 
   function normalize711ApiProtocol(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return SUPPORTED_711_API_PROTOCOLS.includes(normalized) ? normalized : DEFAULT_711_API_PROTO;
+    if (!SUPPORTED_711_API_PROTOCOLS.includes(normalized)) {
+      return DEFAULT_711_API_PROTO;
+    }
+    if (normalized === 'socks4' || normalized === 'socks5') {
+      return 'socks5';
+    }
+    return DEFAULT_711_API_PROTO;
   }
 
   function normalize711ApiProtocolLabel(value = '') {
-    return normalize711ApiProtocol(value);
+    return normalize711ApiProtocol(value) === 'socks5' ? 'socks5' : 'http';
   }
 
   function normalize711ApiStyle(value = '') {
