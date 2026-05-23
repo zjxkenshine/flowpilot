@@ -387,19 +387,20 @@ test('711 API URL parser supports real split and sticky/rotating session types',
   const api = loadIpProxyCore();
 
   const rotating = api.parse711ProxyApiConfigFromUrl(
-    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&region=us&proto=http&stype=text&split=\\r\\n&sessType=rotating'
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom-plus&ptype=7&count=1&region=us&proto=https&stype=text&split=\\r\\n&sessType=rotating&trace=keepme'
   );
   assert.equal(rotating.isValidUrl, true);
-  assert.equal(rotating.zone, 'custom');
-  assert.equal(rotating.ptype, '1');
+  assert.equal(rotating.zone, 'custom-plus');
+  assert.equal(rotating.ptype, '7');
   assert.equal(rotating.count, '1');
   assert.equal(rotating.region, 'US');
-  assert.equal(rotating.proto, 'http');
+  assert.equal(rotating.proto, 'https');
   assert.equal(rotating.stype, 'text');
   assert.equal(rotating.split, '\r\n');
   assert.equal(rotating.sessType, 'rotating');
   assert.equal(rotating.sessTime, '');
   assert.equal(rotating.sessAuto, '');
+  assert.deepEqual(rotating.extraQueryEntries, [{ key: 'trace', value: 'keepme' }]);
 
   const sticky = api.parse711ProxyApiConfigFromUrl(
     'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&sessType=sticky&sessTime=5&sessAuto=1'
@@ -413,13 +414,13 @@ test('711 API URL builder preserves host, keeps rotating sessType, and omits sti
   const api = loadIpProxyCore();
 
   const stickyUrl = api.build711ProxyApiUrl(
-    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&trace=keepme',
+    'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=http&stype=text&split=\\r\\n&trace=keepme&token=abc',
     {
       count: '3',
       region: 'jp',
-      zone: 'custom',
-      ptype: '1',
-      proto: 'http',
+      zone: 'custom-plus',
+      ptype: '7',
+      proto: 'https',
       stype: 'text',
       split: '\\r\\n',
       sessType: 'sticky',
@@ -429,7 +430,11 @@ test('711 API URL builder preserves host, keeps rotating sessType, and omits sti
   );
   assert.match(stickyUrl, /^http:\/\/global\.rotgbapi\.711proxy\.com:8089\/gen\?/);
   assert.match(stickyUrl, /trace=keepme/);
+  assert.match(stickyUrl, /token=abc/);
   assert.match(stickyUrl, /region=JP/);
+  assert.match(stickyUrl, /zone=custom-plus/);
+  assert.match(stickyUrl, /ptype=7/);
+  assert.match(stickyUrl, /proto=https/);
   assert.match(stickyUrl, /split=%5Cr%5Cn/);
   assert.match(stickyUrl, /sessType=sticky/);
   assert.match(stickyUrl, /sessTime=5/);
@@ -481,6 +486,12 @@ test('711 API validation normalizes missing count to default 1 and still validat
   });
   assert.equal(invalidRegion.valid, true);
   assert.equal(invalidRegion.config.region, '');
+
+  const normalizedProto = api.validate711ProxyApiConfig({
+    apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?zone=custom&ptype=1&count=1&proto=socks4&stype=text&split=\\r\\n',
+  });
+  assert.equal(normalizedProto.valid, true);
+  assert.equal(normalizedProto.config.proto, 'socks4');
 });
 
 test('711 JSON API payload normalization supports wrapped object candidates', () => {

@@ -1388,13 +1388,23 @@
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-count" style="display:none;">
                     <span class="data-label">提取数量</span>
-                    <input type="number" id="input-ip-proxy-api-count" class="data-input" min="1" max="200" step="1"
-                      placeholder="1-200" />
+                    <input type="number" id="input-ip-proxy-api-count" class="data-input" min="1" max="900" step="1"
+                      placeholder="1-900" />
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-region" style="display:none;">
                     <span class="data-label">国家/地区</span>
                     <input type="text" id="input-ip-proxy-api-region" class="data-input mono" maxlength="2"
                       placeholder="可空，如 US / JP" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-zone" style="display:none;">
+                    <span class="data-label">Zone</span>
+                    <input type="text" id="input-ip-proxy-api-zone" class="data-input mono"
+                      placeholder="默认 custom" />
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-ptype" style="display:none;">
+                    <span class="data-label">PType</span>
+                    <input type="number" id="input-ip-proxy-api-ptype" class="data-input" min="1" max="9999" step="1"
+                      placeholder="默认 1" />
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-host" style="display:none;">
                     <span class="data-label">代理主机</span>
@@ -1407,7 +1417,9 @@
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-api-proto" style="display:none;">
                     <span class="data-label">返回节点协议</span>
                     <select id="select-ip-proxy-api-proto" class="data-select">
-                      <option value="http">HTTP/HTTPS</option>
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                      <option value="socks4">SOCKS4</option>
                       <option value="socks5">SOCKS5</option>
                     </select>
                   </div>

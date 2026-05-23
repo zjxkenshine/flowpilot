@@ -28,6 +28,9 @@
   const DEFAULT_711_API_SESSION_TIME = '5';
   const DEFAULT_711_API_ZONE = 'custom';
   const DEFAULT_711_API_PTYPE = '1';
+  const SUPPORTED_711_API_PROTOCOLS = ['http', 'https', 'socks4', 'socks5'];
+  const SUPPORTED_711_API_STYLES = ['text', 'json'];
+  const SUPPORTED_711_API_SPLIT_OPTIONS = ['\r\n', '\r', '\n', '\t'];
 
   function publish711Exports(exportsObject = {}) {
     Object.keys(exportsObject).forEach((key) => {
@@ -60,7 +63,7 @@
     if (!raw) return DEFAULT_711_API_COUNT;
     const numeric = Number.parseInt(raw, 10);
     if (!Number.isInteger(numeric)) return DEFAULT_711_API_COUNT;
-    return String(Math.max(1, Math.min(200, numeric)));
+    return String(Math.max(1, Math.min(900, numeric)));
   }
 
   function normalize711ApiHost(value = '') {
@@ -105,16 +108,16 @@
 
   function normalize711ApiProtocol(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return normalized === 'socks5' ? 'socks5' : DEFAULT_711_API_PROTO;
+    return SUPPORTED_711_API_PROTOCOLS.includes(normalized) ? normalized : DEFAULT_711_API_PROTO;
   }
 
   function normalize711ApiProtocolLabel(value = '') {
-    return normalize711ApiProtocol(value) === 'socks5' ? 'socks5' : 'http';
+    return normalize711ApiProtocol(value);
   }
 
   function normalize711ApiStyle(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
-    return normalized === 'json' ? 'json' : DEFAULT_711_API_STYLE;
+    return SUPPORTED_711_API_STYLES.includes(normalized) ? normalized : DEFAULT_711_API_STYLE;
   }
 
   function decode711ApiSplitValue(value = '') {
@@ -142,17 +145,47 @@
 
   function normalize711ApiSplitOption(value = '', fallback = DEFAULT_711_API_SPLIT) {
     const normalized = normalize711ApiSplitValue(value, fallback);
-    return ['\r\n', '\r', '\n', '\t'].includes(normalized)
+    return SUPPORTED_711_API_SPLIT_OPTIONS.includes(normalized)
       ? normalized
       : String(fallback ?? DEFAULT_711_API_SPLIT);
   }
 
-  function normalize711ApiZone() {
-    return DEFAULT_711_API_ZONE;
+  function normalize711ApiZone(value = '') {
+    const raw = String(value || '').trim();
+    return raw || DEFAULT_711_API_ZONE;
   }
 
-  function normalize711ApiPlanType() {
-    return DEFAULT_711_API_PTYPE;
+  function normalize711ApiPlanType(value = '') {
+    const raw = String(value ?? '').trim();
+    if (!raw) {
+      return DEFAULT_711_API_PTYPE;
+    }
+    const numeric = Number.parseInt(raw, 10);
+    if (!Number.isInteger(numeric) || numeric < 1) {
+      return DEFAULT_711_API_PTYPE;
+    }
+    return String(numeric);
+  }
+
+  function normalize711ApiExtraQueryEntries(value) {
+    const entries = [];
+    if (!Array.isArray(value)) {
+      return entries;
+    }
+    for (const item of value) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const key = String(item.key || '').trim();
+      if (!key || KNOWN_711_API_PARAM_KEYS.has(key)) {
+        continue;
+      }
+      entries.push({
+        key,
+        value: item.value === undefined || item.value === null ? '' : String(item.value),
+      });
+    }
+    return entries;
   }
 
   function normalize711ApiSessionType(value = '') {
@@ -312,6 +345,7 @@
       sessTypeLabel: normalize711ApiSessionTypeLabel(DEFAULT_711_API_SESSION_TYPE),
       sessTime: '',
       sessAuto: '',
+      extraQueryEntries: [],
     };
     if (!rawUrl) {
       return defaultResult;
@@ -328,6 +362,13 @@
     }
 
     const sessType = normalize711ApiSessionType(urlObject.searchParams.get('sessType') || '');
+    const extraQueryEntries = [];
+    for (const [key, value] of urlObject.searchParams.entries()) {
+      if (KNOWN_711_API_PARAM_KEYS.has(key)) {
+        continue;
+      }
+      extraQueryEntries.push({ key, value });
+    }
     return {
       apiUrl: rawUrl,
       baseUrl: `${normalize711ApiHost(`${urlObject.protocol}//${urlObject.host}`)}${DEFAULT_711_API_PATHNAME}`,
@@ -341,8 +382,8 @@
       protoLabel: normalize711ApiProtocolLabel(urlObject.searchParams.get('proto') || ''),
       stype: normalize711ApiStyle(urlObject.searchParams.get('stype') || ''),
       split: normalize711ApiSplitOption(urlObject.searchParams.get('split') || ''),
-      zone: DEFAULT_711_API_ZONE,
-      ptype: DEFAULT_711_API_PTYPE,
+      zone: normalize711ApiZone(urlObject.searchParams.get('zone') || ''),
+      ptype: normalize711ApiPlanType(urlObject.searchParams.get('ptype') || ''),
       sessType,
       sessTypeLabel: normalize711ApiSessionTypeLabel(sessType),
       sessTime: sessType === 'sticky'
@@ -351,6 +392,7 @@
       sessAuto: sessType === 'sticky'
         ? normalize711ApiSessionAuto(urlObject.searchParams.get('sessAuto') || '', '')
         : '',
+      extraQueryEntries,
     };
   }
 
@@ -381,8 +423,8 @@
       split: stype === 'json'
         ? ''
         : normalize711ApiSplitOption(config?.split ?? parsed.split),
-      zone: DEFAULT_711_API_ZONE,
-      ptype: DEFAULT_711_API_PTYPE,
+      zone: normalize711ApiZone(config?.zone ?? parsed.zone),
+      ptype: normalize711ApiPlanType(config?.ptype ?? parsed.ptype),
       sessType,
       sessTypeLabel: normalize711ApiSessionTypeLabel(sessType),
       sessTime: sessType === 'sticky'
@@ -391,6 +433,11 @@
       sessAuto: sessType === 'sticky'
         ? normalize711ApiSessionAuto(config?.sessAuto ?? parsed.sessAuto, '1')
         : '',
+      extraQueryEntries: normalize711ApiExtraQueryEntries(
+        config?.extraQueryEntries !== undefined
+          ? config.extraQueryEntries
+          : parsed.extraQueryEntries
+      ),
     };
   }
 
@@ -425,8 +472,8 @@
     setOrDelete('region', normalized.region);
     setOrDelete('proto', normalized.proto);
     setOrDelete('stype', normalized.stype);
-    setOrDelete('zone', DEFAULT_711_API_ZONE);
-    setOrDelete('ptype', DEFAULT_711_API_PTYPE);
+    setOrDelete('zone', normalized.zone);
+    setOrDelete('ptype', normalized.ptype);
     setOrDelete('sessType', normalized.sessType);
 
     if (normalized.stype === 'json') {
@@ -445,6 +492,15 @@
     } else {
       nextUrl.searchParams.delete('sessTime');
       nextUrl.searchParams.delete('sessAuto');
+    }
+    for (const [key] of Array.from(nextUrl.searchParams.entries())) {
+      if (KNOWN_711_API_PARAM_KEYS.has(key)) {
+        continue;
+      }
+      nextUrl.searchParams.delete(key);
+    }
+    for (const item of normalize711ApiExtraQueryEntries(normalized.extraQueryEntries)) {
+      nextUrl.searchParams.append(item.key, item.value);
     }
     return nextUrl.toString();
   }
@@ -485,6 +541,9 @@
     }
     if (normalized.stype !== 'json' && !String(normalized.split || '')) {
       errors.push('711Proxy API 的 split 不能为空。');
+    }
+    if (String(config?.count ?? parsed.count ?? '').trim() && String(normalized.count || '').trim() !== String(config?.count ?? parsed.count ?? '').trim()) {
+      errors.push('711Proxy API 的 count 仅支持 1-900。');
     }
     if (normalized.sessType === 'sticky' && String(config?.sessTime ?? parsed.sessTime ?? '').trim() && !normalized.sessTime) {
       errors.push('711Proxy API 的 sessTime 仅支持 5-180 分钟。');

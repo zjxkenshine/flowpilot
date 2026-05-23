@@ -12,6 +12,8 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
     'input-ip-proxy-api-url',
     'input-ip-proxy-api-count',
     'input-ip-proxy-api-region',
+    'input-ip-proxy-api-zone',
+    'input-ip-proxy-api-ptype',
     'input-ip-proxy-auto-refresh-pool-on-exhausted',
     'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
@@ -35,6 +37,8 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   [
     'inputIpProxyApiCount',
     'inputIpProxyApiRegion',
+    'inputIpProxyApiZone',
+    'inputIpProxyApiPtype',
     'selectIpProxyApiRouteMode',
     'inputIpProxyAutoRefreshPoolOnExhausted',
     'selectIpProxyApiHost',

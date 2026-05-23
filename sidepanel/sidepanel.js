@@ -141,6 +141,10 @@ const rowIpProxyApiCount = document.getElementById('row-ip-proxy-api-count');
 const inputIpProxyApiCount = document.getElementById('input-ip-proxy-api-count');
 const rowIpProxyApiRegion = document.getElementById('row-ip-proxy-api-region');
 const inputIpProxyApiRegion = document.getElementById('input-ip-proxy-api-region');
+const rowIpProxyApiZone = document.getElementById('row-ip-proxy-api-zone');
+const inputIpProxyApiZone = document.getElementById('input-ip-proxy-api-zone');
+const rowIpProxyApiPtype = document.getElementById('row-ip-proxy-api-ptype');
+const inputIpProxyApiPtype = document.getElementById('input-ip-proxy-api-ptype');
 const rowIpProxyApiHost = document.getElementById('row-ip-proxy-api-host');
 const selectIpProxyApiHost = document.getElementById('select-ip-proxy-api-host');
 const rowIpProxyApiProto = document.getElementById('row-ip-proxy-api-proto');
@@ -11045,6 +11049,45 @@ function applySettingsState(state) {
   if (typeof inputIpProxyApiUrl !== 'undefined' && inputIpProxyApiUrl) {
     inputIpProxyApiUrl.value = String(activeIpProxyProfile.apiUrl || '').trim();
   }
+  if (typeof inputIpProxyApiCount !== 'undefined' && inputIpProxyApiCount) {
+    inputIpProxyApiCount.value = String(activeIpProxyProfile.apiCount || '');
+  }
+  if (typeof inputIpProxyApiRegion !== 'undefined' && inputIpProxyApiRegion) {
+    inputIpProxyApiRegion.value = String(activeIpProxyProfile.apiRegion || '');
+  }
+  if (typeof inputIpProxyApiZone !== 'undefined' && inputIpProxyApiZone) {
+    inputIpProxyApiZone.value = String(activeIpProxyProfile.apiZone || '');
+  }
+  if (typeof inputIpProxyApiPtype !== 'undefined' && inputIpProxyApiPtype) {
+    inputIpProxyApiPtype.value = String(activeIpProxyProfile.apiPtype || '');
+  }
+  if (typeof selectIpProxyApiHost !== 'undefined' && selectIpProxyApiHost) {
+    selectIpProxyApiHost.value = String(activeIpProxyProfile.apiHost || '').trim();
+  }
+  if (typeof selectIpProxyApiProto !== 'undefined' && selectIpProxyApiProto) {
+    selectIpProxyApiProto.value = String(activeIpProxyProfile.apiProto || 'http').trim().toLowerCase() || 'http';
+  }
+  if (typeof selectIpProxyApiStype !== 'undefined' && selectIpProxyApiStype) {
+    selectIpProxyApiStype.value = String(activeIpProxyProfile.apiStype || 'text').trim().toLowerCase() || 'text';
+  }
+  if (typeof selectIpProxyApiSplit !== 'undefined' && selectIpProxyApiSplit) {
+    selectIpProxyApiSplit.value = String(activeIpProxyProfile.apiSplit || '\\r\\n');
+  }
+  if (typeof selectIpProxyApiSessType !== 'undefined' && selectIpProxyApiSessType) {
+    selectIpProxyApiSessType.value = String(activeIpProxyProfile.apiSessType || 'rotating').trim().toLowerCase() || 'rotating';
+  }
+  if (typeof inputIpProxyApiSessTime !== 'undefined' && inputIpProxyApiSessTime) {
+    inputIpProxyApiSessTime.value = String(activeIpProxyProfile.apiSessTime || '');
+  }
+  if (typeof selectIpProxyApiSessAuto !== 'undefined' && selectIpProxyApiSessAuto) {
+    selectIpProxyApiSessAuto.value = String(activeIpProxyProfile.apiSessAuto || '1');
+  }
+  if (typeof inputIpProxyApiRefreshKey !== 'undefined' && inputIpProxyApiRefreshKey) {
+    inputIpProxyApiRefreshKey.value = String(activeIpProxyProfile.apiRefreshKey || '');
+  }
+  if (typeof selectIpProxyApiRouteMode !== 'undefined' && selectIpProxyApiRouteMode) {
+    selectIpProxyApiRouteMode.value = String(activeIpProxyProfile.apiRouteMode || 'direct').trim().toLowerCase() || 'direct';
+  }
   if (typeof inputIpProxyAccountList !== 'undefined' && inputIpProxyAccountList) {
     inputIpProxyAccountList.value = activeIpProxyProfile.accountList;
   }
@@ -15989,6 +16032,8 @@ inputIpProxyApiUrl?.addEventListener('input', () => {
 
 [
   inputIpProxyApiCount,
+  inputIpProxyApiZone,
+  inputIpProxyApiPtype,
   selectIpProxyApiHost,
   selectIpProxyApiProto,
   selectIpProxyApiStype,
@@ -17440,6 +17485,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.ipProxyAccountLifeMinutes !== undefined
         || message.payload.ipProxyPoolTargetCount !== undefined
         || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
+        || message.payload.ipProxyApiCount !== undefined
+        || message.payload.ipProxyApiRegion !== undefined
+        || message.payload.ipProxyApiZone !== undefined
+        || message.payload.ipProxyApiPtype !== undefined
+        || message.payload.ipProxyApiHost !== undefined
+        || message.payload.ipProxyApiProto !== undefined
+        || message.payload.ipProxyApiStype !== undefined
+        || message.payload.ipProxyApiSplit !== undefined
+        || message.payload.ipProxyApiSessType !== undefined
+        || message.payload.ipProxyApiSessTime !== undefined
+        || message.payload.ipProxyApiSessAuto !== undefined
+        || message.payload.ipProxyApiRefreshKey !== undefined
+        || message.payload.ipProxyApiRouteMode !== undefined
         || message.payload.ipProxyHost !== undefined
         || message.payload.ipProxyPort !== undefined
         || message.payload.ipProxyProtocol !== undefined
@@ -17475,6 +17533,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           || message.payload.ipProxyServiceProfiles !== undefined
           || message.payload.ipProxyMode !== undefined
           || message.payload.ipProxyApiUrl !== undefined
+          || message.payload.ipProxyApiCount !== undefined
+          || message.payload.ipProxyApiRegion !== undefined
+          || message.payload.ipProxyApiZone !== undefined
+          || message.payload.ipProxyApiPtype !== undefined
+          || message.payload.ipProxyApiHost !== undefined
+          || message.payload.ipProxyApiProto !== undefined
+          || message.payload.ipProxyApiStype !== undefined
+          || message.payload.ipProxyApiSplit !== undefined
+          || message.payload.ipProxyApiSessType !== undefined
+          || message.payload.ipProxyApiSessTime !== undefined
+          || message.payload.ipProxyApiSessAuto !== undefined
+          || message.payload.ipProxyApiRefreshKey !== undefined
+          || message.payload.ipProxyApiRouteMode !== undefined
           || message.payload.ipProxyAccountList !== undefined
           || message.payload.ipProxyAccountSessionPrefix !== undefined
           || message.payload.ipProxyAccountLifeMinutes !== undefined

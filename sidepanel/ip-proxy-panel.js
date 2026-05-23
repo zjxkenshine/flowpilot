@@ -312,6 +312,26 @@ function normalizeIpProxyApiRegionForPanel(value = '') {
   return /^[A-Z]{2}$/.test(raw) ? raw : '';
 }
 
+function normalizeIpProxyApiZoneForPanel(value = '') {
+  if (typeof normalize711ApiZone === 'function') {
+    return normalize711ApiZone(value);
+  }
+  const raw = String(value || '').trim();
+  return raw || 'custom';
+}
+
+function normalizeIpProxyApiPtypeForPanel(value = '') {
+  if (typeof normalize711ApiPlanType === 'function') {
+    return normalize711ApiPlanType(value);
+  }
+  const raw = String(value ?? '').trim();
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isInteger(numeric) || numeric < 1) {
+    return '1';
+  }
+  return String(numeric);
+}
+
 function buildIpProxyServiceProfileFromFlatState(state = {}) {
   return normalizeIpProxyServiceProfile({
     mode: state?.ipProxyMode,
@@ -488,6 +508,8 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
       host: selectIpProxyApiHost?.value || '',
       count: inputIpProxyApiCount?.value || '',
       region: inputIpProxyApiRegion?.value || '',
+      zone: inputIpProxyApiZone?.value || '',
+      ptype: inputIpProxyApiPtype?.value || '',
       proto: selectIpProxyApiProto?.value || '',
       stype: selectIpProxyApiStype?.value || '',
       split: selectIpProxyApiSplit?.value || '',
@@ -512,11 +534,11 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     apiHost: normalizedApiConfig?.host || selectIpProxyApiHost?.value || '',
     apiCount: normalizedApiConfig?.count || inputIpProxyApiCount?.value || '',
     apiRegion: normalizedApiConfig?.region || inputIpProxyApiRegion?.value || '',
+    apiZone: normalizedApiConfig?.zone || inputIpProxyApiZone?.value || '',
+    apiPtype: normalizedApiConfig?.ptype || inputIpProxyApiPtype?.value || '',
     apiProto: normalizedApiConfig?.proto || selectIpProxyApiProto?.value || '',
     apiStype: normalizedApiConfig?.stype || selectIpProxyApiStype?.value || '',
     apiSplit: normalizedApiConfig?.split || selectIpProxyApiSplit?.value || '',
-    apiZone: normalizedApiConfig?.zone || '',
-    apiPtype: normalizedApiConfig?.ptype || '',
     apiSessType: normalizedApiConfig?.sessType || selectIpProxyApiSessType?.value || '',
     apiSessTime: normalizedApiConfig?.sessTime || inputIpProxyApiSessTime?.value || '',
     apiSessAuto: normalizedApiConfig?.sessAuto || selectIpProxyApiSessAuto?.value || '',
@@ -628,6 +650,12 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (inputIpProxyApiRegion) {
     inputIpProxyApiRegion.value = normalizedProfile.apiRegion;
+  }
+  if (inputIpProxyApiZone) {
+    inputIpProxyApiZone.value = normalizedProfile.apiZone;
+  }
+  if (inputIpProxyApiPtype) {
+    inputIpProxyApiPtype.value = normalizedProfile.apiPtype;
   }
   if (selectIpProxyApiProto) {
     selectIpProxyApiProto.value = normalizedProfile.apiProto || 'http';
@@ -1189,6 +1217,8 @@ function sync711ApiFieldsFromUrlForPanel(options = {}) {
 
   assignIfDifferent(inputIpProxyApiCount, parsed.count);
   assignIfDifferent(inputIpProxyApiRegion, parsed.region);
+  assignIfDifferent(inputIpProxyApiZone, parsed.zone);
+  assignIfDifferent(inputIpProxyApiPtype, parsed.ptype);
   assignIfDifferent(selectIpProxyApiHost, parsed.host || DEFAULT_711_API_HOST);
   assignIfDifferent(selectIpProxyApiProto, parsed.proto || 'http');
   assignIfDifferent(selectIpProxyApiStype, parsed.stype || 'text');
@@ -1214,6 +1244,8 @@ function rebuild711ApiUrlFromFieldsForPanel(options = {}) {
     host: selectIpProxyApiHost?.value || '',
     count: inputIpProxyApiCount?.value || '',
     region: inputIpProxyApiRegion?.value || '',
+    zone: inputIpProxyApiZone?.value || '',
+    ptype: inputIpProxyApiPtype?.value || '',
     proto: selectIpProxyApiProto?.value || '',
     stype: selectIpProxyApiStype?.value || '',
     split: selectIpProxyApiSplit?.value || '',
@@ -1595,6 +1627,12 @@ function updateIpProxyUI(state = latestState) {
   if (rowIpProxyApiRegion) {
     rowIpProxyApiRegion.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
   }
+  if (rowIpProxyApiZone) {
+    rowIpProxyApiZone.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
+  }
+  if (rowIpProxyApiPtype) {
+    rowIpProxyApiPtype.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
+  }
   if (rowIpProxyApiHost) {
     rowIpProxyApiHost.style.display = showSettings && apiModeAvailable && isApiMode ? '' : 'none';
   }
@@ -1707,6 +1745,8 @@ function updateIpProxyUI(state = latestState) {
   [
     inputIpProxyApiCount,
     inputIpProxyApiRegion,
+    inputIpProxyApiZone,
+    inputIpProxyApiPtype,
     selectIpProxyApiHost,
     selectIpProxyApiRouteMode,
     selectIpProxyApiProto,
