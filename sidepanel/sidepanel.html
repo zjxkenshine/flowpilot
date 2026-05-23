@@ -1921,12 +1921,45 @@
     <div class="log-header">
       <span class="section-label">日志</span>
       <div class="log-header-actions">
+        <button id="btn-open-account-book" class="btn btn-ghost btn-xs" title="查看账号信息">账号</button>
         <button id="btn-open-account-records" class="btn btn-ghost btn-xs" title="查看账号记录">记录</button>
         <button id="btn-clear-log" class="btn btn-ghost btn-xs" title="清空日志">清空</button>
       </div>
     </div>
     <div id="log-area"></div>
   </section>
+
+  <div id="account-book-overlay" class="account-book-overlay" hidden>
+    <div class="account-book-panel">
+      <div class="account-book-panel-header">
+        <div class="account-book-panel-copy">
+          <span class="account-book-panel-title">账号</span>
+          <span id="account-book-count" class="account-book-panel-meta">暂无账号信息</span>
+        </div>
+        <div class="account-book-panel-actions">
+          <button id="btn-export-account-book" class="btn btn-outline btn-xs" type="button">导出</button>
+          <button id="btn-clear-account-book" class="btn btn-ghost btn-xs" type="button">清空</button>
+          <button id="btn-close-account-book" class="modal-close" type="button" aria-label="关闭">×</button>
+        </div>
+      </div>
+      <div class="account-book-table-shell">
+        <table class="account-book-table">
+          <thead>
+            <tr>
+              <th>邮箱</th>
+              <th>手机号</th>
+              <th>密码</th>
+            </tr>
+          </thead>
+          <tbody id="account-book-body">
+            <tr class="account-book-empty-row">
+              <td class="account-book-empty" colspan="3">暂无账号信息</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
   <div id="account-records-overlay" class="account-records-overlay" hidden>
     <div class="account-records-panel">
@@ -2028,6 +2061,7 @@
   <script src="contribution-mode.js"></script>
   <script src="ip-proxy-provider-711proxy.js"></script>
   <script src="ip-proxy-panel.js"></script>
+  <script src="account-book-manager.js"></script>
   <script src="account-records-manager.js"></script>
   <script src="sidepanel.js"></script>
 </body>

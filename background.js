@@ -15,6 +15,7 @@ importScripts(
   'phone-sms/providers/five-sim.js',
   'phone-sms/providers/registry.js',
   'background/phone-verification-flow.js',
+  'background/account-book.js',
   'background/account-run-history.js',
   'background/contribution-oauth.js',
   'background/mail-2925-session.js',
@@ -738,6 +739,7 @@ const PERSISTENT_ALIAS_STATE_KEYS = [
   'icloudAliasCache',
   'icloudAliasCacheAt',
 ];
+const ACCOUNT_BOOK_STORAGE_KEY = 'accountBookEntries';
 const ACCOUNT_RUN_HISTORY_STORAGE_KEY = 'accountRunHistory';
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
@@ -1495,6 +1497,7 @@ const DEFAULT_STATE = {
   runtimeState: runtimeStateHelpers?.buildDefaultRuntimeState?.() || null,
   kiroRuntime: kiroStateHelpers?.buildDefaultRuntimeState?.() || null,
   ...CONTRIBUTION_RUNTIME_DEFAULTS,
+  accountBookEntries: [],
   accounts: [], // 已生成账号记录：{ email, password, createdAt }。
   accountRunHistory: [], // 账号运行历史快照，实际持久化在 chrome.storage.local。
   manualAliasUsage: {},
@@ -4086,10 +4089,11 @@ async function getPersistedAliasState() {
 }
 
 async function getState() {
-  const [state, persistedSettings, persistedAliasState, accountRunHistory] = await Promise.all([
+  const [state, persistedSettings, persistedAliasState, accountBookEntries, accountRunHistory] = await Promise.all([
     chrome.storage.session.get(null),
     getPersistedSettings(),
     getPersistedAliasState(),
+    accountBookHelpers?.getPersistedAccountBookEntries?.() || [],
     accountRunHistoryHelpers?.getPersistedAccountRunHistory?.() || [],
   ]);
   return buildStateViewWithRuntimeState({
@@ -4097,6 +4101,7 @@ async function getState() {
     ...persistedSettings,
     ...persistedAliasState,
     ...state,
+    accountBookEntries,
     accountRunHistory,
   });
 }
@@ -11074,8 +11079,18 @@ async function reportCompletedStepSideEffectError(step, error) {
 
 async function runCompletedNodeSideEffects(nodeId, payload, completionState, lastNodeId) {
   await handleNodeData(nodeId, payload);
+  const postCompletionState = await getState();
+  if (
+    (nodeId === 'wait-registration-success' || nodeId === 'kiro-complete-register-consent')
+    && typeof upsertAndBroadcastAccountBookEntry === 'function'
+  ) {
+    await upsertAndBroadcastAccountBookEntry('registration_success', postCompletionState);
+  }
   if (nodeId === lastNodeId) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
+    if (typeof upsertAndBroadcastAccountBookEntry === 'function') {
+      await upsertAndBroadcastAccountBookEntry('flow_completed', postCompletionState);
+    }
   }
 }
 
@@ -12333,6 +12348,11 @@ const AUTO_RUN_NODE_DELAYS = Object.freeze({
 function getAutoRunNodeDelayMs(nodeId) {
   return AUTO_RUN_NODE_DELAYS[String(nodeId || '').trim()] ?? 0;
 }
+const accountBookHelpers = self.MultiPageBackgroundAccountBook?.createAccountBookHelpers({
+  ACCOUNT_BOOK_STORAGE_KEY,
+  chrome,
+  getState,
+});
 const accountRunHistoryHelpers = self.MultiPageBackgroundAccountRunHistory?.createAccountRunHistoryHelpers({
   ACCOUNT_RUN_HISTORY_STORAGE_KEY,
   addLog,
@@ -12355,6 +12375,41 @@ const contributionOAuthManager = self.MultiPageBackgroundContributionOAuth?.crea
   setState,
 });
 contributionOAuthManager?.ensureCallbackListeners?.();
+
+async function broadcastAccountBookUpdate() {
+  if (!accountBookHelpers?.getPersistedAccountBookEntries) {
+    return [];
+  }
+
+  const entries = await accountBookHelpers.getPersistedAccountBookEntries();
+  broadcastDataUpdate({ accountBookEntries: entries });
+  return entries;
+}
+
+async function upsertAndBroadcastAccountBookEntry(stage, stateOverride = null) {
+  if (!accountBookHelpers?.upsertAccountBookEntry) {
+    return null;
+  }
+
+  const state = stateOverride || await getState();
+  const entry = await accountBookHelpers.upsertAccountBookEntry(stage, state);
+  if (!entry) {
+    return null;
+  }
+
+  await broadcastAccountBookUpdate();
+  return entry;
+}
+
+async function clearAndBroadcastAccountBookEntries() {
+  if (!accountBookHelpers?.clearAccountBookEntries) {
+    return { clearedCount: 0 };
+  }
+
+  const result = await accountBookHelpers.clearAccountBookEntries();
+  await broadcastAccountBookUpdate();
+  return result;
+}
 
 async function broadcastAccountRunHistoryUpdate() {
   if (!accountRunHistoryHelpers?.getPersistedAccountRunHistory) {
@@ -14491,6 +14546,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   applyIpProxySettingsFromState,
   cancelScheduledAutoRun,
   checkIcloudSession,
+  clearAccountBook: (...args) => clearAndBroadcastAccountBookEntries(...args),
   clearAccountRunHistory: (...args) => clearAndBroadcastAccountRunHistory(...args),
   deleteAccountRunHistoryRecords: (...args) => deleteAndBroadcastAccountRunHistoryRecords(...args),
   clearAutoRunTimerAlarm,
@@ -14633,6 +14689,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   upsertPayPalAccount,
   upsertMail2925Account,
   upsertHotmailAccount,
+  upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
   verifyHotmailAccount,
 });
 

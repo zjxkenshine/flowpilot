@@ -12,6 +12,13 @@ const STATUS_ICONS = {
 };
 
 const logArea = document.getElementById('log-area');
+const btnOpenAccountBook = document.getElementById('btn-open-account-book');
+const accountBookOverlay = document.getElementById('account-book-overlay');
+const accountBookCount = document.getElementById('account-book-count');
+const accountBookBody = document.getElementById('account-book-body');
+const btnExportAccountBook = document.getElementById('btn-export-account-book');
+const btnClearAccountBook = document.getElementById('btn-clear-account-book');
+const btnCloseAccountBook = document.getElementById('btn-close-account-book');
 const btnOpenAccountRecords = document.getElementById('btn-open-account-records');
 const accountRecordsOverlay = document.getElementById('account-records-overlay');
 const accountRecordsMeta = document.getElementById('account-records-meta');
@@ -3098,7 +3105,12 @@ function syncLatestState(nextState) {
     nodeStatuses: mergedNodeStatuses,
   };
 
-  renderAccountRecords(latestState);
+  if (typeof renderAccountBook === 'function') {
+    renderAccountBook(latestState);
+  }
+  if (typeof renderAccountRecords === 'function') {
+    renderAccountRecords(latestState);
+  }
 }
 
 function isContributionModeActiveForFlow(state = latestState, flowId = undefined) {
@@ -14290,6 +14302,37 @@ const bindAccountRecordEvents = accountRecordsManager?.bindEvents
 const closeAccountRecordsPanel = accountRecordsManager?.closePanel
   || (() => { });
 bindAccountRecordEvents();
+const accountBookManager = window.SidepanelAccountBookManager?.createAccountBookManager({
+  state: {
+    getLatestState: () => latestState,
+    syncLatestState,
+  },
+  dom: {
+    accountBookOverlay,
+    accountBookCount,
+    accountBookBody,
+    btnOpenAccountBook,
+    btnExportAccountBook,
+    btnClearAccountBook,
+    btnCloseAccountBook,
+  },
+  helpers: {
+    downloadTextFile,
+    escapeHtml,
+    openConfirmModal,
+    showToast,
+  },
+  runtime: {
+    sendMessage: (message) => chrome.runtime.sendMessage(message),
+  },
+});
+const renderAccountBook = accountBookManager?.render
+  || (() => { });
+const bindAccountBookEvents = accountBookManager?.bindEvents
+  || (() => { });
+const closeAccountBookPanel = accountBookManager?.closePanel
+  || (() => { });
+bindAccountBookEvents();
 const accountContributionManager = window.SidepanelContributionMode?.createContributionModeManager({
   state: {
     getLatestState: () => latestState,

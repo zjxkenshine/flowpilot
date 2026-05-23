@@ -1098,3 +1098,140 @@ test('PROBE_IP_PROXY_EXIT rebinding and probing use sidepanel ipProxyStateOverri
   assert.equal(rebindCalls[0].ipProxyApiUrl, 'http://new.example.com/gen?count=1');
   assert.equal(probeCalls[0].state.ipProxyApiUrl, 'http://new.example.com/gen?count=1');
 });
+
+test('NODE_COMPLETE records registration-success account book entry when wait-registration-success completes', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const accountBookCalls = [];
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => {},
+    batchUpdateLuckmailPurchases: async () => {},
+    buildLocalhostCleanupPrefix: () => '',
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: () => ({}),
+    broadcastDataUpdate: () => {},
+    clearAutoRunTimerAlarm: async () => {},
+    clearStopRequest: () => {},
+    getState: async () => ({
+      nodeStatuses: { 'wait-registration-success': 'pending', 'platform-verify': 'pending' },
+      email: 'user@example.com',
+    }),
+    getNodeIdsForState: () => ['open-chatgpt', 'submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile', 'wait-registration-success', 'platform-verify'],
+    getStepIdByNodeIdForState: (nodeId) => ({
+      'wait-registration-success': 6,
+      'platform-verify': 10,
+    })[nodeId] || 0,
+    getStepDefinitionForState: (step) => ({ id: step, key: step === 6 ? 'wait-registration-success' : 'platform-verify' }),
+    getStepIdsForState: () => [1, 2, 3, 4, 5, 6, 10],
+    getLastStepIdForState: () => 10,
+    getStopRequested: () => false,
+    getSourceLabel: () => '',
+    isCloudflareSecurityBlockedError: () => false,
+    isStopError: () => false,
+    notifyNodeComplete: () => {},
+    notifyNodeError: () => {},
+    setNodeStatus: async () => {},
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'wait-registration-success',
+    payload: { nodeId: 'wait-registration-success' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(accountBookCalls.length, 1);
+  assert.equal(accountBookCalls[0][0], 'registration_success');
+});
+
+test('NODE_COMPLETE records registration-success account book entry when kiro register finalization completes', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const accountBookCalls = [];
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => {},
+    batchUpdateLuckmailPurchases: async () => {},
+    buildLocalhostCleanupPrefix: () => '',
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: () => ({}),
+    broadcastDataUpdate: () => {},
+    clearAutoRunTimerAlarm: async () => {},
+    clearStopRequest: () => {},
+    getState: async () => ({
+      nodeStatuses: { 'kiro-complete-register-consent': 'pending', 'kiro-upload-credential': 'pending' },
+      email: 'kiro@example.com',
+      activeFlowId: 'kiro',
+      flowId: 'kiro',
+    }),
+    getNodeIdsForState: () => [
+      'kiro-open-register-page',
+      'kiro-submit-email',
+      'kiro-submit-name',
+      'kiro-submit-verification-code',
+      'kiro-submit-password',
+      'kiro-complete-register-consent',
+      'kiro-upload-credential',
+    ],
+    getStepIdByNodeIdForState: (nodeId) => ({
+      'kiro-complete-register-consent': 6,
+      'kiro-upload-credential': 9,
+    })[nodeId] || 0,
+    getStepDefinitionForState: (step) => ({ id: step, key: step === 6 ? 'kiro-complete-register-consent' : 'kiro-upload-credential' }),
+    getStepIdsForState: () => [1, 2, 3, 4, 5, 6, 9],
+    getLastStepIdForState: () => 9,
+    getStopRequested: () => false,
+    getSourceLabel: () => '',
+    isCloudflareSecurityBlockedError: () => false,
+    isStopError: () => false,
+    notifyNodeComplete: () => {},
+    notifyNodeError: () => {},
+    setNodeStatus: async () => {},
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'kiro-complete-register-consent',
+    payload: { nodeId: 'kiro-complete-register-consent' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(accountBookCalls.length, 1);
+  assert.equal(accountBookCalls[0][0], 'registration_success');
+});
+
+test('CLEAR_ACCOUNT_BOOK delegates to background clear helper and returns cleared count', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const calls = [];
+
+  const router = api.createMessageRouter({
+    getState: async () => ({ autoRunning: false, autoRunPhase: 'idle' }),
+    isAutoRunLockedState: () => false,
+    clearAccountBook: async (...args) => {
+      calls.push(args);
+      return { clearedCount: 3 };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'CLEAR_ACCOUNT_BOOK',
+    source: 'sidepanel',
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.clearedCount, 3);
+  assert.equal(calls.length, 1);
+});

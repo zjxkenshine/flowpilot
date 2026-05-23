@@ -6,6 +6,7 @@ test('background imports workflow step modules including rebuilt Kiro modules', 
   const source = fs.readFileSync('background.js', 'utf8');
 
   [
+    'background/account-book.js',
     'background/steps/open-chatgpt.js',
     'background/steps/submit-signup-email.js',
     'background/steps/fill-password.js',

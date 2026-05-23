@@ -89,6 +89,9 @@ async function handleNodeData(nodeId, payload) {
 async function appendAndBroadcastAccountRunRecord(status, state) {
   events.push({ type: 'record', status, state });
 }
+async function upsertAndBroadcastAccountBookEntry(stage, state) {
+  events.push({ type: 'account-book', stage, state });
+}
 ${extractFunction('runCompletedNodeSideEffects')}
 ${extractFunction('reportCompletedNodeSideEffectError')}
 ${extractFunction('completeNodeFromBackground')}
@@ -123,4 +126,28 @@ test('completeNodeFromBackground keeps non-final node data handling before compl
   const types = events.map((event) => event.type);
   assert.equal(types.indexOf('handle-done') < types.indexOf('notify'), true);
   assert.equal(types.includes('record'), false);
+});
+
+test('completeNodeFromBackground writes registration-success account book entry for step 6 success hook', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify');
+
+  await api.completeNodeFromBackground('wait-registration-success', { nodeId: 'wait-registration-success' });
+
+  const accountBookEvent = events.find((event) => event.type === 'account-book');
+  assert.deepStrictEqual(accountBookEvent, {
+    type: 'account-book',
+    stage: 'registration_success',
+    state: { nodeStatuses: {}, accountContributionEnabled: true },
+  });
+});
+
+test('completeNodeFromBackground writes flow-completed account book entry for final node', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify');
+
+  await api.completeNodeFromBackground('platform-verify', { nodeId: 'platform-verify' });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.ok(events.some((event) => event.type === 'account-book' && event.stage === 'flow_completed'));
 });

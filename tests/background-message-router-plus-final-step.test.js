@@ -24,11 +24,15 @@ function createRouterWithFinalNode(options = {}) {
     ...(options.nodeStepMap || {}),
   };
   const appendCalls = [];
+  const accountBookCalls = [];
 
   const router = api.createMessageRouter({
     addLog: async () => {},
     appendAccountRunRecord: async (...args) => {
       appendCalls.push(args);
+    },
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
     },
     batchUpdateLuckmailPurchases: async () => {},
     buildLocalhostCleanupPrefix: () => '',
@@ -121,13 +125,14 @@ function createRouterWithFinalNode(options = {}) {
   });
 
   return {
+    accountBookCalls,
     appendCalls,
     router,
   };
 }
 
 test('message router appends success record on Plus final step instead of hard-coded step 10', async () => {
-  const { appendCalls, router } = createRouterWithFinalNode({
+  const { appendCalls, accountBookCalls, router } = createRouterWithFinalNode({
     finalNodeId: 'platform-verify',
     nodeIds: ['open-chatgpt', 'oauth-login', 'fetch-login-code', 'confirm-oauth', 'platform-verify'],
     nodeStepMap: {
@@ -142,10 +147,11 @@ test('message router appends success record on Plus final step instead of hard-c
 
   assert.equal(appendCalls.length, 1);
   assert.equal(appendCalls[0][0], 'success');
+  assert.equal(accountBookCalls.some((call) => call[0] === 'flow_completed'), true);
 });
 
 test('message router appends success record when SUB2API session import is the final Plus node', async () => {
-  const { appendCalls, router } = createRouterWithFinalNode({
+  const { appendCalls, accountBookCalls, router } = createRouterWithFinalNode({
     finalNodeId: 'sub2api-session-import',
     nodeIds: [
       'open-chatgpt',
@@ -172,10 +178,11 @@ test('message router appends success record when SUB2API session import is the f
 
   assert.equal(appendCalls.length, 1);
   assert.equal(appendCalls[0][0], 'success');
+  assert.equal(accountBookCalls.some((call) => call[0] === 'flow_completed'), true);
 });
 
 test('message router appends success record when CPA session import is the final Plus node', async () => {
-  const { appendCalls, router } = createRouterWithFinalNode({
+  const { appendCalls, accountBookCalls, router } = createRouterWithFinalNode({
     finalNodeId: 'cpa-session-import',
     nodeIds: [
       'open-chatgpt',
@@ -202,4 +209,5 @@ test('message router appends success record when CPA session import is the final
 
   assert.equal(appendCalls.length, 1);
   assert.equal(appendCalls[0][0], 'success');
+  assert.equal(accountBookCalls.some((call) => call[0] === 'flow_completed'), true);
 });

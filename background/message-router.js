@@ -14,6 +14,7 @@
       cancelScheduledAutoRun,
       checkIcloudSession,
       clearAccountRunHistory,
+      clearAccountBook,
       deleteAccountRunHistoryRecords,
       clearAutoRunTimerAlarm,
       clearFreeReusablePhoneActivation,
@@ -190,6 +191,7 @@
       upsertPayPalAccount,
       upsertMail2925Account,
       upsertHotmailAccount,
+      upsertAccountBookEntry,
       verifyHotmailAccount,
     } = deps;
 
@@ -1067,8 +1069,18 @@
           await setNodeStatus(nodeId, 'completed');
           await addLog('已完成', 'ok', { nodeId });
           await handleStepData(resolvedStep, message.payload);
+          const postCompletionState = await getState();
+          if (
+            (nodeId === 'wait-registration-success' || nodeId === 'kiro-complete-register-consent')
+            && typeof upsertAccountBookEntry === 'function'
+          ) {
+            await upsertAccountBookEntry('registration_success', postCompletionState);
+          }
           if (isFinalNode && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
+          }
+          if (isFinalNode && typeof upsertAccountBookEntry === 'function') {
+            await upsertAccountBookEntry('flow_completed', postCompletionState);
           }
           notifyNodeComplete(nodeId, message.payload);
           return { ok: true };
@@ -1290,6 +1302,18 @@
             return { ok: true, clearedCount: 0 };
           }
           const result = await clearAccountRunHistory(state);
+          return { ok: true, ...result };
+        }
+
+        case 'CLEAR_ACCOUNT_BOOK': {
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能清空账号信息。');
+          }
+          if (typeof clearAccountBook !== 'function') {
+            return { ok: true, clearedCount: 0 };
+          }
+          const result = await clearAccountBook(state);
           return { ok: true, ...result };
         }
 
