@@ -166,6 +166,8 @@ const rowIpProxyAccountLifeMinutes = document.getElementById('row-ip-proxy-accou
 const inputIpProxyAccountLifeMinutes = document.getElementById('input-ip-proxy-account-life-minutes');
 const rowIpProxyPoolTargetCount = document.getElementById('row-ip-proxy-pool-target-count');
 const inputIpProxyPoolTargetCount = document.getElementById('input-ip-proxy-pool-target-count');
+const rowIpProxyAutoRefreshPoolOnExhausted = document.getElementById('row-ip-proxy-auto-refresh-pool-on-exhausted');
+const inputIpProxyAutoRefreshPoolOnExhausted = document.getElementById('input-ip-proxy-auto-refresh-pool-on-exhausted');
 const rowIpProxyAutoSyncEnabled = document.getElementById('row-ip-proxy-auto-sync-enabled');
 const inputIpProxyAutoSyncEnabled = document.getElementById('input-ip-proxy-auto-sync-enabled');
 const rowIpProxyAutoSyncInterval = document.getElementById('row-ip-proxy-auto-sync-interval');
@@ -4329,6 +4331,7 @@ function collectSettingsPayload() {
         accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(fallbackState?.ipProxyAccountSessionPrefix || ''),
         accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(fallbackState?.ipProxyAccountLifeMinutes || ''),
         poolTargetCount: normalizeIpProxyPoolTargetCountSafe(fallbackState?.ipProxyPoolTargetCount || '', 20),
+        autoRefreshPoolOnExhausted: Boolean(fallbackState?.ipProxyAutoRefreshPoolOnExhausted),
         host: String(fallbackState?.ipProxyHost || '').trim(),
         port: String(normalizeIpProxyPortSafe(fallbackState?.ipProxyPort || '') || ''),
         protocol: normalizeIpProxyProtocolSafe(fallbackState?.ipProxyProtocol || ''),
@@ -4350,6 +4353,7 @@ function collectSettingsPayload() {
           accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(source.accountSessionPrefix || fallbackProfile.accountSessionPrefix),
           accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(source.accountLifeMinutes || fallbackProfile.accountLifeMinutes),
           poolTargetCount: normalizeIpProxyPoolTargetCountSafe(source.poolTargetCount || fallbackProfile.poolTargetCount, 20),
+          autoRefreshPoolOnExhausted: Boolean(source.autoRefreshPoolOnExhausted ?? fallbackProfile.autoRefreshPoolOnExhausted),
           host: String(source.host || fallbackProfile.host || '').trim(),
           port: String(normalizeIpProxyPortSafe(source.port || fallbackProfile.port || '') || ''),
           protocol: normalizeIpProxyProtocolSafe(source.protocol || fallbackProfile.protocol),
@@ -4379,6 +4383,9 @@ function collectSettingsPayload() {
   const ipProxyPoolTargetCountRawValue = typeof inputIpProxyPoolTargetCount !== 'undefined'
     ? inputIpProxyPoolTargetCount?.value
     : '';
+  const ipProxyAutoRefreshPoolOnExhaustedRawValue = typeof inputIpProxyAutoRefreshPoolOnExhausted !== 'undefined'
+    ? Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked)
+    : Boolean(latestState?.ipProxyAutoRefreshPoolOnExhausted);
   const ipProxyAutoSyncEnabledRawValue = typeof inputIpProxyAutoSyncEnabled !== 'undefined'
     ? Boolean(inputIpProxyAutoSyncEnabled?.checked)
     : Boolean(latestState?.ipProxyAutoSyncEnabled);
@@ -4424,6 +4431,7 @@ function collectSettingsPayload() {
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(ipProxyAccountSessionPrefixRawValue || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(ipProxyAccountLifeMinutesRawValue || ''),
     poolTargetCount: normalizeIpProxyPoolTargetCountSafe(ipProxyPoolTargetCountRawValue || '', 20),
+    autoRefreshPoolOnExhausted: Boolean(ipProxyAutoRefreshPoolOnExhaustedRawValue),
     host: String(ipProxyHostRawValue || '').trim(),
     port: String(normalizeIpProxyPortSafe(ipProxyPortRawValue || '') || ''),
     protocol: normalizeIpProxyProtocolSafe(ipProxyProtocolRawValue),
@@ -4445,6 +4453,7 @@ function collectSettingsPayload() {
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: currentIpProxyServiceProfile.poolTargetCount,
+    ipProxyAutoRefreshPoolOnExhausted: Boolean(currentIpProxyServiceProfile.autoRefreshPoolOnExhausted),
     ipProxyHost: currentIpProxyServiceProfile.host,
     ipProxyPort: currentIpProxyServiceProfile.port,
     ipProxyProtocol: currentIpProxyServiceProfile.protocol,
@@ -4897,6 +4906,7 @@ function collectSettingsPayload() {
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: currentIpProxyServiceProfile.poolTargetCount,
+    ipProxyAutoRefreshPoolOnExhausted: Boolean(ipProxyAutoRefreshPoolOnExhaustedRawValue),
     ipProxyAutoSyncEnabled: Boolean(ipProxyAutoSyncEnabledRawValue),
     ipProxyAutoSyncIntervalMinutes: normalizeIpProxyAutoSyncIntervalMinutesSafe(
       ipProxyAutoSyncIntervalMinutesRawValue,
@@ -11203,6 +11213,7 @@ function applySettingsState(state) {
       accountSessionPrefix: resolveIpProxySessionPrefix(state?.ipProxyAccountSessionPrefix || ''),
       accountLifeMinutes: resolveIpProxyAccountLifeMinutes(state?.ipProxyAccountLifeMinutes || ''),
       poolTargetCount: resolveIpProxyPoolTargetCount(state?.ipProxyPoolTargetCount || ''),
+      autoRefreshPoolOnExhausted: Boolean(state?.ipProxyAutoRefreshPoolOnExhausted),
       host: String(state?.ipProxyHost || '').trim(),
       port: String(resolveIpProxyPort(state?.ipProxyPort || '') || ''),
       protocol: resolveIpProxyProtocol(state?.ipProxyProtocol),
@@ -11228,6 +11239,9 @@ function applySettingsState(state) {
   }
   if (typeof inputIpProxyPoolTargetCount !== 'undefined' && inputIpProxyPoolTargetCount) {
     inputIpProxyPoolTargetCount.value = activeIpProxyProfile.poolTargetCount;
+  }
+  if (typeof inputIpProxyAutoRefreshPoolOnExhausted !== 'undefined' && inputIpProxyAutoRefreshPoolOnExhausted) {
+    inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(activeIpProxyProfile.autoRefreshPoolOnExhausted);
   }
   if (typeof inputIpProxyAutoSyncEnabled !== 'undefined' && inputIpProxyAutoSyncEnabled) {
     inputIpProxyAutoSyncEnabled.checked = resolveIpProxyAutoSyncEnabled(state?.ipProxyAutoSyncEnabled);
@@ -15766,6 +15780,7 @@ function syncCurrentIpProxyServiceProfileToLatestState() {
       accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(inputIpProxyAccountSessionPrefix?.value || ''),
       accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(inputIpProxyAccountLifeMinutes?.value || ''),
       poolTargetCount: normalizeIpProxyPoolTargetCount(inputIpProxyPoolTargetCount?.value || '', 20),
+      autoRefreshPoolOnExhausted: Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked),
       host: String(inputIpProxyHost?.value || '').trim(),
       port: String(normalizeIpProxyPort(inputIpProxyPort?.value || '') || ''),
       protocol: normalizeIpProxyProtocol(selectIpProxyProtocol?.value || ''),
@@ -15839,6 +15854,7 @@ selectIpProxyService?.addEventListener('change', () => {
       accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(latestState?.ipProxyAccountSessionPrefix || ''),
       accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(latestState?.ipProxyAccountLifeMinutes || ''),
       poolTargetCount: normalizeIpProxyPoolTargetCount(latestState?.ipProxyPoolTargetCount || '', 20),
+      autoRefreshPoolOnExhausted: Boolean(latestState?.ipProxyAutoRefreshPoolOnExhausted),
       host: String(latestState?.ipProxyHost || '').trim(),
       port: String(normalizeIpProxyPort(latestState?.ipProxyPort || '') || ''),
       protocol: normalizeIpProxyProtocol(latestState?.ipProxyProtocol),
@@ -16371,6 +16387,14 @@ inputIpProxyPoolTargetCount?.addEventListener('input', () => {
 });
 inputIpProxyPoolTargetCount?.addEventListener('blur', () => {
   inputIpProxyPoolTargetCount.value = normalizeIpProxyPoolTargetCount(inputIpProxyPoolTargetCount.value || '', 20);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxyAutoRefreshPoolOnExhausted?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  if (typeof updateIpProxyUI === 'function') {
+    updateIpProxyUI(latestState);
+  }
   saveSettings({ silent: true }).catch(() => {});
 });
 
@@ -17589,6 +17613,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.ipProxyAccountSessionPrefix !== undefined
         || message.payload.ipProxyAccountLifeMinutes !== undefined
         || message.payload.ipProxyPoolTargetCount !== undefined
+        || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
         || message.payload.ipProxyHost !== undefined
         || message.payload.ipProxyPort !== undefined
         || message.payload.ipProxyProtocol !== undefined
@@ -17628,6 +17653,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           || message.payload.ipProxyAccountSessionPrefix !== undefined
           || message.payload.ipProxyAccountLifeMinutes !== undefined
           || message.payload.ipProxyPoolTargetCount !== undefined
+          || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
           || message.payload.ipProxyHost !== undefined
           || message.payload.ipProxyPort !== undefined
           || message.payload.ipProxyProtocol !== undefined
@@ -17661,6 +17687,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (message.payload.ipProxyEnabled !== undefined) {
           setIpProxyEnabled(Boolean(message.payload.ipProxyEnabled));
         }
+        if (message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined && inputIpProxyAutoRefreshPoolOnExhausted) {
+          inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(message.payload.ipProxyAutoRefreshPoolOnExhausted);
+        }
         if (message.payload.ipProxyAutoSyncEnabled !== undefined && inputIpProxyAutoSyncEnabled) {
           inputIpProxyAutoSyncEnabled.checked = Boolean(message.payload.ipProxyAutoSyncEnabled);
         }
@@ -17688,6 +17717,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(mergedProxyState?.ipProxyAccountSessionPrefix || ''),
               accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(mergedProxyState?.ipProxyAccountLifeMinutes || ''),
               poolTargetCount: normalizeIpProxyPoolTargetCount(mergedProxyState?.ipProxyPoolTargetCount || '', 20),
+              autoRefreshPoolOnExhausted: Boolean(mergedProxyState?.ipProxyAutoRefreshPoolOnExhausted),
               host: String(mergedProxyState?.ipProxyHost || '').trim(),
               port: String(normalizeIpProxyPort(mergedProxyState?.ipProxyPort || '') || ''),
               protocol: normalizeIpProxyProtocol(mergedProxyState?.ipProxyProtocol),
@@ -17704,6 +17734,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             if (inputIpProxyAccountSessionPrefix) inputIpProxyAccountSessionPrefix.value = activeProxyProfile.accountSessionPrefix;
             if (inputIpProxyAccountLifeMinutes) inputIpProxyAccountLifeMinutes.value = activeProxyProfile.accountLifeMinutes;
             if (inputIpProxyPoolTargetCount) inputIpProxyPoolTargetCount.value = activeProxyProfile.poolTargetCount;
+            if (inputIpProxyAutoRefreshPoolOnExhausted) inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(activeProxyProfile.autoRefreshPoolOnExhausted);
             if (inputIpProxyHost) inputIpProxyHost.value = activeProxyProfile.host;
             if (inputIpProxyPort) inputIpProxyPort.value = activeProxyProfile.port;
             if (selectIpProxyProtocol) selectIpProxyProtocol.value = normalizeIpProxyProtocol(activeProxyProfile.protocol);

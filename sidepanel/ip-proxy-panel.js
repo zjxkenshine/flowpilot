@@ -284,6 +284,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
     poolTargetCount: normalizeIpProxyPoolTargetCount(raw.poolTargetCount || '', 20),
+    autoRefreshPoolOnExhausted: Boolean(raw.autoRefreshPoolOnExhausted),
     autoSyncEnabled: Boolean(raw.autoSyncEnabled),
     autoSyncIntervalMinutes: String(Math.max(1, Math.min(1440, Number.parseInt(String(raw.autoSyncIntervalMinutes ?? '').trim(), 10) || 15))),
     host: String(raw.host || '').trim(),
@@ -324,6 +325,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,
     poolTargetCount: state?.ipProxyPoolTargetCount,
+    autoRefreshPoolOnExhausted: state?.ipProxyAutoRefreshPoolOnExhausted,
     autoSyncEnabled: state?.ipProxyAutoSyncEnabled,
     autoSyncIntervalMinutes: state?.ipProxyAutoSyncIntervalMinutes,
     host: state?.ipProxyHost,
@@ -515,6 +517,7 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     accountSessionPrefix: inputIpProxyAccountSessionPrefix?.value || '',
     accountLifeMinutes: inputIpProxyAccountLifeMinutes?.value || '',
     poolTargetCount: inputIpProxyPoolTargetCount?.value || '',
+    autoRefreshPoolOnExhausted: Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked),
     autoSyncEnabled: Boolean(inputIpProxyAutoSyncEnabled?.checked),
     autoSyncIntervalMinutes: inputIpProxyAutoSyncIntervalMinutes?.value || '',
     host: inputIpProxyHost?.value || '',
@@ -562,6 +565,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyAccountSessionPrefix: normalizedProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: normalizedProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: normalizedProfile.poolTargetCount,
+    ipProxyAutoRefreshPoolOnExhausted: Boolean(normalizedProfile.autoRefreshPoolOnExhausted),
     ipProxyAutoSyncEnabled: normalizedProfile.autoSyncEnabled,
     ipProxyAutoSyncIntervalMinutes: Number.parseInt(String(normalizedProfile.autoSyncIntervalMinutes || '15').trim(), 10) || 15,
     ipProxyHost: normalizedProfile.host,
@@ -624,6 +628,9 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (inputIpProxyPoolTargetCount) {
     inputIpProxyPoolTargetCount.value = normalizedProfile.poolTargetCount;
+  }
+  if (inputIpProxyAutoRefreshPoolOnExhausted) {
+    inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(normalizedProfile.autoRefreshPoolOnExhausted);
   }
   if (inputIpProxyAutoSyncEnabled) {
     inputIpProxyAutoSyncEnabled.checked = Boolean(normalizedProfile.autoSyncEnabled);
@@ -1505,6 +1512,7 @@ function updateIpProxyUI(state = latestState) {
   const accountListAvailable = isIpProxyAccountListAvailable();
   const isApiMode = mode === 'api' && apiModeAvailable;
   const isAccountMode = mode === 'account';
+  const is711ApiMode = isApiMode && service === '711proxy';
   const showSessionOptions = isAccountMode && service === '711proxy';
   const hasAccountListConfigured = accountListAvailable && isAccountMode && hasCurrentInputAccountListEntries();
   const canOperate = !isAutoRunLockedPhase() && !isAutoRunScheduledPhase();
@@ -1587,7 +1595,10 @@ function updateIpProxyUI(state = latestState) {
     rowIpProxyAccountLifeMinutes.style.display = showSettings && showSessionOptions ? '' : 'none';
   }
   if (rowIpProxyPoolTargetCount) {
-    rowIpProxyPoolTargetCount.style.display = showSettings ? '' : 'none';
+    rowIpProxyPoolTargetCount.style.display = showSettings && is711ApiMode ? '' : 'none';
+  }
+  if (typeof rowIpProxyAutoRefreshPoolOnExhausted !== 'undefined' && rowIpProxyAutoRefreshPoolOnExhausted) {
+    rowIpProxyAutoRefreshPoolOnExhausted.style.display = showSettings && is711ApiMode ? '' : 'none';
   }
   const autoSyncEnabledRow = typeof rowIpProxyAutoSyncEnabled !== 'undefined' ? rowIpProxyAutoSyncEnabled : null;
   const autoSyncIntervalRow = typeof rowIpProxyAutoSyncInterval !== 'undefined' ? rowIpProxyAutoSyncInterval : null;

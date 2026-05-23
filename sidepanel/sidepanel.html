@@ -1324,8 +1324,20 @@
                     <span class="data-label">任务切换阈值</span>
                     <div class="data-inline">
                       <input type="number" id="input-ip-proxy-pool-target-count" class="data-input" min="1" max="500" step="1"
-                        placeholder="20（成功轮次）" title="每成功多少轮任务后自动切换一次代理；仅 1 条节点时会跳过自动切换" />
+                        placeholder="20（成功轮次）" title="自动跑批每成功多少轮后轮换一次 711 API 代理" />
                       <span class="data-unit">轮</span>
+                    </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-auto-refresh-pool-on-exhausted" style="display:none;">
+                    <span class="data-label">池尾自动拉新池</span>
+                    <div class="data-inline">
+                      <label class="toggle-switch" for="input-ip-proxy-auto-refresh-pool-on-exhausted" title="仅用于 711 API 自动跑批成功轮换；走到当前池尾部时自动请求新 IP 池">
+                        <input type="checkbox" id="input-ip-proxy-auto-refresh-pool-on-exhausted" />
+                        <span class="toggle-switch-track" aria-hidden="true">
+                          <span class="toggle-switch-thumb"></span>
+                        </span>
+                      </label>
+                      <span class="data-value">到达当前 API 池尾部后，自动请求 711 API 拉取新 IP 池</span>
                     </div>
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-auto-sync-enabled" style="display:none;">

@@ -34,6 +34,7 @@
       isStopError,
       launchAutoRunTimerPlan,
       normalizeAutoRunFallbackThreadIntervalMinutes,
+      onAutoRunRoundSuccess,
       persistAutoRunTimerPlan,
       resetState,
       runAutoSequenceFromNode,
@@ -669,6 +670,24 @@
             await setState({
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
             });
+            if (typeof onAutoRunRoundSuccess === 'function') {
+              try {
+                await onAutoRunRoundSuccess({
+                  successfulRuns,
+                  targetRun,
+                  totalRuns,
+                  attemptRun,
+                  sessionId,
+                });
+              } catch (hookError) {
+                if (typeof addLog === 'function') {
+                  await addLog(
+                    `自动轮换 IP 失败，已跳过本轮后续处理：${getErrorMessage(hookError)}`,
+                    'warn'
+                  ).catch(() => {});
+                }
+              }
+            }
             await addLog(`=== 第 ${targetRun}/${totalRuns} 轮完成（第 ${attemptRun} 次尝试成功）===`, 'ok');
             break;
           } catch (err) {

@@ -16,6 +16,7 @@ test('background defaults enable free phone reuse switches', () => {
   assert.match(defaultsBlock, /freePhoneReuseEnabled:\s*true/);
   assert.match(defaultsBlock, /freePhoneReuseAutoEnabled:\s*true/);
   assert.match(defaultsBlock, /phoneSmsReuseEnabled:\s*DEFAULT_HERO_SMS_REUSE_ENABLED/);
+  assert.match(defaultsBlock, /ipProxyAutoRefreshPoolOnExhausted:\s*false/);
 });
 
 test('background free reusable phone setter does not depend on module-scoped phone flow constants', () => {

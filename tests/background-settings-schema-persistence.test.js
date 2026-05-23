@@ -102,6 +102,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyEnabled: false,
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
+  ipProxyAutoRefreshPoolOnExhausted: false,
   ipProxySpecialDomainRouteMode: 'local_proxy',
   kiroTargetId: 'kiro-rs',
   kiroRsUrl: '',
@@ -154,6 +155,7 @@ function buildIpProxyServiceProfileFromState() {
     accountSessionPrefix: '',
     accountLifeMinutes: '',
     poolTargetCount: '20',
+    autoRefreshPoolOnExhausted: false,
     host: '',
     port: '',
     protocol: 'http',
@@ -167,6 +169,7 @@ function normalizeIpProxyAccountList(value) { return String(value || ''); }
 function normalizeIpProxyAccountSessionPrefix(value) { return String(value || ''); }
 function normalizeIpProxyAccountLifeMinutes(value) { return String(value || ''); }
 function normalizeIpProxyPoolTargetCount(value) { return String(value || '20'); }
+function normalizeIpProxyAutoRefreshPoolOnExhausted(value) { return Boolean(value); }
 function normalizeIpProxyPort(value) { return String(value || '').trim(); }
 function normalizeIpProxyProtocol(value) { return String(value || 'http').trim() || 'http'; }
 function resolveSignupMethod(state = {}) {
@@ -220,6 +223,19 @@ test('buildPersistentSettingsPayload writes canonical settings schema into persi
     payload.settingsState.flows.kiro.targets['kiro-rs'].baseUrl,
     'https://kiro.example.com/admin'
   );
+});
+
+test('buildPersistentSettingsPayload preserves flat proxy auto-refresh-on-exhausted flag', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyAutoRefreshPoolOnExhausted: true,
+  }, { fillDefaults: true });
+
+  assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
 });
 
 test('buildPersistentSettingsPayload accepts schema-only input when requireKnownKeys is enabled', () => {

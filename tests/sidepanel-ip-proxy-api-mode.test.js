@@ -11,6 +11,7 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
     'input-ip-proxy-api-url',
     'input-ip-proxy-api-count',
     'input-ip-proxy-api-region',
+    'input-ip-proxy-auto-refresh-pool-on-exhausted',
     'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
     'select-ip-proxy-api-stype',
@@ -33,6 +34,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   [
     'inputIpProxyApiCount',
     'inputIpProxyApiRegion',
+    'inputIpProxyAutoRefreshPoolOnExhausted',
     'selectIpProxyApiHost',
     'selectIpProxyApiProto',
     'selectIpProxyApiStype',
@@ -51,4 +53,12 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(panelSource, /apiRegion/);
   assert.match(panelSource, /normalizeIpProxyApiRegionForPanel/);
   assert.match(panelSource, /apiSessType/);
+});
+
+test('sidepanel shows success-rotation controls only for 711 API mode', () => {
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  assert.match(panelSource, /const is711ApiMode = isApiMode && service === '711proxy';/);
+  assert.match(panelSource, /rowIpProxyPoolTargetCount\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
+  assert.match(panelSource, /rowIpProxyAutoRefreshPoolOnExhausted\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
 });
