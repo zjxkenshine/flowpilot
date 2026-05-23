@@ -3456,9 +3456,12 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
     )?.[provider]
       || buildIpProxyServiceProfileFromState(resolvedState)
   );
+  const specialDomainRouteModeOverride = String(options?.specialDomainRouteModeOverride || '').trim();
   const specialDomainFallback = resolveIpProxySpecialDomainFallback(
     effectiveEntry,
-    activeProfile?.specialDomainRouteMode || resolvedState?.ipProxySpecialDomainRouteMode
+    specialDomainRouteModeOverride
+      ? normalizeIpProxySpecialDomainRouteMode(specialDomainRouteModeOverride)
+      : (activeProfile?.specialDomainRouteMode || resolvedState?.ipProxySpecialDomainRouteMode)
   );
   const pacScript = buildIpProxyPacScript(effectiveEntry, {
     syncApiProfile: activeProfile,

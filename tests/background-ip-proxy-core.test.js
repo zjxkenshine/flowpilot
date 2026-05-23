@@ -47,6 +47,7 @@ const transformIpProxyAccountEntryByProvider = self.transformIpProxyAccountEntry
 ${coreSource}
 return {
   applyExitRegionExpectation,
+  applyIpProxySettingsFromState,
   buildIpProxyPacScript,
   build711ProxyApiUrl,
   chrome,
@@ -319,6 +320,89 @@ test('IP proxy PAC can route special domains direct', () => {
 
   assert.match(pac, /return "DIRECT";/);
   assert.doesNotMatch(pac, /PROXY 127\.0\.0\.1:7897/);
+});
+
+test('IP proxy apply supports a temporary direct override for special domains', async () => {
+  const api = loadIpProxyCore();
+  let appliedPac = '';
+  const stateUpdates = [];
+  const originalChrome = globalThis.chrome;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalAddLog = globalThis.addLog;
+
+  try {
+    api.chrome.proxy = {
+      settings: {
+        clear(_details, callback) {
+          callback();
+        },
+        set(details, callback) {
+          appliedPac = details?.value?.pacScript?.data || '';
+          callback();
+        },
+        get(_details, callback) {
+          callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: {
+              mode: 'pac_script',
+              pacScript: {
+                data: appliedPac,
+              },
+            },
+          });
+        },
+      },
+    };
+    api.chrome.runtime = {};
+    globalThis.chrome = api.chrome;
+    globalThis.setState = async (updates) => {
+      stateUpdates.push(updates);
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    globalThis.addLog = async () => {};
+
+    const status = await api.applyIpProxySettingsFromState({
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'account',
+      ipProxyHost: 'global.rotgb.711proxy.com',
+      ipProxyPort: '10000',
+      ipProxyProtocol: 'http',
+      ipProxySpecialDomainRouteMode: 'provider_proxy',
+    }, {
+      specialDomainRouteModeOverride: 'direct',
+      skipExitProbe: true,
+    });
+
+    assert.equal(status.applied, true);
+    assert.match(appliedPac, /forceDirectPatterns[\s\S]*return "DIRECT";[\s\S]*syncApiHosts/);
+    assert.equal(
+      stateUpdates.some((patch) => Object.hasOwn(patch, 'ipProxySpecialDomainRouteMode')),
+      false
+    );
+  } finally {
+    if (originalChrome === undefined) {
+      delete globalThis.chrome;
+    } else {
+      globalThis.chrome = originalChrome;
+    }
+    if (originalSetState === undefined) {
+      delete globalThis.setState;
+    } else {
+      globalThis.setState = originalSetState;
+    }
+    if (originalBroadcastDataUpdate === undefined) {
+      delete globalThis.broadcastDataUpdate;
+    } else {
+      globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    }
+    if (originalAddLog === undefined) {
+      delete globalThis.addLog;
+    } else {
+      globalThis.addLog = originalAddLog;
+    }
+  }
 });
 
 test('sidepanel loads IP proxy scripts before sidepanel bootstrap', () => {

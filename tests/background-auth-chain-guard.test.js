@@ -783,3 +783,217 @@ return {
     true
   );
 });
+
+function createSpecialDomainFallbackApi(routeMode = 'provider_proxy', options = {}) {
+  const events = {
+    applyCalls: [],
+    logs: [],
+    reloads: [],
+    waitStableCalls: [],
+    runCount: 0,
+  };
+  const api = new Function('events', 'routeMode', 'options', `
+const DEFAULT_IP_PROXY_SERVICE = '711proxy';
+const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
+const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
+const IP_PROXY_FORCE_DIRECT_HOST_PATTERNS = [
+  'pm-redirects.stripe.com',
+  '*.pm-redirects.stripe.com',
+  'hwork.pro',
+  '*.hwork.pro',
+  'auth.openai.com',
+  'auth0.openai.com',
+  'accounts.openai.com',
+  'luckyous.com',
+  '*.luckyous.com',
+];
+const state = {
+  ipProxyEnabled: true,
+  ipProxyService: '711proxy',
+  ipProxySpecialDomainRouteMode: routeMode,
+  ipProxyServiceProfiles: {
+    '711proxy': {
+      specialDomainRouteMode: routeMode,
+    },
+  },
+};
+const chrome = {
+  tabs: {
+    async get(tabId) {
+      return {
+        id: tabId,
+        url: options.tabUrl || 'https://auth.openai.com/authorize',
+      };
+    },
+    async reload(tabId, payload) {
+      events.reloads.push({ tabId, payload });
+    },
+  },
+};
+function normalizeIpProxySpecialDomainRouteMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES.includes(normalized)
+    ? normalized
+    : DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE;
+}
+function normalizeIpProxyProviderValue(value = '') {
+  return String(value || DEFAULT_IP_PROXY_SERVICE).trim().toLowerCase() || DEFAULT_IP_PROXY_SERVICE;
+}
+function normalizeIpProxyServiceProfiles(rawValue = {}) {
+  return rawValue;
+}
+function normalizeIpProxyServiceProfile(rawValue = {}) {
+  return rawValue || {};
+}
+function getErrorMessage(error) {
+  return error?.message || String(error || '');
+}
+async function getState() {
+  return { ...state, ipProxyServiceProfiles: { ...state.ipProxyServiceProfiles } };
+}
+async function addLog(message, level = 'info', extra = {}) {
+  events.logs.push({ message, level, extra });
+}
+async function applyIpProxySettingsFromState(_state, applyOptions = {}) {
+  events.applyCalls.push(applyOptions.specialDomainRouteModeOverride || '');
+  if (applyOptions.specialDomainRouteModeOverride === '' && options.failRestore) {
+    throw new Error('restore failed');
+  }
+  return { applied: true };
+}
+function getStepIdByNodeIdForState(nodeId) {
+  return nodeId === 'oauth-login' ? 7 : 6;
+}
+function getNodeDefinitionForState(nodeId) {
+  return { nodeId, executeKey: nodeId };
+}
+function getStepDefinitionForState(_step, _state) {
+  return { key: options.stepKey || 'oauth-login' };
+}
+function isStopError() {
+  return false;
+}
+function isTerminalSecurityBlockedError() {
+  return false;
+}
+function isBrowserSwitchRequiredError() {
+  return false;
+}
+function isPlusCheckoutNonFreeTrialFailure(error) {
+  return /PLUS_CHECKOUT_NON_FREE_TRIAL::/.test(getErrorMessage(error));
+}
+function isGpcTaskEndedFailure(error) {
+  return /GPC_TASK_ENDED::/.test(getErrorMessage(error));
+}
+function isPhoneSmsPlatformRateLimitFailure() {
+  return false;
+}
+function isAddPhoneAuthFailure() {
+  return false;
+}
+function isSignupUserAlreadyExistsFailure(error) {
+  return /user_already_exists/i.test(getErrorMessage(error));
+}
+function isSignupPhonePasswordMismatchFailure() {
+  return false;
+}
+function isSignupPhoneRetryFromStep2Failure() {
+  return false;
+}
+function isStep4Route405RecoveryLimitFailure() {
+  return false;
+}
+function isKiroProxyFailure() {
+  return false;
+}
+async function getTabId(source) {
+  if (source === 'signup-page') return 9;
+  if (source === 'plus-checkout') return 19;
+  return 0;
+}
+async function waitForTabStableComplete(tabId, payload) {
+  events.waitStableCalls.push({ tabId, payload });
+}
+${extractFunction('normalizeSpecialDomainRouteModeForExecution')}
+${extractFunction('normalizeIpProxyProviderForExecution')}
+${extractFunction('resolveIpProxyActiveProfileForState')}
+${extractFunction('isSpecialDomainDirectFallbackCandidateNode')}
+${extractFunction('isSpecialDomainDirectFallbackEnabledForNode')}
+${extractFunction('isBusinessTerminalErrorForSpecialDomainFallback')}
+${extractFunction('isSpecialDomainDirectFallbackError')}
+${extractFunction('getSpecialDomainFallbackTabSourcesForNode')}
+${extractFunction('getSpecialDomainHostPatterns')}
+${extractFunction('doesHostMatchSpecialDomainPattern')}
+${extractFunction('isSpecialDomainFallbackRecoveryUrl')}
+${extractFunction('recoverSpecialDomainFallbackTabsForNode')}
+${extractFunction('applySpecialDomainRouteModeOverrideForCurrentState')}
+${extractFunction('executeNodeWithSpecialDomainDirectFallback')}
+return {
+  async run(errorMessage = 'Failed to fetch') {
+    return executeNodeWithSpecialDomainDirectFallback('oauth-login', async () => {
+      events.runCount += 1;
+      if (events.runCount === 1) {
+        throw new Error(errorMessage);
+      }
+    }, { state });
+  },
+  snapshot() {
+    return events;
+  },
+};
+`)(events, routeMode, options);
+  return api;
+}
+
+test('special-domain provider proxy failure retries current node through direct and restores provider proxy', async () => {
+  const api = createSpecialDomainFallbackApi('provider_proxy');
+
+  await api.run('Failed to fetch');
+
+  const events = api.snapshot();
+  assert.equal(events.runCount, 2);
+  assert.deepStrictEqual(events.applyCalls, ['direct', '']);
+  assert.deepStrictEqual(events.reloads.map((entry) => entry.tabId), [9]);
+  assert.equal(events.logs.some((entry) => /DIRECT retry succeeded/.test(entry.message)), true);
+});
+
+test('special-domain fallback is skipped when route mode is not provider proxy', async () => {
+  const api = createSpecialDomainFallbackApi('local_proxy');
+
+  await assert.rejects(
+    () => api.run('Failed to fetch'),
+    /Failed to fetch/
+  );
+
+  const events = api.snapshot();
+  assert.equal(events.runCount, 1);
+  assert.deepStrictEqual(events.applyCalls, []);
+  assert.deepStrictEqual(events.reloads, []);
+});
+
+test('special-domain fallback does not retry business terminal failures', async () => {
+  const api = createSpecialDomainFallbackApi('provider_proxy');
+
+  await assert.rejects(
+    () => api.run('PLUS_CHECKOUT_NON_FREE_TRIAL::not free'),
+    /PLUS_CHECKOUT_NON_FREE_TRIAL/
+  );
+
+  const events = api.snapshot();
+  assert.equal(events.runCount, 1);
+  assert.deepStrictEqual(events.applyCalls, []);
+});
+
+test('special-domain fallback restore failure blocks successful retry from continuing', async () => {
+  const api = createSpecialDomainFallbackApi('provider_proxy', { failRestore: true });
+
+  await assert.rejects(
+    () => api.run('Failed to fetch'),
+    /SPECIAL_DOMAIN_DIRECT_FALLBACK_RESTORE_FAILED::restore failed/
+  );
+
+  const events = api.snapshot();
+  assert.equal(events.runCount, 2);
+  assert.deepStrictEqual(events.applyCalls, ['direct', '']);
+  assert.equal(events.logs.some((entry) => /failed to restore current IP proxy route/.test(entry.message)), true);
+});

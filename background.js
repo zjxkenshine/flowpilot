@@ -11542,6 +11542,328 @@ const STEP_FETCH_NETWORK_RETRY_POLICIES = new Map([
   [9, { maxAttempts: 3, cooldownMs: 12000 }],
 ]);
 
+function normalizeSpecialDomainRouteModeForExecution(value = '') {
+  if (typeof normalizeIpProxySpecialDomainRouteMode === 'function') {
+    return normalizeIpProxySpecialDomainRouteMode(value);
+  }
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = typeof IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES !== 'undefined'
+    && Array.isArray(IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES)
+    ? IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES
+    : ['local_proxy', 'direct', 'provider_proxy'];
+  if (allowed.includes(normalized)) {
+    return normalized;
+  }
+  return typeof DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE === 'string'
+    ? DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE
+    : 'local_proxy';
+}
+
+function normalizeIpProxyProviderForExecution(value = '') {
+  if (typeof normalizeIpProxyProviderValue === 'function') {
+    return normalizeIpProxyProviderValue(value);
+  }
+  const fallback = typeof DEFAULT_IP_PROXY_SERVICE === 'string' ? DEFAULT_IP_PROXY_SERVICE : '711proxy';
+  return String(value || fallback).trim().toLowerCase() || fallback;
+}
+
+function resolveIpProxyActiveProfileForState(state = {}) {
+  const provider = normalizeIpProxyProviderForExecution(state?.ipProxyService);
+  if (typeof normalizeIpProxyServiceProfiles === 'function') {
+    const profiles = normalizeIpProxyServiceProfiles(state?.ipProxyServiceProfiles || {}, state || {});
+    const profile = profiles?.[provider]
+      || (typeof buildIpProxyServiceProfileFromState === 'function'
+        ? buildIpProxyServiceProfileFromState(state)
+        : {});
+    return typeof normalizeIpProxyServiceProfile === 'function'
+      ? normalizeIpProxyServiceProfile(profile)
+      : (profile || {});
+  }
+  const rawProfiles = state?.ipProxyServiceProfiles && typeof state.ipProxyServiceProfiles === 'object'
+    ? state.ipProxyServiceProfiles
+    : {};
+  return {
+    ...(rawProfiles?.[provider] || {}),
+    specialDomainRouteMode: rawProfiles?.[provider]?.specialDomainRouteMode
+      || state?.ipProxySpecialDomainRouteMode
+      || '',
+  };
+}
+
+function isSpecialDomainDirectFallbackCandidateNode(nodeId, state = {}) {
+  const candidateKeys = new Set([
+    'oauth-login',
+    'fetch-login-code',
+    'post-login-phone-verification',
+    'bind-email',
+    'fetch-bind-email-code',
+    'relogin-bound-email',
+    'fetch-bound-email-login-code',
+    'post-bound-email-phone-verification',
+    'confirm-oauth',
+    'platform-verify',
+    'plus-checkout-create',
+    'paypal-hosted-openai-checkout',
+    'paypal-hosted-email',
+    'paypal-hosted-card',
+    'paypal-hosted-create-account',
+    'paypal-hosted-review',
+    'plus-checkout-billing',
+    'gopay-subscription-confirm',
+    'paypal-approve',
+    'plus-checkout-return',
+  ]);
+  const normalizedNodeId = String(nodeId || '').trim();
+  const step = typeof getStepIdByNodeIdForState === 'function'
+    ? getStepIdByNodeIdForState(normalizedNodeId, state)
+    : null;
+  const nodeDefinition = typeof getNodeDefinitionForState === 'function'
+    ? getNodeDefinitionForState(normalizedNodeId, state)
+    : null;
+  const stepDefinition = typeof getStepDefinitionForState === 'function'
+    ? getStepDefinitionForState(step, state)
+    : null;
+  return [
+    normalizedNodeId,
+    nodeDefinition?.executeKey,
+    nodeDefinition?.key,
+    stepDefinition?.executeKey,
+    stepDefinition?.key,
+  ]
+    .map((item) => String(item || '').trim())
+    .some((item) => candidateKeys.has(item));
+}
+
+function isSpecialDomainDirectFallbackEnabledForNode(nodeId, state = {}) {
+  if (!state?.ipProxyEnabled) {
+    return false;
+  }
+  if (!isSpecialDomainDirectFallbackCandidateNode(nodeId, state)) {
+    return false;
+  }
+  const activeProfile = resolveIpProxyActiveProfileForState(state);
+  const routeMode = normalizeSpecialDomainRouteModeForExecution(
+    activeProfile?.specialDomainRouteMode || state?.ipProxySpecialDomainRouteMode
+  );
+  return routeMode === 'provider_proxy';
+}
+
+function isBusinessTerminalErrorForSpecialDomainFallback(error) {
+  const checks = [
+    typeof isStopError === 'function' && isStopError(error),
+    typeof isTerminalSecurityBlockedError === 'function' && isTerminalSecurityBlockedError(error),
+    typeof isBrowserSwitchRequiredError === 'function' && isBrowserSwitchRequiredError(error),
+    typeof isPlusCheckoutNonFreeTrialFailure === 'function' && isPlusCheckoutNonFreeTrialFailure(error),
+    typeof isGpcTaskEndedFailure === 'function' && isGpcTaskEndedFailure(error),
+    typeof isPhoneSmsPlatformRateLimitFailure === 'function' && isPhoneSmsPlatformRateLimitFailure(error),
+    typeof isAddPhoneAuthFailure === 'function' && isAddPhoneAuthFailure(error),
+    typeof isSignupUserAlreadyExistsFailure === 'function' && isSignupUserAlreadyExistsFailure(error),
+    typeof isSignupPhonePasswordMismatchFailure === 'function' && isSignupPhonePasswordMismatchFailure(error),
+    typeof isSignupPhoneRetryFromStep2Failure === 'function' && isSignupPhoneRetryFromStep2Failure(error),
+    typeof isStep4Route405RecoveryLimitFailure === 'function' && isStep4Route405RecoveryLimitFailure(error),
+    typeof isKiroProxyFailure === 'function' && isKiroProxyFailure(error),
+  ];
+  return checks.some(Boolean);
+}
+
+function isSpecialDomainDirectFallbackError(error) {
+  if (isBusinessTerminalErrorForSpecialDomainFallback(error)) {
+    return false;
+  }
+  const message = getErrorMessage(error);
+  return /failed to fetch|network\s*error|networkerror|fetch failed|load failed|net::err_|err_tunnel_connection_failed|err_proxy_connection_failed|err_connection|err_timed_out|err_empty_response|err_name_not_resolved|chrome-error|message channel is closed|receiving end does not exist|did not respond in \d+s|content script.*(?:timeout|unresponsive)|target tab.*closed|目标标签页已关闭|页面正在跳转或重载|等待[^。；\n]*(?:页面|oauth|checkout|paypal|gopay|stripe|跳转|加载)[^。；\n]*(?:超时|失败)|(?:页面|授权|认证|oauth|checkout|paypal|gopay|stripe)[\s\S]{0,80}(?:跳转|加载)[\s\S]{0,80}(?:失败|超时|未完成|卡住)|(?:跳转|重定向)[\s\S]{0,80}(?:失败|超时|未完成|等待超时)|timeout waiting for oauth callback|oauth flow timed out|localhost[\s\S]{0,60}回调[\s\S]{0,60}超时|未(?:捕获|拿到|收到)[\s\S]{0,60}localhost[\s\S]{0,60}回调|登录超时(?:报错)?页|login timeout/i.test(message);
+}
+
+function getSpecialDomainFallbackTabSourcesForNode(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const step = typeof getStepIdByNodeIdForState === 'function'
+    ? getStepIdByNodeIdForState(normalizedNodeId, state)
+    : null;
+  const nodeDefinition = typeof getNodeDefinitionForState === 'function'
+    ? getNodeDefinitionForState(normalizedNodeId, state)
+    : null;
+  const stepDefinition = typeof getStepDefinitionForState === 'function'
+    ? getStepDefinitionForState(step, state)
+    : null;
+  const keys = [
+    normalizedNodeId,
+    nodeDefinition?.executeKey,
+    nodeDefinition?.key,
+    stepDefinition?.executeKey,
+    stepDefinition?.key,
+  ].map((item) => String(item || '').trim());
+  const hasPaymentKey = keys.some((key) => [
+    'plus-checkout-create',
+    'paypal-hosted-openai-checkout',
+    'paypal-hosted-email',
+    'paypal-hosted-card',
+    'paypal-hosted-create-account',
+    'paypal-hosted-review',
+    'plus-checkout-billing',
+    'gopay-subscription-confirm',
+    'paypal-approve',
+    'plus-checkout-return',
+  ].includes(key));
+  return hasPaymentKey
+    ? ['plus-checkout', 'paypal-flow', 'gopay-flow']
+    : ['signup-page'];
+}
+
+function getSpecialDomainHostPatterns() {
+  return typeof IP_PROXY_FORCE_DIRECT_HOST_PATTERNS !== 'undefined'
+    && Array.isArray(IP_PROXY_FORCE_DIRECT_HOST_PATTERNS)
+    ? IP_PROXY_FORCE_DIRECT_HOST_PATTERNS
+    : [
+      'pm-redirects.stripe.com',
+      '*.pm-redirects.stripe.com',
+      'hwork.pro',
+      '*.hwork.pro',
+      'auth.openai.com',
+      'auth0.openai.com',
+      'accounts.openai.com',
+      'luckyous.com',
+      '*.luckyous.com',
+    ];
+}
+
+function doesHostMatchSpecialDomainPattern(host = '', pattern = '') {
+  const normalizedHost = String(host || '').trim().toLowerCase().replace(/\.$/, '');
+  const normalizedPattern = String(pattern || '').trim().toLowerCase().replace(/\.$/, '');
+  if (!normalizedHost || !normalizedPattern) {
+    return false;
+  }
+  if (normalizedPattern.startsWith('*.')) {
+    const base = normalizedPattern.slice(2);
+    return normalizedHost === base || normalizedHost.endsWith(`.${base}`);
+  }
+  return normalizedHost === normalizedPattern || normalizedHost.endsWith(`.${normalizedPattern}`);
+}
+
+function isSpecialDomainFallbackRecoveryUrl(url = '') {
+  const text = String(url || '').trim();
+  if (/^(?:chrome-error|edge-error|about:neterror):/i.test(text)) {
+    return true;
+  }
+  try {
+    const parsed = new URL(text);
+    return getSpecialDomainHostPatterns().some((pattern) => (
+      doesHostMatchSpecialDomainPattern(parsed.hostname, pattern)
+    ));
+  } catch {
+    return false;
+  }
+}
+
+async function recoverSpecialDomainFallbackTabsForNode(nodeId, state = {}) {
+  if (typeof getTabId !== 'function' || !chrome?.tabs?.get || !chrome?.tabs?.reload) {
+    return;
+  }
+  const tabIds = new Set();
+  for (const source of getSpecialDomainFallbackTabSourcesForNode(nodeId, state)) {
+    const tabId = await Promise.resolve(getTabId(source)).catch(() => 0);
+    if (Number.isInteger(Number(tabId)) && Number(tabId) > 0) {
+      tabIds.add(Number(tabId));
+    }
+  }
+  for (const tabId of tabIds) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !isSpecialDomainFallbackRecoveryUrl(tab.url || '')) {
+      continue;
+    }
+    await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
+    if (typeof waitForTabStableComplete === 'function') {
+      await waitForTabStableComplete(tabId, {
+        timeoutMs: 30000,
+        retryDelayMs: 300,
+        stableMs: 800,
+        initialDelayMs: 500,
+      }).catch(() => {});
+    }
+  }
+}
+
+async function applySpecialDomainRouteModeOverrideForCurrentState(routeMode, options = {}) {
+  if (typeof applyIpProxySettingsFromState !== 'function') {
+    throw new Error('IP proxy apply helper is unavailable.');
+  }
+  const latestState = typeof getState === 'function' ? await getState() : {};
+  return applyIpProxySettingsFromState(latestState, {
+    ...options,
+    specialDomainRouteModeOverride: routeMode,
+    skipExitProbe: true,
+  });
+}
+
+async function executeNodeWithSpecialDomainDirectFallback(nodeId, runNodeOnce, context = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const initialState = context?.state || (typeof getState === 'function' ? await getState() : {});
+  if (!isSpecialDomainDirectFallbackEnabledForNode(normalizedNodeId, initialState)) {
+    return runNodeOnce();
+  }
+
+  try {
+    return await runNodeOnce();
+  } catch (firstError) {
+    if (!isSpecialDomainDirectFallbackError(firstError)) {
+      throw firstError;
+    }
+
+    await addLog(
+      `[SPECIAL_DOMAIN_FALLBACK] Node ${normalizedNodeId}: current IP proxy route failed (${getErrorMessage(firstError)}). Retrying this node with DIRECT for special domains once.`,
+      'warn',
+      { nodeId: normalizedNodeId }
+    );
+
+    try {
+      await applySpecialDomainRouteModeOverrideForCurrentState('direct');
+    } catch (switchError) {
+      await addLog(
+        `[SPECIAL_DOMAIN_FALLBACK] Node ${normalizedNodeId}: failed to switch special domains to DIRECT: ${getErrorMessage(switchError)}`,
+        'error',
+        { nodeId: normalizedNodeId }
+      );
+      throw new Error(`SPECIAL_DOMAIN_DIRECT_FALLBACK_SWITCH_FAILED::${getErrorMessage(switchError)}; original=${getErrorMessage(firstError)}`);
+    }
+
+    let retryError = null;
+    try {
+      const latestState = typeof getState === 'function' ? await getState() : initialState;
+      await recoverSpecialDomainFallbackTabsForNode(normalizedNodeId, latestState);
+      await runNodeOnce();
+    } catch (error) {
+      retryError = error;
+    }
+
+    let restoreError = null;
+    try {
+      await applySpecialDomainRouteModeOverrideForCurrentState('');
+    } catch (error) {
+      restoreError = error;
+    }
+
+    if (restoreError) {
+      const retrySuffix = retryError ? `; retry=${getErrorMessage(retryError)}` : '';
+      await addLog(
+        `[SPECIAL_DOMAIN_FALLBACK] Node ${normalizedNodeId}: failed to restore current IP proxy route: ${getErrorMessage(restoreError)}${retrySuffix}`,
+        'error',
+        { nodeId: normalizedNodeId }
+      );
+      throw new Error(`SPECIAL_DOMAIN_DIRECT_FALLBACK_RESTORE_FAILED::${getErrorMessage(restoreError)}${retrySuffix}`);
+    }
+
+    if (retryError) {
+      throw retryError;
+    }
+
+    await addLog(
+      `[SPECIAL_DOMAIN_FALLBACK] Node ${normalizedNodeId}: DIRECT retry succeeded and current IP proxy route has been restored.`,
+      'ok',
+      { nodeId: normalizedNodeId }
+    );
+    return undefined;
+  }
+}
+
 async function executeNode(nodeId, options = {}) {
   const { deferRetryableTransportError = false } = options;
   const normalizedNodeId = String(nodeId || '').trim();
@@ -11576,7 +11898,12 @@ async function executeNode(nodeId, options = {}) {
     };
     let attempt = 1;
 
-    while (true) {
+    const executeWithSpecialDomainFallback = typeof executeNodeWithSpecialDomainDirectFallback === 'function'
+      ? executeNodeWithSpecialDomainDirectFallback
+      : async (_nodeId, action) => action();
+    await executeWithSpecialDomainFallback(normalizedNodeId, async () => {
+      attempt = 1;
+      while (true) {
       state = await getState();
 
       // Set flow start time on first step
@@ -11609,6 +11936,13 @@ async function executeNode(nodeId, options = {}) {
         }
         break;
       } catch (attemptError) {
+        if (attempt === 1
+          && typeof isSpecialDomainDirectFallbackEnabledForNode === 'function'
+          && isSpecialDomainDirectFallbackEnabledForNode(normalizedNodeId, state)
+          && typeof isSpecialDomainDirectFallbackError === 'function'
+          && isSpecialDomainDirectFallbackError(attemptError)) {
+          throw attemptError;
+        }
         if (!fetchRetryPolicy || !isFetchRetryable(attemptError) || attempt >= fetchRetryPolicy.maxAttempts) {
           throw attemptError;
         }
@@ -11625,7 +11959,8 @@ async function executeNode(nodeId, options = {}) {
         }
         attempt = nextAttempt;
       }
-    }
+      }
+    }, { state });
   } catch (err) {
     executionError = err;
     const errorState = await getState();
