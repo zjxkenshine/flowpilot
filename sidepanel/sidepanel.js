@@ -4205,83 +4205,6 @@ function collectSettingsPayload() {
     : '';
   const normalizedIcloudTargetMailboxType = normalizeIcloudTargetMailboxType(icloudTargetMailboxTypeValue);
   const normalizedIcloudForwardMailProvider = normalizeIcloudForwardMailProvider(icloudForwardMailProviderValue);
-  const normalizeIpProxyServiceSafe = typeof normalizeIpProxyService === 'function'
-    ? normalizeIpProxyService
-    : ((value = '') => {
-      const normalized = String(value || '').trim().toLowerCase();
-      return ['711proxy'].includes(normalized)
-        ? normalized
-        : '711proxy';
-    });
-  const normalizeIpProxyModeSafe = typeof normalizeIpProxyMode === 'function'
-    ? normalizeIpProxyMode
-    : ((value = '') => {
-      const normalized = String(value || '').trim().toLowerCase();
-      return ['api', 'account'].includes(normalized) ? normalized : 'account';
-    });
-  const normalizeIpProxyProtocolSafe = typeof normalizeIpProxyProtocol === 'function'
-    ? normalizeIpProxyProtocol
-    : ((value = '') => {
-      const normalized = String(value || '').trim().toLowerCase();
-      return ['http', 'https', 'socks4', 'socks5'].includes(normalized) ? normalized : 'http';
-    });
-  const normalizeIpProxyPortSafe = typeof normalizeIpProxyPort === 'function'
-    ? normalizeIpProxyPort
-    : ((value = '') => {
-      const numeric = Number.parseInt(String(value || '').trim(), 10);
-      if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 65535) {
-        return 0;
-      }
-      return numeric;
-    });
-  const normalizeIpProxyPoolTargetCountSafe = typeof normalizeIpProxyPoolTargetCount === 'function'
-    ? normalizeIpProxyPoolTargetCount
-    : ((value = '', fallback = 20) => {
-      const rawValue = String(value ?? '').trim();
-      if (!rawValue) {
-        return String(Math.max(1, Math.min(500, Number(fallback) || 20)));
-      }
-      const numeric = Number.parseInt(rawValue, 10);
-      if (!Number.isInteger(numeric)) {
-        return String(Math.max(1, Math.min(500, Number(fallback) || 20)));
-      }
-      return String(Math.max(1, Math.min(500, numeric)));
-    });
-  const normalizeIpProxyAutoSyncIntervalMinutesSafe = (value = '', fallback = 15) => {
-    const rawValue = String(value ?? '').trim();
-    if (!rawValue) {
-      return Math.max(1, Math.min(1440, Number(fallback) || 15));
-    }
-    const numeric = Number.parseInt(rawValue, 10);
-    if (!Number.isFinite(numeric)) {
-      return Math.max(1, Math.min(1440, Number(fallback) || 15));
-    }
-    return Math.max(1, Math.min(1440, numeric));
-  };
-  const normalizeIpProxyAccountLifeMinutesSafe = typeof normalizeIpProxyAccountLifeMinutes === 'function'
-    ? normalizeIpProxyAccountLifeMinutes
-    : ((value = '', fallback = '') => {
-      const rawValue = String(value ?? '').trim();
-      if (!rawValue) {
-        return String(fallback || '').trim();
-      }
-      const numeric = Number.parseInt(rawValue, 10);
-      if (!Number.isInteger(numeric)) {
-        return String(fallback || '').trim();
-      }
-      return String(Math.max(1, Math.min(1440, numeric)));
-    });
-  const normalizeIpProxyAccountSessionPrefixSafe = typeof normalizeIpProxyAccountSessionPrefix === 'function'
-    ? normalizeIpProxyAccountSessionPrefix
-    : ((value = '') => String(value || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32));
-  const normalizeIpProxyAccountListSafe = typeof normalizeIpProxyAccountList === 'function'
-    ? normalizeIpProxyAccountList
-    : ((value = '') => String(value || '')
-      .replace(/\r/g, '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join('\n'));
   const normalizeGpcOtpChannelSafe = typeof normalizeGpcOtpChannelValue === 'function'
     ? normalizeGpcOtpChannelValue
     : ((value = '') => {
@@ -4315,164 +4238,34 @@ function collectSettingsPayload() {
   const getSelectedIpProxyEnabledSafe = typeof getSelectedIpProxyEnabled === 'function'
     ? getSelectedIpProxyEnabled
     : (() => false);
-  const getSelectedIpProxyModeSafe = typeof getSelectedIpProxyMode === 'function'
-    ? getSelectedIpProxyMode
-    : (() => 'account');
-  const isIpProxyApiModeEnabledSafe = typeof isIpProxyApiModeAvailable === 'function'
-    ? Boolean(isIpProxyApiModeAvailable())
-    : (typeof IP_PROXY_API_MODE_ENABLED !== 'undefined' ? Boolean(IP_PROXY_API_MODE_ENABLED) : false);
-  const normalizeIpProxyServiceProfilesSafe = typeof normalizeIpProxyServiceProfiles === 'function'
-    ? normalizeIpProxyServiceProfiles
-    : ((rawValue = {}, fallbackState = {}) => {
-      const raw = (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue))
-        ? rawValue
-        : {};
-      const services = ['711proxy'];
-      const fallbackProfile = {
-        mode: normalizeIpProxyModeSafe(fallbackState?.ipProxyMode || 'account'),
-        apiUrl: String(fallbackState?.ipProxyApiUrl || '').trim(),
-        accountList: normalizeIpProxyAccountListSafe(fallbackState?.ipProxyAccountList || ''),
-        accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(fallbackState?.ipProxyAccountSessionPrefix || ''),
-        accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(fallbackState?.ipProxyAccountLifeMinutes || ''),
-        poolTargetCount: normalizeIpProxyPoolTargetCountSafe(fallbackState?.ipProxyPoolTargetCount || '', 20),
-        autoRefreshPoolOnExhausted: Boolean(fallbackState?.ipProxyAutoRefreshPoolOnExhausted),
-        host: String(fallbackState?.ipProxyHost || '').trim(),
-        port: String(normalizeIpProxyPortSafe(fallbackState?.ipProxyPort || '') || ''),
-        protocol: normalizeIpProxyProtocolSafe(fallbackState?.ipProxyProtocol || ''),
-        username: String(fallbackState?.ipProxyUsername || '').trim(),
-        password: String(fallbackState?.ipProxyPassword || ''),
-        region: String(fallbackState?.ipProxyRegion || '').trim(),
-        apiRouteMode: String(fallbackState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
-        specialDomainRouteMode: String(fallbackState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
-      };
-      const result = {};
-      services.forEach((service) => {
-        const candidate = raw?.[service];
-        const source = (candidate && typeof candidate === 'object' && !Array.isArray(candidate))
-          ? candidate
-          : fallbackProfile;
-        result[service] = {
-          mode: normalizeIpProxyModeSafe(source.mode || fallbackProfile.mode),
-          apiUrl: String(source.apiUrl || fallbackProfile.apiUrl || '').trim(),
-          accountList: normalizeIpProxyAccountListSafe(source.accountList || fallbackProfile.accountList),
-          accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(source.accountSessionPrefix || fallbackProfile.accountSessionPrefix),
-          accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(source.accountLifeMinutes || fallbackProfile.accountLifeMinutes),
-          poolTargetCount: normalizeIpProxyPoolTargetCountSafe(source.poolTargetCount || fallbackProfile.poolTargetCount, 20),
-          autoRefreshPoolOnExhausted: Boolean(source.autoRefreshPoolOnExhausted ?? fallbackProfile.autoRefreshPoolOnExhausted),
-          host: String(source.host || fallbackProfile.host || '').trim(),
-          port: String(normalizeIpProxyPortSafe(source.port || fallbackProfile.port || '') || ''),
-          protocol: normalizeIpProxyProtocolSafe(source.protocol || fallbackProfile.protocol),
-          username: String(source.username || fallbackProfile.username || '').trim(),
-          password: String(source.password || fallbackProfile.password || ''),
-          region: String(source.region || fallbackProfile.region || '').trim(),
-          apiRouteMode: String(source.apiRouteMode || fallbackProfile.apiRouteMode || 'direct').trim().toLowerCase() || 'direct',
-          specialDomainRouteMode: String(source.specialDomainRouteMode || fallbackProfile.specialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
-        };
-      });
-      return result;
-    });
-  const ipProxyServiceRawValue = typeof selectIpProxyService !== 'undefined'
-    ? selectIpProxyService?.value
-    : '';
-  const ipProxyApiUrlRawValue = typeof inputIpProxyApiUrl !== 'undefined'
-    ? inputIpProxyApiUrl?.value
-    : '';
-  const ipProxyAccountListRawValue = typeof inputIpProxyAccountList !== 'undefined'
-    ? inputIpProxyAccountList?.value
-    : '';
-  const ipProxyAccountSessionPrefixRawValue = typeof inputIpProxyAccountSessionPrefix !== 'undefined'
-    ? inputIpProxyAccountSessionPrefix?.value
-    : '';
-  const ipProxyAccountLifeMinutesRawValue = typeof inputIpProxyAccountLifeMinutes !== 'undefined'
-    ? inputIpProxyAccountLifeMinutes?.value
-    : '';
-  const ipProxyPoolTargetCountRawValue = typeof inputIpProxyPoolTargetCount !== 'undefined'
-    ? inputIpProxyPoolTargetCount?.value
-    : '';
-  const ipProxyAutoRefreshPoolOnExhaustedRawValue = typeof inputIpProxyAutoRefreshPoolOnExhausted !== 'undefined'
-    ? Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked)
-    : Boolean(latestState?.ipProxyAutoRefreshPoolOnExhausted);
-  const ipProxyAutoSyncEnabledRawValue = typeof inputIpProxyAutoSyncEnabled !== 'undefined'
-    ? Boolean(inputIpProxyAutoSyncEnabled?.checked)
-    : Boolean(latestState?.ipProxyAutoSyncEnabled);
-  const ipProxyAutoSyncIntervalMinutesRawValue = typeof inputIpProxyAutoSyncIntervalMinutes !== 'undefined'
-    ? inputIpProxyAutoSyncIntervalMinutes?.value
-    : '';
-  const ipProxyHostRawValue = typeof inputIpProxyHost !== 'undefined'
-    ? inputIpProxyHost?.value
-    : '';
-  const ipProxyPortRawValue = typeof inputIpProxyPort !== 'undefined'
-    ? inputIpProxyPort?.value
-    : '';
-  const ipProxyProtocolRawValue = typeof selectIpProxyProtocol !== 'undefined'
-    ? selectIpProxyProtocol?.value
-    : '';
-  const ipProxyUsernameRawValue = typeof inputIpProxyUsername !== 'undefined'
-    ? inputIpProxyUsername?.value
-    : '';
-  const ipProxyPasswordRawValue = typeof inputIpProxyPassword !== 'undefined'
-    ? inputIpProxyPassword?.value
-    : '';
-  const ipProxyRegionRawValue = typeof inputIpProxyRegion !== 'undefined'
-    ? inputIpProxyRegion?.value
-    : '';
-  const ipProxyApiRouteModeRawValue = typeof selectIpProxyApiRouteMode !== 'undefined'
-    ? selectIpProxyApiRouteMode?.value
-    : '';
-  const ipProxySpecialDomainRouteModeRawValue = typeof selectIpProxySpecialDomainRouteMode !== 'undefined'
-    ? selectIpProxySpecialDomainRouteMode?.value
-    : '';
-  const selectedIpProxyService = normalizeIpProxyServiceSafe(
-    ipProxyServiceRawValue || latestState?.ipProxyService || '711proxy'
+  const defaultIpProxyService = typeof DEFAULT_IP_PROXY_SERVICE !== 'undefined'
+    ? DEFAULT_IP_PROXY_SERVICE
+    : '711proxy';
+  const currentIpProxyStateOverride = typeof buildCurrentIpProxyActionStateOverride === 'function'
+    ? buildCurrentIpProxyActionStateOverride(latestState)
+    : {};
+  const selectedIpProxyService = typeof normalizeIpProxyService === 'function'
+    ? normalizeIpProxyService(
+      currentIpProxyStateOverride?.ipProxyService
+      || latestState?.ipProxyService
+      || defaultIpProxyService
+    )
+    : String(currentIpProxyStateOverride?.ipProxyService || latestState?.ipProxyService || defaultIpProxyService).trim().toLowerCase() || defaultIpProxyService;
+  const currentIpProxyServiceProfile = (
+    currentIpProxyStateOverride?.ipProxyServiceProfiles?.[selectedIpProxyService]
+    || {}
   );
-  const selectedIpProxyModeRaw = normalizeIpProxyModeSafe(getSelectedIpProxyModeSafe());
-  const selectedIpProxyMode = (!isIpProxyApiModeEnabledSafe && selectedIpProxyModeRaw === 'api')
-    ? 'account'
-    : selectedIpProxyModeRaw;
-  const ipProxyApiRegionRawValue = typeof inputIpProxyApiRegion !== 'undefined'
-    ? inputIpProxyApiRegion?.value
-    : '';
-  const currentIpProxyServiceProfile = {
-    mode: selectedIpProxyMode,
-    apiUrl: String(ipProxyApiUrlRawValue || '').trim(),
-    apiRegion: String(ipProxyApiRegionRawValue || '').trim(),
-    accountList: normalizeIpProxyAccountListSafe(ipProxyAccountListRawValue || ''),
-    accountSessionPrefix: normalizeIpProxyAccountSessionPrefixSafe(ipProxyAccountSessionPrefixRawValue || ''),
-    accountLifeMinutes: normalizeIpProxyAccountLifeMinutesSafe(ipProxyAccountLifeMinutesRawValue || ''),
-    poolTargetCount: normalizeIpProxyPoolTargetCountSafe(ipProxyPoolTargetCountRawValue || '', 20),
-    autoRefreshPoolOnExhausted: Boolean(ipProxyAutoRefreshPoolOnExhaustedRawValue),
-    host: String(ipProxyHostRawValue || '').trim(),
-    port: String(normalizeIpProxyPortSafe(ipProxyPortRawValue || '') || ''),
-    protocol: normalizeIpProxyProtocolSafe(ipProxyProtocolRawValue),
-    username: String(ipProxyUsernameRawValue || '').trim(),
-    password: String(ipProxyPasswordRawValue || ''),
-    region: String(ipProxyRegionRawValue || '').trim(),
-    apiRouteMode: String(ipProxyApiRouteModeRawValue || latestState?.ipProxyApiRouteMode || 'direct').trim().toLowerCase() || 'direct',
-    specialDomainRouteMode: String(ipProxySpecialDomainRouteModeRawValue || latestState?.ipProxySpecialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy',
+  const normalizeIpProxyAutoSyncIntervalMinutesSafe = (value = '', fallback = 15) => {
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return Math.max(1, Math.min(1440, Number(fallback) || 15));
+    }
+    const numeric = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(numeric)) {
+      return Math.max(1, Math.min(1440, Number(fallback) || 15));
+    }
+    return Math.max(1, Math.min(1440, numeric));
   };
-  const ipProxyServiceProfiles = normalizeIpProxyServiceProfilesSafe({
-    ...(latestState?.ipProxyServiceProfiles || {}),
-    [selectedIpProxyService]: currentIpProxyServiceProfile,
-  }, {
-    ...(latestState || {}),
-    ipProxyService: selectedIpProxyService,
-    ipProxyMode: currentIpProxyServiceProfile.mode,
-    ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
-    ipProxyApiRegion: currentIpProxyServiceProfile.apiRegion,
-    ipProxyAccountList: currentIpProxyServiceProfile.accountList,
-    ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
-    ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
-    ipProxyPoolTargetCount: currentIpProxyServiceProfile.poolTargetCount,
-    ipProxyAutoRefreshPoolOnExhausted: Boolean(currentIpProxyServiceProfile.autoRefreshPoolOnExhausted),
-    ipProxyHost: currentIpProxyServiceProfile.host,
-    ipProxyPort: currentIpProxyServiceProfile.port,
-    ipProxyProtocol: currentIpProxyServiceProfile.protocol,
-    ipProxyUsername: currentIpProxyServiceProfile.username,
-    ipProxyPassword: currentIpProxyServiceProfile.password,
-    ipProxyRegion: currentIpProxyServiceProfile.region,
-    ipProxyApiRouteMode: currentIpProxyServiceProfile.apiRouteMode,
-    ipProxySpecialDomainRouteMode: currentIpProxyServiceProfile.specialDomainRouteMode,
-  });
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
     ? Boolean(inputMail2925UseAccountPool?.checked)
     : Boolean(latestState?.mail2925UseAccountPool);
@@ -4911,20 +4704,31 @@ function collectSettingsPayload() {
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
     ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
+    ipProxyApiHost: currentIpProxyStateOverride.ipProxyApiHost,
+    ipProxyApiCount: currentIpProxyStateOverride.ipProxyApiCount,
     ipProxyApiRegion: currentIpProxyServiceProfile.apiRegion,
-    ipProxyServiceProfiles,
+    ipProxyApiProto: currentIpProxyStateOverride.ipProxyApiProto,
+    ipProxyApiStype: currentIpProxyStateOverride.ipProxyApiStype,
+    ipProxyApiSplit: currentIpProxyStateOverride.ipProxyApiSplit,
+    ipProxyApiZone: currentIpProxyStateOverride.ipProxyApiZone,
+    ipProxyApiPtype: currentIpProxyStateOverride.ipProxyApiPtype,
+    ipProxyApiSessType: currentIpProxyStateOverride.ipProxyApiSessType,
+    ipProxyApiSessTime: currentIpProxyStateOverride.ipProxyApiSessTime,
+    ipProxyApiSessAuto: currentIpProxyStateOverride.ipProxyApiSessAuto,
+    ipProxyApiRefreshKey: currentIpProxyStateOverride.ipProxyApiRefreshKey,
+    ipProxyServiceProfiles: currentIpProxyStateOverride.ipProxyServiceProfiles,
     ipProxyAccountList: currentIpProxyServiceProfile.accountList,
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: currentIpProxyServiceProfile.poolTargetCount,
-    ipProxyAutoRefreshPoolOnExhausted: Boolean(ipProxyAutoRefreshPoolOnExhaustedRawValue),
-    ipProxyAutoSyncEnabled: Boolean(ipProxyAutoSyncEnabledRawValue),
+    ipProxyAutoRefreshPoolOnExhausted: Boolean(currentIpProxyStateOverride.ipProxyAutoRefreshPoolOnExhausted),
+    ipProxyAutoSyncEnabled: Boolean(currentIpProxyStateOverride.ipProxyAutoSyncEnabled),
     ipProxyAutoSyncIntervalMinutes: normalizeIpProxyAutoSyncIntervalMinutesSafe(
-      ipProxyAutoSyncIntervalMinutesRawValue,
+      currentIpProxyStateOverride.ipProxyAutoSyncIntervalMinutes,
       latestState?.ipProxyAutoSyncIntervalMinutes
     ),
     ipProxyHost: currentIpProxyServiceProfile.host,
-    ipProxyPort: normalizeIpProxyPortSafe(currentIpProxyServiceProfile.port),
+    ipProxyPort: Number.parseInt(String(currentIpProxyServiceProfile.port || '').trim(), 10) || 0,
     ipProxyProtocol: currentIpProxyServiceProfile.protocol,
     ipProxyUsername: currentIpProxyServiceProfile.username,
     ipProxyPassword: currentIpProxyServiceProfile.password,
@@ -15939,11 +15743,11 @@ btnIpProxyRefresh?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
       ? await runIpProxyActionWithLock('refresh', async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await refreshIpProxyPoolByApi();
       })
       : await (async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await refreshIpProxyPoolByApi();
         return { skipped: false };
       })();
@@ -15959,11 +15763,11 @@ btnIpProxyNext?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
       ? await runIpProxyActionWithLock('next', async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await switchIpProxyToNext();
       })
       : await (async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await switchIpProxyToNext();
         return { skipped: false };
       })();
@@ -15979,11 +15783,11 @@ btnIpProxyChange?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
       ? await runIpProxyActionWithLock('change', async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await changeIpProxyExitBySession();
       })
       : await (async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await changeIpProxyExitBySession();
         return { skipped: false };
       })();
@@ -15999,11 +15803,11 @@ btnIpProxyProbe?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
       ? await runIpProxyActionWithLock('probe', async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await probeIpProxyExit();
       })
       : await (async () => {
-        await saveSettings({ silent: true });
+        await persistCurrentSettingsForAction();
         await probeIpProxyExit();
         return { skipped: false };
       })();

@@ -408,3 +408,12 @@ return {
   assert.equal(snapshot.phonePersistCalls, 1);
   assert.deepStrictEqual(snapshot.saveCalls, [{ luckmailApiKey: 'autofilled-key' }]);
 });
+
+test('IP proxy action buttons persist current settings through the strong-consistency helper', () => {
+  const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+
+  assert.match(source, /btnIpProxyRefresh\?\.addEventListener\('click', async \(\) => \{[\s\S]*await persistCurrentSettingsForAction\(\);[\s\S]*await refreshIpProxyPoolByApi\(\);/);
+  assert.match(source, /btnIpProxyNext\?\.addEventListener\('click', async \(\) => \{[\s\S]*await persistCurrentSettingsForAction\(\);[\s\S]*await switchIpProxyToNext\(\);/);
+  assert.match(source, /btnIpProxyChange\?\.addEventListener\('click', async \(\) => \{[\s\S]*await persistCurrentSettingsForAction\(\);[\s\S]*await changeIpProxyExitBySession\(\);/);
+  assert.match(source, /btnIpProxyProbe\?\.addEventListener\('click', async \(\) => \{[\s\S]*await persistCurrentSettingsForAction\(\);[\s\S]*await probeIpProxyExit\(\);/);
+});

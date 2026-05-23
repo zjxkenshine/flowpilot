@@ -67,3 +67,16 @@ test('sidepanel shows success-rotation controls only for 711 API mode', () => {
   assert.match(panelSource, /rowIpProxyAutoRefreshPoolOnExhausted\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyProtocol\.style\.display = showSettings && isAccountMode \? '' : 'none';/);
 });
+
+test('sidepanel IP proxy actions send current normalized proxy override payload', () => {
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  assert.match(panelSource, /function buildCurrentIpProxyActionStateOverride\(state = latestState, options = \{\}\)/);
+  assert.match(panelSource, /ipProxyServiceProfiles: profiles/);
+  assert.match(panelSource, /buildIpProxyStatePatchFromServiceProfile\(selectedService, currentProfile\)/);
+  assert.match(panelSource, /ipProxyStateOverride,/);
+  assert.match(panelSource, /type: 'REFRESH_IP_PROXY_POOL'[\s\S]*ipProxyStateOverride/);
+  assert.match(panelSource, /type: 'SWITCH_IP_PROXY'[\s\S]*ipProxyStateOverride/);
+  assert.match(panelSource, /type: 'CHANGE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
+  assert.match(panelSource, /type: 'PROBE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
+});

@@ -984,3 +984,117 @@ test('SAVE_SETTING applies shared mode-switch normalization before persisting in
   });
   assert.equal(response.modeValidation?.errors?.[0]?.code, 'plus_mode_unsupported');
 });
+
+test('REFRESH_IP_PROXY_POOL prefers sidepanel ipProxyStateOverride over stale saved proxy API URL', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const calls = [];
+  const originalRefreshIpProxyPool = globalThis.refreshIpProxyPool;
+  globalThis.refreshIpProxyPool = async (options = {}) => {
+    calls.push(options);
+    return {
+      mode: options.mode || options.state?.ipProxyMode,
+      provider: options.state?.ipProxyService,
+      pool: [],
+    };
+  };
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+
+  try {
+    const router = api.createMessageRouter({
+      buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+      getState: async () => ({
+        ipProxyEnabled: true,
+        ipProxyService: '711proxy',
+        ipProxyMode: 'api',
+        ipProxyApiUrl: 'http://old.example.com/gen?count=1',
+        ipProxyServiceProfiles: {
+          '711proxy': {
+            mode: 'api',
+            apiUrl: 'http://old.example.com/gen?count=1',
+          },
+        },
+      }),
+    });
+
+    const response = await router.handleMessage({
+      type: 'REFRESH_IP_PROXY_POOL',
+      source: 'sidepanel',
+      payload: {
+        mode: 'api',
+        ipProxyStateOverride: {
+          ipProxyService: '711proxy',
+          ipProxyMode: 'api',
+          ipProxyApiUrl: 'http://new.example.com/gen?count=1',
+          ipProxyApiHost: 'http://new.example.com:8089',
+          ipProxyApiCount: '1',
+          ipProxyServiceProfiles: {
+            '711proxy': {
+              mode: 'api',
+              apiUrl: 'http://new.example.com/gen?count=1',
+              apiHost: 'http://new.example.com:8089',
+              apiCount: '1',
+            },
+          },
+        },
+      },
+    });
+
+    assert.equal(response.ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].state.ipProxyApiUrl, 'http://new.example.com/gen?count=1');
+    assert.equal(calls[0].state.ipProxyServiceProfiles['711proxy'].apiUrl, 'http://new.example.com/gen?count=1');
+  } finally {
+    if (originalRefreshIpProxyPool === undefined) {
+      delete globalThis.refreshIpProxyPool;
+    } else {
+      globalThis.refreshIpProxyPool = originalRefreshIpProxyPool;
+    }
+  }
+});
+
+test('PROBE_IP_PROXY_EXIT rebinding and probing use sidepanel ipProxyStateOverride', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const rebindCalls = [];
+  const probeCalls = [];
+
+  const router = api.createMessageRouter({
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyApiUrl: 'http://old.example.com/gen?count=1',
+      ipProxyAppliedReason: 'applied',
+      ipProxyAppliedExitError: '',
+    }),
+    lockAutomationWindowFromMessage: async () => {},
+    applyIpProxySettingsFromState: async (state) => {
+      rebindCalls.push(state);
+      return null;
+    },
+    probeIpProxyExit: async (options = {}) => {
+      probeCalls.push(options);
+      return { proxyRouting: { applied: true, provider: '711proxy' } };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'PROBE_IP_PROXY_EXIT',
+    source: 'sidepanel',
+    payload: {
+      ipProxyStateOverride: {
+        ipProxyEnabled: true,
+        ipProxyService: '711proxy',
+        ipProxyMode: 'api',
+        ipProxyApiUrl: 'http://new.example.com/gen?count=1',
+      },
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(rebindCalls[0].ipProxyApiUrl, 'http://new.example.com/gen?count=1');
+  assert.equal(probeCalls[0].state.ipProxyApiUrl, 'http://new.example.com/gen?count=1');
+});

@@ -53,6 +53,7 @@ return {
   createAutomationScopedTab,
   buildIpProxyRoutingStatePatch,
   applyTargetReachabilityExpectation,
+  pullIpProxyPoolFromApi,
   getAccountModeProxyPoolFromState,
   normalize711ProxyApiConfig,
   normalizeIpProxyAccountList,
@@ -510,6 +511,28 @@ test('711 JSON API payload normalization supports wrapped object candidates', ()
       provider: '711proxy',
     }]
   );
+});
+
+test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snapshot', async () => {
+  const api = loadIpProxyCore();
+  const fetchCalls = [];
+  global.fetch = async (url) => {
+    fetchCalls.push(url);
+    return {
+      ok: true,
+      text: async () => '1.2.3.4:8080:user:pass',
+    };
+  };
+
+  const pool = await api.pullIpProxyPoolFromApi({
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyApiUrl: 'http://new.example.com/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+  });
+
+  assert.equal(fetchCalls[0], 'http://new.example.com/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating');
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].host, '1.2.3.4');
 });
 
 test('target reachability failure turns detected exit IP into connectivity_failed', () => {

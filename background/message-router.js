@@ -278,6 +278,29 @@
       preserveKeyFromState(updates, currentState, 'phonePreferredActivation');
     }
 
+    function pickIpProxyOverridePayload(payload = {}) {
+      const source = payload?.ipProxyStateOverride;
+      if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        return {};
+      }
+      const allowedEntries = Object.entries(source).filter(([key]) => /^ipProxy[A-Z_]/.test(String(key || '')));
+      return Object.fromEntries(allowedEntries);
+    }
+
+    function buildResolvedIpProxyState(currentState = {}, payload = {}) {
+      const overridePayload = pickIpProxyOverridePayload(payload);
+      if (!Object.keys(overridePayload).length) {
+        return currentState;
+      }
+      const normalizedOverride = typeof buildPersistentSettingsPayload === 'function'
+        ? buildPersistentSettingsPayload(overridePayload)
+        : overridePayload;
+      return {
+        ...(currentState || {}),
+        ...(normalizedOverride || {}),
+      };
+    }
+
     async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null, reason = '') {
       if (typeof appendAccountRunRecord !== 'function') {
         return null;
@@ -1745,10 +1768,13 @@
           if (typeof refreshIpProxyPool !== 'function') {
             throw new Error('IP 代理池能力尚未接入。');
           }
+          const currentState = await getState();
+          const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
           const result = await refreshIpProxyPool({
             maxItems: message.payload?.maxItems,
             mode: message.payload?.mode,
             skipExitProbe: message.payload?.skipExitProbe,
+            state: resolvedState,
           });
           return { ok: true, ...result };
         }
@@ -1757,11 +1783,14 @@
           if (typeof switchIpProxy !== 'function') {
             throw new Error('IP 代理切换能力尚未接入。');
           }
+          const currentState = await getState();
+          const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
           const result = await switchIpProxy(message.payload?.direction || 'next', {
             maxItems: message.payload?.maxItems,
             mode: message.payload?.mode,
             forceRefresh: message.payload?.forceRefresh,
             skipExitProbe: message.payload?.skipExitProbe,
+            state: resolvedState,
           });
           return { ok: true, ...result };
         }
@@ -1770,9 +1799,12 @@
           if (typeof changeIpProxyExit !== 'function') {
             throw new Error('IP 代理 Change 能力尚未接入。');
           }
+          const currentState = await getState();
+          const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
           const result = await changeIpProxyExit({
             mode: message.payload?.mode,
             skipExitProbe: message.payload?.skipExitProbe,
+            state: resolvedState,
           });
           return { ok: true, ...result };
         }
@@ -1784,7 +1816,8 @@
           if (typeof probeIpProxyExit !== 'function') {
             throw new Error('IP 代理出口检测能力尚未接入。');
           }
-          const probeState = await getState();
+          const currentState = await getState();
+          const probeState = buildResolvedIpProxyState(currentState, message.payload || {});
           const mode = typeof normalizeIpProxyMode === 'function'
             ? normalizeIpProxyMode(probeState?.ipProxyMode)
             : String(probeState?.ipProxyMode || 'account').trim().toLowerCase();
@@ -1817,6 +1850,7 @@
           const result = await probeIpProxyExit({
             timeoutMs,
             authRebindMaxAttempts: is711AccountMode ? 1 : undefined,
+            state: probeState,
           });
           return { ok: true, ...result };
         }

@@ -675,9 +675,41 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     }
     return Math.max(1, Math.min(1440, numeric));
   };
+  const normalizedApiConfig = typeof normalize711ProxyApiConfig === 'function'
+    ? normalize711ProxyApiConfig({
+      apiUrl: raw.apiUrl || '',
+      count: raw.apiCount,
+      host: raw.apiHost,
+      region: raw.apiRegion,
+      proto: raw.apiProto,
+      stype: raw.apiStype,
+      split: raw.apiSplit,
+      zone: raw.apiZone,
+      ptype: raw.apiPtype,
+      sessType: raw.apiSessType,
+      sessTime: raw.apiSessTime,
+      sessAuto: raw.apiSessAuto,
+    })
+    : null;
   return {
     mode: normalizeIpProxyMode(raw.mode),
-    apiUrl: String(raw.apiUrl || '').trim(),
+    apiUrl: String(
+      normalizedApiConfig && typeof build711ProxyApiUrl === 'function'
+        ? build711ProxyApiUrl(raw.apiUrl || normalizedApiConfig.apiUrl || '', normalizedApiConfig)
+        : (normalizedApiConfig?.apiUrl || raw.apiUrl || '')
+    ).trim(),
+    apiHost: String(normalizedApiConfig?.host || raw.apiHost || '').trim(),
+    apiCount: String(normalizedApiConfig?.count || raw.apiCount || '').trim(),
+    apiRegion: String(normalizedApiConfig?.region || raw.apiRegion || '').trim(),
+    apiProto: String(normalizedApiConfig?.proto || raw.apiProto || '').trim(),
+    apiStype: String(normalizedApiConfig?.stype || raw.apiStype || '').trim(),
+    apiSplit: String(normalizedApiConfig?.split || raw.apiSplit || '').trim(),
+    apiZone: String(normalizedApiConfig?.zone || raw.apiZone || '').trim(),
+    apiPtype: String(normalizedApiConfig?.ptype || raw.apiPtype || '').trim(),
+    apiSessType: String(normalizedApiConfig?.sessType || raw.apiSessType || '').trim(),
+    apiSessTime: String(normalizedApiConfig?.sessTime || raw.apiSessTime || '').trim(),
+    apiSessAuto: String(normalizedApiConfig?.sessAuto || raw.apiSessAuto || '').trim(),
+    apiRefreshKey: String(raw.apiRefreshKey || '').trim(),
     accountList: normalizeIpProxyAccountList(raw.accountList || ''),
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
@@ -700,6 +732,18 @@ function buildIpProxyServiceProfileFromState(state = {}) {
   return normalizeIpProxyServiceProfile({
     mode: state?.ipProxyMode,
     apiUrl: state?.ipProxyApiUrl,
+    apiHost: state?.ipProxyApiHost,
+    apiCount: state?.ipProxyApiCount,
+    apiRegion: state?.ipProxyApiRegion,
+    apiProto: state?.ipProxyApiProto,
+    apiStype: state?.ipProxyApiStype,
+    apiSplit: state?.ipProxyApiSplit,
+    apiZone: state?.ipProxyApiZone,
+    apiPtype: state?.ipProxyApiPtype,
+    apiSessType: state?.ipProxyApiSessType,
+    apiSessTime: state?.ipProxyApiSessTime,
+    apiSessAuto: state?.ipProxyApiSessAuto,
+    apiRefreshKey: state?.ipProxyApiRefreshKey,
     accountList: state?.ipProxyAccountList,
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,

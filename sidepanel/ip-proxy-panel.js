@@ -588,6 +588,29 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
   };
 }
 
+function buildCurrentIpProxyActionStateOverride(state = latestState, options = {}) {
+  const selectedService = normalizeIpProxyService(
+    options?.service
+    || selectIpProxyService?.value
+    || state?.ipProxyService
+    || DEFAULT_IP_PROXY_SERVICE
+  );
+  const profiles = typeof buildIpProxyServiceProfilesPatch === 'function'
+    ? buildIpProxyServiceProfilesPatch(selectedService, state || {})
+    : getIpProxyServiceProfilesFromState(state || {});
+  const currentProfile = normalizeIpProxyServiceProfile(
+    profiles[selectedService]
+      || buildCurrentIpProxyServiceProfileFromInputs()
+  );
+  return {
+    ipProxyService: selectedService,
+    ipProxyServiceProfiles: profiles,
+    ...(typeof buildIpProxyStatePatchFromServiceProfile === 'function'
+      ? buildIpProxyStatePatchFromServiceProfile(selectedService, currentProfile)
+      : {}),
+  };
+}
+
 function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   const { keepMode = false } = options;
   const normalizedProfile = normalizeIpProxyServiceProfile(profile);
@@ -1814,12 +1837,16 @@ function updateIpProxyUI(state = latestState) {
 async function refreshIpProxyPoolByApi(options = {}) {
   const { silent = false } = options;
   const mode = normalizeIpProxyModeForCurrentRelease(getSelectedIpProxyMode());
+  const ipProxyStateOverride = typeof buildCurrentIpProxyActionStateOverride === 'function'
+    ? buildCurrentIpProxyActionStateOverride(latestState)
+    : undefined;
   const response = await chrome.runtime.sendMessage({
     type: 'REFRESH_IP_PROXY_POOL',
     source: 'sidepanel',
     payload: {
       mode,
       skipExitProbe: true,
+      ipProxyStateOverride,
     },
   });
   if (response?.error) {
@@ -1865,6 +1892,9 @@ async function refreshIpProxyPoolByApi(options = {}) {
 async function switchIpProxyToNext(options = {}) {
   const { silent = false } = options;
   const mode = normalizeIpProxyModeForCurrentRelease(getSelectedIpProxyMode());
+  const ipProxyStateOverride = typeof buildCurrentIpProxyActionStateOverride === 'function'
+    ? buildCurrentIpProxyActionStateOverride(latestState)
+    : undefined;
   const response = await chrome.runtime.sendMessage({
     type: 'SWITCH_IP_PROXY',
     source: 'sidepanel',
@@ -1873,6 +1903,7 @@ async function switchIpProxyToNext(options = {}) {
       mode,
       forceRefresh: false,
       skipExitProbe: true,
+      ipProxyStateOverride,
     },
   });
   if (response?.error) {
@@ -1912,12 +1943,16 @@ async function switchIpProxyToNext(options = {}) {
 async function changeIpProxyExitBySession(options = {}) {
   const { silent = false } = options;
   const mode = normalizeIpProxyModeForCurrentRelease(getSelectedIpProxyMode());
+  const ipProxyStateOverride = typeof buildCurrentIpProxyActionStateOverride === 'function'
+    ? buildCurrentIpProxyActionStateOverride(latestState)
+    : undefined;
   const response = await chrome.runtime.sendMessage({
     type: 'CHANGE_IP_PROXY_EXIT',
     source: 'sidepanel',
     payload: {
       mode,
       skipExitProbe: true,
+      ipProxyStateOverride,
     },
   });
   if (response?.error) {
@@ -1959,10 +1994,15 @@ async function probeIpProxyExit(options = {}) {
   const sendMessage = typeof sendSidepanelMessage === 'function'
     ? sendSidepanelMessage
     : (message) => chrome.runtime.sendMessage(message);
+  const ipProxyStateOverride = typeof buildCurrentIpProxyActionStateOverride === 'function'
+    ? buildCurrentIpProxyActionStateOverride(latestState)
+    : undefined;
   const response = await sendMessage({
     type: 'PROBE_IP_PROXY_EXIT',
     source: 'sidepanel',
-    payload: {},
+    payload: {
+      ipProxyStateOverride,
+    },
   });
   if (response?.error) {
     throw new Error(response.error);
