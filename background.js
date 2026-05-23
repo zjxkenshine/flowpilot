@@ -12202,6 +12202,36 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
     ? resolveIpProxyPoolTargetCountForMode(state, mode)
     : undefined;
 
+  const switchToFirstEntryFromFreshPool = async (refreshResult, sourceState = state) => {
+    const refreshedPool = Array.isArray(refreshResult?.pool) ? refreshResult.pool : [];
+    if (!refreshedPool.length) {
+      return refreshResult;
+    }
+    const preSwitchIndex = Math.max(0, refreshedPool.length - 1);
+    const preSwitchCurrent = refreshedPool[preSwitchIndex] || null;
+    const refreshDisplay = String(refreshResult?.display || '').trim();
+    if (typeof addLog === 'function') {
+      await addLog(
+        `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已先从 711 同步新池${refreshDisplay ? `：${refreshDisplay}` : ''}，继续切换到新池下一条。`,
+        'info'
+      );
+    }
+    return switchIpProxy('next', {
+      mode,
+      state: {
+        ...sourceState,
+        ...buildIpProxyRuntimeStatePatch('api', {
+          pool: refreshedPool,
+          index: preSwitchIndex,
+          current: preSwitchCurrent,
+        }, '711proxy'),
+      },
+      forceRefresh: false,
+      skipExitProbe: true,
+      maxItems,
+    });
+  };
+
   const runSingleAttempt = async () => {
     if (!pool.length) {
       if (!autoRefreshPoolOnExhausted) {
@@ -12216,12 +12246,13 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
           successfulRuns,
         };
       }
-      return refreshIpProxyPool({
+      const refreshed = await refreshIpProxyPool({
         mode: 'api',
         state,
         skipExitProbe: true,
         maxItems,
       });
+      return switchToFirstEntryFromFreshPool(refreshed, state);
     }
 
     const isAtPoolTail = currentIndex >= pool.length - 1;
@@ -12240,12 +12271,13 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
           index: currentIndex,
         };
       }
-      return refreshIpProxyPool({
+      const refreshed = await refreshIpProxyPool({
         mode: 'api',
         state,
         skipExitProbe: true,
         maxItems,
       });
+      return switchToFirstEntryFromFreshPool(refreshed, state);
     }
 
     return switchIpProxy('next', {
@@ -12268,7 +12300,7 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
       const routingApplied = Boolean(result?.proxyRouting?.applied);
       await addLog(
         routingApplied
-          ? `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已自动轮换代理：${display || '已切换到下一条'}。`
+          ? `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已按下一条语义自动轮换代理：${display || '已切换到下一条'}。`
           : `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已尝试自动轮换代理，但连通性仍异常。`,
         routingApplied ? 'ok' : 'warn'
       );

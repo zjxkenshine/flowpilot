@@ -1,9 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const source = fs.readFileSync('background.js', 'utf8');
 
 test('background imports auto-run controller module', () => {
-  const source = fs.readFileSync('background.js', 'utf8');
   assert.match(source, /background\/auto-run-controller\.js/);
   assert.match(source, /buildFreshAutoRunKeepState/);
 });
@@ -157,4 +157,240 @@ test('auto-run controller invokes success hook after a successful round', async 
     attemptRun: 1,
     sessionId: 1,
   });
+});
+
+function extractFunction(name) {
+  const markers = [`async function ${name}(`, `function ${name}(`];
+  const start = markers
+    .map((marker) => source.indexOf(marker))
+    .find((index) => index >= 0);
+  if (start < 0) {
+    throw new Error(`missing function ${name}`);
+  }
+
+  let parenDepth = 0;
+  let signatureEnded = false;
+  let braceStart = -1;
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === '(') {
+      parenDepth += 1;
+    } else if (ch === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        signatureEnded = true;
+      }
+    } else if (ch === '{' && signatureEnded) {
+      braceStart = i;
+      break;
+    }
+  }
+
+  if (braceStart < 0) {
+    throw new Error(`missing body for function ${name}`);
+  }
+
+  let depth = 0;
+  let end = braceStart;
+  for (; end < source.length; end += 1) {
+    const ch = source[end];
+    if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end += 1;
+        break;
+      }
+    }
+  }
+
+  return source.slice(start, end);
+}
+
+function createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness(overrides = {}) {
+  const events = {
+    logs: [],
+    refreshCalls: [],
+    switchCalls: [],
+  };
+  let currentState = overrides.state || {};
+  const runtimePatchCalls = [];
+  const api = new Function(
+    'deps',
+    `
+const {
+  getState,
+  addLog,
+  switchIpProxy,
+  refreshIpProxyPool,
+  getIpProxyRuntimeSnapshot,
+  buildIpProxyRuntimeStatePatch,
+  normalizeIpProxyMode,
+  normalizeIpProxyProviderValue,
+  resolveIpProxyAutoSwitchThreshold,
+  resolveIpProxyPoolTargetCountForMode,
+  DEFAULT_IP_PROXY_SERVICE,
+} = deps;
+${extractFunction('maybeSwitchIpProxyAfterAutoRunRoundSuccess')}
+return maybeSwitchIpProxyAfterAutoRunRoundSuccess;
+`
+  )({
+    getState: async () => currentState,
+    addLog: async (message, level) => {
+      events.logs.push({ message, level });
+    },
+    switchIpProxy: async (direction, options = {}) => {
+      events.switchCalls.push({ direction, options });
+      if (typeof overrides.switchIpProxy === 'function') {
+        return overrides.switchIpProxy(direction, options, events);
+      }
+      return {
+        display: '1.2.3.4:9000 (1/3)',
+        proxyRouting: { applied: true },
+      };
+    },
+    refreshIpProxyPool: async (options = {}) => {
+      events.refreshCalls.push({ options });
+      if (typeof overrides.refreshIpProxyPool === 'function') {
+        return overrides.refreshIpProxyPool(options, events);
+      }
+      return {
+        display: '1.2.3.4:9000 (1/3)',
+        pool: [{ host: '1.2.3.4', port: 9000 }],
+        proxyRouting: { applied: true },
+      };
+    },
+    getIpProxyRuntimeSnapshot: overrides.getIpProxyRuntimeSnapshot || (() => (
+      overrides.runtimeSnapshot || { pool: [], index: 0 }
+    )),
+    buildIpProxyRuntimeStatePatch: overrides.buildIpProxyRuntimeStatePatch || ((mode, runtime, provider) => {
+      runtimePatchCalls.push({ mode, runtime, provider });
+      return {
+        ipProxyApiPool: runtime.pool,
+        ipProxyApiCurrentIndex: runtime.index,
+        ipProxyApiCurrent: runtime.current,
+      };
+    }),
+    normalizeIpProxyMode: overrides.normalizeIpProxyMode || ((value) => String(value || '').trim().toLowerCase()),
+    normalizeIpProxyProviderValue: overrides.normalizeIpProxyProviderValue || ((value) => String(value || '').trim().toLowerCase()),
+    resolveIpProxyAutoSwitchThreshold: overrides.resolveIpProxyAutoSwitchThreshold || ((state) => Number(state.ipProxyPoolTargetCount) || 20),
+    resolveIpProxyPoolTargetCountForMode: overrides.resolveIpProxyPoolTargetCountForMode || (() => 100),
+    DEFAULT_IP_PROXY_SERVICE: '711proxy',
+  });
+
+  return {
+    events,
+    runtimePatchCalls,
+    setState(nextState) {
+      currentState = nextState;
+    },
+    run: (payload = {}) => api(payload),
+  };
+}
+
+test('success rotation hook does not rotate before hitting threshold', async () => {
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '3',
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.2.3.4', port: 9000 }, { host: '5.6.7.8', port: 10000 }],
+      index: 0,
+    },
+  });
+
+  const result = await harness.run({ successfulRuns: 2 });
+  assert.equal(result, null);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.equal(harness.events.refreshCalls.length, 0);
+});
+
+test('success rotation hook switches to next entry when threshold hits before pool tail', async () => {
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '2',
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.2.3.4', port: 9000 }, { host: '5.6.7.8', port: 10000 }],
+      index: 0,
+    },
+  });
+
+  const result = await harness.run({ successfulRuns: 2 });
+  assert.equal(harness.events.refreshCalls.length, 0);
+  assert.equal(harness.events.switchCalls.length, 1);
+  assert.equal(harness.events.switchCalls[0].direction, 'next');
+  assert.equal(harness.events.switchCalls[0].options.forceRefresh, false);
+  assert.equal(result.display, '1.2.3.4:9000 (1/3)');
+});
+
+test('success rotation hook refreshes tail pool and then switches to first entry of refreshed pool', async () => {
+  const refreshedPool = [
+    { host: '9.9.9.9', port: 9000 },
+    { host: '9.9.9.9', port: 9000 },
+    { host: '8.8.8.8', port: 10000 },
+  ];
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '2',
+      ipProxyAutoRefreshPoolOnExhausted: true,
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
+      index: 1,
+    },
+    refreshIpProxyPool: async () => ({
+      display: '9.9.9.9:9000 (2/3)',
+      pool: refreshedPool,
+      proxyRouting: { applied: true },
+    }),
+    switchIpProxy: async (direction, options = {}) => ({
+      display: `${options?.state?.ipProxyApiPool?.[0]?.host}:${options?.state?.ipProxyApiPool?.[0]?.port} (1/3)`,
+      proxyRouting: { applied: true },
+    }),
+  });
+
+  const result = await harness.run({ successfulRuns: 2 });
+  assert.equal(harness.events.refreshCalls.length, 1);
+  assert.equal(harness.events.switchCalls.length, 1);
+  assert.equal(harness.events.switchCalls[0].direction, 'next');
+  assert.equal(harness.runtimePatchCalls.length, 1);
+  assert.equal(harness.runtimePatchCalls[0].runtime.index, refreshedPool.length - 1);
+  assert.deepEqual(harness.runtimePatchCalls[0].runtime.current, refreshedPool[refreshedPool.length - 1]);
+  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已先从 711 同步新池/);
+  assert.equal(result.display, '9.9.9.9:9000 (1/3)');
+});
+
+test('success rotation hook skips tail rotation without auto refresh', async () => {
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '2',
+      ipProxyAutoRefreshPoolOnExhausted: false,
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
+      index: 1,
+    },
+  });
+
+  const result = await harness.run({ successfulRuns: 2 });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'pool_tail_without_refresh');
+  assert.equal(harness.events.refreshCalls.length, 0);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已到 API 池尾部/);
 });

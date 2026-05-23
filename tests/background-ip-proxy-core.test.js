@@ -524,6 +524,29 @@ test('711 JSON API payload normalization supports wrapped object candidates', ()
   );
 });
 
+test('711 API pool normalization preserves duplicate ip:port entries while non-API normalization still deduplicates', () => {
+  const api = loadIpProxyCore();
+  const duplicatePayload = [
+    { ip: '1.2.3.4', port: 9000 },
+    { ip: '1.2.3.4', port: 9000 },
+    { ip: '5.6.7.8', port: 10000 },
+  ];
+
+  const apiPool = api.normalizeIpProxyListFromPayload(duplicatePayload, '711proxy', {
+    mode: 'api',
+  });
+  assert.equal(apiPool.length, 3);
+  assert.equal(apiPool[0].host, '1.2.3.4');
+  assert.equal(apiPool[1].host, '1.2.3.4');
+  assert.equal(apiPool[2].host, '5.6.7.8');
+
+  const dedupedPool = api.normalizeProxyPoolEntries([
+    'http://global.rotgb.711proxy.com:10000:user:pass',
+    'http://global.rotgb.711proxy.com:10000:user:pass',
+  ], '711proxy');
+  assert.equal(dedupedPool.length, 1);
+});
+
 test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snapshot', async () => {
   const api = loadIpProxyCore();
   const fetchCalls = [];
@@ -544,6 +567,40 @@ test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snap
   assert.equal(fetchCalls[0], 'http://new.example.com/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating');
   assert.equal(pool.length, 1);
   assert.equal(pool[0].host, '1.2.3.4');
+});
+
+test('pullIpProxyPoolFromApi preserves duplicate entries for 711 API mode', async () => {
+  const api = loadIpProxyCore();
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    text: async () => JSON.stringify({
+      data: [
+        { ip: '1.2.3.4', port: 9000 },
+        { ip: '1.2.3.4', port: 9000 },
+        { ip: '5.6.7.8', port: 10000 },
+      ],
+    }),
+  });
+
+  try {
+    const pool = await api.pullIpProxyPoolFromApi({
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=3&proto=http&stype=json&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+    });
+
+    assert.equal(pool.length, 3);
+    assert.equal(pool[0].host, '1.2.3.4');
+    assert.equal(pool[1].host, '1.2.3.4');
+    assert.equal(pool[2].host, '5.6.7.8');
+  } finally {
+    if (originalFetch === undefined) {
+      delete global.fetch;
+    } else {
+      global.fetch = originalFetch;
+    }
+  }
 });
 
 test('target reachability failure turns detected exit IP into connectivity_failed', () => {

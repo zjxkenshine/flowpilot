@@ -64,12 +64,14 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
 
 test('sidepanel shows success-rotation controls only for 711 API mode', () => {
   const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+  const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
 
   assert.match(panelSource, /const is711ApiMode = isApiMode && service === '711proxy';/);
   assert.match(panelSource, /rowIpProxyApiRouteMode\.style\.display = showSettings && apiModeAvailable && isApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyPoolTargetCount\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyAutoRefreshPoolOnExhausted\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyProtocol\.style\.display = showSettings && isAccountMode \? '' : 'none';/);
+  assert.match(html, /先自动请求 711 API 拉取新 IP 池，再切换到新池下一条/);
 });
 
 test('sidepanel IP proxy actions send current normalized proxy override payload', () => {

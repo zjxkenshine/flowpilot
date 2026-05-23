@@ -1345,13 +1345,13 @@
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-auto-refresh-pool-on-exhausted" style="display:none;">
                     <span class="data-label">池尾自动拉新池</span>
                     <div class="data-inline">
-                      <label class="toggle-switch" for="input-ip-proxy-auto-refresh-pool-on-exhausted" title="仅用于 711 API 自动跑批成功轮换；走到当前池尾部时自动请求新 IP 池">
+                      <label class="toggle-switch" for="input-ip-proxy-auto-refresh-pool-on-exhausted" title="仅用于 711 API 自动跑批成功轮换；走到当前池尾部时先自动请求新 IP 池，再切换到新池下一条">
                         <input type="checkbox" id="input-ip-proxy-auto-refresh-pool-on-exhausted" />
                         <span class="toggle-switch-track" aria-hidden="true">
                           <span class="toggle-switch-thumb"></span>
                         </span>
                       </label>
-                      <span class="data-value">到达当前 API 池尾部后，自动请求 711 API 拉取新 IP 池</span>
+                      <span class="data-value">到达当前 API 池尾部后，先自动请求 711 API 拉取新 IP 池，再切换到新池下一条</span>
                     </div>
                   </div>
                   <div class="data-row ip-proxy-column-row" id="row-ip-proxy-auto-sync-enabled" style="display:none;">

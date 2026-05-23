@@ -1054,9 +1054,19 @@ function parseContiguousProxyStream(rawText = '', provider = DEFAULT_IP_PROXY_SE
   })).filter((item) => item.host && item.port);
 }
 
-function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVICE) {
+function shouldDeduplicateProxyPoolEntry(provider = DEFAULT_IP_PROXY_SERVICE, options = {}) {
+  const normalizedProvider = normalizeIpProxyProviderValue(provider);
+  const normalizedMode = normalizeIpProxyMode(options?.mode || options?.sourceMode || '');
+  if (normalizedProvider === '711proxy' && normalizedMode === 'api') {
+    return false;
+  }
+  return true;
+}
+
+function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVICE, options = {}) {
   const result = [];
   const seen = new Set();
+  const deduplicate = shouldDeduplicateProxyPoolEntry(provider, options);
   const append = (entry) => {
     if (!entry || !entry.host || !entry.port) {
       return;
@@ -1073,11 +1083,13 @@ function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVI
     if (!normalizedEntry.host || !normalizedEntry.port) {
       return;
     }
-    const dedupKey = `${normalizedEntry.host}:${normalizedEntry.port}:${normalizedEntry.username}:${normalizedEntry.password}:${normalizedEntry.protocol}`;
-    if (seen.has(dedupKey)) {
-      return;
+    if (deduplicate) {
+      const dedupKey = `${normalizedEntry.host}:${normalizedEntry.port}:${normalizedEntry.username}:${normalizedEntry.password}:${normalizedEntry.protocol}`;
+      if (seen.has(dedupKey)) {
+        return;
+      }
+      seen.add(dedupKey);
     }
-    seen.add(dedupKey);
     result.push(normalizedEntry);
   };
 
@@ -1117,20 +1129,20 @@ function normalizeProxyPoolEntries(value = [], provider = DEFAULT_IP_PROXY_SERVI
   return result;
 }
 
-function normalizeIpProxyListFromPayload(payload, provider = DEFAULT_IP_PROXY_SERVICE) {
+function normalizeIpProxyListFromPayload(payload, provider = DEFAULT_IP_PROXY_SERVICE, options = {}) {
   if (Array.isArray(payload)) {
-    return normalizeProxyPoolEntries(payload, provider);
+    return normalizeProxyPoolEntries(payload, provider, options);
   }
 
   if (!payload || typeof payload !== 'object') {
     if (typeof payload === 'string') {
-      return normalizeProxyPoolEntries(payload, provider);
+      return normalizeProxyPoolEntries(payload, provider, options);
     }
     return [];
   }
 
   const nestedCandidates = collectIpProxyPayloadCandidateEntries(payload);
-  const normalized = normalizeProxyPoolEntries(nestedCandidates, provider);
+  const normalized = normalizeProxyPoolEntries(nestedCandidates, provider, options);
   if (normalized.length) {
     return normalized;
   }
@@ -1312,10 +1324,15 @@ function getIpProxyRuntimeSnapshot(
   const hasModePool = Array.isArray(state?.[fields.poolKey]);
   const hasModeCurrent = state?.[fields.currentKey] !== undefined && state?.[fields.currentKey] !== null;
   const hasModeIndex = state?.[fields.indexKey] !== undefined && state?.[fields.indexKey] !== null;
-  const modePool = normalizeProxyPoolEntries(state?.[fields.poolKey], normalizedProvider);
+  const modePool = normalizeProxyPoolEntries(state?.[fields.poolKey], normalizedProvider, {
+    mode: normalizedMode,
+  });
   const modeCurrent = normalizeProxyPoolEntries(
     state?.[fields.currentKey] ? [state[fields.currentKey]] : [],
-    normalizedProvider
+    normalizedProvider,
+    {
+      mode: normalizedMode,
+    }
   )[0] || null;
   const pool = hasModePool ? modePool : [];
   const current = hasModeCurrent ? modeCurrent : null;
@@ -1341,11 +1358,16 @@ function buildIpProxyRuntimeStatePatch(mode = DEFAULT_IP_PROXY_MODE, runtime = {
   const normalizedMode = normalizeIpProxyMode(mode);
   const normalizedProvider = normalizeIpProxyProviderValue(provider);
   const fields = getIpProxyRuntimeFieldNames(normalizedMode);
-  const pool = normalizeProxyPoolEntries(runtime?.pool, normalizedProvider);
+  const pool = normalizeProxyPoolEntries(runtime?.pool, normalizedProvider, {
+    mode: normalizedMode,
+  });
   const summary = buildProxyPoolSummary(pool, runtime?.index);
   const explicitCurrent = normalizeProxyPoolEntries(
     runtime?.current ? [runtime.current] : [],
-    normalizedProvider
+    normalizedProvider,
+    {
+      mode: normalizedMode,
+    }
   )[0] || null;
   const current = explicitCurrent || summary.current || null;
   return {
@@ -1417,7 +1439,9 @@ function getIpProxyCurrentEntryFromState(state = {}) {
     const index = normalizeIpProxyCurrentIndex(runtime.index, 0) % pool.length;
     return pool[index];
   }
-  const fallback = normalizeProxyPoolEntries(runtime.current ? [runtime.current] : [], provider)[0];
+  const fallback = normalizeProxyPoolEntries(runtime.current ? [runtime.current] : [], provider, {
+    mode,
+  })[0];
   return fallback || null;
 }
 
@@ -2887,9 +2911,13 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
   } catch {
     payload = rawText;
   }
-  const pool = normalizeIpProxyListFromPayload(payload, provider);
+  const pool = normalizeIpProxyListFromPayload(payload, provider, {
+    mode: state?.ipProxyMode,
+  });
   if (!pool.length && typeof payload === 'string') {
-    return normalizeProxyPoolEntries(payload, provider).slice(0, Number(options.maxItems) || 100);
+    return normalizeProxyPoolEntries(payload, provider, {
+      mode: state?.ipProxyMode,
+    }).slice(0, Number(options.maxItems) || 100);
   }
   const maxItems = Math.max(1, Math.min(500, Number(options.maxItems) || 100));
   return pool.slice(0, maxItems);
