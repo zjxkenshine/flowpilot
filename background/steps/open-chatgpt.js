@@ -163,10 +163,75 @@
       return `${exitIp}${regionPart}${sourcePart}`;
     }
 
+    function getStep1ExitInfoSnapshot(state = {}) {
+      return {
+        exitIp: String(state?.ipProxyAppliedExitIp || '').trim(),
+        exitRegion: String(state?.ipProxyAppliedExitRegion || '').trim(),
+        exitDetecting: Boolean(state?.ipProxyAppliedExitDetecting),
+        exitError: String(state?.ipProxyAppliedExitError || '').trim(),
+        exitSource: String(state?.ipProxyAppliedExitSource || '').trim().toLowerCase(),
+      };
+    }
+
+    function sleep(ms = 0) {
+      return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+    }
+
+    async function waitForIpProxyExitToSettle(initialState = {}, options = {}) {
+      const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 15000);
+      const pollDelayMs = Math.max(100, Number(options?.pollDelayMs) || 250);
+      let currentState = initialState || {};
+      const startedAt = Date.now();
+
+      while (Boolean(currentState?.ipProxyAppliedExitDetecting) && (Date.now() - startedAt) < timeoutMs) {
+        await sleep(Math.min(pollDelayMs, timeoutMs));
+        if (typeof getState !== 'function') {
+          break;
+        }
+        try {
+          currentState = await getState();
+        } catch (error) {
+          await addLog(
+            `步骤 1：读取 IP 代理状态失败，停止等待出口落态：${error?.message || String(error || '未知错误')}`,
+            'warn'
+          );
+          break;
+        }
+      }
+
+      return {
+        state: currentState || initialState || {},
+        timedOut: Boolean(currentState?.ipProxyAppliedExitDetecting) && (Date.now() - startedAt) >= timeoutMs,
+      };
+    }
+
     async function ensureIpProxyExitReadyBeforeStep1() {
       const initialState = typeof getState === 'function' ? await getState() : {};
       if (!initialState?.ipProxyEnabled) {
         return { skipped: true, reason: 'proxy_disabled' };
+      }
+
+      const maxAttempts = 3;
+      const waitResult = await waitForIpProxyExitToSettle(initialState, { timeoutMs: 10000, pollDelayMs: 250 });
+      const settledState = waitResult.state || initialState;
+      const exitSnapshot = getStep1ExitInfoSnapshot(settledState);
+
+      if (exitSnapshot.exitDetecting) {
+        await addLog('步骤 1：IP 代理出口状态仍在更新，准备按现有状态继续判断是否需要检测。', 'warn');
+      }
+
+      if (exitSnapshot.exitIp) {
+        const summary = formatProxyRoutingSummary(exitSnapshot);
+        await addLog(
+          summary
+            ? `步骤 1：当前出口已存在 ${summary}，继续打开 ChatGPT。`
+            : '步骤 1：当前出口已存在，继续打开 ChatGPT。',
+          'ok'
+        );
+        return {
+          ...settledState,
+          ...exitSnapshot,
+        };
       }
 
       if (typeof probeIpProxyExit !== 'function') {
@@ -176,11 +241,10 @@
         throw new Error('IP 代理切换能力不可用。');
       }
 
-      const maxAttempts = 3;
-      let currentState = initialState;
+      let currentState = settledState;
       let lastRouting = null;
 
-      await addLog('步骤 1：已开启 IP 代理，正在执行访问 ChatGPT 前出口检测...', 'info');
+      await addLog('步骤 1：已开启 IP 代理且当前出口信息为空，正在执行访问 ChatGPT 前出口检测...', 'info');
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         let probeError = null;

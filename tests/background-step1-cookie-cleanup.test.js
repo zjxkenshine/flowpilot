@@ -160,22 +160,112 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
   assert.deepStrictEqual(events.openedSteps, [1]);
 });
 
-test('step 1 probes proxy exit before opening ChatGPT when IP proxy is enabled', async () => {
+test('step 1 reuses existing proxy exit info without probing when exit IP already exists', async () => {
   const api = loadStep1Module();
   const events = [];
 
   const executor = api.createStep1Executor({
     addLog: async () => {},
     chrome: createNoopChromeApi(),
-    getState: async () => ({ ipProxyEnabled: true }),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.8',
+      ipProxyAppliedExitRegion: 'JP',
+      ipProxyAppliedExitDetecting: false,
+      ipProxyAppliedExitSource: 'page_context',
+    }),
+    probeIpProxyExit: async () => {
+      events.push(['probe']);
+      return {};
+    },
+    switchIpProxy: async () => {
+      events.push(['switch']);
+    },
+    openSignupEntryTab: async (step) => {
+      events.push(['open', step]);
+    },
+    completeNodeFromBackground: async (nodeId) => {
+      events.push(['complete', nodeId]);
+    },
+  });
+
+  await executor.executeStep1();
+
+  assert.deepStrictEqual(events, [
+    ['open', 1],
+    ['complete', 'open-chatgpt'],
+  ]);
+});
+
+test('step 1 waits for proxy exit settle and continues without probing when exit IP appears', async () => {
+  const api = loadStep1Module();
+  const events = [];
+  let stateCallCount = 0;
+
+  const executor = api.createStep1Executor({
+    addLog: async () => {},
+    chrome: createNoopChromeApi(),
+    getState: async () => {
+      stateCallCount += 1;
+      if (stateCallCount === 1) {
+        return {
+          ipProxyEnabled: true,
+          ipProxyAppliedExitIp: '',
+          ipProxyAppliedExitRegion: '',
+          ipProxyAppliedExitDetecting: true,
+        };
+      }
+      return {
+        ipProxyEnabled: true,
+        ipProxyAppliedExitIp: '203.0.113.8',
+        ipProxyAppliedExitRegion: 'JP',
+        ipProxyAppliedExitDetecting: false,
+        ipProxyAppliedExitSource: 'page_context',
+      };
+    },
+    probeIpProxyExit: async () => {
+      events.push(['probe']);
+      return {};
+    },
+    switchIpProxy: async () => {
+      events.push(['switch']);
+    },
+    openSignupEntryTab: async (step) => {
+      events.push(['open', step]);
+    },
+    completeNodeFromBackground: async (nodeId) => {
+      events.push(['complete', nodeId]);
+    },
+  });
+
+  await executor.executeStep1();
+
+  assert.deepStrictEqual(events, [
+    ['open', 1],
+    ['complete', 'open-chatgpt'],
+  ]);
+});
+
+test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty', async () => {
+  const api = loadStep1Module();
+  const events = [];
+
+  const executor = api.createStep1Executor({
+    addLog: async () => {},
+    chrome: createNoopChromeApi(),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '',
+      ipProxyAppliedExitDetecting: false,
+    }),
     probeIpProxyExit: async (options) => {
       events.push(['probe', options.timeoutMs, options.authRebindRetry]);
       return {
         proxyRouting: {
           applied: true,
           reason: 'applied',
-          exitIp: '203.0.113.8',
-          exitRegion: 'JP',
+          exitIp: '198.51.100.8',
+          exitRegion: 'US',
           exitSource: 'page_context',
         },
       };
