@@ -214,6 +214,10 @@ const ipProxyRuntimeDot = document.getElementById('ip-proxy-runtime-dot');
 const ipProxyRuntimeText = document.getElementById('ip-proxy-runtime-text');
 const ipProxyRuntimeDetails = document.getElementById('ip-proxy-runtime-details');
 const ipProxyRuntimeDetailsText = document.getElementById('ip-proxy-runtime-details-text');
+const rowIpProxyExitInfo = document.getElementById('row-ip-proxy-exit-info');
+const displayIpProxyExitIp = document.getElementById('display-ip-proxy-exit-ip');
+const displayIpProxyExitRegion = document.getElementById('display-ip-proxy-exit-region');
+const btnIpProxyExitRefresh = document.getElementById('btn-ip-proxy-exit-refresh');
 const rowCodex2ApiUrl = document.getElementById('row-codex2api-url');
 const inputCodex2ApiUrl = document.getElementById('input-codex2api-url');
 const rowCodex2ApiAdminKey = document.getElementById('row-codex2api-admin-key');
@@ -15886,6 +15890,26 @@ btnIpProxyChange?.addEventListener('click', async () => {
 });
 
 btnIpProxyProbe?.addEventListener('click', async () => {
+  try {
+    const result = typeof runIpProxyActionWithLock === 'function'
+      ? await runIpProxyActionWithLock('probe', async () => {
+        await persistCurrentSettingsForAction();
+        await probeIpProxyExit();
+      })
+      : await (async () => {
+        await persistCurrentSettingsForAction();
+        await probeIpProxyExit();
+        return { skipped: false };
+      })();
+    if (result?.skipped) {
+      return;
+    }
+  } catch (err) {
+    showToast(err?.message || String(err || '未知错误'), 'error');
+  }
+});
+
+btnIpProxyExitRefresh?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
       ? await runIpProxyActionWithLock('probe', async () => {

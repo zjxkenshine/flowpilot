@@ -1593,6 +1593,26 @@ function setIpProxyRuntimeStatusDisplay(status = {}) {
   }
 }
 
+function setIpProxyExitInfoDisplay(state = latestState) {
+  const runtimeState = state || {};
+  const exitDetecting = Boolean(runtimeState?.ipProxyAppliedExitDetecting);
+  const exitIp = String(runtimeState?.ipProxyAppliedExitIp || '').trim();
+  const exitRegion = String(runtimeState?.ipProxyAppliedExitRegion || '').trim();
+  const ipText = exitDetecting ? '检测中...' : (exitIp || '未检测');
+  const regionText = exitDetecting ? '检测中...' : (exitRegion || '未检测');
+
+  if (displayIpProxyExitIp) {
+    displayIpProxyExitIp.textContent = ipText;
+    displayIpProxyExitIp.title = ipText;
+    displayIpProxyExitIp.classList.toggle('has-value', Boolean(exitIp) && !exitDetecting);
+  }
+  if (displayIpProxyExitRegion) {
+    displayIpProxyExitRegion.textContent = regionText;
+    displayIpProxyExitRegion.title = regionText;
+    displayIpProxyExitRegion.classList.toggle('has-value', Boolean(exitRegion) && !exitDetecting);
+  }
+}
+
 function normalizeIpProxyEnabledInlineRegion(value = '') {
   const normalized = String(value || '').trim();
   return normalized ? normalized.toUpperCase() : '';
@@ -1770,6 +1790,9 @@ function updateIpProxyUI(state = latestState) {
   if (rowIpProxyRuntimeStatus) {
     rowIpProxyRuntimeStatus.style.display = showSettings ? '' : 'none';
   }
+  if (rowIpProxyExitInfo) {
+    rowIpProxyExitInfo.style.display = showSettings ? '' : 'none';
+  }
   if (ipProxyLayout) {
     ipProxyLayout.classList.toggle('is-account-only', !apiModeAvailable);
   }
@@ -1882,6 +1905,7 @@ function updateIpProxyUI(state = latestState) {
 
   const runtimeStatus = formatIpProxyRuntimeStatus(runtimeState);
   setIpProxyRuntimeStatusDisplay(runtimeStatus);
+  setIpProxyExitInfoDisplay(runtimeState);
   const currentDisplay = formatIpProxyCurrentDisplay(runtimeState);
   const currentDisplayText = buildIpProxyCurrentDisplayText(currentDisplay, runtimeStatus);
   setIpProxyCurrentDisplay(currentDisplayText, currentDisplay.hasValue);
@@ -1916,6 +1940,11 @@ function updateIpProxyUI(state = latestState) {
   if (btnIpProxyProbe) {
     btnIpProxyProbe.disabled = actionBusy || !enabled || !canOperate;
     btnIpProxyProbe.textContent = busyAction === 'probe' ? '检测中...' : '检测出口';
+  }
+  if (btnIpProxyExitRefresh) {
+    btnIpProxyExitRefresh.disabled = actionBusy || !enabled || !canOperate;
+    btnIpProxyExitRefresh.textContent = busyAction === 'probe' ? '刷新中...' : '刷新';
+    btnIpProxyExitRefresh.title = '重新检测出口 IP 和地区';
   }
   if (btnIpProxyCheckIp) {
     btnIpProxyCheckIp.disabled = false;

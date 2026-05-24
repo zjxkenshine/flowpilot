@@ -38,6 +38,39 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
   assert.match(html, /<select id="select-ip-proxy-protocol" class="data-select">[\s\S]*<option value="https">HTTPS<\/option>[\s\S]*<option value="socks4">SOCKS4<\/option>/);
 });
 
+test('sidepanel exposes read-only IP proxy exit info form below runtime status', () => {
+  const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
+  const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  [
+    'row-ip-proxy-exit-info',
+    'display-ip-proxy-exit-ip',
+    'display-ip-proxy-exit-region',
+    'btn-ip-proxy-exit-refresh',
+  ].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`));
+  });
+  assert.ok(
+    html.indexOf('id="row-ip-proxy-runtime-status"') < html.indexOf('id="row-ip-proxy-exit-info"'),
+    'exit info row should stay directly below runtime status'
+  );
+
+  assert.match(source, /const rowIpProxyExitInfo = document\.getElementById\('row-ip-proxy-exit-info'\);/);
+  assert.match(source, /const displayIpProxyExitIp = document\.getElementById\('display-ip-proxy-exit-ip'\);/);
+  assert.match(source, /const displayIpProxyExitRegion = document\.getElementById\('display-ip-proxy-exit-region'\);/);
+  assert.match(source, /const btnIpProxyExitRefresh = document\.getElementById\('btn-ip-proxy-exit-refresh'\);/);
+  assert.match(source, /btnIpProxyExitRefresh\?\.addEventListener\('click'[\s\S]*runIpProxyActionWithLock\('probe'[\s\S]*await probeIpProxyExit\(\);/);
+
+  assert.match(panelSource, /function setIpProxyExitInfoDisplay\(state = latestState\)/);
+  assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitIp/);
+  assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitRegion/);
+  assert.match(panelSource, /const ipText = exitDetecting \? '检测中\.\.\.' : \(exitIp \|\| '未检测'\);/);
+  assert.match(panelSource, /rowIpProxyExitInfo\.style\.display = showSettings \? '' : 'none';/);
+  assert.match(panelSource, /btnIpProxyExitRefresh\.disabled = actionBusy \|\| !enabled \|\| !canOperate;/);
+  assert.match(panelSource, /type: 'PROBE_IP_PROXY_EXIT'/);
+});
+
 test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
   const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');

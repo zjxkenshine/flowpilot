@@ -1303,6 +1303,63 @@ header {
   word-break: break-word;
 }
 
+#row-ip-proxy-exit-info {
+  align-items: flex-start;
+}
+
+#row-ip-proxy-exit-info > .data-label {
+  padding-top: 8px;
+}
+
+.ip-proxy-exit-info {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ip-proxy-exit-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.ip-proxy-exit-field-label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.ip-proxy-exit-value {
+  min-width: 0;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.ip-proxy-exit-refresh-btn {
+  align-self: stretch;
+  min-width: 54px;
+  padding-inline: 8px;
+}
+
+@media (max-width: 520px) {
+  .ip-proxy-exit-info {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 0.45fr);
+  }
+
+  .ip-proxy-exit-refresh-btn {
+    grid-column: 1 / -1;
+    min-height: 28px;
+  }
+}
+
 .mail2925-base-inline {
   gap: 10px;
 }
