@@ -14,6 +14,7 @@
       readAuthTabSnapshot = null,
       sendToContentScript,
       sendToContentScriptResilient,
+      refreshAuthContactVerificationTab = null,
       navigateAuthTabToAddPhone = null,
       setState,
       broadcastDataUpdate = null,
@@ -97,6 +98,7 @@
     const PHONE_RESEND_BANNED_NUMBER_ERROR_PREFIX = 'PHONE_RESEND_BANNED_NUMBER::';
     const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
     const PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX = 'PHONE_ROUTE_405_RECOVERY_FAILED::';
+    const SIGNUP_CONTACT_VERIFICATION_PREFLIGHT_DELAY_MS = 2000;
     const PHONE_MANUAL_FREE_REUSE_ERROR_PREFIX = 'PHONE_MANUAL_FREE_REUSE::';
     const PHONE_AUTO_FREE_REUSE_PREPARE_ERROR_PREFIX = 'PHONE_AUTO_FREE_REUSE_PREPARE::';
     const FREE_PHONE_REUSE_PREPARE_TIMEOUT_MS = 20000;
@@ -1778,6 +1780,108 @@
       if (serverErrorText) {
         throw buildPhoneResendServerError(serverErrorText);
       }
+    }
+
+    function isContactVerificationUrl(rawUrl = '') {
+      return /\/contact-verification(?:[/?#]|$)/i.test(String(rawUrl || '').trim());
+    }
+
+    function getSnapshotText(snapshot = {}) {
+      return [
+        snapshot?.title,
+        snapshot?.text,
+        snapshot?.bodyText,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function hasContactVerificationPhonePrompt(snapshot = {}) {
+      const text = getSnapshotText(snapshot);
+      if (!text) {
+        return false;
+      }
+      return /查看你的手机|检查你的手机|查看手机|检查手机|check\s+your\s+phone|phone\s+verification|verify\s+your\s+phone|sent\s+(?:a\s+)?(?:code|sms|text(?:\s+message)?)\s+to\s+\+|code\s+to\s+\+/i.test(text);
+    }
+
+    async function readAuthTabSnapshotSafely(tabId) {
+      if (typeof readAuthTabSnapshot !== 'function') {
+        return null;
+      }
+      try {
+        return await readAuthTabSnapshot(tabId);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function preflightSignupContactVerificationPage(tabId) {
+      if (typeof readAuthTabSnapshot !== 'function') {
+        return;
+      }
+
+      await sleepWithStop(SIGNUP_CONTACT_VERIFICATION_PREFLIGHT_DELAY_MS);
+      const beforeSnapshot = await readAuthTabSnapshotSafely(tabId);
+      if (!beforeSnapshot || !isContactVerificationUrl(beforeSnapshot.url || beforeSnapshot.href)) {
+        return;
+      }
+      if (hasContactVerificationPhonePrompt(beforeSnapshot)) {
+        return;
+      }
+      if (getPhoneResendServerErrorFromSnapshot(beforeSnapshot)) {
+        return;
+      }
+
+      await addLog(
+        '步骤 4：contact-verification 页面未检测到“查看你的手机 / Check your phone”提示，准备刷新一次后继续确认。',
+        'warn',
+        { step: 4, stepKey: 'fetch-signup-code' }
+      );
+
+      if (typeof refreshAuthContactVerificationTab !== 'function') {
+        await addLog(
+          '步骤 4：当前环境未接入 contact-verification 刷新能力，将继续等待短信。',
+          'warn',
+          { step: 4, stepKey: 'fetch-signup-code' }
+        );
+        return;
+      }
+
+      try {
+        await refreshAuthContactVerificationTab(tabId, {
+          step: 4,
+          visibleStep: 4,
+          timeoutMs: 30000,
+        });
+      } catch (error) {
+        if (isStopRequestedError(error)) {
+          throw error;
+        }
+        await addLog(
+          `步骤 4：刷新 contact-verification 页面失败，将继续等待短信。${error.message}`,
+          'warn',
+          { step: 4, stepKey: 'fetch-signup-code' }
+        );
+        return;
+      }
+
+      const afterSnapshot = await readAuthTabSnapshotSafely(tabId);
+      if (afterSnapshot && hasContactVerificationPhonePrompt(afterSnapshot)) {
+        await addLog(
+          '步骤 4：刷新 contact-verification 后已检测到手机验证提示。',
+          'info',
+          { step: 4, stepKey: 'fetch-signup-code' }
+        );
+        return;
+      }
+
+      await addLog(
+        '步骤 4：刷新 contact-verification 后仍未检测到“查看你的手机 / Check your phone”提示，将继续使用现有短信等待流程。',
+        'warn',
+        { step: 4, stepKey: 'fetch-signup-code' }
+      );
     }
 
     function shouldTreatResendThrottledAsBanned(state = {}) {
@@ -6142,6 +6246,7 @@
 
         let shouldCancelActivation = true;
         try {
+          await preflightSignupContactVerificationPage(tabId);
           for (let attempt = 1; attempt <= DEFAULT_PHONE_SUBMIT_ATTEMPTS; attempt += 1) {
             throwIfStopped();
             state = await getState();

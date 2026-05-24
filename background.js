@@ -14116,6 +14116,40 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
   readAuthTabSnapshot,
   ensureStep8SignupPageReady,
+  refreshAuthContactVerificationTab: async (tabId, options = {}) => {
+    const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 4;
+    const requestedTimeoutMs = Number(options.timeoutMs);
+    const timeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
+      ? requestedTimeoutMs
+      : await getOAuthFlowStepTimeoutMs(30000, {
+        step: visibleStep,
+        actionLabel: 'refresh contact-verification',
+      });
+    let currentUrl = '';
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      currentUrl = String(tab?.url || '').trim();
+    } catch {}
+
+    if (/\/contact-verification(?:[/?#]|$)/i.test(currentUrl)) {
+      await chrome.tabs.reload(tabId, { bypassCache: true });
+    } else {
+      await chrome.tabs.update(tabId, {
+        url: 'https://auth.openai.com/contact-verification',
+        active: true,
+      });
+    }
+
+    await ensureStep8SignupPageReady(tabId, {
+      timeoutMs,
+      visibleStep,
+      logStepKey: options.logStepKey || 'fetch-signup-code',
+      logMessage: options.logMessage || '步骤 4：已刷新 contact-verification 页面，等待认证页脚本恢复。',
+    });
+    return {
+      url: 'https://auth.openai.com/contact-verification',
+    };
+  },
   navigateAuthTabToAddPhone: async (tabId, options = {}) => {
     const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 9;
     const requestedTimeoutMs = Number(options.timeoutMs);

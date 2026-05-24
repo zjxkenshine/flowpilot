@@ -626,6 +626,264 @@ test('signup phone helper completes signup SMS verification without touching add
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
 
+test('signup phone helper refreshes bad contact-verification once before SMS polling', async () => {
+  const contentMessages = [];
+  const refreshCalls = [];
+  const sleeps = [];
+  let snapshotReads = 0;
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsReuseEnabled: false,
+    phoneCodeWaitSeconds: 15,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 2,
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-refresh-1',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return {
+          ok: true,
+          text: async () => 'STATUS_OK:123456',
+        };
+      }
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_READY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    readAuthTabSnapshot: async () => {
+      snapshotReads += 1;
+      return snapshotReads === 1
+        ? {
+          url: 'https://auth.openai.com/contact-verification',
+          title: 'auth.openai.com',
+          text: '',
+        }
+        : {
+          url: 'https://auth.openai.com/contact-verification',
+          title: 'Verify your phone',
+          text: 'Check your phone. We just sent a code to +66 95 991 6439.',
+        };
+    },
+    refreshAuthContactVerificationTab: async (tabId, options) => {
+      refreshCalls.push({ tabId, options });
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      contentMessages.push(message);
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/contact-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return { success: true };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async (ms) => {
+      sleeps.push(ms);
+    },
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.completeSignupPhoneVerificationFlow(77, { state: currentState });
+
+  assert.deepStrictEqual(result, { success: true });
+  assert.deepStrictEqual(sleeps.slice(0, 1), [2000]);
+  assert.equal(refreshCalls.length, 1);
+  assert.equal(refreshCalls[0].tabId, 77);
+  assert.equal(snapshotReads, 2);
+  assert.equal(contentMessages.filter((message) => message.type === 'SUBMIT_PHONE_VERIFICATION_CODE').length, 1);
+});
+
+test('signup phone helper does not refresh valid contact-verification prompt', async () => {
+  const refreshCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsReuseEnabled: false,
+    phoneCodeWaitSeconds: 15,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 2,
+    signupPhoneNumber: '8613812345678',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-refresh-2',
+      phoneNumber: '8613812345678',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return {
+          ok: true,
+          text: async () => 'STATUS_OK:654321',
+        };
+      }
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_READY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    readAuthTabSnapshot: async () => ({
+      url: 'https://auth.openai.com/contact-verification',
+      title: '手机验证',
+      text: '查看你的手机。我们刚刚向 +86 138 1234 5678 发送了验证码。',
+    }),
+    refreshAuthContactVerificationTab: async () => {
+      refreshCalls.push('refresh');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/contact-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return { success: true };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.completeSignupPhoneVerificationFlow(77, { state: currentState });
+
+  assert.deepStrictEqual(result, { success: true });
+  assert.deepStrictEqual(refreshCalls, []);
+});
+
+test('signup phone helper logs and continues when contact-verification refresh stays bad', async () => {
+  const logs = [];
+  const refreshCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    heroSmsReuseEnabled: false,
+    phoneCodeWaitSeconds: 15,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 15,
+    phoneCodePollMaxRounds: 1,
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-refresh-3',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async (message, level) => {
+      logs.push({ message, level });
+    },
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      const id = parsedUrl.searchParams.get('id');
+      if (action === 'getStatus') {
+        return {
+          ok: true,
+          text: async () => 'STATUS_WAIT_CODE',
+        };
+      }
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => `STATUS_UPDATED:${id}`,
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    readAuthTabSnapshot: async () => ({
+      url: 'https://auth.openai.com/contact-verification',
+      title: 'auth.openai.com',
+      text: '',
+    }),
+    refreshAuthContactVerificationTab: async () => {
+      refreshCalls.push('refresh');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/contact-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => helpers.completeSignupPhoneVerificationFlow(77, { state: currentState }),
+    /等待手机验证码超时/
+  );
+
+  assert.deepStrictEqual(refreshCalls, ['refresh']);
+  assert.equal(
+    logs.some(({ message, level }) => level === 'warn' && /刷新 contact-verification 后仍未检测到/.test(message)),
+    true
+  );
+  assert.equal(currentState.signupPhoneActivation, null);
+});
+
 test('signup phone helper fails stale email-verification before polling SMS', async () => {
   let smsPollCount = 0;
   const contentMessages = [];

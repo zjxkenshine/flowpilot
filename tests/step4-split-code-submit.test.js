@@ -1192,6 +1192,7 @@ function createSignupUserAlreadyExistsError() { return new Error('user already e
 function getSignupPasswordInput() { return passwordInput; }
 function getSignupPasswordSubmitButton() { return submitButton; }
 function isSignupEmailAlreadyExistsPage() { return false; }
+function getSignupPhoneRetryRequiredState() { return null; }
 function isSignupPasswordErrorPage() { return false; }
 function getSignupPasswordTimeoutErrorPageState() { return null; }
 function isStep5Ready() { return false; }

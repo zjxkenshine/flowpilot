@@ -55,6 +55,7 @@ const bundle = [
   extractFunction('getLoginVerificationDisplayedEmail'),
   extractFunction('getPhoneVerificationDisplayedPhone'),
   extractFunction('getContactVerificationServerErrorText'),
+  extractFunction('hasPhoneVerificationPromptText'),
   extractFunction('isPhoneVerificationPageReady'),
   extractFunction('inspectLoginAuthState'),
   extractFunction('normalizeStep6Snapshot'),
@@ -215,7 +216,6 @@ return {
   const api = createApi({
     pathname: '/contact-verification',
     href: 'https://auth.openai.com/contact-verification',
-    verificationTarget: { id: 'otp' },
     pageText: 'Check your phone. We just sent a code to +66 81 234 5678.',
   });
 
@@ -223,6 +223,32 @@ return {
 
   const snapshot = api.inspectLoginAuthState();
   assert.strictEqual(snapshot.state, 'phone_verification_page');
+}
+
+{
+  const api = createApi({
+    pathname: '/contact-verification',
+    href: 'https://auth.openai.com/contact-verification',
+    pageText: '查看你的手机。我们刚刚向 +86 138 1234 5678 发送了验证码。',
+  });
+
+  assert.strictEqual(api.isPhoneVerificationPageReady(), true);
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.strictEqual(snapshot.state, 'phone_verification_page');
+}
+
+{
+  const api = createApi({
+    pathname: '/contact-verification',
+    href: 'https://auth.openai.com/contact-verification',
+    pageText: '',
+  });
+
+  assert.strictEqual(api.isPhoneVerificationPageReady(), false);
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.notStrictEqual(snapshot.state, 'phone_verification_page');
 }
 
 {

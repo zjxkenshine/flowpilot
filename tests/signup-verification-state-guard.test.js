@@ -280,6 +280,10 @@ function isSignupEmailAlreadyExistsPage() {
   return false;
 }
 
+function getSignupPhoneRetryRequiredState() {
+  return null;
+}
+
 function getSignupPasswordInput() {
   return { value: 'Secret123!' };
 }

@@ -918,6 +918,9 @@ test('signup flow helper finalizes step 3 submit by reusing signup verification 
       password: 'Secret123!',
       prepareSource: 'step3_finalize',
       prepareLogLabel: '步骤 3 收尾',
+      signupMethod: '',
+      accountIdentifierType: '',
+      phoneNumber: '',
     },
   });
 });

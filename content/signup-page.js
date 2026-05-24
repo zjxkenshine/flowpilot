@@ -3097,6 +3097,10 @@ function getPhoneVerificationDisplayedPhone() {
   return matches[0] ? String(matches[0]).replace(/\s+/g, ' ').trim() : '';
 }
 
+function hasPhoneVerificationPromptText(pageText = getPageTextSnapshot()) {
+  return /查看你的手机|检查你的手机|查看手机|检查手机|check\s+your\s+phone|phone\s+verification|verify\s+your\s+phone|sent\s+(?:a\s+)?(?:code|sms|text(?:\s+message)?)\s+to\s+\+|code\s+to\s+\+/i.test(String(pageText || ''));
+}
+
 function getOAuthConsentForm() {
   return document.querySelector(OAUTH_CONSENT_FORM_SELECTOR);
 }
@@ -3209,11 +3213,18 @@ function isPhoneVerificationPageReady() {
   const path = `${location.pathname || ''} ${location.href || ''}`;
   const isPhoneVerificationRoute = /\/phone-verification(?:[/?#]|$)/i.test(path);
   const isContactVerificationRoute = /\/contact-verification(?:[/?#]|$)/i.test(path);
+  const pageText = getPageTextSnapshot();
+  const displayedPhone = getPhoneVerificationDisplayedPhone();
   if (isContactVerificationRoute && getContactVerificationServerErrorText()) {
     return false;
   }
-  if (isPhoneVerificationRoute || isContactVerificationRoute) {
+  if (isPhoneVerificationRoute) {
     return true;
+  }
+  if (isContactVerificationRoute) {
+    return hasPhoneVerificationPromptText(pageText)
+      || Boolean(getVerificationCodeTarget())
+      || Boolean(document.querySelector('button[name="intent"][value="resend"]') && displayedPhone);
   }
 
   const form = document.querySelector('form[action*="/phone-verification" i]');
@@ -3225,11 +3236,9 @@ function isPhoneVerificationPageReady() {
     return true;
   }
 
-  const pageText = getPageTextSnapshot();
-  const displayedPhone = getPhoneVerificationDisplayedPhone();
   return Boolean(getVerificationCodeTarget())
     && Boolean(displayedPhone)
-    && /check\s+your\s+phone|phone\s+verification|verify\s+your\s+phone|sms|text\s+message|code\s+to\s+\+/.test(pageText);
+    && hasPhoneVerificationPromptText(pageText);
 }
 
 function getDocumentReadyStateSnapshot() {
