@@ -131,10 +131,13 @@ test('sidepanel IP proxy actions send current normalized proxy override payload'
   assert.match(panelSource, /ipProxyServiceProfiles: profiles/);
   assert.match(panelSource, /buildIpProxyStatePatchFromServiceProfile\(selectedService, currentProfile\)/);
   assert.match(panelSource, /ipProxyStateOverride,/);
+  assert.match(panelSource, /type: 'REFRESH_IP_PROXY_POOL'[\s\S]*ensureDifferentExit: mode === 'api'/);
+  assert.match(panelSource, /type: 'SWITCH_IP_PROXY'[\s\S]*ensureDifferentExit: mode === 'api'/);
   assert.match(panelSource, /type: 'REFRESH_IP_PROXY_POOL'[\s\S]*ipProxyStateOverride/);
   assert.match(panelSource, /type: 'SWITCH_IP_PROXY'[\s\S]*ipProxyStateOverride/);
   assert.match(panelSource, /type: 'CHANGE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
   assert.match(panelSource, /type: 'PROBE_IP_PROXY_EXIT'[\s\S]*ipProxyStateOverride/);
+  assert.match(panelSource, /if \(!response\?\.exitCheckCompleted\) \{\s*scheduleIpProxyExitProbe\(\{ silent: true \}\);/);
 });
 
 test('sidepanel 711 API region input keeps draft typing and only persists complete country codes', () => {

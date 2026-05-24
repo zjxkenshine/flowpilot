@@ -69,6 +69,7 @@ return {
   resolveIpProxySwitchIpRoundCount,
   resolveTargetReachabilityEndpoints,
   shouldEnableIpProxyLeakGuardForStatus,
+  switch711ApiProxyUntilExitChanged,
   validate711ProxyApiConfig,
 };
 `)();
@@ -714,6 +715,197 @@ test('pullIpProxyPoolFromApi preserves duplicate entries for 711 API mode', asyn
     } else {
       global.fetch = originalFetch;
     }
+  }
+});
+
+test('711 API different-exit rotation skips same exit and accepts the next detected exit', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const oldExitIp = '203.0.113.8';
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=3&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+    ipProxyApiPool: pool,
+    ipProxyApiCurrentIndex: 0,
+    ipProxyApiCurrent: pool[0],
+    ipProxyApplied: true,
+    ipProxyAppliedReason: 'applied',
+    ipProxyAppliedExitIp: oldExitIp,
+    ipProxyAppliedExitRegion: 'JP',
+    ipProxyAppliedExitDetecting: false,
+  };
+  const stateUpdates = [];
+  let switchCalls = 0;
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+      stateUpdates.push(updates);
+    };
+    globalThis.broadcastDataUpdate = () => {};
+
+    const result = await api.switch711ApiProxyUntilExitChanged({
+      state,
+      switchProxyFn: async () => {
+        switchCalls += 1;
+        const index = switchCalls;
+        state = {
+          ...state,
+          ipProxyApiCurrentIndex: index,
+          ipProxyApiCurrent: pool[index],
+        };
+        return {
+          mode: 'api',
+          provider: '711proxy',
+          count: pool.length,
+          index,
+          current: pool[index],
+          display: `${pool[index].host}:${pool[index].port} (${index + 1}/${pool.length})`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: pool[index].host,
+            port: pool[index].port,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: switchCalls === 1 ? oldExitIp : '198.51.100.9',
+            exitRegion: switchCalls === 1 ? 'JP' : 'US',
+            exitSource: 'page_context',
+          },
+        };
+      },
+    });
+
+    assert.equal(result.exitChanged, true);
+    assert.equal(result.previousExitIp, oldExitIp);
+    assert.equal(result.attemptedCount, 2);
+    assert.equal(result.proxyRouting.exitIp, '198.51.100.9');
+    assert.equal(
+      stateUpdates.some((patch) => patch.ipProxyAppliedExitDetecting === true && patch.ipProxyAppliedExitIp === ''),
+      true
+    );
+    assert.equal(state.ipProxyAppliedExitDetecting, false);
+    assert.equal(state.ipProxyAppliedExitIp, '198.51.100.9');
+    assert.equal(state.ipProxyAppliedExitRegion, 'US');
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+  }
+});
+
+test('711 API different-exit rotation restores old exit state when every candidate keeps the same exit', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalAddLog = globalThis.addLog;
+  const oldExitIp = '203.0.113.8';
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+    ipProxyApiPool: pool,
+    ipProxyApiCurrentIndex: 0,
+    ipProxyApiCurrent: pool[0],
+    ipProxyApplied: true,
+    ipProxyAppliedReason: 'applied',
+    ipProxyAppliedExitIp: oldExitIp,
+    ipProxyAppliedExitRegion: 'JP',
+    ipProxyAppliedExitDetecting: false,
+  };
+  let appliedPac = '';
+
+  try {
+    api.chrome.proxy = {
+      settings: {
+        clear(_details, callback) {
+          callback();
+        },
+        set(details, callback) {
+          appliedPac = details?.value?.pacScript?.data || '';
+          callback();
+        },
+        get(_details, callback) {
+          callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: {
+              mode: 'pac_script',
+              pacScript: { data: appliedPac },
+            },
+          });
+        },
+      },
+    };
+    api.chrome.runtime = {};
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    globalThis.addLog = async () => {};
+
+    const result = await api.switch711ApiProxyUntilExitChanged({
+      state,
+      switchProxyFn: async () => ({
+        mode: 'api',
+        provider: '711proxy',
+        count: pool.length,
+        index: 1,
+        current: pool[1],
+        display: `${pool[1].host}:${pool[1].port} (2/${pool.length})`,
+        pool,
+        proxyRouting: {
+          enabled: true,
+          applied: true,
+          reason: 'applied',
+          host: pool[1].host,
+          port: pool[1].port,
+          provider: '711proxy',
+          exitDetecting: false,
+          exitIp: oldExitIp,
+          exitRegion: 'JP',
+          exitSource: 'page_context',
+        },
+      }),
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.exitChanged, false);
+    assert.equal(result.skippedReason, 'same_exit_exhausted');
+    assert.equal(result.attemptedCount, 1);
+    assert.equal(state.ipProxyAppliedExitDetecting, false);
+    assert.equal(state.ipProxyAppliedExitIp, oldExitIp);
+    assert.equal(state.ipProxyAppliedExitRegion, 'JP');
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    if (originalAddLog === undefined) delete globalThis.addLog;
+    else globalThis.addLog = originalAddLog;
   }
 });
 

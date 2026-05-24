@@ -211,6 +211,7 @@ function extractFunction(name) {
 function createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness(overrides = {}) {
   const events = {
     logs: [],
+    differentExitCalls: [],
     refreshCalls: [],
     switchCalls: [],
   };
@@ -223,6 +224,7 @@ const {
   getState,
   addLog,
   switchIpProxy,
+  switch711ApiProxyUntilExitChanged,
   refreshIpProxyPool,
   getIpProxyRuntimeSnapshot,
   buildIpProxyRuntimeStatePatch,
@@ -249,6 +251,26 @@ return maybeSwitchIpProxyAfterAutoRunRoundSuccess;
       return {
         display: '1.2.3.4:9000 (1/3)',
         proxyRouting: { applied: true },
+      };
+    },
+    switch711ApiProxyUntilExitChanged: async (options = {}) => {
+      events.differentExitCalls.push({ options });
+      if (typeof overrides.switch711ApiProxyUntilExitChanged === 'function') {
+        return overrides.switch711ApiProxyUntilExitChanged(options, events);
+      }
+      return {
+        display: '5.6.7.8:9000 (2/3)',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '5.6.7.8',
+          exitRegion: 'US',
+        },
+        exitCheckCompleted: true,
+        exitChanged: true,
+        previousExitIp: options.previousExitIp || '',
+        attemptedCount: 1,
+        refreshedPool: Boolean(options.refreshPoolFirst),
       };
     },
     refreshIpProxyPool: async (options = {}) => {
@@ -329,11 +351,11 @@ test('success rotation hook switches to next entry when switch-IP round hits bef
 
   const result = await harness.run({ successfulRuns: 2 });
   assert.equal(harness.events.refreshCalls.length, 0);
-  assert.equal(harness.events.switchCalls.length, 1);
-  assert.equal(harness.events.switchCalls[0].direction, 'next');
-  assert.equal(harness.events.switchCalls[0].options.forceRefresh, false);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.equal(harness.events.differentExitCalls.length, 1);
+  assert.equal(harness.events.differentExitCalls[0].options.refreshPoolFirst, false);
   assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换IP轮次命中/);
-  assert.equal(result.display, '1.2.3.4:9000 (1/3)');
+  assert.equal(result.display, '5.6.7.8:9000 (2/3)');
 });
 
 test('success rotation hook refreshes tail pool when switch-IP round hits and tail refresh is enabled', async () => {
@@ -355,27 +377,27 @@ test('success rotation hook refreshes tail pool when switch-IP round hits and ta
       pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
       index: 1,
     },
-    refreshIpProxyPool: async () => ({
-      display: '9.9.9.9:9000 (2/3)',
+    switch711ApiProxyUntilExitChanged: async () => ({
+      display: '9.9.9.9:9000 (1/3)',
       pool: refreshedPool,
-      proxyRouting: { applied: true },
-    }),
-    switchIpProxy: async (direction, options = {}) => ({
-      display: `${options?.state?.ipProxyApiPool?.[0]?.host}:${options?.state?.ipProxyApiPool?.[0]?.port} (1/3)`,
-      proxyRouting: { applied: true },
+      proxyRouting: {
+        applied: true,
+        reason: 'applied',
+        exitIp: '9.9.9.9',
+      },
+      exitChanged: true,
+      attemptedCount: 1,
+      refreshedPool: true,
     }),
   });
 
   const result = await harness.run({ successfulRuns: 2 });
-  assert.equal(harness.events.refreshCalls.length, 1);
-  assert.equal(harness.events.switchCalls.length, 1);
-  assert.equal(harness.events.switchCalls[0].direction, 'next');
-  assert.equal(harness.runtimePatchCalls.length, 1);
-  assert.equal(harness.runtimePatchCalls[0].runtime.index, refreshedPool.length - 1);
-  assert.deepEqual(harness.runtimePatchCalls[0].runtime.current, refreshedPool[refreshedPool.length - 1]);
-  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.equal(harness.events.refreshCalls.length, 0);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.equal(harness.events.differentExitCalls.length, 1);
+  assert.equal(harness.events.differentExitCalls[0].options.allowRefreshOnExhausted, true);
   assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换IP轮次命中/);
-  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已从 711 同步新池/);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已完成真实出口切换/);
   assert.equal(result.display, '9.9.9.9:9000 (1/3)');
 });
 
@@ -393,6 +415,18 @@ test('success rotation hook skips tail switch-IP rotation when tail refresh is d
       pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
       index: 1,
     },
+    switch711ApiProxyUntilExitChanged: async () => ({
+      skipped: true,
+      reason: 'pool_tail_without_refresh',
+      skippedReason: 'pool_tail_without_refresh',
+      exitChanged: false,
+      attemptedCount: 0,
+      proxyRouting: {
+        applied: true,
+        reason: 'applied',
+        exitIp: '203.0.113.8',
+      },
+    }),
   });
 
   const result = await harness.run({ successfulRuns: 2 });
@@ -400,8 +434,8 @@ test('success rotation hook skips tail switch-IP rotation when tail refresh is d
   assert.equal(result.reason, 'pool_tail_without_refresh');
   assert.equal(harness.events.refreshCalls.length, 0);
   assert.equal(harness.events.switchCalls.length, 0);
-  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已到 API 池尾部/);
-  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /未允许池尾拉新池/);
+  assert.equal(harness.events.differentExitCalls.length, 1);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /未找到不同出口/);
 });
 
 test('success rotation hook refreshes a new proxy pool when pool round hits', async () => {
@@ -422,18 +456,25 @@ test('success rotation hook refreshes a new proxy pool when pool round hits', as
       pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
       index: 0,
     },
-    refreshIpProxyPool: async () => ({
+    switch711ApiProxyUntilExitChanged: async () => ({
       display: '7.7.7.7:9000 (1/2)',
       pool: refreshedPool,
-      proxyRouting: { applied: true },
+      proxyRouting: {
+        applied: true,
+        reason: 'applied',
+        exitIp: '7.7.7.7',
+      },
+      exitChanged: true,
+      attemptedCount: 1,
+      refreshedPool: true,
     }),
   });
 
   await harness.run({ successfulRuns: 2 });
-  assert.equal(harness.events.refreshCalls.length, 1);
-  assert.equal(harness.events.switchCalls.length, 1);
-  assert.equal(harness.events.switchCalls[0].direction, 'next');
-  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.equal(harness.events.refreshCalls.length, 0);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.equal(harness.events.differentExitCalls.length, 1);
+  assert.equal(harness.events.differentExitCalls[0].options.refreshPoolFirst, true);
   assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换代理池轮次命中/);
 });
 
@@ -455,18 +496,26 @@ test('success rotation hook prioritizes pool refresh when pool and switch-IP rou
       pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
       index: 0,
     },
-    refreshIpProxyPool: async () => ({
+    switch711ApiProxyUntilExitChanged: async () => ({
       display: '7.7.7.7:9000 (1/2)',
       pool: refreshedPool,
-      proxyRouting: { applied: true },
+      proxyRouting: {
+        applied: true,
+        reason: 'applied',
+        exitIp: '7.7.7.7',
+      },
+      exitChanged: true,
+      attemptedCount: 1,
+      refreshedPool: true,
     }),
   });
 
   await harness.run({ successfulRuns: 2 });
   const logText = harness.events.logs.map((entry) => entry.message).join('\n');
-  assert.equal(harness.events.refreshCalls.length, 1);
-  assert.equal(harness.events.switchCalls.length, 1);
-  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.equal(harness.events.refreshCalls.length, 0);
+  assert.equal(harness.events.switchCalls.length, 0);
+  assert.equal(harness.events.differentExitCalls.length, 1);
+  assert.equal(harness.events.differentExitCalls[0].options.refreshPoolFirst, true);
   assert.match(logText, /换代理池轮次命中/);
   assert.doesNotMatch(logText, /换IP轮次命中/);
 });

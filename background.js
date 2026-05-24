@@ -12607,6 +12607,37 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
   const maxItems = typeof resolveIpProxyPoolTargetCountForMode === 'function'
     ? resolveIpProxyPoolTargetCountForMode(state, mode)
     : undefined;
+  const differentExitAvailable = typeof switch711ApiProxyUntilExitChanged === 'function';
+  const runDifferentExitRotation = async (reasonLabel, options = {}) => {
+    const thresholdLabel = reasonLabel === '换IP轮次'
+      ? `换IP轮次 ${switchIpThreshold}`
+      : `换代理池轮次 ${switchPoolThreshold}`;
+    const result = await switch711ApiProxyUntilExitChanged({
+      mode: 'api',
+      state,
+      previousExitIp: state?.ipProxyAppliedExitIp || '',
+      refreshPoolFirst: Boolean(options?.refreshPoolFirst),
+      allowRefreshOnExhausted: Boolean(options?.allowRefreshOnExhausted),
+      maxItems,
+    });
+    const newExitIp = String(result?.proxyRouting?.exitIp || '').trim();
+    const newExitRegion = String(result?.proxyRouting?.exitRegion || '').trim();
+    const oldExitIp = String(result?.previousExitIp || state?.ipProxyAppliedExitIp || '').trim();
+    if (typeof addLog === 'function') {
+      if (result?.exitChanged) {
+        await addLog(
+          `${reasonLabel}命中（成功 ${successfulRuns} 轮 / ${thresholdLabel}），已完成真实出口切换：${oldExitIp || '未知'} -> ${newExitIp}${newExitRegion ? ` [${newExitRegion}]` : ''}，尝试 ${Number(result?.attemptedCount) || 0} 个节点${result?.refreshedPool ? '，期间已拉取新池' : ''}。`,
+          'ok'
+        );
+      } else {
+        await addLog(
+          `${reasonLabel}命中（成功 ${successfulRuns} 轮 / ${thresholdLabel}），未找到不同出口，已保留当前出口${oldExitIp ? ` ${oldExitIp}` : ''}。原因：${result?.skippedReason || result?.reason || 'unknown'}，尝试 ${Number(result?.attemptedCount) || 0} 个节点${result?.refreshedPool ? '，期间已拉取新池' : ''}。`,
+          'warn'
+        );
+      }
+    }
+    return result;
+  };
   const switchToFirstEntryFromFreshPool = async (refreshResult, sourceState = state, reasonLabel = '换代理池轮次') => {
     const refreshedPool = Array.isArray(refreshResult?.pool) ? refreshResult.pool : [];
     if (!refreshedPool.length) {
@@ -12722,9 +12753,21 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
 
   const runSingleAttempt = async () => {
     if (poolRoundHit) {
+      if (differentExitAvailable) {
+        return runDifferentExitRotation('换代理池轮次', {
+          refreshPoolFirst: true,
+          allowRefreshOnExhausted: true,
+        });
+      }
       return refreshPoolAndFirstEntry('换代理池轮次');
     }
     if (switchIpRoundHit) {
+      if (differentExitAvailable) {
+        return runDifferentExitRotation('换IP轮次', {
+          refreshPoolFirst: false,
+          allowRefreshOnExhausted: autoRefreshPoolOnExhausted,
+        });
+      }
       return switchToNextInCurrentPool();
     }
     return null;
@@ -14700,6 +14743,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   registerTab,
   requestStop,
   probeIpProxyExit,
+  switch711ApiProxyUntilExitChanged,
   resetState,
   resumeAutoRun,
   scheduleAutoRun,

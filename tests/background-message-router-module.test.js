@@ -1053,6 +1053,143 @@ test('REFRESH_IP_PROXY_POOL prefers sidepanel ipProxyStateOverride over stale sa
   }
 });
 
+test('SWITCH_IP_PROXY with ensureDifferentExit routes 711 API mode through the real-exit rotation helper', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const rotationCalls = [];
+  const refreshCalls = [];
+  const switchCalls = [];
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+
+  const router = api.createMessageRouter({
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyApiUrl: 'http://proxy.example.com/gen?count=10',
+      ipProxyAppliedExitIp: '198.51.100.10',
+      ipProxyAutoRefreshPoolOnExhausted: true,
+    }),
+    refreshIpProxyPool: async (options = {}) => {
+      refreshCalls.push(options);
+      return { mode: options.mode || 'api', provider: '711proxy', pool: [] };
+    },
+    switchIpProxy: async (direction, options = {}) => {
+      switchCalls.push({ direction, options });
+      return { mode: 'api', provider: '711proxy', pool: [] };
+    },
+    switch711ApiProxyUntilExitChanged: async (options = {}) => {
+      rotationCalls.push(options);
+      return {
+        ok: true,
+        mode: 'api',
+        provider: '711proxy',
+        exitChanged: true,
+        exitCheckCompleted: true,
+        previousExitIp: options.previousExitIp,
+        attemptedCount: 2,
+        refreshedPool: true,
+        proxyRouting: {
+          applied: true,
+          provider: '711proxy',
+          exitIp: '203.0.113.77',
+          exitRegion: 'US',
+          exitDetecting: false,
+        },
+      };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SWITCH_IP_PROXY',
+    source: 'sidepanel',
+    payload: {
+      mode: 'api',
+      ensureDifferentExit: true,
+      direction: 'next',
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(rotationCalls.length, 1);
+  assert.equal(rotationCalls[0].refreshPoolFirst, false);
+  assert.equal(rotationCalls[0].allowRefreshOnExhausted, true);
+  assert.equal(rotationCalls[0].previousExitIp, '198.51.100.10');
+  assert.equal(refreshCalls.length, 0);
+  assert.equal(switchCalls.length, 0);
+  assert.equal(response.exitChanged, true);
+  assert.equal(response.proxyRouting.exitIp, '203.0.113.77');
+});
+
+test('REFRESH_IP_PROXY_POOL with ensureDifferentExit routes 711 API mode through the real-exit rotation helper', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const rotationCalls = [];
+  const refreshCalls = [];
+  const switchCalls = [];
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+
+  const router = api.createMessageRouter({
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyApiUrl: 'http://proxy.example.com/gen?count=10',
+      ipProxyAppliedExitIp: '198.51.100.20',
+      ipProxyAutoRefreshPoolOnExhausted: true,
+    }),
+    refreshIpProxyPool: async (options = {}) => {
+      refreshCalls.push(options);
+      return { mode: options.mode || 'api', provider: '711proxy', pool: [] };
+    },
+    switchIpProxy: async (direction, options = {}) => {
+      switchCalls.push({ direction, options });
+      return { mode: 'api', provider: '711proxy', pool: [] };
+    },
+    switch711ApiProxyUntilExitChanged: async (options = {}) => {
+      rotationCalls.push(options);
+      return {
+        ok: true,
+        mode: 'api',
+        provider: '711proxy',
+        exitChanged: true,
+        exitCheckCompleted: true,
+        previousExitIp: options.previousExitIp,
+        attemptedCount: 3,
+        refreshedPool: true,
+        proxyRouting: {
+          applied: true,
+          provider: '711proxy',
+          exitIp: '203.0.113.88',
+          exitRegion: 'JP',
+          exitDetecting: false,
+        },
+      };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'REFRESH_IP_PROXY_POOL',
+    source: 'sidepanel',
+    payload: {
+      mode: 'api',
+      ensureDifferentExit: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(rotationCalls.length, 1);
+  assert.equal(rotationCalls[0].refreshPoolFirst, true);
+  assert.equal(rotationCalls[0].allowRefreshOnExhausted, true);
+  assert.equal(rotationCalls[0].previousExitIp, '198.51.100.20');
+  assert.equal(refreshCalls.length, 0);
+  assert.equal(switchCalls.length, 0);
+  assert.equal(response.exitChanged, true);
+  assert.equal(response.proxyRouting.exitIp, '203.0.113.88');
+});
+
 test('PROBE_IP_PROXY_EXIT rebinding and probing use sidepanel ipProxyStateOverride', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

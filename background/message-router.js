@@ -154,6 +154,7 @@
       registerTab,
       requestStop,
       probeIpProxyExit,
+      switch711ApiProxyUntilExitChanged,
       handleCloudflareSecurityBlocked,
       resetState,
       resumeAutoRun,
@@ -1789,11 +1790,30 @@
         }
 
         case 'REFRESH_IP_PROXY_POOL': {
+          const currentState = await getState();
+          const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
+          if (message.payload?.ensureDifferentExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
+            const mode = typeof normalizeIpProxyMode === 'function'
+              ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
+              : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
+            const provider = typeof normalizeIpProxyProviderValue === 'function'
+              ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
+              : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+            if (mode === 'api' && provider === '711proxy') {
+              const result = await switch711ApiProxyUntilExitChanged({
+                maxItems: message.payload?.maxItems,
+                mode,
+                state: resolvedState,
+                previousExitIp: message.payload?.previousExitIp ?? resolvedState?.ipProxyAppliedExitIp,
+                refreshPoolFirst: true,
+                allowRefreshOnExhausted: true,
+              });
+              return { ok: true, ...result };
+            }
+          }
           if (typeof refreshIpProxyPool !== 'function') {
             throw new Error('IP 代理池能力尚未接入。');
           }
-          const currentState = await getState();
-          const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
           const result = await refreshIpProxyPool({
             maxItems: message.payload?.maxItems,
             mode: message.payload?.mode,
@@ -1809,6 +1829,25 @@
           }
           const currentState = await getState();
           const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
+          if (message.payload?.ensureDifferentExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
+            const mode = typeof normalizeIpProxyMode === 'function'
+              ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
+              : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
+            const provider = typeof normalizeIpProxyProviderValue === 'function'
+              ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
+              : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+            if (mode === 'api' && provider === '711proxy') {
+              const result = await switch711ApiProxyUntilExitChanged({
+                maxItems: message.payload?.maxItems,
+                mode,
+                state: resolvedState,
+                previousExitIp: message.payload?.previousExitIp ?? resolvedState?.ipProxyAppliedExitIp,
+                refreshPoolFirst: false,
+                allowRefreshOnExhausted: Boolean(resolvedState?.ipProxyAutoRefreshPoolOnExhausted),
+              });
+              return { ok: true, ...result };
+            }
+          }
           const result = await switchIpProxy(message.payload?.direction || 'next', {
             maxItems: message.payload?.maxItems,
             mode: message.payload?.mode,

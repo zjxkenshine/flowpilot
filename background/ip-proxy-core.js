@@ -3700,6 +3700,291 @@ function getNextIpProxyPoolIndex(currentIndex = 0, poolLength = 0, direction = '
   return (normalized + 1) % length;
 }
 
+function isReadyIpProxyExitRouting(status = {}) {
+  const exitIp = String(status?.exitIp || '').trim();
+  const reason = String(status?.reason || '').trim().toLowerCase();
+  if (!exitIp || status?.applied === false) {
+    return false;
+  }
+  return ![
+    'connectivity_failed',
+    'apply_failed',
+    'missing_proxy_entry',
+    'proxy_api_unavailable',
+    'disabled',
+    'disabled_probe_only',
+  ].includes(reason);
+}
+
+function build711ApiDifferentExitStatusSeed(state = {}, provider = DEFAULT_IP_PROXY_SERVICE) {
+  const entry = getIpProxyCurrentEntryFromState(state);
+  return {
+    enabled: true,
+    applied: Boolean(state?.ipProxyApplied) || Boolean(entry),
+    reason: String(state?.ipProxyAppliedReason || 'applied').trim().toLowerCase(),
+    host: String(entry?.host || state?.ipProxyAppliedHost || '').trim(),
+    port: normalizeIpProxyPort(entry?.port || state?.ipProxyAppliedPort),
+    region: String(entry?.region || state?.ipProxyAppliedRegion || '').trim(),
+    username: String(entry?.username || '').trim(),
+    entrySource: resolveIpProxyAccountEntrySource(state, normalizeIpProxyMode(state?.ipProxyMode)),
+    hasAuth: Boolean(entry?.username || entry?.password || state?.ipProxyAppliedHasAuth),
+    provider: normalizeIpProxyProviderValue(entry?.provider || provider || state?.ipProxyService),
+    error: '',
+    warning: '',
+    exitDetecting: true,
+    exitIp: '',
+    exitRegion: '',
+    exitError: '',
+    exitSource: '',
+    exitEndpoint: '',
+  };
+}
+
+function build711ApiDifferentExitSkippedReason(stats = {}) {
+  if (Number(stats?.attemptedCount || 0) <= 0) {
+    return stats?.emptyPool ? 'empty_pool_without_refresh' : 'pool_tail_without_refresh';
+  }
+  if (stats?.sawSameExit) {
+    return 'same_exit_exhausted';
+  }
+  return 'probe_failed_exhausted';
+}
+
+async function restore711ApiProxyRuntimeAfterDifferentExitFailure(originalState = {}, options = {}) {
+  const provider = normalizeIpProxyProviderValue(originalState?.ipProxyService);
+  const runtime = getIpProxyRuntimeSnapshot(originalState, 'api', provider);
+  const runtimePatch = buildIpProxyRuntimeStatePatch('api', {
+    pool: runtime.pool,
+    index: runtime.index,
+    current: runtime.current,
+  }, provider);
+  await setState(runtimePatch);
+  broadcastDataUpdate(runtimePatch);
+
+  const applyState = {
+    ...originalState,
+    ...runtimePatch,
+  };
+  const appliedStatus = await applyIpProxySettingsFromState(applyState, {
+    skipExitProbe: true,
+    suppressAuthRebind: true,
+  }).catch(() => null);
+  const restoredStatus = {
+    ...(appliedStatus || build711ApiDifferentExitStatusSeed(applyState, provider)),
+    applied: appliedStatus?.applied !== undefined
+      ? Boolean(appliedStatus.applied)
+      : Boolean(originalState?.ipProxyApplied || runtime.current),
+    reason: String(appliedStatus?.reason || originalState?.ipProxyAppliedReason || 'applied').trim().toLowerCase(),
+    error: String(originalState?.ipProxyAppliedError || ''),
+    warning: String(originalState?.ipProxyAppliedWarning || ''),
+    exitDetecting: false,
+    exitIp: String(options?.previousExitIp ?? originalState?.ipProxyAppliedExitIp ?? '').trim(),
+    exitRegion: String(originalState?.ipProxyAppliedExitRegion || '').trim(),
+    exitError: String(originalState?.ipProxyAppliedExitError || '').trim(),
+    exitSource: String(originalState?.ipProxyAppliedExitSource || '').trim().toLowerCase(),
+    exitEndpoint: String(originalState?.ipProxyAppliedExitEndpoint || '').trim(),
+  };
+  await syncIpProxyLeakGuardForStatus(restoredStatus);
+  await updateIpProxyRuntimeStatus(restoredStatus);
+  return restoredStatus;
+}
+
+async function store711ApiProxyPoolForFirstEntrySwitch(state = {}, pool = [], provider = DEFAULT_IP_PROXY_SERVICE) {
+  const normalizedProvider = normalizeIpProxyProviderValue(provider);
+  const normalizedPool = normalizeProxyPoolEntries(pool, normalizedProvider, { mode: 'api' });
+  if (!normalizedPool.length) {
+    return {
+      pool: [],
+      state,
+      summary: buildProxyPoolSummary([], 0),
+    };
+  }
+  const preSwitchIndex = Math.max(0, normalizedPool.length - 1);
+  const runtimePatch = buildIpProxyRuntimeStatePatch('api', {
+    pool: normalizedPool,
+    index: preSwitchIndex,
+    current: normalizedPool[preSwitchIndex] || null,
+  }, normalizedProvider);
+  const updates = {
+    ipProxyService: normalizedProvider,
+    ...runtimePatch,
+  };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  return {
+    pool: normalizedPool,
+    state: {
+      ...state,
+      ...updates,
+    },
+    summary: buildProxyPoolSummary(normalizedPool, preSwitchIndex),
+  };
+}
+
+async function switch711ApiProxyUntilExitChanged(options = {}) {
+  const originalState = options.state || await getState();
+  const mode = normalizeIpProxyMode(options.mode || originalState?.ipProxyMode);
+  const provider = normalizeIpProxyProviderValue(originalState?.ipProxyService);
+  if (mode !== 'api' || provider !== '711proxy') {
+    throw new Error('真实出口轮换仅支持 711Proxy API 模式。');
+  }
+  if (!isApiModeProxyConfigAvailable(originalState)) {
+    throw new Error('API 模式代理 URL 为空，请先填写代理 API 地址。');
+  }
+
+  const previousExitIp = String(
+    options.previousExitIp ?? originalState?.ipProxyAppliedExitIp ?? ''
+  ).trim();
+  const allowRefreshOnExhausted = options.allowRefreshOnExhausted === undefined
+    ? Boolean(originalState?.ipProxyAutoRefreshPoolOnExhausted)
+    : Boolean(options.allowRefreshOnExhausted);
+  const refreshPoolFirst = Boolean(options.refreshPoolFirst);
+  const maxItems = Math.max(
+    1,
+    Math.min(500, Number(options.maxItems) || resolveIpProxyPoolTargetCountForMode(originalState, mode))
+  );
+  const switchProxy = typeof options.switchProxyFn === 'function' ? options.switchProxyFn : switchIpProxy;
+  const pullPool = typeof options.pullPoolFn === 'function' ? options.pullPoolFn : pullIpProxyPoolFromApi;
+  const stats = {
+    attemptedCount: 0,
+    refreshedPool: false,
+    sawSameExit: false,
+    sawProbeFailure: false,
+    emptyPool: false,
+  };
+  let lastResult = null;
+  let lastRouting = null;
+
+  await updateIpProxyRuntimeStatus(build711ApiDifferentExitStatusSeed(originalState, provider));
+
+  const acceptResultIfChanged = (result = {}) => {
+    const routing = result?.proxyRouting || {};
+    lastRouting = routing;
+    const exitIp = String(routing?.exitIp || '').trim();
+    if (isReadyIpProxyExitRouting(routing) && (!previousExitIp || exitIp !== previousExitIp)) {
+      return {
+        ...result,
+        exitCheckCompleted: true,
+        exitChanged: true,
+        previousExitIp,
+        attemptedCount: stats.attemptedCount,
+        refreshedPool: stats.refreshedPool,
+        skippedReason: '',
+      };
+    }
+    if (exitIp && previousExitIp && exitIp === previousExitIp) {
+      stats.sawSameExit = true;
+    } else {
+      stats.sawProbeFailure = true;
+    }
+    return null;
+  };
+
+  const attemptFromState = async (sourceState = {}, attemptLimit = 0) => {
+    let latestState = sourceState;
+    const limit = Math.max(0, Number(attemptLimit) || 0);
+    for (let attempt = 0; attempt < limit; attempt += 1) {
+      const switched = await switchProxy('next', {
+        mode: 'api',
+        state: latestState,
+        forceRefresh: false,
+        skipExitProbe: false,
+        maxItems,
+      });
+      stats.attemptedCount += 1;
+      lastResult = switched;
+      const accepted = acceptResultIfChanged(switched);
+      if (accepted) {
+        if (switched?.proxyRouting && typeof switched.proxyRouting === 'object') {
+          await syncIpProxyLeakGuardForStatus(switched.proxyRouting);
+          await updateIpProxyRuntimeStatus({
+            ...switched.proxyRouting,
+            exitDetecting: false,
+          });
+        }
+        return accepted;
+      }
+      latestState = await getState();
+    }
+    return null;
+  };
+
+  const pullAndStoreFreshPool = async (sourceState = {}) => {
+    const pool = await pullPool(sourceState, {
+      maxItems,
+      timeoutMs: options.timeoutMs,
+    });
+    if (!Array.isArray(pool) || !pool.length) {
+      stats.emptyPool = true;
+      return {
+        pool: [],
+        state: sourceState,
+      };
+    }
+    stats.refreshedPool = true;
+    return store711ApiProxyPoolForFirstEntrySwitch(sourceState, pool, provider);
+  };
+
+  if (refreshPoolFirst) {
+    const fresh = await pullAndStoreFreshPool(originalState);
+    if (fresh.pool.length) {
+      const accepted = await attemptFromState(fresh.state, fresh.pool.length);
+      if (accepted) {
+        return accepted;
+      }
+    }
+  } else {
+    const runtime = getIpProxyRuntimeSnapshot(originalState, 'api', provider);
+    const pool = Array.isArray(runtime.pool) ? runtime.pool.slice(0, maxItems) : [];
+    if (!pool.length) {
+      stats.emptyPool = true;
+    } else {
+      const currentIndex = normalizeIpProxyCurrentIndex(runtime.index, 0) % pool.length;
+      const remainingCount = Math.max(0, pool.length - 1 - currentIndex);
+      const accepted = await attemptFromState(originalState, remainingCount);
+      if (accepted) {
+        return accepted;
+      }
+    }
+
+    if (allowRefreshOnExhausted) {
+      const latestState = await getState();
+      const fresh = await pullAndStoreFreshPool(latestState);
+      if (fresh.pool.length) {
+        const accepted = await attemptFromState(fresh.state, fresh.pool.length);
+        if (accepted) {
+          return accepted;
+        }
+      }
+    }
+  }
+
+  const skippedReason = build711ApiDifferentExitSkippedReason(stats);
+  const restoredStatus = await restore711ApiProxyRuntimeAfterDifferentExitFailure(originalState, {
+    previousExitIp,
+  });
+  const restoredRuntime = getIpProxyRuntimeSnapshot(originalState, 'api', provider);
+  const fallbackSummary = buildProxyPoolSummary(restoredRuntime.pool, restoredRuntime.index);
+  return {
+    mode: 'api',
+    provider,
+    count: lastResult?.count ?? fallbackSummary.count,
+    index: lastResult?.index ?? fallbackSummary.index,
+    current: lastResult?.current ?? fallbackSummary.current,
+    display: lastResult?.display || fallbackSummary.display,
+    pool: lastResult?.pool || restoredRuntime.pool,
+    proxyRouting: restoredStatus || lastRouting,
+    skipped: true,
+    reason: skippedReason,
+    skippedReason,
+    exitCheckCompleted: true,
+    exitChanged: false,
+    previousExitIp,
+    attemptedCount: stats.attemptedCount,
+    refreshedPool: stats.refreshedPool,
+  };
+}
+
 async function refreshIpProxyPool(options = {}) {
   const state = options.state || await getState();
   const mode = normalizeIpProxyMode(options.mode || state?.ipProxyMode);

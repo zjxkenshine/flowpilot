@@ -1987,6 +1987,7 @@ async function refreshIpProxyPoolByApi(options = {}) {
     payload: {
       mode,
       skipExitProbe: true,
+      ensureDifferentExit: mode === 'api',
       ipProxyStateOverride,
     },
   });
@@ -2018,11 +2019,15 @@ async function refreshIpProxyPoolByApi(options = {}) {
     syncLatestState(patch);
   }
   updateIpProxyUI(latestState);
-  scheduleIpProxyExitProbe({ silent: true });
+  if (!response?.exitCheckCompleted) {
+    scheduleIpProxyExitProbe({ silent: true });
+  }
 
   if (!silent) {
     if (mode === 'account') {
       showToast(`已同步账号代理：${response?.display || formatIpProxyCurrentDisplay(latestState).text}`, 'success', 1800);
+    } else if (response?.skipped) {
+      showToast(`已拉取代理池，但未找到不同出口：${response?.skippedReason || response?.reason || 'unknown'}`, 'warn', 2600);
     } else {
       showToast(`已拉取代理池：${Number(response?.count) || 0} 条`, 'success', 1800);
     }
@@ -2044,6 +2049,7 @@ async function switchIpProxyToNext(options = {}) {
       mode,
       forceRefresh: false,
       skipExitProbe: true,
+      ensureDifferentExit: mode === 'api',
       ipProxyStateOverride,
     },
   });
@@ -2074,9 +2080,15 @@ async function switchIpProxyToNext(options = {}) {
     syncLatestState(patch);
   }
   updateIpProxyUI(latestState);
-  scheduleIpProxyExitProbe({ silent: true });
+  if (!response?.exitCheckCompleted) {
+    scheduleIpProxyExitProbe({ silent: true });
+  }
   if (!silent) {
-    showToast(`已切换代理：${response?.display || formatIpProxyCurrentDisplay(latestState).text}`, 'success', 1800);
+    if (response?.skipped) {
+      showToast(`未找到不同出口：${response?.skippedReason || response?.reason || 'unknown'}`, 'warn', 2600);
+    } else {
+      showToast(`已切换代理：${response?.display || formatIpProxyCurrentDisplay(latestState).text}`, 'success', 1800);
+    }
   }
   return response;
 }
