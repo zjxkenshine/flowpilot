@@ -14114,7 +14114,10 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
   completeNodeFromBackground,
+  getState,
   openSignupEntryTab,
+  probeIpProxyExit,
+  switchIpProxy,
 });
 const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   addLog,
