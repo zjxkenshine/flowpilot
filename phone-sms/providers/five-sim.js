@@ -12,6 +12,13 @@
   const DEFAULT_MAX_USES = 3;
   const FIVE_SIM_RATE_LIMIT_ERROR_PREFIX = 'FIVE_SIM_RATE_LIMIT::';
   const MAX_PRICE_CANDIDATES = 8;
+  const DEFAULT_ACTIVATION_RETRY_ROUNDS = 3;
+  const ACTIVATION_RETRY_ROUNDS_MIN = 1;
+  const ACTIVATION_RETRY_ROUNDS_MAX = 10;
+  const DEFAULT_ACTIVATION_RETRY_DELAY_MS = 2000;
+  const DEFAULT_TIER_UPGRADE_LIMIT = 1;
+  const TIER_UPGRADE_LIMIT_MIN = 0;
+  const TIER_UPGRADE_LIMIT_MAX = 20;
   const SUPPORTED_COUNTRY_ITEMS = Object.freeze([
     { id: 'indonesia', label: '印度尼西亚 (Indonesia)' },
     { id: 'thailand', label: '泰国 (Thailand)' },
@@ -179,6 +186,40 @@
       return '';
     }
     return String(Math.round(numeric * 10000) / 10000);
+  }
+
+  function normalizeActivationRetryRounds(value) {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return DEFAULT_ACTIVATION_RETRY_ROUNDS;
+    }
+    return Math.max(ACTIVATION_RETRY_ROUNDS_MIN, Math.min(ACTIVATION_RETRY_ROUNDS_MAX, parsed));
+  }
+
+  function normalizeActivationRetryDelayMs(value) {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return DEFAULT_ACTIVATION_RETRY_DELAY_MS;
+    }
+    return Math.max(500, Math.min(30000, parsed));
+  }
+
+  function normalizeTierUpgradeLimit(value) {
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_TIER_UPGRADE_LIMIT;
+    }
+    return Math.max(TIER_UPGRADE_LIMIT_MIN, Math.min(TIER_UPGRADE_LIMIT_MAX, parsed));
+  }
+
+  function formatTierPrice(price) {
+    return price === null || price === undefined || String(price).trim() === ''
+      ? '自动'
+      : String(price);
+  }
+
+  function buildTierKey(countryId, price) {
+    return [normalizeFiveSimCountryId(countryId, ''), formatTierPrice(price)].join('::');
   }
 
   function normalizeFiveSimCountryFallback(value = []) {
@@ -526,17 +567,36 @@
     priceCandidates = buildSortedUniquePriceCandidates(priceCandidates);
 
     const minCatalogPrice = priceCandidates.length > 0 ? priceCandidates[0] : null;
+    const minPriceText = normalizeFiveSimMaxPrice(state.fiveSimMinPrice);
+    const minPrice = minPriceText ? Number(minPriceText) : null;
+    const preferredText = normalizeFiveSimMaxPrice(state.heroSmsPreferredPrice);
+    const preferredPrice = preferredText ? Number(preferredText) : null;
+    let filteredPrices = priceCandidates;
+    if (minPrice !== null) {
+      filteredPrices = filteredPrices.filter((price) => price >= minPrice);
+    }
     if (userLimit !== null) {
-      const bounded = priceCandidates.filter((price) => price <= userLimit);
+      filteredPrices = filteredPrices.filter((price) => price <= userLimit);
+    }
+    const orderedPrices = Array.from(new Set(filteredPrices)).sort((left, right) => left - right);
+    if (preferredPrice !== null && orderedPrices.includes(preferredPrice)) {
       return {
-        prices: bounded.length > 0 ? [userLimit, ...bounded.filter((price) => price !== userLimit)] : [userLimit],
+        prices: [preferredPrice, ...orderedPrices.filter((price) => price !== preferredPrice)],
         userLimit,
         minCatalogPrice,
       };
     }
-
-    if (priceCandidates.length > 0) {
-      return { prices: priceCandidates, userLimit: null, minCatalogPrice };
+    if (orderedPrices.length > 0) {
+      return {
+        prices: userLimit !== null
+          ? [userLimit, ...orderedPrices.filter((price) => Number(price) !== Number(userLimit))]
+          : orderedPrices,
+        userLimit,
+        minCatalogPrice,
+      };
+    }
+    if (userLimit !== null && minPrice === null) {
+      return { prices: [userLimit], userLimit, minCatalogPrice };
     }
     return { prices: [null], userLimit: null, minCatalogPrice: null };
   }
@@ -590,6 +650,42 @@
   function isTerminalError(payloadOrMessage) {
     const text = describePayload(payloadOrMessage);
     return /not\s+enough\s+(?:user\s+)?balance|not\s+enough\s+rating|unauthorized|invalid\s+token|banned|bad\s+(?:country|operator)|no\s+product|server\s+offline/i.test(text);
+  }
+
+  function createTierQueue(countryAttempts = [], preferredPrice = null) {
+    const queue = [];
+    const seen = new Set();
+    const preferred = normalizePrice(preferredPrice);
+    const pushTier = (attempt, price, source = 'auto') => {
+      const key = buildTierKey(attempt?.countryConfig?.id, price);
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      queue.push({
+        attempt,
+        price,
+        source,
+        key,
+      });
+    };
+
+    if (preferred !== null) {
+      for (const attempt of countryAttempts) {
+        const prices = Array.isArray(attempt?.pricePlan?.prices) ? attempt.pricePlan.prices : [];
+        if (prices.some((price) => Number(price) === Number(preferred))) {
+          pushTier(attempt, preferred, 'preferred');
+          break;
+        }
+      }
+    }
+
+    for (const attempt of countryAttempts) {
+      const prices = Array.isArray(attempt?.pricePlan?.prices) ? attempt.pricePlan.prices : [];
+      prices.forEach((price) => pushTier(attempt, price, 'auto'));
+    }
+
+    return queue;
   }
 
   function assertMaxPriceCompatibleWithOperator(state = {}) {
@@ -695,62 +791,97 @@
       ));
     }
 
-    const noNumbersByCountry = [];
-    const rateLimitByCountry = [];
+    for (const attempt of countryAttempts) {
+      attempt.pricePlan = attempt.pricePlan || await resolvePricePlan(state, attempt.countryConfig, deps);
+    }
+
+    const retryRounds = Math.max(2, normalizeActivationRetryRounds(state.heroSmsActivationRetryRounds));
+    const retryDelayMs = normalizeActivationRetryDelayMs(state.heroSmsActivationRetryDelayMs);
+    const tierUpgradeLimit = normalizeTierUpgradeLimit(state.phoneActivationTierUpgradeLimit);
+    const preferredText = normalizeFiveSimMaxPrice(state.heroSmsPreferredPrice);
+    const tierQueue = createTierQueue(countryAttempts, preferredText ? Number(preferredText) : null);
+    const attemptedTiers = tierQueue.slice(0, Math.max(1, tierUpgradeLimit + 1));
+    const noNumbersByTier = [];
     let lastError = null;
     let lastFailureText = '';
-    let sawOnlyRetryableFailures = true;
-    for (const attempt of countryAttempts) {
-      const countryConfig = attempt.countryConfig;
-      const countryFailures = [];
-      const pricePlan = attempt.pricePlan || await resolvePricePlan(state, countryConfig, deps);
-      for (const maxPrice of pricePlan.prices) {
+
+    for (let tierIndex = 0; tierIndex < attemptedTiers.length; tierIndex += 1) {
+      const tier = attemptedTiers[tierIndex];
+      const countryConfig = tier.attempt.countryConfig;
+      const tierLabel = `${countryConfig.label}: 价格档位 ${formatTierPrice(tier.price)}`;
+      for (let round = 1; round <= retryRounds; round += 1) {
+        if (typeof deps.throwIfStopped === 'function') {
+          deps.throwIfStopped();
+        }
+        if (typeof deps.addLog === 'function') {
+          await deps.addLog(
+            `步骤 9：5sim 正在获取手机号（档位 ${tierIndex + 1}/${attemptedTiers.length}：${tierLabel}，第 ${round}/${retryRounds} 轮）...`,
+            'info'
+          );
+        }
         try {
-          const activation = await buyActivationWithPrice(state, countryConfig, maxPrice, deps);
+          const activation = await buyActivationWithPrice(state, countryConfig, tier.price, deps);
           if (activation) {
             return activation;
           }
           lastFailureText = '空响应';
         } catch (error) {
           const payloadOrMessage = error?.payload || error?.message;
-          if (isTerminalError(payloadOrMessage)) {
-            throw new Error(`5sim 购买手机号失败：${describePayload(payloadOrMessage) || '空响应'}`);
-          }
           const failureText = describePayload(payloadOrMessage) || lastFailureText;
+          if (isTerminalError(payloadOrMessage)) {
+            throw new Error(`5sim 购买手机号失败：${failureText || '空响应'}`);
+          }
           if (isRateLimitPayload(payloadOrMessage)) {
-            lastFailureText = failureText;
-            countryFailures.push(failureText || 'rate limit');
-            continue;
+            throw buildFiveSimRateLimitError([`${countryConfig.label}: ${failureText || 'rate limit'}`]);
           }
           if (isNoNumbersPayload(payloadOrMessage)) {
-            lastFailureText = failureText;
-            countryFailures.push(failureText || '无可用号码');
+            lastFailureText = failureText || '无可用号码';
+            if (round < retryRounds) {
+              if (typeof deps.addLog === 'function') {
+                await deps.addLog(
+                  `步骤 9：5sim 档位 ${tierLabel} 暂无可用号码（第 ${round}/${retryRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。`,
+                  'warn'
+                );
+              }
+              if (typeof deps.sleepWithStop === 'function') {
+                await deps.sleepWithStop(retryDelayMs);
+              }
+            }
             continue;
           }
-          sawOnlyRetryableFailures = false;
           lastError = error;
-          lastFailureText = failureText;
+          lastFailureText = failureText || error?.message || '未知';
+          break;
         }
       }
-      const countryFailureText = countryFailures.length
-        ? Array.from(new Set(countryFailures)).join(', ')
-        : (lastFailureText || '无可用号码');
-      if (countryFailures.some((text) => isRateLimitPayload(text))) {
-        rateLimitByCountry.push(`${countryConfig.label}: ${countryFailureText}`);
-      } else {
-        noNumbersByCountry.push(`${countryConfig.label}: ${countryFailureText}`);
+
+      noNumbersByTier.push(`${tierLabel}: ${lastFailureText || '无可用号码'}`);
+      const nextTier = attemptedTiers[tierIndex + 1];
+      if (nextTier && typeof deps.addLog === 'function') {
+        if (tier.source === 'preferred') {
+          await deps.addLog(
+            `步骤 9：5sim 指定档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，回退自动档位并消耗 1 次升档。`,
+            'warn'
+          );
+        }
+        await deps.addLog(
+          `步骤 9：5sim 档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，正在升档到 ${nextTier.attempt.countryConfig.label}: 价格档位 ${formatTierPrice(nextTier.price)}（${tierIndex + 1}/${tierUpgradeLimit}）。`,
+          'warn'
+        );
       }
     }
 
-    if (rateLimitByCountry.length) {
-      throw buildFiveSimRateLimitError(rateLimitByCountry);
-    }
-
-    if (noNumbersByCountry.length && sawOnlyRetryableFailures) {
-      throw new Error(`5sim 已尝试 ${countryCandidates.length} 个候选国家，均无可用号码：${noNumbersByCountry.join(' | ')}。`);
-    }
     if (lastError) {
       throw lastError;
+    }
+    if (tierQueue.length > attemptedTiers.length && typeof deps.addLog === 'function') {
+      await deps.addLog(
+        `步骤 9：5sim 升档次数已用尽（${tierUpgradeLimit} 次），仍有 ${tierQueue.length - attemptedTiers.length} 个候选档位未尝试。`,
+        'warn'
+      );
+    }
+    if (noNumbersByTier.length) {
+      throw new Error(`5sim 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${attemptedTiers.length} 个候选档位，均无可用号码：${noNumbersByTier.join(' | ')}。`);
     }
     throw new Error(`5sim 获取手机号失败，最后状态：${lastFailureText || '未知'}。`);
   }

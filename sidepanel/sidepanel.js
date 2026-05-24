@@ -507,6 +507,7 @@ const rowHeroSmsPreferredActivation = document.getElementById('row-hero-sms-pref
 const rowPhoneCodeSettingsGroup = document.getElementById('row-phone-code-settings-group');
 const rowPhoneVerificationResendCount = document.getElementById('row-phone-verification-resend-count');
 const rowPhoneReplacementLimit = document.getElementById('row-phone-replacement-limit');
+const rowPhoneActivationTierUpgradeLimit = document.getElementById('row-phone-activation-tier-upgrade-limit');
 const rowPhoneCodeWaitSeconds = document.getElementById('row-phone-code-wait-seconds');
 const rowPhoneCodeTimeoutWindows = document.getElementById('row-phone-code-timeout-windows');
 const rowPhoneCodePollIntervalSeconds = document.getElementById('row-phone-code-poll-interval-seconds');
@@ -527,6 +528,7 @@ const inputHeroSmsMinPrice = document.getElementById('input-hero-sms-min-price')
 const inputHeroSmsMaxPrice = document.getElementById('input-hero-sms-max-price');
 const inputHeroSmsPreferredPrice = document.getElementById('input-hero-sms-preferred-price');
 const inputPhoneReplacementLimit = document.getElementById('input-phone-replacement-limit');
+const inputPhoneActivationTierUpgradeLimit = document.getElementById('input-phone-activation-tier-upgrade-limit');
 const inputPhoneCodeWaitSeconds = document.getElementById('input-phone-code-wait-seconds');
 const inputPhoneCodeTimeoutWindows = document.getElementById('input-phone-code-timeout-windows');
 const inputPhoneCodePollIntervalSeconds = document.getElementById('input-phone-code-poll-interval-seconds');
@@ -678,6 +680,9 @@ const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
+const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
+const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
 const PHONE_CODE_WAIT_SECONDS_MIN = 15;
 const PHONE_CODE_WAIT_SECONDS_MAX = 300;
 const DEFAULT_PHONE_CODE_WAIT_SECONDS = 60;
@@ -4317,6 +4322,9 @@ function collectSettingsPayload() {
   const defaultPhoneCodeWaitSeconds = typeof DEFAULT_PHONE_CODE_WAIT_SECONDS !== 'undefined'
     ? DEFAULT_PHONE_CODE_WAIT_SECONDS
     : 60;
+  const defaultPhoneActivationTierUpgradeLimit = typeof DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT !== 'undefined'
+    ? DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT
+    : 1;
   const defaultPhoneCodeTimeoutWindows = typeof DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS !== 'undefined'
     ? DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS
     : 2;
@@ -4452,6 +4460,12 @@ function collectSettingsPayload() {
       latestState?.phoneVerificationReplacementLimit
     )
     : DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT;
+  const phoneActivationTierUpgradeLimitValue = typeof inputPhoneActivationTierUpgradeLimit !== 'undefined' && inputPhoneActivationTierUpgradeLimit
+    ? normalizePhoneActivationTierUpgradeLimit(
+      inputPhoneActivationTierUpgradeLimit.value,
+      latestState?.phoneActivationTierUpgradeLimit
+    )
+    : defaultPhoneActivationTierUpgradeLimit;
   const phoneCodeWaitSecondsValue = typeof inputPhoneCodeWaitSeconds !== 'undefined' && inputPhoneCodeWaitSeconds
     ? normalizePhoneCodeWaitSecondsValue(
       inputPhoneCodeWaitSeconds.value,
@@ -4924,6 +4938,7 @@ function collectSettingsPayload() {
     heroSmsPreferredPrice: heroSmsPreferredPriceValue,
     phonePreferredActivation: phonePreferredActivationValue,
     phoneVerificationReplacementLimit: phoneVerificationReplacementLimitValue,
+    phoneActivationTierUpgradeLimit: phoneActivationTierUpgradeLimitValue,
     phoneCodeWaitSeconds: phoneCodeWaitSecondsValue,
     phoneCodeTimeoutWindows: phoneCodeTimeoutWindowsValue,
     phoneCodePollIntervalSeconds: phoneCodePollIntervalSecondsValue,
@@ -5721,6 +5736,18 @@ function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PH
     );
   }
   return Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.min(PHONE_REPLACEMENT_LIMIT_MAX, parsed));
+}
+
+function normalizePhoneActivationTierUpgradeLimit(value, fallback = DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN,
+      Math.min(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX, Number(fallback) || DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT)
+    );
+  }
+  return Math.max(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN, Math.min(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX, parsed));
 }
 
 function normalizePhoneCodeWaitSecondsValue(value, fallback = DEFAULT_PHONE_CODE_WAIT_SECONDS) {
@@ -9421,6 +9448,7 @@ function updatePhoneVerificationSettingsUI() {
     typeof rowPhoneCodeSettingsGroup !== 'undefined' ? rowPhoneCodeSettingsGroup : null,
     typeof rowPhoneVerificationResendCount !== 'undefined' ? rowPhoneVerificationResendCount : null,
     typeof rowPhoneReplacementLimit !== 'undefined' ? rowPhoneReplacementLimit : null,
+    typeof rowPhoneActivationTierUpgradeLimit !== 'undefined' ? rowPhoneActivationTierUpgradeLimit : null,
     typeof rowPhoneCodeWaitSeconds !== 'undefined' ? rowPhoneCodeWaitSeconds : null,
     typeof rowPhoneCodeTimeoutWindows !== 'undefined' ? rowPhoneCodeTimeoutWindows : null,
     typeof rowPhoneCodePollIntervalSeconds !== 'undefined' ? rowPhoneCodePollIntervalSeconds : null,
@@ -11395,6 +11423,14 @@ function applySettingsState(state) {
       normalizePhoneVerificationReplacementLimit(
         state?.phoneVerificationReplacementLimit,
         DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+      )
+    );
+  }
+  if (typeof inputPhoneActivationTierUpgradeLimit !== 'undefined' && inputPhoneActivationTierUpgradeLimit) {
+    inputPhoneActivationTierUpgradeLimit.value = String(
+      normalizePhoneActivationTierUpgradeLimit(
+        state?.phoneActivationTierUpgradeLimit,
+        DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT
       )
     );
   }
@@ -17186,6 +17222,20 @@ inputPhoneReplacementLimit?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPhoneActivationTierUpgradeLimit?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneActivationTierUpgradeLimit?.addEventListener('blur', () => {
+  inputPhoneActivationTierUpgradeLimit.value = String(
+    normalizePhoneActivationTierUpgradeLimit(
+      inputPhoneActivationTierUpgradeLimit.value,
+      DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputPhoneCodeWaitSeconds?.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -18081,6 +18131,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePhoneVerificationReplacementLimit(
             message.payload.phoneVerificationReplacementLimit,
             DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+          )
+        );
+      }
+      if (message.payload.phoneActivationTierUpgradeLimit !== undefined && typeof inputPhoneActivationTierUpgradeLimit !== 'undefined' && inputPhoneActivationTierUpgradeLimit) {
+        inputPhoneActivationTierUpgradeLimit.value = String(
+          normalizePhoneActivationTierUpgradeLimit(
+            message.payload.phoneActivationTierUpgradeLimit,
+            DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT
           )
         );
       }

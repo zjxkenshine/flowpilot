@@ -652,6 +652,9 @@ const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
+const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
+const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
 const PHONE_CODE_WAIT_SECONDS_MIN = 15;
 const PHONE_CODE_WAIT_SECONDS_MAX = 300;
 const DEFAULT_PHONE_CODE_WAIT_SECONDS = 60;
@@ -1364,6 +1367,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   phoneSmsProviderOrder: [],
   verificationResendCount: DEFAULT_VERIFICATION_RESEND_COUNT,
   phoneVerificationReplacementLimit: DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT,
+  phoneActivationTierUpgradeLimit: DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT,
   phoneCodeWaitSeconds: DEFAULT_PHONE_CODE_WAIT_SECONDS,
   phoneCodeTimeoutWindows: DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS,
   phoneCodePollIntervalSeconds: DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
@@ -1652,6 +1656,21 @@ function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PH
   return Math.min(
     PHONE_REPLACEMENT_LIMIT_MAX,
     Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizePhoneActivationTierUpgradeLimit(value, fallback = DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT) {
+  const rawValue = String(value ?? '').trim();
+  const numeric = Number(rawValue);
+  if (!rawValue || !Number.isFinite(numeric)) {
+    return Math.min(
+      PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX,
+      Math.max(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN, Math.floor(Number(fallback) || DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT))
+    );
+  }
+  return Math.min(
+    PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX,
+    Math.max(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN, Math.floor(numeric))
   );
 }
 
@@ -3403,6 +3422,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
       return normalizePhoneVerificationReplacementLimit(value, DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT);
+    case 'phoneActivationTierUpgradeLimit':
+      return normalizePhoneActivationTierUpgradeLimit(value, DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT);
     case 'phoneCodeWaitSeconds':
       return normalizePhoneCodeWaitSeconds(value, DEFAULT_PHONE_CODE_WAIT_SECONDS);
     case 'phoneCodeTimeoutWindows':

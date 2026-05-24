@@ -73,6 +73,9 @@
     const DEFAULT_PHONE_PRICE_LOOKUP_ATTEMPTS = 3;
     const MAX_PHONE_PRICE_CANDIDATES = 8;
     const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 3;
+    const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
+    const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
+    const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
     const PHONE_ACTIVATION_RETRY_ROUNDS_MIN = 1;
     const PHONE_ACTIVATION_RETRY_ROUNDS_MAX = 10;
     const DEFAULT_PHONE_ACTIVATION_RETRY_DELAY_MS = 2000;
@@ -408,6 +411,17 @@
         return DEFAULT_PHONE_ACTIVATION_RETRY_DELAY_MS;
       }
       return Math.max(500, Math.min(30000, parsed));
+    }
+
+    function normalizePhoneActivationTierUpgradeLimit(value) {
+      const parsed = Math.floor(Number(value));
+      if (!Number.isFinite(parsed)) {
+        return DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT;
+      }
+      return Math.max(
+        PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN,
+        Math.min(PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX, parsed)
+      );
     }
 
     function assertFiveSimMaxPriceCompatibleWithOperator(operator, maxPriceLimit) {
@@ -770,6 +784,167 @@
         const normalized = Math.round(numeric * 10000) / 10000;
         return normalized > floor;
       });
+    }
+
+    function formatPhoneActivationTierPrice(price) {
+      return price === null || price === undefined || String(price).trim() === ''
+        ? '自动'
+        : String(price);
+    }
+
+    function buildPhoneActivationTierKey(provider, countryId, price) {
+      return [
+        normalizePhoneSmsProvider(provider || ''),
+        String(countryId ?? '').trim(),
+        formatPhoneActivationTierPrice(price),
+      ].join('::');
+    }
+
+    function createPhoneActivationTierQueue(options = {}) {
+      const {
+        provider,
+        countryAttempts = [],
+        getCountryId = (attempt) => attempt?.countryConfig?.id,
+        getCountryLabel = (attempt) => String(attempt?.countryConfig?.label || getCountryId(attempt) || '').trim(),
+        getPrices = () => [],
+        preferredPrice = null,
+      } = options;
+      const queue = [];
+      const seenKeys = new Set();
+      const normalizedPreferred = normalizeHeroSmsPriceLimit(preferredPrice);
+      const pushTier = (attempt, price, source = 'auto') => {
+        const countryId = getCountryId(attempt);
+        const key = buildPhoneActivationTierKey(provider, countryId, price);
+        if (seenKeys.has(key)) {
+          return;
+        }
+        seenKeys.add(key);
+        queue.push({
+          attempt,
+          price,
+          source,
+          key,
+          countryId,
+          countryLabel: getCountryLabel(attempt),
+        });
+      };
+
+      if (normalizedPreferred !== null) {
+        for (const attempt of countryAttempts) {
+          const prices = Array.isArray(getPrices(attempt)) ? getPrices(attempt) : [];
+          if (prices.some((price) => Number(price) === Number(normalizedPreferred))) {
+            pushTier(attempt, normalizedPreferred, 'preferred');
+            break;
+          }
+        }
+      }
+
+      for (const attempt of countryAttempts) {
+        const prices = Array.isArray(getPrices(attempt)) ? getPrices(attempt) : [];
+        prices.forEach((price) => pushTier(attempt, price, 'auto'));
+      }
+
+      return queue;
+    }
+
+    async function runPhoneActivationTierQueue(options = {}) {
+      const {
+        providerLabel = '接码平台',
+        queue = [],
+        maxAcquireRounds = 1,
+        retryDelayMs = DEFAULT_PHONE_ACTIVATION_RETRY_DELAY_MS,
+        tierUpgradeLimit = DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT,
+        attemptTier,
+        getTierLabel = (tier) => `${tier.countryLabel || tier.countryId || '未知国家'} / ${formatPhoneActivationTierPrice(tier.price)}`,
+      } = options;
+      const safeRounds = Math.max(1, Math.floor(Number(maxAcquireRounds) || 1));
+      const safeUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(tierUpgradeLimit);
+      const maxTierCount = Math.max(1, safeUpgradeLimit + 1);
+      const eligibleQueue = Array.isArray(queue) ? queue.filter(Boolean) : [];
+      if (!eligibleQueue.length || typeof attemptTier !== 'function') {
+        return {
+          exhausted: true,
+          tierFailures: [],
+          lastError: null,
+          lastFailureText: '',
+        };
+      }
+
+      const tierFailures = [];
+      const attemptedTiers = eligibleQueue.slice(0, maxTierCount);
+      for (let tierIndex = 0; tierIndex < attemptedTiers.length; tierIndex += 1) {
+        const tier = attemptedTiers[tierIndex];
+        const tierLabel = getTierLabel(tier);
+        let lastTierFailureText = '';
+        for (let round = 1; round <= safeRounds; round += 1) {
+          throwIfStopped();
+          await addLog(
+            `步骤 9：${providerLabel} 正在获取手机号（档位 ${tierIndex + 1}/${attemptedTiers.length}：${tierLabel}，第 ${round}/${safeRounds} 轮）...`,
+            'info'
+          );
+          const result = await attemptTier(tier, { round, tierIndex, tierLabel });
+          if (result?.activation) {
+            return {
+              activation: result.activation,
+              tier,
+              tierIndex,
+              tierFailures,
+            };
+          }
+          if (result?.terminalError) {
+            throw result.terminalError;
+          }
+          if (result?.lastError && !result?.retryable) {
+            return {
+              exhausted: false,
+              tierFailures,
+              lastError: result.lastError,
+              lastFailureText: result.failureText || result.lastError?.message || '',
+            };
+          }
+          lastTierFailureText = result?.failureText || result?.lastError?.message || lastTierFailureText || '暂无可用号码';
+          if (round < safeRounds) {
+            await addLog(
+              `步骤 9：${providerLabel} 档位 ${tierLabel} 暂无可用号码（第 ${round}/${safeRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。`,
+              'warn'
+            );
+            await sleepWithStop(retryDelayMs);
+          }
+        }
+
+        tierFailures.push({
+          tier,
+          label: tierLabel,
+          reason: lastTierFailureText || '暂无可用号码',
+        });
+        const nextTier = attemptedTiers[tierIndex + 1];
+        if (nextTier) {
+          if (tier.source === 'preferred') {
+            await addLog(
+              `步骤 9：${providerLabel} 指定档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，回退自动档位并消耗 1 次升档。`,
+              'warn'
+            );
+          }
+          await addLog(
+            `步骤 9：${providerLabel} 档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，正在升档到 ${getTierLabel(nextTier)}（${tierIndex + 1}/${safeUpgradeLimit}）。`,
+            'warn'
+          );
+        }
+      }
+
+      const remainingTiers = Math.max(0, eligibleQueue.length - attemptedTiers.length);
+      if (remainingTiers > 0) {
+        await addLog(
+          `步骤 9：${providerLabel} 升档次数已用尽（${safeUpgradeLimit} 次），仍有 ${remainingTiers} 个候选档位未尝试。`,
+          'warn'
+        );
+      }
+      return {
+        exhausted: true,
+        tierFailures,
+        lastError: null,
+        lastFailureText: tierFailures[tierFailures.length - 1]?.reason || '',
+      };
     }
 
     function shouldUseHeroSmsExpandedPriceLookup(state = {}) {
@@ -2511,6 +2686,11 @@
       return /\bNO_BALANCE\b|\bNOT_ENOUGH_BALANCE\b|\bBAD_KEY\b|\bINVALID_KEY\b|\bBANNED\b|\bACCOUNT_BANNED\b|\bWRONG_KEY\b/i.test(text);
     }
 
+    function isHeroSmsWrongMaxPriceFailure(payloadOrMessage) {
+      const text = describeHeroSmsPayload(payloadOrMessage);
+      return /WRONG_MAX_PRICE|价格上限过低|价格上限不符合平台要求|低于当前配置的最低购买价|超过当前配置的价格上限/i.test(text);
+    }
+
     function isProviderNoSupplyFailureMessage(message = '') {
       const text = String(message || '').trim();
       if (!text) {
@@ -3016,355 +3196,314 @@
       const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
       const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
+      const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 
-      let finalNoNumbersByCountry = [];
-      let finalRateLimitByCountry = [];
-      let finalLastError = null;
-
-      for (let round = 1; round <= maxAcquireRounds; round += 1) {
-        if (maxAcquireRounds > 1) {
-          await addLog(
-            `步骤 9：5sim 正在获取手机号（第 ${round}/${maxAcquireRounds} 轮）...`,
-            'info'
-          );
-        }
-        const noNumbersByCountry = [];
-        const rateLimitByCountry = [];
-        const retryableNoNumberCountries = [];
-        let lastError = null;
-
-        let orderedCountryCandidates = [...countryCandidates];
-        if (
-          (acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH)
-          && countryCandidates.length > 1
-        ) {
-          const rankedCandidates = [];
-          for (const [index, countryConfig] of countryCandidates.entries()) {
-            const countryCode = normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', 'thailand');
-            const lowestPrice = await resolveFiveSimLowestPrice(config, countryCode, priceRange);
-            rankedCandidates.push({
-              index,
-              countryConfig,
-              lowestPrice: Number.isFinite(Number(lowestPrice)) ? Number(lowestPrice) : null,
-            });
-          }
-          rankedCandidates.sort((left, right) => {
-            const leftPrice = left.lowestPrice;
-            const rightPrice = right.lowestPrice;
-            const leftHasPrice = Number.isFinite(leftPrice);
-            const rightHasPrice = Number.isFinite(rightPrice);
-            if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
-              return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
-                ? (rightPrice - leftPrice)
-                : (leftPrice - rightPrice);
-            }
-            if (leftHasPrice !== rightHasPrice) {
-              return leftHasPrice ? -1 : 1;
-            }
-            return left.index - right.index;
-          });
-          orderedCountryCandidates = rankedCandidates.map((entry) => entry.countryConfig);
-            const rankedSummary = rankedCandidates
-              .map((entry) => {
-                const countryCode = normalizeFiveSimCountryCode(entry.countryConfig.code || entry.countryConfig.id || '', 'thailand');
-                const countryLabel = String(entry.countryConfig.label || countryCode).trim() || countryCode;
-                return Number.isFinite(entry.lowestPrice)
-                  ? `${countryLabel}:${entry.lowestPrice}`
-                  : `${countryLabel}:无`;
-              })
-            .join(' | ');
-          await addLog(`步骤 9：5sim 价格优先排序：${rankedSummary}`, 'info');
-        }
-
-        for (const countryConfig of orderedCountryCandidates) {
+      let orderedCountryCandidates = [...countryCandidates];
+      if (
+        (acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH)
+        && countryCandidates.length > 1
+      ) {
+        const rankedCandidates = [];
+        for (const [index, countryConfig] of countryCandidates.entries()) {
           const countryCode = normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', 'thailand');
-          const countryLabel = String(countryConfig.label || countryCode).trim() || countryCode;
-          const countryPriceFloor = countryPriceFloorByCountryCode.get(countryCode) ?? null;
+          const lowestPrice = await resolveFiveSimLowestPrice(config, countryCode, priceRange);
+          rankedCandidates.push({
+            index,
+            countryConfig,
+            lowestPrice: Number.isFinite(Number(lowestPrice)) ? Number(lowestPrice) : null,
+          });
+        }
+        rankedCandidates.sort((left, right) => {
+          const leftPrice = left.lowestPrice;
+          const rightPrice = right.lowestPrice;
+          const leftHasPrice = Number.isFinite(leftPrice);
+          const rightHasPrice = Number.isFinite(rightPrice);
+          if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
+            return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
+              ? (rightPrice - leftPrice)
+              : (leftPrice - rightPrice);
+          }
+          if (leftHasPrice !== rightHasPrice) {
+            return leftHasPrice ? -1 : 1;
+          }
+          return left.index - right.index;
+        });
+        orderedCountryCandidates = rankedCandidates.map((entry) => entry.countryConfig);
+        const rankedSummary = rankedCandidates
+          .map((entry) => {
+            const countryCode = normalizeFiveSimCountryCode(entry.countryConfig.code || entry.countryConfig.id || '', 'thailand');
+            const countryLabel = String(entry.countryConfig.label || countryCode).trim() || countryCode;
+            return Number.isFinite(entry.lowestPrice)
+              ? `${countryLabel}:${entry.lowestPrice}`
+              : `${countryLabel}:无`;
+          })
+          .join(' | ');
+        await addLog(`步骤 9：5sim 价格优先排序：${rankedSummary}`, 'info');
+      }
+
+      const noNumbersByCountry = [];
+      const countryAttempts = [];
+      let lastError = null;
+      const explicitFiveSimMaxPriceLimit = normalizeHeroSmsPriceLimit(state.fiveSimMaxPrice);
+      for (const [index, countryConfig] of orderedCountryCandidates.entries()) {
+        const countryCode = normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', 'thailand');
+        const countryLabel = String(countryConfig.label || countryCode).trim() || countryCode;
+        const countryPriceFloor = countryPriceFloorByCountryCode.get(countryCode) ?? null;
+        let guestPricesPayload = null;
+        let productPricesPayload = null;
+        if (explicitFiveSimMaxPriceLimit !== null) {
           try {
-            const explicitFiveSimMaxPriceLimit = normalizeHeroSmsPriceLimit(state.fiveSimMaxPrice);
-            let guestPricesPayload = null;
-            let productPricesPayload = null;
-            if (explicitFiveSimMaxPriceLimit !== null) {
-              try {
-                productPricesPayload = await fetchFiveSimPayload(
-                  config,
-                  `/guest/products/${countryCode}/${config.operator}`,
-                  '5sim guest products'
-                );
-              } catch (_) {
-                productPricesPayload = null;
-              }
-            }
-            try {
-              guestPricesPayload = await fetchFiveSimPayload(
-                config,
-                '/guest/prices',
-                '5sim guest prices',
-                {
-                  query: {
-                    country: countryCode,
-                    product: config.product,
-                  },
-                }
-              );
-            } catch (_) {
-              guestPricesPayload = null;
-            }
-
-            const rawPriceCandidates = buildSortedUniquePriceCandidates(
-              [
-                ...(
-                  normalizeHeroSmsPriceLimit(state.fiveSimMaxPrice) !== null
-                    ? collectFiveSimProductPriceCandidates(productPricesPayload, config.product, [])
-                    : []
-                ),
-                ...collectFiveSimPriceCandidates(
-                  (
-                    guestPricesPayload
-                    && typeof guestPricesPayload === 'object'
-                    && !Array.isArray(guestPricesPayload)
-                    ? (guestPricesPayload?.[config.product]?.[countryCode] || guestPricesPayload?.[countryCode] || guestPricesPayload)
-                    : guestPricesPayload
-                  ),
-                  []
-                ),
-              ]
+            productPricesPayload = await fetchFiveSimPayload(
+              config,
+              `/guest/products/${countryCode}/${config.operator}`,
+              '5sim guest products'
             );
-            const rangeFilteredPriceCandidates = filterPriceCandidatesWithinRange(
-              rawPriceCandidates,
-              minPriceLimit,
-              maxPriceLimit
-            );
-            const orderedPricesFromCatalog = reorderPriceCandidates(
-              rangeFilteredPriceCandidates,
-              acquirePriority,
-              preferredPriceTier
-            );
-            const orderedPrices = orderedPricesFromCatalog.length
-              ? (
-                explicitFiveSimMaxPriceLimit !== null
-                  ? [
-                    explicitFiveSimMaxPriceLimit,
-                    ...orderedPricesFromCatalog.filter((price) => Number(price) !== Number(explicitFiveSimMaxPriceLimit)),
-                  ]
-                  : orderedPricesFromCatalog
-              )
-              : (
-                minPriceLimit !== null
-                  ? (maxPriceLimit !== null ? [maxPriceLimit] : [])
-                  : (maxPriceLimit !== null ? [maxPriceLimit] : [null])
-              );
-            const rangeCheckedPrices = filterPriceCandidatesWithinRange(orderedPrices, minPriceLimit, maxPriceLimit);
-            const candidatePrices = rangeCheckedPrices.length
-              ? rangeCheckedPrices
-              : (hasPriceBounds ? [] : orderedPrices);
-            const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
-            const hasCountryPriceFloor = (
-              countryPriceFloor !== null
-              && Number.isFinite(Number(countryPriceFloor))
-              && Number(countryPriceFloor) > 0
-            );
-            const hasAlternativeCountries = orderedCountryCandidates.some((entry) => (
-              normalizeFiveSimCountryCode(entry.code || entry.id || '', '')
-              !== normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', '')
-            ));
-            // When a floor is set (e.g. timeout on current tier), do NOT fall back to the
-            // original lowest-tier list; that would retry the same tier forever and block
-            // country/provider fallback.
-            const pricesToTry = hasCountryPriceFloor
-              ? (
-                floorFilteredPrices.length
-                  ? floorFilteredPrices
-                  : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
-              )
-              : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
-
-            if (!pricesToTry.length) {
-              const lowestCatalog = rawPriceCandidates.length ? rawPriceCandidates[0] : null;
-              if (
-                minPriceLimit !== null
-                && !rangeFilteredPriceCandidates.length
-                && rawPriceCandidates.length
-              ) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码；可见档位=${rawPriceCandidates.join(', ')}`
-                );
-              } else if (
-                maxPriceLimit !== null
-                && lowestCatalog !== null
-                && Number(lowestCatalog) > Number(maxPriceLimit)
-              ) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 价格上限 ${maxPriceLimit} 内暂无可用号码；平台最低价=${lowestCatalog}`
-                );
-              } else if (countryPriceFloor !== null && rangeFilteredPriceCandidates.length) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
-                );
-              } else if (rawPriceCandidates.length) {
-                const tierText = rawPriceCandidates.join(', ');
-                noNumbersByCountry.push(`${countryLabel}: 可见价格档位均不可用（${tierText}）`);
-                retryableNoNumberCountries.push(countryLabel);
-              } else {
-                noNumbersByCountry.push(`${countryLabel}: 暂无可用号码`);
-                retryableNoNumberCountries.push(countryLabel);
-              }
-              continue;
-            }
-
-            let acquiredActivation = null;
-            let countryNoNumbersText = '';
-            for (const candidatePrice of pricesToTry) {
-              try {
-                const payload = await fetchFiveSimPayload(
-                  config,
-                  `/user/buy/activation/${countryCode}/${config.operator}/${config.product}`,
-                  '5sim buy activation',
-                  {
-                    query: {
-                      ...(candidatePrice !== null && candidatePrice !== undefined ? { maxPrice: candidatePrice } : {}),
-                      ...(normalizePhoneSmsReuseEnabled(state) ? { reuse: 1 } : {}),
-                    },
-                  }
-                );
-                const activation = parseFiveSimActivationPayload(payload, {
-                  countryCode,
-                  countryLabel,
-                  serviceCode: config.product,
-                });
-                if (activation) {
-                  const priceValue = Number(candidatePrice);
-                  rememberActivationAcquiredPrice(activation, priceValue);
-                  acquiredActivation = activation;
-                  break;
-                }
-                const payloadText = describeFiveSimPayload(payload);
-                if (isFiveSimRateLimitError(payload)) {
-                  countryNoNumbersText = payloadText || countryNoNumbersText || 'rate limit';
-                  continue;
-                }
-                if (isFiveSimNoNumbersError(payload)) {
-                  countryNoNumbersText = payloadText || countryNoNumbersText || '暂无可用号码';
-                  continue;
-                }
-                if (isFiveSimTerminalError(payload)) {
-                  throw createPhoneSmsActionFailureError('5sim buy activation', payloadText || 'empty response');
-                }
-                lastError = createPhoneSmsActionFailureError('5sim buy activation', payloadText || 'empty response');
-              } catch (error) {
-                if (isFiveSimRateLimitError(error?.payload || error?.message, error?.status)) {
-                  countryNoNumbersText = describeFiveSimPayload(error?.payload || error?.message) || countryNoNumbersText || 'rate limit';
-                  continue;
-                }
-                if (isFiveSimTerminalError(error?.payload || error?.message, error?.status)) {
-                  throw createPhoneSmsActionFailureError('5sim buy activation', describeFiveSimPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
-                }
-                if (isFiveSimNoNumbersError(error?.payload || error?.message)) {
-                  countryNoNumbersText = describeFiveSimPayload(error?.payload || error?.message) || countryNoNumbersText || '暂无可用号码';
-                  continue;
-                }
-                lastError = error;
-              }
-            }
-
-            if (acquiredActivation) {
-              return acquiredActivation;
-            }
-
-            const lowestCatalogPrice = rawPriceCandidates.length
-              ? rawPriceCandidates[0]
-              : await resolveFiveSimLowestPrice(config, countryCode);
-            if (
-              minPriceLimit !== null
-              && !rangeFilteredPriceCandidates.length
-              && rawPriceCandidates.length
-            ) {
-              noNumbersByCountry.push(
-                `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码；可见档位=${rawPriceCandidates.join(', ')}`
-              );
-            } else if (maxPriceLimit !== null && lowestCatalogPrice !== null && Number(lowestCatalogPrice) > Number(maxPriceLimit)) {
-              noNumbersByCountry.push(
-                `${countryLabel}: 价格上限 ${maxPriceLimit} 内暂无可用号码；平台最低价=${lowestCatalogPrice}`
-              );
-            } else if (isFiveSimRateLimitError(countryNoNumbersText)) {
-              rateLimitByCountry.push(`${countryLabel}: ${countryNoNumbersText || 'rate limit'}`);
-            } else {
-              noNumbersByCountry.push(`${countryLabel}: ${countryNoNumbersText || '暂无可用号码'}`);
-              retryableNoNumberCountries.push(countryLabel);
-            }
-            continue;
-          } catch (error) {
-            if (isFiveSimRateLimitError(error?.payload || error?.message, error?.status)) {
-              rateLimitByCountry.push(`${countryLabel}: ${describeFiveSimPayload(error?.payload || error?.message) || 'rate limit'}`);
-              continue;
-            }
-            if (isFiveSimTerminalError(error?.payload || error?.message, error?.status)) {
-              throw createPhoneSmsActionFailureError('5sim buy activation', describeFiveSimPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
-            }
-            if (isFiveSimNoNumbersError(error?.payload || error?.message)) {
-              const lowestRangePrice = await resolveFiveSimLowestPrice(config, countryCode, priceRange);
-              const lowestCatalogPrice = lowestRangePrice === null
-                ? await resolveFiveSimLowestPrice(config, countryCode)
-                : lowestRangePrice;
-              if (minPriceLimit !== null && lowestRangePrice === null) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码`
-                );
-              } else if (maxPriceLimit !== null && lowestCatalogPrice !== null && lowestCatalogPrice > maxPriceLimit) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 价格上限 ${maxPriceLimit} 内暂无可用号码；平台最低价=${lowestCatalogPrice}`
-                );
-              } else {
-                noNumbersByCountry.push(`${countryLabel}: ${describeFiveSimPayload(error?.payload || error?.message) || '暂无可用号码'}`);
-                retryableNoNumberCountries.push(countryLabel);
-              }
-              continue;
-            }
-            lastError = error;
+          } catch (_) {
+            productPricesPayload = null;
           }
         }
-
-        finalNoNumbersByCountry = noNumbersByCountry;
-        finalRateLimitByCountry = rateLimitByCountry;
-        finalLastError = lastError;
-
-        if (rateLimitByCountry.length) {
-          throw buildFiveSimRateLimitError(rateLimitByCountry);
+        try {
+          guestPricesPayload = await fetchFiveSimPayload(
+            config,
+            '/guest/prices',
+            '5sim guest prices',
+            {
+              query: {
+                country: countryCode,
+                product: config.product,
+              },
+            }
+          );
+        } catch (error) {
+          if (isFiveSimTerminalError(error?.payload || error?.message, error?.status)) {
+            throw createPhoneSmsActionFailureError('5sim guest prices', describeFiveSimPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
+          }
+          lastError = error;
         }
 
-        if (
-          noNumbersByCountry.length
-          && round < maxAcquireRounds
-          && retryableNoNumberCountries.length > 0
-        ) {
-          await addLog(
-            `步骤 9：5sim 暂无可用号码（第 ${round}/${maxAcquireRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。国家：${retryableNoNumberCountries.join(', ')}。`,
-            'warn'
+        const rawPriceCandidates = buildSortedUniquePriceCandidates(
+          [
+            ...(
+              explicitFiveSimMaxPriceLimit !== null
+                ? collectFiveSimProductPriceCandidates(productPricesPayload, config.product, [])
+                : []
+            ),
+            ...collectFiveSimPriceCandidates(
+              (
+                guestPricesPayload
+                && typeof guestPricesPayload === 'object'
+                && !Array.isArray(guestPricesPayload)
+                ? (guestPricesPayload?.[config.product]?.[countryCode] || guestPricesPayload?.[countryCode] || guestPricesPayload)
+                : guestPricesPayload
+              ),
+              []
+            ),
+          ]
+        );
+        const rangeFilteredPriceCandidates = filterPriceCandidatesWithinRange(
+          rawPriceCandidates,
+          minPriceLimit,
+          maxPriceLimit
+        );
+        const orderedPricesFromCatalog = reorderPriceCandidates(
+          rangeFilteredPriceCandidates,
+          acquirePriority,
+          preferredPriceTier
+        );
+        const orderedPrices = orderedPricesFromCatalog.length
+          ? (
+            explicitFiveSimMaxPriceLimit !== null
+              ? [
+                explicitFiveSimMaxPriceLimit,
+                ...orderedPricesFromCatalog.filter((price) => Number(price) !== Number(explicitFiveSimMaxPriceLimit)),
+              ]
+              : orderedPricesFromCatalog
+          )
+          : (
+            minPriceLimit !== null
+              ? (maxPriceLimit !== null ? [maxPriceLimit] : [])
+              : (maxPriceLimit !== null ? [maxPriceLimit] : [null])
           );
-          await sleepWithStop(retryDelayMs);
+        const rangeCheckedPrices = filterPriceCandidatesWithinRange(orderedPrices, minPriceLimit, maxPriceLimit);
+        const candidatePrices = rangeCheckedPrices.length
+          ? rangeCheckedPrices
+          : (hasPriceBounds ? [] : orderedPrices);
+        const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
+        const hasCountryPriceFloor = (
+          countryPriceFloor !== null
+          && Number.isFinite(Number(countryPriceFloor))
+          && Number(countryPriceFloor) > 0
+        );
+        const hasAlternativeCountries = orderedCountryCandidates.some((entry) => (
+          normalizeFiveSimCountryCode(entry.code || entry.id || '', '')
+          !== normalizeFiveSimCountryCode(countryConfig.code || countryConfig.id || '', '')
+        ));
+        const pricesToTry = hasCountryPriceFloor
+          ? (
+            floorFilteredPrices.length
+              ? floorFilteredPrices
+              : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
+          )
+          : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
+
+        if (!pricesToTry.length) {
+          const lowestCatalog = rawPriceCandidates.length ? rawPriceCandidates[0] : null;
+          if (
+            minPriceLimit !== null
+            && !rangeFilteredPriceCandidates.length
+            && rawPriceCandidates.length
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码；可见档位=${rawPriceCandidates.join(', ')}`
+            );
+          } else if (
+            maxPriceLimit !== null
+            && lowestCatalog !== null
+            && Number(lowestCatalog) > Number(maxPriceLimit)
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格上限 ${maxPriceLimit} 内暂无可用号码；平台最低价=${lowestCatalog}`
+            );
+          } else if (countryPriceFloor !== null && rangeFilteredPriceCandidates.length) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
+            );
+          } else if (rawPriceCandidates.length) {
+            const tierText = rawPriceCandidates.join(', ');
+            noNumbersByCountry.push(`${countryLabel}: 可见价格档位均不可用（${tierText}）`);
+          } else {
+            noNumbersByCountry.push(`${countryLabel}: 暂无可用号码`);
+          }
           continue;
         }
 
-        break;
+        countryAttempts.push({
+          index,
+          countryConfig,
+          countryCode,
+          countryLabel,
+          rawPriceCandidates,
+          rangeFilteredPriceCandidates,
+          pricesToTry,
+        });
       }
 
-      if (finalNoNumbersByCountry.length) {
+      const tierQueue = createPhoneActivationTierQueue({
+        provider: PHONE_SMS_PROVIDER_5SIM,
+        countryAttempts,
+        getCountryId: (attempt) => attempt?.countryCode,
+        getCountryLabel: (attempt) => attempt?.countryLabel,
+        getPrices: (attempt) => attempt?.pricesToTry,
+        preferredPrice: preferredPriceTier,
+      });
+
+      const result = await runPhoneActivationTierQueue({
+        providerLabel: '5sim',
+        queue: tierQueue,
+        maxAcquireRounds,
+        retryDelayMs,
+        tierUpgradeLimit,
+        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}`,
+        attemptTier: async (tier) => {
+          const attempt = tier.attempt;
+          const candidatePrice = tier.price;
+          try {
+            const payload = await fetchFiveSimPayload(
+              config,
+              `/user/buy/activation/${attempt.countryCode}/${config.operator}/${config.product}`,
+              '5sim buy activation',
+              {
+                query: {
+                  ...(candidatePrice !== null && candidatePrice !== undefined ? { maxPrice: candidatePrice } : {}),
+                  ...(normalizePhoneSmsReuseEnabled(state) ? { reuse: 1 } : {}),
+                },
+              }
+            );
+            const activation = parseFiveSimActivationPayload(payload, {
+              countryCode: attempt.countryCode,
+              countryLabel: attempt.countryLabel,
+              serviceCode: config.product,
+            });
+            if (activation) {
+              const priceValue = Number(candidatePrice);
+              rememberActivationAcquiredPrice(activation, priceValue);
+              return { activation };
+            }
+            const payloadText = describeFiveSimPayload(payload);
+            if (isFiveSimRateLimitError(payload)) {
+              return {
+                terminalError: buildFiveSimRateLimitError([`${attempt.countryLabel}: ${payloadText || 'rate limit'}`]),
+              };
+            }
+            if (isFiveSimNoNumbersError(payload)) {
+              return {
+                retryable: true,
+                failureText: payloadText || '暂无可用号码',
+              };
+            }
+            if (isFiveSimTerminalError(payload)) {
+              return {
+                terminalError: createPhoneSmsActionFailureError('5sim buy activation', payloadText || 'empty response'),
+              };
+            }
+            return {
+              retryable: false,
+              failureText: payloadText || 'empty response',
+              lastError: createPhoneSmsActionFailureError('5sim buy activation', payloadText || 'empty response'),
+            };
+          } catch (error) {
+            const payloadOrMessage = error?.payload || error?.message;
+            const payloadText = describeFiveSimPayload(payloadOrMessage);
+            if (isFiveSimRateLimitError(payloadOrMessage, error?.status)) {
+              return {
+                terminalError: buildFiveSimRateLimitError([`${attempt.countryLabel}: ${payloadText || 'rate limit'}`]),
+              };
+            }
+            if (isFiveSimTerminalError(payloadOrMessage, error?.status)) {
+              return {
+                terminalError: createPhoneSmsActionFailureError('5sim buy activation', payloadText || 'unknown terminal error', error?.payload, error?.status),
+              };
+            }
+            if (isFiveSimNoNumbersError(payloadOrMessage)) {
+              return {
+                retryable: true,
+                failureText: payloadText || '暂无可用号码',
+              };
+            }
+            return {
+              retryable: false,
+              failureText: payloadText || error?.message || 'unknown error',
+              lastError: error,
+            };
+          }
+        },
+      });
+
+      if (result?.activation) {
+        return result.activation;
+      }
+      if (result?.lastError) {
+        throw result.lastError;
+      }
+
+      const tierFailures = Array.isArray(result?.tierFailures)
+        ? result.tierFailures.map((entry) => `${entry.label}: ${entry.reason}`)
+        : [];
+      const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
+      if (failureDetails.length) {
         throw new Error(
-          `5sim 已尝试 ${countryCandidates.length} 个候选国家，均无可用号码：${finalNoNumbersByCountry.join(' | ')}。`
+          `5sim 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
-      if (finalRateLimitByCountry.length) {
-        throw buildFiveSimRateLimitError(finalRateLimitByCountry);
-      }
-      if (finalLastError) {
-        throw finalLastError;
+      if (lastError) {
+        throw lastError;
       }
       throw new Error('5sim 获取手机号失败。');
     }
 
     function isNexSmsNoNumbersError(payloadOrMessage) {
       const text = describeNexSmsPayload(payloadOrMessage);
-      return /numbers?\s+not\s+found|暂无可用|no\s+numbers|no\s+stock|库存.*0|not\s+available/i.test(text);
+      return /numbers?\s+not\s+found|暂无可用|no\s+numbers|no\s+stock|库存.*0|not\s+available|\bNO_NUMBERS\b/i.test(text);
     }
 
     function isNexSmsPendingMessage(payloadOrMessage) {
@@ -3546,238 +3685,256 @@
       const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
       const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
-      let finalNoNumbersByCountry = [];
-      let finalLastError = null;
+      const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 
-      for (let round = 1; round <= maxAcquireRounds; round += 1) {
-        if (maxAcquireRounds > 1) {
-          await addLog(
-            `步骤 9：NexSMS 正在获取手机号（第 ${round}/${maxAcquireRounds} 轮）...`,
-            'info'
-          );
-        }
+      const candidateAttempts = countryCandidates.map((countryConfig, index) => ({
+        index,
+        countryConfig,
+        pricePlan: null,
+        orderingPrice: Number.POSITIVE_INFINITY,
+        pricesToTry: [],
+      }));
 
-        const candidateAttempts = [];
-        for (const [index, countryConfig] of countryCandidates.entries()) {
-          candidateAttempts.push({
-            index,
-            countryConfig,
-            pricePlan: null,
-            orderingPrice: Number.POSITIVE_INFINITY,
-          });
-        }
-
-        if (
-          (acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH)
-          && candidateAttempts.length > 1
-        ) {
-          for (const attempt of candidateAttempts) {
-            try {
-              const pricePlan = await resolveNexSmsCountryPricePlan(config, attempt.countryConfig, state);
-              attempt.pricePlan = pricePlan;
-              const orderedForRanking = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-              const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
-                orderedForRanking,
-                minPriceLimit,
-                maxPriceLimit
-              );
-              const rankingPrices = rangeFilteredForRanking.length
-                ? rangeFilteredForRanking
-                : (hasPriceBounds ? [] : orderedForRanking);
-              attempt.orderingPrice = Array.isArray(rankingPrices) && rankingPrices.length
-                ? Number(rankingPrices[0])
-                : Number.POSITIVE_INFINITY;
-            } catch (error) {
-              attempt.pricePlan = null;
-              attempt.orderingPrice = Number.POSITIVE_INFINITY;
-              attempt.lookupError = error;
-            }
-          }
-          candidateAttempts.sort((left, right) => {
-            if (left.orderingPrice !== right.orderingPrice) {
-              return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
-                ? (right.orderingPrice - left.orderingPrice)
-                : (left.orderingPrice - right.orderingPrice);
-            }
-            return left.index - right.index;
-          });
-          const rankingSummary = candidateAttempts.map((attempt) => {
-            const id = normalizeNexSmsCountryId(attempt.countryConfig.id, -1);
-            const label = String(attempt.countryConfig.label || `Country #${id}`).trim() || `Country #${id}`;
-            return Number.isFinite(attempt.orderingPrice)
-              ? `${label}:${attempt.orderingPrice}`
-              : `${label}:无`;
-          }).join(' | ');
-          await addLog(`步骤 9：NexSMS 价格优先排序：${rankingSummary}`, 'info');
-        }
-
-        const noNumbersByCountry = [];
-        const retryableNoNumberCountries = [];
-        let lastError = null;
-
+      if (
+        (acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH)
+        && candidateAttempts.length > 1
+      ) {
         for (const attempt of candidateAttempts) {
-          const countryId = normalizeNexSmsCountryId(attempt.countryConfig.id, -1);
-          const countryLabel = normalizeCountryLabel(attempt.countryConfig.label, `Country #${countryId}`);
-          const countryPriceFloor = countryPriceFloorByCountryId.get(String(countryId)) ?? null;
-          let pricePlan = attempt.pricePlan;
-          if (!pricePlan) {
-            try {
-              pricePlan = await resolveNexSmsCountryPricePlan(config, attempt.countryConfig, state);
-            } catch (error) {
-              if (isNexSmsTerminalError(error?.payload || error?.message, error?.status)) {
-                throw createPhoneSmsActionFailureError('NexSMS price lookup', describeNexSmsPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
-              }
-              lastError = error;
-              continue;
-            }
-          }
-
-          if (!Array.isArray(pricePlan.prices) || !pricePlan.prices.length) {
-            if (
-              pricePlan.userLimit !== null
-              && pricePlan.minCatalogPrice !== null
-              && pricePlan.minCatalogPrice > pricePlan.userLimit
-            ) {
-              noNumbersByCountry.push(
-                `${countryLabel}: 价格上限 ${pricePlan.userLimit} 内暂无可用号码；平台最低价=${pricePlan.minCatalogPrice}`
-              );
-            } else {
-              const reason = describeNexSmsPayload(pricePlan.rawPayload) || '无可用价格档位';
-              noNumbersByCountry.push(`${countryLabel}: ${reason}`);
-              retryableNoNumberCountries.push(countryLabel);
-            }
-            continue;
-          }
-
-            const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-            const rangeFilteredPrices = filterPriceCandidatesWithinRange(
-              orderedPrices,
+          try {
+            const pricePlan = await resolveNexSmsCountryPricePlan(config, attempt.countryConfig, state);
+            attempt.pricePlan = pricePlan;
+            const orderedForRanking = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
+            const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
+              orderedForRanking,
               minPriceLimit,
               maxPriceLimit
             );
-            const candidatePrices = rangeFilteredPrices.length
-              ? rangeFilteredPrices
-              : (hasPriceBounds ? [] : orderedPrices);
-            const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
-            const hasCountryPriceFloor = (
-              countryPriceFloor !== null
-              && Number.isFinite(Number(countryPriceFloor))
-              && Number(countryPriceFloor) > 0
-            );
-            const hasAlternativeCountries = candidateAttempts.some((entry) => (
-              normalizeNexSmsCountryId(entry?.countryConfig?.id, -1)
-              !== normalizeNexSmsCountryId(attempt?.countryConfig?.id, -1)
-            ));
-            // With an explicit floor, only try higher tiers. If none exist, we should
-            // move to country/provider fallback instead of retrying the same tier again.
-            const pricesToTry = hasCountryPriceFloor
-              ? (
-                floorFilteredPrices.length
-                  ? floorFilteredPrices
-                  : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
-              )
-              : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
-            if (!pricesToTry.length) {
-              if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码`
-                );
-                continue;
-              }
-              if (
-                countryPriceFloor !== null
-                && Array.isArray(pricePlan.prices)
-                && pricePlan.prices.length > 0
-              ) {
-                noNumbersByCountry.push(
-                  `${countryLabel}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
-                );
-              } else {
-                noNumbersByCountry.push(`${countryLabel}: ${describeNexSmsPayload(pricePlan.rawPayload) || '暂无可用号码'}`);
-                retryableNoNumberCountries.push(countryLabel);
-              }
-              continue;
-            }
-            for (const price of pricesToTry) {
-            try {
-              const payload = await fetchNexSmsPayload(
-                config,
-                '/api/order/purchase',
-                'NexSMS purchase',
-                {
-                  method: 'POST',
-                  body: {
-                    serviceCode: config.serviceCode,
-                    countryId,
-                    quantity: 1,
-                    price,
-                  },
-                }
-              );
-              if (!isNexSmsSuccessPayload(payload)) {
-                if (isNexSmsNoNumbersError(payload)) {
-                  continue;
-                }
-                if (isNexSmsTerminalError(payload)) {
-                  throw createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(payload) || 'empty response');
-                }
-                lastError = createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(payload) || 'empty response');
-                continue;
-              }
-              const activation = parseNexSmsActivationPayload(payload, {
-                countryId,
-                countryLabel,
-                serviceCode: config.serviceCode,
-              });
-              if (!activation) {
-                lastError = new Error('NexSMS 购买成功，但未返回手机号。');
-                continue;
-              }
-              const numericPrice = Number(price);
-              rememberActivationAcquiredPrice(activation, numericPrice);
-              return activation;
-            } catch (error) {
-              if (isNexSmsTerminalError(error?.payload || error?.message, error?.status)) {
-                throw createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
-              }
-              if (isNexSmsNoNumbersError(error?.payload || error?.message)) {
-                continue;
-              }
-              lastError = error;
-            }
+            const rankingPrices = rangeFilteredForRanking.length
+              ? rangeFilteredForRanking
+              : (hasPriceBounds ? [] : orderedForRanking);
+            attempt.orderingPrice = Array.isArray(rankingPrices) && rankingPrices.length
+              ? Number(rankingPrices[0])
+              : Number.POSITIVE_INFINITY;
+          } catch (error) {
+            attempt.pricePlan = null;
+            attempt.orderingPrice = Number.POSITIVE_INFINITY;
+            attempt.lookupError = error;
           }
+        }
+        candidateAttempts.sort((left, right) => {
+          if (left.orderingPrice !== right.orderingPrice) {
+            return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
+              ? (right.orderingPrice - left.orderingPrice)
+              : (left.orderingPrice - right.orderingPrice);
+          }
+          return left.index - right.index;
+        });
+        const rankingSummary = candidateAttempts.map((attempt) => {
+          const id = normalizeNexSmsCountryId(attempt.countryConfig.id, -1);
+          const label = String(attempt.countryConfig.label || `Country #${id}`).trim() || `Country #${id}`;
+          return Number.isFinite(attempt.orderingPrice)
+            ? `${label}:${attempt.orderingPrice}`
+            : `${label}:无`;
+        }).join(' | ');
+        await addLog(`步骤 9：NexSMS 价格优先排序：${rankingSummary}`, 'info');
+      }
 
-          const fallbackReason = describeNexSmsPayload(pricePlan.rawPayload) || '暂无可用号码';
-          noNumbersByCountry.push(`${countryLabel}: ${fallbackReason}`);
-          retryableNoNumberCountries.push(countryLabel);
+      const noNumbersByCountry = [];
+      let lastError = null;
+      for (const attempt of candidateAttempts) {
+        const countryId = normalizeNexSmsCountryId(attempt.countryConfig.id, -1);
+        const countryLabel = normalizeCountryLabel(attempt.countryConfig.label, `Country #${countryId}`);
+        const countryPriceFloor = countryPriceFloorByCountryId.get(String(countryId)) ?? null;
+        attempt.countryId = countryId;
+        attempt.countryLabel = countryLabel;
+        let pricePlan = attempt.pricePlan;
+        if (!pricePlan) {
+          try {
+            pricePlan = await resolveNexSmsCountryPricePlan(config, attempt.countryConfig, state);
+            attempt.pricePlan = pricePlan;
+          } catch (error) {
+            if (isNexSmsTerminalError(error?.payload || error?.message, error?.status)) {
+              throw createPhoneSmsActionFailureError('NexSMS price lookup', describeNexSmsPayload(error?.payload || error?.message) || 'unknown terminal error', error?.payload, error?.status);
+            }
+            lastError = error;
+            continue;
+          }
         }
 
-        finalNoNumbersByCountry = noNumbersByCountry;
-        finalLastError = lastError;
-
-        if (
-          noNumbersByCountry.length
-          && round < maxAcquireRounds
-          && retryableNoNumberCountries.length > 0
-        ) {
-          await addLog(
-            `步骤 9：NexSMS 暂无可用号码（第 ${round}/${maxAcquireRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。国家：${retryableNoNumberCountries.join(', ')}。`,
-            'warn'
-          );
-          await sleepWithStop(retryDelayMs);
+        if (!Array.isArray(pricePlan.prices) || !pricePlan.prices.length) {
+          if (
+            pricePlan.userLimit !== null
+            && pricePlan.minCatalogPrice !== null
+            && pricePlan.minCatalogPrice > pricePlan.userLimit
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格上限 ${pricePlan.userLimit} 内暂无可用号码；平台最低价=${pricePlan.minCatalogPrice}`
+            );
+          } else {
+            const reason = describeNexSmsPayload(pricePlan.rawPayload) || '无可用价格档位';
+            noNumbersByCountry.push(`${countryLabel}: ${reason}`);
+          }
           continue;
         }
 
-        break;
+        const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
+        const rangeFilteredPrices = filterPriceCandidatesWithinRange(
+          orderedPrices,
+          minPriceLimit,
+          maxPriceLimit
+        );
+        const candidatePrices = rangeFilteredPrices.length
+          ? rangeFilteredPrices
+          : (hasPriceBounds ? [] : orderedPrices);
+        const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
+        const hasCountryPriceFloor = (
+          countryPriceFloor !== null
+          && Number.isFinite(Number(countryPriceFloor))
+          && Number(countryPriceFloor) > 0
+        );
+        const hasAlternativeCountries = candidateAttempts.some((entry) => (
+          normalizeNexSmsCountryId(entry?.countryConfig?.id, -1)
+          !== normalizeNexSmsCountryId(attempt?.countryConfig?.id, -1)
+        ));
+        const pricesToTry = hasCountryPriceFloor
+          ? (
+            floorFilteredPrices.length
+              ? floorFilteredPrices
+              : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
+          )
+          : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
+
+        if (!pricesToTry.length) {
+          if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码`
+            );
+            continue;
+          }
+          if (
+            countryPriceFloor !== null
+            && Array.isArray(pricePlan.prices)
+            && pricePlan.prices.length > 0
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
+            );
+          } else {
+            noNumbersByCountry.push(`${countryLabel}: ${describeNexSmsPayload(pricePlan.rawPayload) || '暂无可用号码'}`);
+          }
+          continue;
+        }
+
+        attempt.pricesToTry = pricesToTry;
       }
 
-      if (finalNoNumbersByCountry.length) {
+      const tierQueue = createPhoneActivationTierQueue({
+        provider: PHONE_SMS_PROVIDER_NEXSMS,
+        countryAttempts: candidateAttempts.filter((attempt) => Array.isArray(attempt.pricesToTry) && attempt.pricesToTry.length),
+        getCountryId: (attempt) => attempt?.countryId,
+        getCountryLabel: (attempt) => attempt?.countryLabel,
+        getPrices: (attempt) => attempt?.pricesToTry,
+        preferredPrice: preferredPriceTier,
+      });
+
+      const result = await runPhoneActivationTierQueue({
+        providerLabel: 'NexSMS',
+        queue: tierQueue,
+        maxAcquireRounds,
+        retryDelayMs,
+        tierUpgradeLimit,
+        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}`,
+        attemptTier: async (tier) => {
+          const attempt = tier.attempt;
+          const price = tier.price;
+          try {
+            const payload = await fetchNexSmsPayload(
+              config,
+              '/api/order/purchase',
+              'NexSMS purchase',
+              {
+                method: 'POST',
+                body: {
+                  serviceCode: config.serviceCode,
+                  countryId: attempt.countryId,
+                  quantity: 1,
+                  price,
+                },
+              }
+            );
+            if (!isNexSmsSuccessPayload(payload)) {
+              if (isNexSmsNoNumbersError(payload)) {
+                return {
+                  retryable: true,
+                  failureText: describeNexSmsPayload(payload) || '暂无可用号码',
+                };
+              }
+              if (isNexSmsTerminalError(payload)) {
+                return {
+                  terminalError: createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(payload) || 'empty response'),
+                };
+              }
+              return {
+                retryable: false,
+                failureText: describeNexSmsPayload(payload) || 'empty response',
+                lastError: createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(payload) || 'empty response'),
+              };
+            }
+            const activation = parseNexSmsActivationPayload(payload, {
+              countryId: attempt.countryId,
+              countryLabel: attempt.countryLabel,
+              serviceCode: config.serviceCode,
+            });
+            if (!activation) {
+              return {
+                retryable: false,
+                failureText: 'NexSMS 购买成功，但未返回手机号。',
+                lastError: new Error('NexSMS 购买成功，但未返回手机号。'),
+              };
+            }
+            const numericPrice = Number(price);
+            rememberActivationAcquiredPrice(activation, numericPrice);
+            return { activation };
+          } catch (error) {
+            const payloadOrMessage = error?.payload || error?.message;
+            if (isNexSmsTerminalError(payloadOrMessage, error?.status)) {
+              return {
+                terminalError: createPhoneSmsActionFailureError('NexSMS purchase', describeNexSmsPayload(payloadOrMessage) || 'unknown terminal error', error?.payload, error?.status),
+              };
+            }
+            if (isNexSmsNoNumbersError(payloadOrMessage)) {
+              return {
+                retryable: true,
+                failureText: describeNexSmsPayload(payloadOrMessage) || '暂无可用号码',
+              };
+            }
+            return {
+              retryable: false,
+              failureText: describeNexSmsPayload(payloadOrMessage) || error?.message || 'unknown error',
+              lastError: error,
+            };
+          }
+        },
+      });
+
+      if (result?.activation) {
+        return result.activation;
+      }
+      if (result?.lastError) {
+        throw result.lastError;
+      }
+
+      const tierFailures = Array.isArray(result?.tierFailures)
+        ? result.tierFailures.map((entry) => `${entry.label}: ${entry.reason}`)
+        : [];
+      const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
+      if (failureDetails.length) {
         throw new Error(
-          `NexSMS 已尝试 ${countryCandidates.length} 个候选国家，均无可用号码：${finalNoNumbersByCountry.join(' | ')}。`
+          `NexSMS 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
-      if (finalLastError) {
-        throw finalLastError;
+      if (lastError) {
+        throw lastError;
       }
       throw new Error('NexSMS 获取手机号失败。');
     }
@@ -3835,369 +3992,386 @@
         (value) => String(normalizeCountryId(value, 0))
       );
       const requestActions = ['getNumber', 'getNumberV2'];
-      const configuredAcquireRounds = normalizePhoneActivationRetryRounds(
-        state?.heroSmsActivationRetryRounds
-      );
+      const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
       const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
-      const retryDelayMs = normalizePhoneActivationRetryDelayMs(
-        state?.heroSmsActivationRetryDelayMs
-      );
+      const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
+      const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 
-      let finalNoNumbersByCountry = [];
-      let finalLastError = null;
-      let finalLastFailureText = '';
+      const countryAttempts = countryCandidates.map((countryConfig, index) => ({
+        index,
+        countryConfig,
+        countryIdKey: String(normalizeCountryId(countryConfig?.id, 0)),
+        countryLabel: String(countryConfig?.label || `Country #${normalizeCountryId(countryConfig?.id, 0)}`).trim() || `Country #${normalizeCountryId(countryConfig?.id, 0)}`,
+        pricePlan: null,
+        orderingPrice: Number.POSITIVE_INFINITY,
+        pricesToTry: [],
+        preferredOperator: String(config?.heroSmsOperatorByCountry?.[String(normalizeCountryId(countryConfig?.id, 0))] || '').trim(),
+      }));
 
-      for (let round = 1; round <= maxAcquireRounds; round += 1) {
-        if (maxAcquireRounds > 1) {
+      if (
+        acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE
+        || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
+      ) {
+        for (const attempt of countryAttempts) {
+          const pricePlan = await resolvePhoneActivationPricePlan(config, attempt.countryConfig, state);
+          attempt.pricePlan = pricePlan;
+          const orderedPrices = reorderPriceCandidates(pricePlan?.prices, acquirePriority, preferredPriceTier);
+          const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
+            orderedPrices,
+            minPriceLimit,
+            maxPriceLimit
+          );
+          const rankingPrices = rangeFilteredForRanking.length
+            ? rangeFilteredForRanking
+            : (hasPriceBounds ? [] : orderedPrices);
+          const numericPrices = Array.isArray(orderedPrices)
+            ? rankingPrices
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value) && value > 0)
+            : [];
+          const candidateOrderingPrice = numericPrices.length ? numericPrices[0] : null;
+          const cappedByUserLimit = (
+            pricePlan?.userLimit !== null
+            && pricePlan?.userLimit !== undefined
+            && pricePlan?.minCatalogPrice !== null
+            && pricePlan?.minCatalogPrice !== undefined
+            && Number(pricePlan.minCatalogPrice) > Number(pricePlan.userLimit)
+          );
+          attempt.orderingPrice = cappedByUserLimit
+            ? Number.POSITIVE_INFINITY
+            : (candidateOrderingPrice !== null ? candidateOrderingPrice : Number.POSITIVE_INFINITY);
+        }
+
+        countryAttempts.sort((left, right) => {
+          if (left.orderingPrice !== right.orderingPrice) {
+            return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
+              ? (right.orderingPrice - left.orderingPrice)
+              : (left.orderingPrice - right.orderingPrice);
+          }
+          return left.index - right.index;
+        });
+
+        const rankingSummary = countryAttempts.map((attempt) => (
+          Number.isFinite(attempt.orderingPrice)
+            ? `${attempt.countryLabel}:${attempt.orderingPrice}`
+            : `${attempt.countryLabel}:无`
+        )).join(' | ');
+        await addLog(`步骤 9：HeroSMS 价格优先排序：${rankingSummary}`, 'info');
+      }
+
+      const noNumbersByCountry = [];
+      for (const attempt of countryAttempts) {
+        const countryConfig = attempt.countryConfig;
+        const countryIdKey = attempt.countryIdKey;
+        const countryLabel = attempt.countryLabel;
+        const countryPriceFloor = countryPriceFloorByCountryId.get(countryIdKey) ?? null;
+        const preferredOperator = attempt.preferredOperator;
+        const pricePlan = attempt.pricePlan || await resolvePhoneActivationPricePlan(config, countryConfig, state);
+        attempt.pricePlan = pricePlan;
+        const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
+        const rangeFilteredPrices = filterPriceCandidatesWithinRange(
+          orderedPrices,
+          minPriceLimit,
+          maxPriceLimit
+        );
+        const candidatePrices = rangeFilteredPrices.length
+          ? rangeFilteredPrices
+          : (hasPriceBounds ? [] : orderedPrices);
+        const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
+        const hasCountryPriceFloor = (
+          countryPriceFloor !== null
+          && Number.isFinite(Number(countryPriceFloor))
+          && Number(countryPriceFloor) > 0
+        );
+        const hasAlternativeCountries = countryAttempts.some((entry) => entry.countryIdKey !== countryIdKey);
+        const pricesToTry = hasCountryPriceFloor
+          ? (
+            floorFilteredPrices.length
+              ? floorFilteredPrices
+              : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
+          )
+          : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
+        const rawTierText = Array.isArray(pricePlan?.prices) && pricePlan.prices.length
+          ? pricePlan.prices
+            .map((value) => (value === null || value === undefined ? '自动' : String(value)))
+            .join(', ')
+          : '无';
+        await addLog(
+          `步骤 9：HeroSMS ${countryLabel} 价格方案：档位=[${rawTierText}]，用户上限=${pricePlan?.userLimit ?? '未设置'}，目录最低价=${pricePlan?.minCatalogPrice ?? '未知'}。`,
+          'info'
+        );
+        if (pricesToTry.length > 1 || countryPriceFloor !== null) {
+          const tierText = pricesToTry
+            .map((value) => (value === null || value === undefined ? '自动' : String(value)))
+            .join(', ');
           await addLog(
-            `步骤 9：HeroSMS 正在获取手机号（第 ${round}/${maxAcquireRounds} 轮）...`,
+            `步骤 9：HeroSMS ${countryLabel} 本轮候选价格：${tierText}${countryPriceFloor !== null ? `（高于 ${countryPriceFloor}）` : ''}。`,
             'info'
           );
         }
-
-        const countryAttempts = countryCandidates.map((countryConfig, index) => ({
-          index,
-          countryConfig,
-          pricePlan: null,
-          orderingPrice: Number.POSITIVE_INFINITY,
-        }));
-
-        if (
-          acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE
-          || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
-        ) {
-          for (const attempt of countryAttempts) {
-            const pricePlan = await resolvePhoneActivationPricePlan(config, attempt.countryConfig, state);
-            const orderedPrices = reorderPriceCandidates(pricePlan?.prices, acquirePriority, preferredPriceTier);
-            const rangeFilteredForRanking = filterPriceCandidatesWithinRange(
-              orderedPrices,
-              minPriceLimit,
-              maxPriceLimit
+        if (!pricesToTry.length) {
+          if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码`
             );
-            const rankingPrices = rangeFilteredForRanking.length
-              ? rangeFilteredForRanking
-              : (hasPriceBounds ? [] : orderedPrices);
-            const numericPrices = Array.isArray(orderedPrices)
-              ? rankingPrices
-                  .map((value) => Number(value))
-                  .filter((value) => Number.isFinite(value) && value > 0)
-              : [];
-            const candidateOrderingPrice = numericPrices.length ? numericPrices[0] : null;
-            const cappedByUserLimit = (
-              pricePlan?.userLimit !== null
-              && pricePlan?.userLimit !== undefined
-              && pricePlan?.minCatalogPrice !== null
-              && pricePlan?.minCatalogPrice !== undefined
-              && Number(pricePlan.minCatalogPrice) > Number(pricePlan.userLimit)
-            );
-            attempt.pricePlan = pricePlan;
-            attempt.orderingPrice = cappedByUserLimit
-              ? Number.POSITIVE_INFINITY
-              : (candidateOrderingPrice !== null ? candidateOrderingPrice : Number.POSITIVE_INFINITY);
+            continue;
           }
+          if (
+            countryPriceFloor !== null
+            && Array.isArray(pricePlan.prices)
+            && pricePlan.prices.length > 0
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
+            );
+            continue;
+          }
+          if (
+            pricePlan.userLimit !== null
+            && pricePlan.minCatalogPrice !== null
+            && pricePlan.minCatalogPrice > pricePlan.userLimit
+          ) {
+            noNumbersByCountry.push(
+              `${countryLabel}: 价格上限 ${pricePlan.userLimit} 内暂无可用号码；平台最低价=${pricePlan.minCatalogPrice}`
+            );
+          } else {
+            noNumbersByCountry.push(`${countryLabel}: ${describeHeroSmsPayload(pricePlan.rawPayload) || '暂无可用号码'}`);
+          }
+          continue;
         }
+        attempt.pricesToTry = pricesToTry;
+      }
 
-        if (
-          (acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE || acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH)
-          && countryAttempts.length > 1
-        ) {
-          countryAttempts.sort((left, right) => {
-            if (left.orderingPrice !== right.orderingPrice) {
-              return acquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
-                ? (right.orderingPrice - left.orderingPrice)
-                : (left.orderingPrice - right.orderingPrice);
-            }
-            return left.index - right.index;
-          });
-        }
+      const tierQueue = createPhoneActivationTierQueue({
+        provider: PHONE_SMS_PROVIDER_HERO,
+        countryAttempts: countryAttempts.filter((attempt) => Array.isArray(attempt.pricesToTry) && attempt.pricesToTry.length),
+        getCountryId: (attempt) => attempt?.countryIdKey,
+        getCountryLabel: (attempt) => attempt?.countryLabel,
+        getPrices: (attempt) => attempt?.pricesToTry,
+        preferredPrice: preferredPriceTier,
+      });
 
-        const noNumbersByCountry = [];
-        const retryableNoNumberCountries = [];
-        let lastError = null;
-        let lastFailureText = '';
-
-        for (const attempt of countryAttempts) {
+      const result = await runPhoneActivationTierQueue({
+        providerLabel: 'HeroSMS',
+        queue: tierQueue,
+        maxAcquireRounds,
+        retryDelayMs,
+        tierUpgradeLimit,
+        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}`,
+        attemptTier: async (tier) => {
+          const attempt = tier.attempt;
           const countryConfig = attempt.countryConfig;
-          const countryIdKey = String(normalizeCountryId(countryConfig?.id, 0));
-          const countryPriceFloor = countryPriceFloorByCountryId.get(countryIdKey) ?? null;
-          const preferredOperator = String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim();
+          const countryIdKey = attempt.countryIdKey;
+          const countryLabel = attempt.countryLabel;
+          const pricePlan = attempt.pricePlan || await resolvePhoneActivationPricePlan(config, countryConfig, state);
+          const preferredOperator = attempt.preferredOperator || String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim();
           const buildFallbackActivation = (requestAction) => ({
             countryId: countryConfig.id,
             ...(preferredOperator ? { operator: preferredOperator } : {}),
             ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
           });
-          const pricePlan = attempt.pricePlan || await resolvePhoneActivationPricePlan(config, countryConfig, state);
+          const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe);
+          let lastFailureText = '';
           let noNumbersObservedInCountry = false;
 
-          const orderedPrices = reorderPriceCandidates(pricePlan.prices, acquirePriority, preferredPriceTier);
-          const rangeFilteredPrices = filterPriceCandidatesWithinRange(
-            orderedPrices,
-            minPriceLimit,
-            maxPriceLimit
-          );
-          const candidatePrices = rangeFilteredPrices.length
-            ? rangeFilteredPrices
-            : (hasPriceBounds ? [] : orderedPrices);
-          const floorFilteredPrices = filterPriceCandidatesAboveFloor(candidatePrices, countryPriceFloor);
-          const hasCountryPriceFloor = (
-            countryPriceFloor !== null
-            && Number.isFinite(Number(countryPriceFloor))
-            && Number(countryPriceFloor) > 0
-          );
-          const hasAlternativeCountries = countryAttempts.some((entry) => (
-            String(normalizeCountryId(entry?.countryConfig?.id, 0))
-            !== String(normalizeCountryId(countryConfig?.id, 0))
-          ));
-          // Same rule as 5sim/NexSMS: once floor is set, never re-try lower/equal tiers.
-          // Keep a probe fallback only for HeroSMS (single-country/no-tier environments),
-          // so replacement-limit behavior remains stable while still allowing country fallback.
-          const pricesToTry = hasCountryPriceFloor
-            ? (
-              floorFilteredPrices.length
-                ? floorFilteredPrices
-                : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
-            )
-            : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
-          const rawTierText = Array.isArray(pricePlan?.prices) && pricePlan.prices.length
-            ? pricePlan.prices
-                .map((value) => (value === null || value === undefined ? '自动' : String(value)))
-                .join(', ')
-            : '无';
-          await addLog(
-            `步骤 9：HeroSMS ${countryConfig.label} 价格方案：档位=[${rawTierText}]，用户上限=${pricePlan?.userLimit ?? '未设置'}，目录最低价=${pricePlan?.minCatalogPrice ?? '未知'}。`,
-            'info'
-          );
-          if (pricesToTry.length > 1 || countryPriceFloor !== null) {
-            const tierText = pricesToTry
-              .map((value) => (value === null || value === undefined ? '自动' : String(value)))
-              .join(', ');
-            await addLog(
-              `步骤 9：HeroSMS ${countryConfig.label} 本轮候选价格：${tierText}${countryPriceFloor !== null ? `（高于 ${countryPriceFloor}）` : ''}。`,
-              'info'
-            );
-          }
-          if (!pricesToTry.length) {
-            if (priceRange.hasMinPriceLimit && !rangeFilteredPrices.length) {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: 价格区间 ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} 内暂无可用号码`
+          const tryWithoutPreferredOperator = async (requestAction) => {
+            try {
+              const fallbackPayload = await requestPhoneActivationWithPrice(
+                config,
+                countryConfig,
+                requestAction,
+                tier.price,
+                {
+                  userLimit: pricePlan.userLimit,
+                  userMinLimit: minPriceLimit,
+                  fixedPrice,
+                }
               );
-              continue;
+              const fallbackActivation = parseActivationPayload(fallbackPayload, {
+                countryId: countryConfig.id,
+                ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
+              });
+              if (fallbackActivation) {
+                const numericPrice = Number(tier.price);
+                rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
+                return { activation: fallbackActivation };
+              }
+              const fallbackText = describeHeroSmsPayload(fallbackPayload);
+              if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
+                return { noNumbers: true, failureText: fallbackText || '暂无可用号码' };
+              }
+              if (isHeroSmsTerminalError(fallbackPayload)) {
+                return {
+                  terminalError: createHeroSmsActionFailureError(requestAction, fallbackText || 'empty response'),
+                };
+              }
+              return {
+                retryable: true,
+                failureText: fallbackText || 'empty response',
+              };
+            } catch (fallbackError) {
+              const fallbackPayloadOrMessage = fallbackError?.payload || fallbackError?.message;
+              const fallbackText = describeHeroSmsPayload(fallbackPayloadOrMessage);
+              if (isHeroSmsTerminalError(fallbackPayloadOrMessage)) {
+                return {
+                  terminalError: createHeroSmsActionFailureError(requestAction, fallbackText || 'empty response'),
+                };
+              }
+              if (isHeroSmsNoNumbersPayload(fallbackPayloadOrMessage)) {
+                return { noNumbers: true, failureText: fallbackText || '暂无可用号码' };
+              }
+              return {
+                retryable: true,
+                failureText: fallbackText || 'empty response',
+              };
             }
-            if (
-              countryPriceFloor !== null
-              && Array.isArray(pricePlan.prices)
-              && pricePlan.prices.length > 0
-            ) {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: 当前回退尝试没有高于 ${countryPriceFloor} 的价格档位`
+          };
+
+          for (const requestAction of requestActions) {
+            try {
+              await addLog(
+                `步骤 9：HeroSMS ${countryLabel} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${tier.price === null || tier.price === undefined ? '自动' : tier.price}。`,
+                'info'
               );
-              continue;
-            }
-            if (
-              pricePlan.userLimit !== null
-              && pricePlan.minCatalogPrice !== null
-              && pricePlan.minCatalogPrice > pricePlan.userLimit
-            ) {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: 价格上限 ${pricePlan.userLimit} 内暂无可用号码；平台最低价=${pricePlan.minCatalogPrice}`
+              const payload = await requestPhoneActivationWithPrice(
+                config,
+                countryConfig,
+                requestAction,
+                tier.price,
+                {
+                  userLimit: pricePlan.userLimit,
+                  userMinLimit: minPriceLimit,
+                  fixedPrice,
+                  operator: preferredOperator,
+                }
               );
-            } else {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: ${lastFailureText || 'NO_NUMBERS'}`
-              );
-              retryableNoNumberCountries.push(countryConfig.label);
-            }
-            continue;
-          }
-          for (const maxPrice of pricesToTry) {
-            for (const requestAction of requestActions) {
-              try {
-                const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe);
-                await addLog(
-                  `步骤 9：HeroSMS ${countryConfig.label} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${maxPrice === null || maxPrice === undefined ? '自动' : maxPrice}。`,
-                  'info'
-                );
-                const payload = await requestPhoneActivationWithPrice(
-                  config,
-                  countryConfig,
-                  requestAction,
-                  maxPrice,
-                  {
-                    userLimit: pricePlan.userLimit,
-                    userMinLimit: minPriceLimit,
-                    fixedPrice,
-                    operator: preferredOperator,
-                  }
-                );
-                const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
-                if (activation) {
-                  const numericPrice = Number(maxPrice);
-                  rememberActivationAcquiredPrice(activation, numericPrice);
-                  return {
+              const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
+              if (activation) {
+                const numericPrice = Number(tier.price);
+                rememberActivationAcquiredPrice(activation, numericPrice);
+                return {
+                  activation: {
                     ...activation,
                     countryId: countryConfig.id,
+                  },
+                };
+              }
+              const payloadText = describeHeroSmsPayload(payload);
+              if (isHeroSmsWrongMaxPriceFailure(payloadText)) {
+                return {
+                  retryable: false,
+                  failureText: payloadText || '价格档位不符合平台要求',
+                  lastError: createHeroSmsActionFailureError(requestAction, payloadText || '价格档位不符合平台要求'),
+                };
+              }
+              if (preferredOperator && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
+                const fallbackResult = await tryWithoutPreferredOperator(requestAction);
+                if (fallbackResult.activation) {
+                  return {
+                    activation: {
+                      ...fallbackResult.activation,
+                      countryId: countryConfig.id,
+                    },
                   };
                 }
-                const payloadText = describeHeroSmsPayload(payload);
-                if (preferredOperator && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
-                  const fallbackPayload = await requestPhoneActivationWithPrice(
-                    config,
-                    countryConfig,
-                    requestAction,
-                    maxPrice,
-                    {
-                      userLimit: pricePlan.userLimit,
-                      userMinLimit: minPriceLimit,
-                      fixedPrice,
-                    }
-                  );
-                  const fallbackActivation = parseActivationPayload(fallbackPayload, {
-                    countryId: countryConfig.id,
-                    ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
-                  });
-                  if (fallbackActivation) {
-                    const numericPrice = Number(maxPrice);
-                    rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
-                    return {
-                      ...fallbackActivation,
-                      countryId: countryConfig.id,
-                    };
-                  }
-                  if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
-                    noNumbersObservedInCountry = true;
-                    lastFailureText = describeHeroSmsPayload(fallbackPayload) || payloadText || lastFailureText;
-                    continue;
-                  }
+                if (fallbackResult.terminalError) {
+                  return { terminalError: fallbackResult.terminalError };
                 }
-                if (isHeroSmsNoNumbersPayload(payload)) {
+                if (fallbackResult.noNumbers) {
                   noNumbersObservedInCountry = true;
-                  lastFailureText = payloadText || lastFailureText;
+                  lastFailureText = fallbackResult.failureText || payloadText || lastFailureText;
                   continue;
                 }
-                if (isHeroSmsTerminalError(payload)) {
-                  throw createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
-                }
-                lastFailureText = payloadText || lastFailureText;
-                lastError = createHeroSmsActionFailureError(requestAction, payloadText || 'empty response');
-              } catch (error) {
-                if (error?.localizedPhoneSmsFailure) {
-                  throw error;
-                }
-                const payloadOrMessage = error?.payload || error?.message;
-                if (isHeroSmsTerminalError(payloadOrMessage)) {
-                  throw createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response');
-                }
-                if (preferredOperator && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
-                  try {
-                    const fallbackPayload = await requestPhoneActivationWithPrice(
-                      config,
-                      countryConfig,
-                      requestAction,
-                      maxPrice,
-                      {
-                        userLimit: pricePlan.userLimit,
-                        userMinLimit: minPriceLimit,
-                        fixedPrice,
-                      }
-                    );
-                    const fallbackActivation = parseActivationPayload(fallbackPayload, {
-                      countryId: countryConfig.id,
-                      ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
-                    });
-                    if (fallbackActivation) {
-                      const numericPrice = Number(maxPrice);
-                      rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
-                      return {
-                        ...fallbackActivation,
-                        countryId: countryConfig.id,
-                      };
-                    }
-                    if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
-                      noNumbersObservedInCountry = true;
-                      lastFailureText = describeHeroSmsPayload(fallbackPayload) || lastFailureText;
-                      continue;
-                    }
-                  } catch (fallbackError) {
-                    const fallbackPayloadOrMessage = fallbackError?.payload || fallbackError?.message;
-                    if (isHeroSmsTerminalError(fallbackPayloadOrMessage)) {
-                      throw createHeroSmsActionFailureError(requestAction, fallbackPayloadOrMessage || 'empty response');
-                    }
-                    if (isHeroSmsNoNumbersPayload(fallbackPayloadOrMessage)) {
-                      noNumbersObservedInCountry = true;
-                      lastFailureText = describeHeroSmsPayload(fallbackPayloadOrMessage) || lastFailureText;
-                      continue;
-                    }
-                    lastFailureText = describeHeroSmsPayload(fallbackPayloadOrMessage) || lastFailureText;
-                    lastError = fallbackError;
-                    continue;
-                  }
-                }
-                if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
-                  noNumbersObservedInCountry = true;
-                  lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
-                  continue;
-                }
-                lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
-                lastError = error;
+                lastFailureText = fallbackResult.failureText || payloadText || lastFailureText;
+                continue;
               }
+              if (isHeroSmsNoNumbersPayload(payload)) {
+                noNumbersObservedInCountry = true;
+                lastFailureText = payloadText || lastFailureText;
+                continue;
+              }
+              if (isHeroSmsTerminalError(payload)) {
+                return { terminalError: createHeroSmsActionFailureError(requestAction, payloadText || 'empty response') };
+              }
+              lastFailureText = payloadText || lastFailureText;
+            } catch (error) {
+              if (error?.localizedPhoneSmsFailure) {
+                throw error;
+              }
+              const payloadOrMessage = error?.payload || error?.message;
+              if (isHeroSmsWrongMaxPriceFailure(payloadOrMessage)) {
+                return {
+                  retryable: false,
+                  failureText: describeHeroSmsPayload(payloadOrMessage) || error?.message || '价格档位不符合平台要求',
+                  lastError: error,
+                };
+              }
+              if (isHeroSmsTerminalError(payloadOrMessage)) {
+                return {
+                  terminalError: createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response'),
+                };
+              }
+              if (preferredOperator && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
+                const fallbackResult = await tryWithoutPreferredOperator(requestAction);
+                if (fallbackResult.activation) {
+                  return {
+                    activation: {
+                      ...fallbackResult.activation,
+                      countryId: countryConfig.id,
+                    },
+                  };
+                }
+                if (fallbackResult.terminalError) {
+                  return { terminalError: fallbackResult.terminalError };
+                }
+                if (fallbackResult.noNumbers) {
+                  noNumbersObservedInCountry = true;
+                  lastFailureText = fallbackResult.failureText || lastFailureText;
+                  continue;
+                }
+                lastFailureText = fallbackResult.failureText || lastFailureText;
+                continue;
+              }
+              if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
+                noNumbersObservedInCountry = true;
+                lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
+                continue;
+              }
+              lastFailureText = describeHeroSmsPayload(payloadOrMessage) || lastFailureText;
             }
           }
 
           if (noNumbersObservedInCountry) {
-            const tiersTriedText = pricesToTry
-              .map((value) => (value === null || value === undefined ? '自动' : String(value)))
-              .join(', ');
-            if (
-              pricePlan.userLimit !== null
-              && pricePlan.minCatalogPrice !== null
-              && pricePlan.minCatalogPrice > pricePlan.userLimit
-            ) {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: 价格上限 ${pricePlan.userLimit} 内暂无可用号码；平台最低价=${pricePlan.minCatalogPrice}`
-              );
-            } else {
-              noNumbersByCountry.push(
-                `${countryConfig.label}: ${lastFailureText || 'NO_NUMBERS'}${tiersTriedText ? `（已尝试档位：${tiersTriedText}）` : ''}`
-              );
-              retryableNoNumberCountries.push(countryConfig.label);
-            }
-            continue;
+            return {
+              retryable: true,
+              failureText: lastFailureText || 'NO_NUMBERS',
+            };
           }
-        }
 
-        finalNoNumbersByCountry = noNumbersByCountry;
-        finalLastError = lastError;
-        finalLastFailureText = lastFailureText;
+          return {
+            retryable: true,
+            failureText: lastFailureText || '暂无可用号码',
+          };
+        },
+      });
 
-        if (
-          noNumbersByCountry.length
-          && round < maxAcquireRounds
-          && retryableNoNumberCountries.length > 0
-        ) {
-          await addLog(
-            `步骤 9：HeroSMS 暂无可用号码（第 ${round}/${maxAcquireRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。国家：${retryableNoNumberCountries.join(', ')}。`,
-            'warn'
-          );
-          await addLog(
-            `步骤 9：HeroSMS 暂无可用号码（第 ${round}/${maxAcquireRounds} 轮），${Math.ceil(retryDelayMs / 1000)} 秒后重试。国家：${retryableNoNumberCountries.join(', ')}。`,
-            'warn'
-          );
-          await sleepWithStop(retryDelayMs);
-          continue;
-        }
-
-        break;
+      if (result?.activation) {
+        return result.activation;
+      }
+      if (result?.lastError) {
+        throw result.lastError;
       }
 
-      if (finalNoNumbersByCountry.length) {
+      const tierFailures = Array.isArray(result?.tierFailures)
+        ? result.tierFailures.map((entry) => `${entry.label}: ${entry.reason}`)
+        : [];
+      const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
+      if (failureDetails.length) {
         throw new Error(
-          `HeroSMS 已尝试 ${countryCandidates.length} 个候选国家，均无可用号码：${finalNoNumbersByCountry.join(' | ')}。`
+          `HeroSMS 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
-      if (finalLastError) {
-        throw finalLastError;
-      }
-      throw new Error(`HeroSMS 获取手机号失败，最后状态：${finalLastFailureText || '未知'}。`);
+      throw new Error('HeroSMS 获取手机号失败。');
     }
 
     async function reactivatePhoneActivation(state = {}, activation) {
