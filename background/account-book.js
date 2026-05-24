@@ -12,6 +12,12 @@
       return String(value || '').trim();
     }
 
+    function normalizeSignupRegion(value = '') {
+      const letters = String(value || '').match(/[A-Za-z]/g);
+      const normalized = letters ? letters.join('').toUpperCase() : '';
+      return normalized.length === 2 ? normalized : '';
+    }
+
     function normalizePhoneDigits(value = '') {
       return String(value || '').replace(/\D+/g, '');
     }
@@ -76,6 +82,8 @@
       const password = normalizeString(state.password || state.customPassword || '');
       const flowId = normalizeString(state.flowId || state.activeFlowId || '');
       const panelMode = normalizeString(state.panelMode || '');
+      const signupIp = normalizeString(state.ipProxyAppliedExitIp || '');
+      const signupRegion = normalizeSignupRegion(state.ipProxyAppliedExitRegion || '');
 
       return {
         recordId,
@@ -88,6 +96,8 @@
         createdAt: now,
         updatedAt: now,
         finalFlowCompletedAt: stage === 'flow_completed' ? now : '',
+        signupIp,
+        signupRegion,
       };
     }
 
@@ -121,6 +131,8 @@
         createdAt: createdAt || updatedAt || new Date().toISOString(),
         updatedAt: updatedAt || createdAt || new Date().toISOString(),
         finalFlowCompletedAt,
+        signupIp: normalizeString(entry.signupIp || ''),
+        signupRegion: normalizeSignupRegion(entry.signupRegion || ''),
       };
     }
 
@@ -207,6 +219,8 @@
         createdAt: normalizeTimestamp(normalizedExisting.createdAt || normalizedDraft.createdAt || updatedAt) || updatedAt,
         updatedAt,
         finalFlowCompletedAt,
+        signupIp: normalizedExisting.signupIp || normalizedDraft.signupIp,
+        signupRegion: normalizedExisting.signupRegion || normalizedDraft.signupRegion,
       };
     }
 

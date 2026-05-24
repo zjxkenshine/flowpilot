@@ -14,6 +14,12 @@
       return String(value || '').trim();
     }
 
+    function normalizeSignupRegion(value = '') {
+      const letters = String(value || '').match(/[A-Za-z]/g);
+      const normalized = letters ? letters.join('').toUpperCase() : '';
+      return normalized.length === 2 ? normalized : '';
+    }
+
     function normalizeTimestamp(value = '') {
       const timestamp = Date.parse(String(value || ''));
       return Number.isFinite(timestamp) ? timestamp : 0;
@@ -36,6 +42,11 @@
       const entries = Array.isArray(currentState?.accountBookEntries) ? currentState.accountBookEntries : [];
       return entries
         .filter((item) => item && typeof item === 'object')
+        .map((item) => ({
+          ...item,
+          signupIp: normalizeString(item.signupIp || ''),
+          signupRegion: normalizeSignupRegion(item.signupRegion || ''),
+        }))
         .slice()
         .sort((left, right) => {
           const rightTime = normalizeTimestamp(right.updatedAt || right.createdAt || '');
@@ -57,6 +68,15 @@
       return normalized || '--';
     }
 
+    function formatSignupIp(entry = {}) {
+      const signupIp = normalizeString(entry.signupIp || '');
+      const signupRegion = normalizeSignupRegion(entry.signupRegion || '');
+      if (signupIp && signupRegion) {
+        return `${signupIp} [${signupRegion}]`;
+      }
+      return signupIp || '--';
+    }
+
     function render(currentState = state.getLatestState()) {
       const entries = getEntries(currentState);
       if (dom.accountBookCount) {
@@ -72,7 +92,7 @@
       if (!entries.length) {
         dom.accountBookBody.innerHTML = `
           <tr class="account-book-empty-row">
-            <td class="account-book-empty" colspan="3">暂无账号信息</td>
+            <td class="account-book-empty" colspan="4">暂无账号信息</td>
           </tr>
         `;
         return;
@@ -101,6 +121,7 @@
                 ` : ''}
               </div>
             </td>
+            <td class="mono account-book-cell account-book-ip-cell">${escapeHtml(formatSignupIp(entry))}</td>
           </tr>
         `;
       }).join('');

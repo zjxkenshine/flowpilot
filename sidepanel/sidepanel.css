@@ -3072,7 +3072,7 @@ header {
 }
 
 .account-book-panel {
-  width: min(100%, 620px);
+  width: min(100%, 760px);
   max-height: calc(100vh - 24px);
   display: flex;
   flex-direction: column;
@@ -3144,6 +3144,11 @@ header {
   table-layout: fixed;
 }
 
+.account-book-table thead th:nth-child(1) { width: 25%; }
+.account-book-table thead th:nth-child(2) { width: 22%; }
+.account-book-table thead th:nth-child(3) { width: 20%; }
+.account-book-table thead th:nth-child(4) { width: 33%; }
+
 .account-book-table thead th {
   position: sticky;
   top: 0;
@@ -3173,6 +3178,10 @@ header {
   line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.account-book-ip-cell {
+  white-space: normal;
 }
 
 .account-book-password-cell {

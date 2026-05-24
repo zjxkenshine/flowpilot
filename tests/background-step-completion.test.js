@@ -61,7 +61,12 @@ function getErrorMessage(error) {
 }
 async function getState() {
   events.push({ type: 'getState' });
-  return { nodeStatuses: {}, accountContributionEnabled: true };
+  return {
+    nodeStatuses: {},
+    accountContributionEnabled: true,
+    ipProxyAppliedExitIp: '203.0.113.8',
+    ipProxyAppliedExitRegion: 'JP',
+  };
 }
 function getLastNodeIdForState() {
   return lastNodeId;
@@ -138,7 +143,12 @@ test('completeNodeFromBackground writes registration-success account book entry 
   assert.deepStrictEqual(accountBookEvent, {
     type: 'account-book',
     stage: 'registration_success',
-    state: { nodeStatuses: {}, accountContributionEnabled: true },
+    state: {
+      nodeStatuses: {},
+      accountContributionEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.8',
+      ipProxyAppliedExitRegion: 'JP',
+    },
   });
 });
 

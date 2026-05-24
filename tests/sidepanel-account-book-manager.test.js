@@ -89,12 +89,52 @@ test('sidepanel html contains account book overlay, button order, and manager sc
   assert.match(html, /id="account-book-body"/);
   assert.match(html, /id="btn-export-account-book"/);
   assert.match(html, /id="btn-clear-account-book"/);
+  assert.match(html, /<th>IP<\/th>/);
+  assert.match(html, /colspan="4"/);
   assert.ok(accountIndex >= 0 && recordsIndex >= 0 && clearIndex >= 0);
   assert.ok(accountIndex < recordsIndex);
   assert.ok(recordsIndex < clearIndex);
   assert.notEqual(managerIndex, -1);
   assert.notEqual(sidepanelIndex, -1);
   assert.ok(managerIndex < sidepanelIndex);
+});
+
+test('account book manager renders empty signup IP as placeholder', () => {
+  const source = fs.readFileSync('sidepanel/account-book-manager.js', 'utf8');
+  const windowObject = {};
+  const api = new Function('window', `${source}; return window.SidepanelAccountBookManager;`)(windowObject);
+
+  const dom = {
+    accountBookCount: createNode(),
+    accountBookBody: createNode(),
+  };
+
+  const manager = api.createAccountBookManager({
+    state: {
+      getLatestState: () => ({
+        accountBookEntries: [
+          {
+            recordId: 'missing-ip@example.com',
+            email: 'missing-ip@example.com',
+            phoneNumber: '+15550001111',
+            password: 'secret-pass',
+            captureStage: 'registration_success',
+            createdAt: '2026-05-24T10:00:00.000Z',
+            updatedAt: '2026-05-24T10:00:00.000Z',
+          },
+        ],
+      }),
+    },
+    dom,
+    helpers: {
+      escapeHtml: (value) => String(value || ''),
+    },
+    runtime: {},
+  });
+
+  manager.render();
+
+  assert.match(dom.accountBookBody.innerHTML, /<td class="mono account-book-cell account-book-ip-cell">--<\/td>/);
 });
 
 test('sidepanel source wires account book manager and latest-state rendering', () => {
@@ -134,6 +174,8 @@ test('account book manager masks passwords by default, toggles display, exports 
         createdAt: '2026-05-24T10:00:00.000Z',
         updatedAt: '2026-05-24T10:05:00.000Z',
         finalFlowCompletedAt: '2026-05-24T10:05:00.000Z',
+        signupIp: '203.0.113.8',
+        signupRegion: 'jp',
       },
     ],
   };
@@ -183,6 +225,7 @@ test('account book manager masks passwords by default, toggles display, exports 
   assert.match(dom.accountBookCount.textContent, /共 1 条账号信息/);
   assert.match(dom.accountBookBody.innerHTML, /flow@example\.com/);
   assert.match(dom.accountBookBody.innerHTML, /\+15551234567/);
+  assert.match(dom.accountBookBody.innerHTML, /203\.0\.113\.8 \[JP\]/);
   assert.match(dom.accountBookBody.innerHTML, /••••••••/);
   assert.doesNotMatch(dom.accountBookBody.innerHTML, /secret-pass/);
 
@@ -202,6 +245,8 @@ test('account book manager masks passwords by default, toggles display, exports 
   const exported = JSON.parse(downloads[0].content);
   assert.equal(exported.count, 1);
   assert.equal(exported.entries[0].password, 'secret-pass');
+  assert.equal(exported.entries[0].signupIp, '203.0.113.8');
+  assert.equal(exported.entries[0].signupRegion, 'JP');
 
   await dom.btnClearAccountBook.listeners.click();
   await flushPromises();

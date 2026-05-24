@@ -1118,6 +1118,8 @@ test('NODE_COMPLETE records registration-success account book entry when wait-re
     getState: async () => ({
       nodeStatuses: { 'wait-registration-success': 'pending', 'platform-verify': 'pending' },
       email: 'user@example.com',
+      ipProxyAppliedExitIp: '203.0.113.8',
+      ipProxyAppliedExitRegion: 'JP',
     }),
     getNodeIdsForState: () => ['open-chatgpt', 'submit-signup-email', 'fill-password', 'fetch-signup-code', 'fill-profile', 'wait-registration-success', 'platform-verify'],
     getStepIdByNodeIdForState: (nodeId) => ({
@@ -1148,6 +1150,8 @@ test('NODE_COMPLETE records registration-success account book entry when wait-re
   assert.equal(response.ok, true);
   assert.equal(accountBookCalls.length, 1);
   assert.equal(accountBookCalls[0][0], 'registration_success');
+  assert.equal(accountBookCalls[0][1].ipProxyAppliedExitIp, '203.0.113.8');
+  assert.equal(accountBookCalls[0][1].ipProxyAppliedExitRegion, 'JP');
 });
 
 test('NODE_COMPLETE records registration-success account book entry when kiro register finalization completes', async () => {
@@ -1171,6 +1175,8 @@ test('NODE_COMPLETE records registration-success account book entry when kiro re
       email: 'kiro@example.com',
       activeFlowId: 'kiro',
       flowId: 'kiro',
+      ipProxyAppliedExitIp: '198.51.100.9',
+      ipProxyAppliedExitRegion: 'US',
     }),
     getNodeIdsForState: () => [
       'kiro-open-register-page',
@@ -1209,6 +1215,8 @@ test('NODE_COMPLETE records registration-success account book entry when kiro re
   assert.equal(response.ok, true);
   assert.equal(accountBookCalls.length, 1);
   assert.equal(accountBookCalls[0][0], 'registration_success');
+  assert.equal(accountBookCalls[0][1].ipProxyAppliedExitIp, '198.51.100.9');
+  assert.equal(accountBookCalls[0][1].ipProxyAppliedExitRegion, 'US');
 });
 
 test('CLEAR_ACCOUNT_BOOK delegates to background clear helper and returns cleared count', async () => {
