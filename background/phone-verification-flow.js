@@ -1884,6 +1884,61 @@
       );
     }
 
+    async function recoverSignupContactVerificationServerError(tabId, options = {}) {
+      const phaseLabel = String(options?.phaseLabel || '重发后').trim() || '重发后';
+      const fallbackError = options?.error || null;
+      const beforeSnapshot = await readAuthTabSnapshotSafely(tabId);
+      const beforeErrorText = getPhoneResendServerErrorFromSnapshot(beforeSnapshot);
+      if (!beforeErrorText) {
+        return false;
+      }
+
+      await addLog(
+        `步骤 4：${phaseLabel}检测到 contact-verification 500 页面，正在刷新一次后继续等待短信。`,
+        'warn',
+        { step: 4, stepKey: 'fetch-signup-code' }
+      );
+
+      if (typeof refreshAuthContactVerificationTab !== 'function') {
+        throw buildPhoneResendServerError(beforeErrorText || fallbackError);
+      }
+
+      try {
+        await refreshAuthContactVerificationTab(tabId, {
+          step: 4,
+          visibleStep: 4,
+          timeoutMs: 30000,
+          logStepKey: 'fetch-signup-code',
+          logMessage: '步骤 4：重发后已刷新 contact-verification 页面，等待认证页脚本恢复。',
+        });
+      } catch (error) {
+        if (isStopRequestedError(error)) {
+          throw error;
+        }
+        await addLog(
+          `步骤 4：重发后刷新 contact-verification 页面失败，将按 500 错误处理。${error.message}`,
+          'warn',
+          { step: 4, stepKey: 'fetch-signup-code' }
+        );
+        throw buildPhoneResendServerError(beforeErrorText || fallbackError || error);
+      }
+
+      const afterSnapshot = await readAuthTabSnapshotSafely(tabId);
+      const afterErrorText = getPhoneResendServerErrorFromSnapshot(afterSnapshot);
+      if (afterErrorText) {
+        throw buildPhoneResendServerError(afterErrorText);
+      }
+
+      await addLog(
+        hasContactVerificationPhonePrompt(afterSnapshot)
+          ? '步骤 4：重发后刷新 contact-verification 已恢复手机验证提示，继续等待短信。'
+          : '步骤 4：重发后刷新 contact-verification 后未再检测到 500，继续等待短信。',
+        'info',
+        { step: 4, stepKey: 'fetch-signup-code' }
+      );
+      return true;
+    }
+
     function shouldTreatResendThrottledAsBanned(state = {}) {
       return Boolean(state?.phoneResendThrottledAsBannedEnabled);
     }
@@ -6216,9 +6271,29 @@
         let state = options?.state || await getState();
         const activation = normalizeActivation(options?.activation || state?.signupPhoneActivation);
         const pageStateCheckTimeoutMs = Math.max(1, Math.floor(Number(options?.pageStateCheckTimeoutMs) || 5000));
+        let pendingSignupContactVerificationRecovery = false;
+        let signupContactVerificationServerErrorRecoveryUsed = false;
         if (!activation) {
           throw new Error('步骤 4：未找到当前注册手机号激活记录，请重新执行步骤 2。');
         }
+
+        const recoverSignupContactVerificationServerErrorOnce = async (phaseLabel, error = null) => {
+          if (signupContactVerificationServerErrorRecoveryUsed) {
+            const serverErrorText = await readPhoneResendServerErrorFromAuthTab(tabId);
+            if (serverErrorText) {
+              throw buildPhoneResendServerError(serverErrorText);
+            }
+            return false;
+          }
+          const recovered = await recoverSignupContactVerificationServerError(tabId, {
+            phaseLabel,
+            error,
+          });
+          if (recovered) {
+            signupContactVerificationServerErrorRecoveryUsed = true;
+          }
+          return recovered;
+        };
 
         const assertSignupPhoneStillApplicable = async (phaseLabel) => {
           try {
@@ -6226,11 +6301,36 @@
             if (isSignupEmailVerificationPageState(pageState)) {
               throw buildSignupPhoneStaleEmailVerificationError(pageState);
             }
+            if (
+              pendingSignupContactVerificationRecovery
+              && isContactVerificationUrl(pageState?.url || pageState?.href)
+              && !pageState?.phoneVerificationPage
+            ) {
+              const recovered = await recoverSignupContactVerificationServerErrorOnce(phaseLabel);
+              pendingSignupContactVerificationRecovery = false;
+              if (recovered) {
+                return null;
+              }
+            }
+            pendingSignupContactVerificationRecovery = false;
             return pageState;
           } catch (error) {
             if (isStopRequestedError(error) || isStaleSignupPhoneEmailVerificationError(error)) {
               throw error;
             }
+            if (pendingSignupContactVerificationRecovery) {
+              try {
+                const recovered = await recoverSignupContactVerificationServerErrorOnce(phaseLabel, error);
+                pendingSignupContactVerificationRecovery = false;
+                if (recovered) {
+                  return null;
+                }
+              } catch (recoveryError) {
+                pendingSignupContactVerificationRecovery = false;
+                throw recoveryError;
+              }
+            }
+
             await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
             await addLog(
               `步骤 4：检查注册手机号页面状态（${phaseLabel}）失败，将继续等待短信。${error.message}`,
@@ -6256,6 +6356,7 @@
                 await assertSignupPhoneStillApplicable('while waiting for SMS code');
               },
               onTimeoutWindow: async () => {
+                pendingSignupContactVerificationRecovery = true;
                 try {
                   await resendSignupPhoneVerificationCode(tabId);
                   await addLog('步骤 4：已点击注册手机验证码页面的“重新发送”。', 'info', {
@@ -6264,12 +6365,17 @@
                   });
                 } catch (resendError) {
                   if (isStopRequestedError(resendError)) {
+                    pendingSignupContactVerificationRecovery = false;
                     throw resendError;
+                  }
+                  const recovered = await recoverSignupContactVerificationServerErrorOnce('重发后', resendError);
+                  pendingSignupContactVerificationRecovery = false;
+                  if (recovered) {
+                    return;
                   }
                   if (isPhoneResendServerError(resendError)) {
                     throw buildPhoneResendServerError(resendError);
                   }
-                  await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
                   await addLog(`步骤 4：注册手机验证码页面重发失败，将继续轮询短信。${resendError.message}`, 'warn', {
                     step: 4,
                     stepKey: 'fetch-signup-code',
@@ -6302,15 +6408,21 @@
 
               await requestAdditionalPhoneSms(state, activation);
               try {
+                pendingSignupContactVerificationRecovery = true;
                 await resendSignupPhoneVerificationCode(tabId);
               } catch (resendError) {
                 if (isStopRequestedError(resendError)) {
+                  pendingSignupContactVerificationRecovery = false;
                   throw resendError;
+                }
+                const recovered = await recoverSignupContactVerificationServerErrorOnce('验证码被拒后重发', resendError);
+                pendingSignupContactVerificationRecovery = false;
+                if (recovered) {
+                  continue;
                 }
                 if (isPhoneResendServerError(resendError)) {
                   throw buildPhoneResendServerError(resendError);
                 }
-                await throwPhoneResendServerErrorIfAuthTabShowsIt(tabId);
                 await addLog(`步骤 4：验证码被拒后点击重发失败。${resendError.message}`, 'warn', {
                   step: 4,
                   stepKey: 'fetch-signup-code',
