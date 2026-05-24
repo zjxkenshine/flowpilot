@@ -1276,6 +1276,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyAccountSessionPrefix: '',
   ipProxyAccountLifeMinutes: '',
   ipProxyPoolTargetCount: '20',
+  ipProxySwitchIpRoundCount: '1',
   ipProxyAutoRefreshPoolOnExhausted: false,
   ipProxyAutoSyncEnabled: false,
   ipProxyAutoSyncIntervalMinutes: IP_PROXY_AUTO_SYNC_DEFAULT_INTERVAL_MINUTES,
@@ -3182,6 +3183,10 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeIpProxyAccountLifeMinutes(value || '');
     case 'ipProxyPoolTargetCount':
       return normalizeIpProxyPoolTargetCount(value || '', 20);
+    case 'ipProxySwitchIpRoundCount':
+      return typeof normalizeIpProxySwitchIpRoundCount === 'function'
+        ? normalizeIpProxySwitchIpRoundCount(value || '', 1)
+        : normalizeIpProxyPoolTargetCount(value || '', 1);
     case 'ipProxyAutoRefreshPoolOnExhausted':
       return Boolean(value);
     case 'ipProxyAutoSyncEnabled':
@@ -3718,6 +3723,12 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     payload.ipProxyAccountSessionPrefix = normalizeIpProxyAccountSessionPrefix(activeProfile?.accountSessionPrefix || payload.ipProxyAccountSessionPrefix || '');
     payload.ipProxyAccountLifeMinutes = normalizeIpProxyAccountLifeMinutes(activeProfile?.accountLifeMinutes || payload.ipProxyAccountLifeMinutes || '');
     payload.ipProxyPoolTargetCount = normalizeIpProxyPoolTargetCount(activeProfile?.poolTargetCount || payload.ipProxyPoolTargetCount || '', 20);
+    payload.ipProxySwitchIpRoundCount = typeof normalizeIpProxySwitchIpRoundCount === 'function'
+      ? normalizeIpProxySwitchIpRoundCount(activeProfile?.switchIpRoundCount || payload.ipProxySwitchIpRoundCount || '', 1)
+      : normalizeIpProxyPoolTargetCount(
+        activeProfile?.switchIpRoundCount || payload.ipProxySwitchIpRoundCount || '',
+        1
+      );
     payload.ipProxyAutoRefreshPoolOnExhausted = Boolean(
       activeProfile?.autoRefreshPoolOnExhausted
       ?? payload.ipProxyAutoRefreshPoolOnExhausted
@@ -12575,10 +12586,15 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
   if (provider !== '711proxy' || mode !== 'api') {
     return null;
   }
-  const threshold = typeof resolveIpProxyAutoSwitchThreshold === 'function'
+  const switchPoolThreshold = typeof resolveIpProxyAutoSwitchThreshold === 'function'
     ? resolveIpProxyAutoSwitchThreshold(state)
     : Math.max(1, Math.min(500, Number(state?.ipProxyPoolTargetCount) || 20));
-  if (successfulRuns % threshold !== 0) {
+  const switchIpThreshold = typeof resolveIpProxySwitchIpRoundCount === 'function'
+    ? resolveIpProxySwitchIpRoundCount(state)
+    : Math.max(1, Math.min(500, Number(state?.ipProxySwitchIpRoundCount) || 1));
+  const poolRoundHit = successfulRuns % switchPoolThreshold === 0;
+  const switchIpRoundHit = successfulRuns % switchIpThreshold === 0;
+  if (!poolRoundHit && !switchIpRoundHit) {
     return null;
   }
 
@@ -12591,22 +12607,27 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
   const maxItems = typeof resolveIpProxyPoolTargetCountForMode === 'function'
     ? resolveIpProxyPoolTargetCountForMode(state, mode)
     : undefined;
-
-  const switchToFirstEntryFromFreshPool = async (refreshResult, sourceState = state) => {
+  const switchToFirstEntryFromFreshPool = async (refreshResult, sourceState = state, reasonLabel = '换代理池轮次') => {
     const refreshedPool = Array.isArray(refreshResult?.pool) ? refreshResult.pool : [];
     if (!refreshedPool.length) {
+      if (typeof addLog === 'function') {
+        const thresholdLabel = reasonLabel === '换IP轮次'
+          ? `换IP轮次 ${switchIpThreshold}`
+          : `换代理池轮次 ${switchPoolThreshold}`;
+        await addLog(
+          `${reasonLabel}命中（成功 ${successfulRuns} 轮 / ${thresholdLabel}），已请求 711 API 拉新池，但未获取到可用代理，已跳过自动轮换。`,
+          'warn'
+        );
+      }
       return refreshResult;
     }
     const preSwitchIndex = Math.max(0, refreshedPool.length - 1);
     const preSwitchCurrent = refreshedPool[preSwitchIndex] || null;
     const refreshDisplay = String(refreshResult?.display || '').trim();
-    if (typeof addLog === 'function') {
-      await addLog(
-        `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已先从 711 同步新池${refreshDisplay ? `：${refreshDisplay}` : ''}，继续切换到新池下一条。`,
-        'info'
-      );
-    }
-    return switchIpProxy('next', {
+    const thresholdLabel = reasonLabel === '换IP轮次'
+      ? `换IP轮次 ${switchIpThreshold}`
+      : `换代理池轮次 ${switchPoolThreshold}`;
+    const result = await switchIpProxy('next', {
       mode,
       state: {
         ...sourceState,
@@ -12620,80 +12641,105 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
       skipExitProbe: true,
       maxItems,
     });
+    const display = String(result?.display || refreshDisplay || '').trim();
+    const routingApplied = Boolean(result?.proxyRouting?.applied);
+    if (typeof addLog === 'function') {
+      await addLog(
+        routingApplied
+          ? `${reasonLabel}命中（成功 ${successfulRuns} 轮 / ${thresholdLabel}），已从 711 同步新池${refreshDisplay ? `：${refreshDisplay}` : ''}，并切到新池第一条${display ? `：${display}` : ''}。`
+          : `${reasonLabel}命中（成功 ${successfulRuns} 轮 / ${thresholdLabel}），已从 711 同步新池${refreshDisplay ? `：${refreshDisplay}` : ''}，但切换到新池第一条后连通性仍异常。`,
+        routingApplied ? 'ok' : 'warn'
+      );
+    }
+    return result;
   };
 
-  const runSingleAttempt = async () => {
+  const refreshPoolAndFirstEntry = async (reasonLabel) => {
+    const refreshed = await refreshIpProxyPool({
+      mode: 'api',
+      state,
+      skipExitProbe: true,
+      maxItems,
+    });
+    return switchToFirstEntryFromFreshPool(refreshed, state, reasonLabel);
+  };
+
+  const switchToNextInCurrentPool = async () => {
     if (!pool.length) {
       if (!autoRefreshPoolOnExhausted) {
         await addLog(
-          `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），当前 API 池为空，且未开启池尾自动拉新池，已跳过自动轮换。`,
+          `换IP轮次命中（成功 ${successfulRuns} 轮 / 换IP轮次 ${switchIpThreshold}），当前 API 池为空，且未允许池尾拉新池，已跳过自动轮换。`,
           'info'
         );
         return {
           skipped: true,
           reason: 'empty_pool_without_refresh',
-          threshold,
+          threshold: switchIpThreshold,
           successfulRuns,
         };
       }
-      const refreshed = await refreshIpProxyPool({
-        mode: 'api',
-        state,
-        skipExitProbe: true,
-        maxItems,
-      });
-      return switchToFirstEntryFromFreshPool(refreshed, state);
+      return refreshPoolAndFirstEntry('换IP轮次');
     }
 
     const isAtPoolTail = currentIndex >= pool.length - 1;
     if (isAtPoolTail) {
       if (!autoRefreshPoolOnExhausted) {
         await addLog(
-          `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），当前已到 API 池尾部，且未开启池尾自动拉新池，已跳过自动轮换。`,
+          `换IP轮次命中（成功 ${successfulRuns} 轮 / 换IP轮次 ${switchIpThreshold}），当前已到 API 池尾部，且未允许池尾拉新池，已跳过自动轮换。`,
           'info'
         );
         return {
           skipped: true,
           reason: 'pool_tail_without_refresh',
-          threshold,
+          threshold: switchIpThreshold,
           successfulRuns,
           count: pool.length,
           index: currentIndex,
         };
       }
-      const refreshed = await refreshIpProxyPool({
-        mode: 'api',
-        state,
-        skipExitProbe: true,
-        maxItems,
-      });
-      return switchToFirstEntryFromFreshPool(refreshed, state);
+      return refreshPoolAndFirstEntry('换IP轮次');
     }
 
-    return switchIpProxy('next', {
+    const result = await switchIpProxy('next', {
       mode,
       state,
       forceRefresh: false,
       skipExitProbe: true,
       maxItems,
     });
+    const display = String(result?.display || '').trim();
+    const routingApplied = Boolean(result?.proxyRouting?.applied);
+    if (typeof addLog === 'function') {
+      await addLog(
+        routingApplied
+          ? `换IP轮次命中（成功 ${successfulRuns} 轮 / 换IP轮次 ${switchIpThreshold}），已完成代理切换：${display || '已切换到下一条'}。`
+          : `换IP轮次命中（成功 ${successfulRuns} 轮 / 换IP轮次 ${switchIpThreshold}），已尝试自动轮换代理，但连通性仍异常。`,
+        routingApplied ? 'ok' : 'warn'
+      );
+    }
+    return result;
+  };
+
+  const runSingleAttempt = async () => {
+    if (poolRoundHit) {
+      return refreshPoolAndFirstEntry('换代理池轮次');
+    }
+    if (switchIpRoundHit) {
+      return switchToNextInCurrentPool();
+    }
+    return null;
   };
 
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const result = await runSingleAttempt();
+      if (!result) {
+        return null;
+      }
       if (result?.skipped) {
         return result;
       }
-      const display = String(result?.display || '').trim();
-      const routingApplied = Boolean(result?.proxyRouting?.applied);
-      await addLog(
-        routingApplied
-          ? `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已按下一条语义自动轮换代理：${display || '已切换到下一条'}。`
-          : `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），已尝试自动轮换代理，但连通性仍异常。`,
-        routingApplied ? 'ok' : 'warn'
-      );
       return result;
     } catch (error) {
       lastError = error;
@@ -12701,13 +12747,13 @@ async function maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload = {}) {
   }
 
   await addLog(
-    `任务切换阈值命中（成功 ${successfulRuns} 轮 / 阈值 ${threshold}），自动轮换代理失败：${lastError?.message || String(lastError || '未知错误')}`,
+    `${poolRoundHit ? '换代理池轮次' : '换IP轮次'}命中（成功 ${successfulRuns} 轮），自动轮换代理失败：${lastError?.message || String(lastError || '未知错误')}`,
     'warn'
   );
   return {
     skipped: true,
     reason: 'error',
-    threshold,
+    threshold: poolRoundHit ? switchPoolThreshold : switchIpThreshold,
     successfulRuns,
     error: lastError?.message || String(lastError || '未知错误'),
   };

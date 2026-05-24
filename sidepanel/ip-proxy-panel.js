@@ -213,6 +213,10 @@ function normalizeIpProxyPoolTargetCount(value = '', fallback = 20) {
   return String(Math.max(1, Math.min(500, numeric)));
 }
 
+function normalizeIpProxySwitchIpRoundCount(value = '', fallback = 1) {
+  return normalizeIpProxyPoolTargetCount(value, fallback);
+}
+
 function normalizeIpProxyAccountLifeMinutes(value = '', fallback = '') {
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
@@ -294,6 +298,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
     poolTargetCount: normalizeIpProxyPoolTargetCount(raw.poolTargetCount || '', 20),
+    switchIpRoundCount: normalizeIpProxySwitchIpRoundCount(raw.switchIpRoundCount || '', 1),
     autoRefreshPoolOnExhausted: Boolean(raw.autoRefreshPoolOnExhausted),
     autoSyncEnabled: Boolean(raw.autoSyncEnabled),
     autoSyncIntervalMinutes: String(Math.max(1, Math.min(1440, Number.parseInt(String(raw.autoSyncIntervalMinutes ?? '').trim(), 10) || 15))),
@@ -390,6 +395,7 @@ function buildIpProxyServiceProfileFromFlatState(state = {}) {
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,
     poolTargetCount: state?.ipProxyPoolTargetCount,
+    switchIpRoundCount: state?.ipProxySwitchIpRoundCount,
     autoRefreshPoolOnExhausted: state?.ipProxyAutoRefreshPoolOnExhausted,
     autoSyncEnabled: state?.ipProxyAutoSyncEnabled,
     autoSyncIntervalMinutes: state?.ipProxyAutoSyncIntervalMinutes,
@@ -603,6 +609,7 @@ function buildCurrentIpProxyServiceProfileFromInputs() {
     accountSessionPrefix: inputIpProxyAccountSessionPrefix?.value || '',
     accountLifeMinutes: inputIpProxyAccountLifeMinutes?.value || '',
     poolTargetCount: inputIpProxyPoolTargetCount?.value || '',
+    switchIpRoundCount: inputIpProxySwitchIpRoundCount?.value || '',
     autoRefreshPoolOnExhausted: Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked),
     autoSyncEnabled: Boolean(inputIpProxyAutoSyncEnabled?.checked),
     autoSyncIntervalMinutes: inputIpProxyAutoSyncIntervalMinutes?.value || '',
@@ -652,6 +659,7 @@ function buildIpProxyStatePatchFromServiceProfile(service = '', profile = {}) {
     ipProxyAccountSessionPrefix: normalizedProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: normalizedProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: normalizedProfile.poolTargetCount,
+    ipProxySwitchIpRoundCount: normalizedProfile.switchIpRoundCount,
     ipProxyAutoRefreshPoolOnExhausted: Boolean(normalizedProfile.autoRefreshPoolOnExhausted),
     ipProxyAutoSyncEnabled: normalizedProfile.autoSyncEnabled,
     ipProxyAutoSyncIntervalMinutes: Number.parseInt(String(normalizedProfile.autoSyncIntervalMinutes || '15').trim(), 10) || 15,
@@ -747,6 +755,9 @@ function applyIpProxyServiceProfileToInputs(profile = {}, options = {}) {
   }
   if (inputIpProxyPoolTargetCount) {
     inputIpProxyPoolTargetCount.value = normalizedProfile.poolTargetCount;
+  }
+  if (inputIpProxySwitchIpRoundCount) {
+    inputIpProxySwitchIpRoundCount.value = normalizedProfile.switchIpRoundCount;
   }
   if (inputIpProxyAutoRefreshPoolOnExhausted) {
     inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(normalizedProfile.autoRefreshPoolOnExhausted);
@@ -1751,6 +1762,9 @@ function updateIpProxyUI(state = latestState) {
   }
   if (rowIpProxyPoolTargetCount) {
     rowIpProxyPoolTargetCount.style.display = showSettings && is711ApiMode ? '' : 'none';
+  }
+  if (typeof rowIpProxySwitchIpRoundCount !== 'undefined' && rowIpProxySwitchIpRoundCount) {
+    rowIpProxySwitchIpRoundCount.style.display = showSettings && is711ApiMode ? '' : 'none';
   }
   if (typeof rowIpProxyAutoRefreshPoolOnExhausted !== 'undefined' && rowIpProxyAutoRefreshPoolOnExhausted) {
     rowIpProxyAutoRefreshPoolOnExhausted.style.display = showSettings && is711ApiMode ? '' : 'none';

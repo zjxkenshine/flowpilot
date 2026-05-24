@@ -102,6 +102,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyEnabled: false,
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
+  ipProxyServiceProfiles: {},
+  ipProxyPoolTargetCount: '20',
+  ipProxySwitchIpRoundCount: '1',
   ipProxyAutoRefreshPoolOnExhausted: false,
   ipProxyApiRouteMode: 'direct',
   ipProxySpecialDomainRouteMode: 'local_proxy',
@@ -151,30 +154,59 @@ function normalizeIpProxyApiRouteMode(value) {
   const normalized = String(value || 'direct').trim().toLowerCase();
   return ['direct', 'local_proxy', 'provider_proxy'].includes(normalized) ? normalized : 'direct';
 }
-function normalizeIpProxyServiceProfiles(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
-function buildIpProxyServiceProfileFromState() {
+function normalizeIpProxyServiceProfile(value = {}) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
-    mode: 'account',
-    apiUrl: '',
-    accountList: '',
-    accountSessionPrefix: '',
-    accountLifeMinutes: '',
-    poolTargetCount: '20',
-    autoRefreshPoolOnExhausted: false,
-    host: '',
-    port: '',
-    protocol: 'http',
-    username: '',
-    password: '',
-    region: '',
-    specialDomainRouteMode: 'local_proxy',
-    apiRouteMode: 'direct',
+    mode: normalizeIpProxyMode(raw.mode),
+    apiUrl: String(raw.apiUrl || '').trim(),
+    accountList: normalizeIpProxyAccountList(raw.accountList || ''),
+    accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
+    accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
+    poolTargetCount: normalizeIpProxyPoolTargetCount(raw.poolTargetCount || '', 20),
+    switchIpRoundCount: normalizeIpProxyPoolTargetCount(raw.switchIpRoundCount || '', 1),
+    autoRefreshPoolOnExhausted: Boolean(raw.autoRefreshPoolOnExhausted),
+    host: String(raw.host || '').trim(),
+    port: String(raw.port || '').trim(),
+    protocol: normalizeIpProxyProtocol(raw.protocol),
+    username: String(raw.username || '').trim(),
+    password: String(raw.password || ''),
+    region: String(raw.region || '').trim(),
+    specialDomainRouteMode: normalizeIpProxySpecialDomainRouteMode(raw.specialDomainRouteMode),
+    apiRouteMode: normalizeIpProxyApiRouteMode(raw.apiRouteMode),
   };
 }
 function normalizeIpProxyAccountList(value) { return String(value || ''); }
 function normalizeIpProxyAccountSessionPrefix(value) { return String(value || ''); }
 function normalizeIpProxyAccountLifeMinutes(value) { return String(value || ''); }
-function normalizeIpProxyPoolTargetCount(value) { return String(value || '20'); }
+function normalizeIpProxyPoolTargetCount(value, fallback = 20) { return String(value || fallback); }
+function normalizeIpProxyServiceProfiles(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const profiles = {};
+  Object.entries(source).forEach(([service, profile]) => {
+    profiles[normalizeIpProxyProviderValue(service)] = normalizeIpProxyServiceProfile(profile);
+  });
+  return profiles;
+}
+function buildIpProxyServiceProfileFromState(state = {}) {
+  return normalizeIpProxyServiceProfile({
+    mode: state.ipProxyMode,
+    apiUrl: state.ipProxyApiUrl,
+    accountList: state.ipProxyAccountList,
+    accountSessionPrefix: state.ipProxyAccountSessionPrefix,
+    accountLifeMinutes: state.ipProxyAccountLifeMinutes,
+    poolTargetCount: state.ipProxyPoolTargetCount,
+    switchIpRoundCount: state.ipProxySwitchIpRoundCount,
+    autoRefreshPoolOnExhausted: state.ipProxyAutoRefreshPoolOnExhausted,
+    host: state.ipProxyHost,
+    port: state.ipProxyPort,
+    protocol: state.ipProxyProtocol,
+    username: state.ipProxyUsername,
+    password: state.ipProxyPassword,
+    region: state.ipProxyRegion,
+    specialDomainRouteMode: state.ipProxySpecialDomainRouteMode,
+    apiRouteMode: state.ipProxyApiRouteMode,
+  });
+}
 function normalizeIpProxyAutoRefreshPoolOnExhausted(value) { return Boolean(value); }
 function normalizeIpProxyPort(value) { return String(value || '').trim(); }
 function normalizeIpProxyProtocol(value) { return String(value || 'http').trim() || 'http'; }
@@ -231,16 +263,42 @@ test('buildPersistentSettingsPayload writes canonical settings schema into persi
   );
 });
 
-test('buildPersistentSettingsPayload preserves flat proxy auto-refresh-on-exhausted flag', () => {
+test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh settings', () => {
   const api = buildHarness();
 
   const payload = api.buildPersistentSettingsPayload({
     ipProxyEnabled: true,
     ipProxyService: '711proxy',
     ipProxyMode: 'api',
+    ipProxyPoolTargetCount: '25',
+    ipProxySwitchIpRoundCount: '3',
     ipProxyAutoRefreshPoolOnExhausted: true,
   }, { fillDefaults: true });
 
+  assert.equal(payload.ipProxyPoolTargetCount, '25');
+  assert.equal(payload.ipProxySwitchIpRoundCount, '3');
+  assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload derives switch-IP round count from active service profile', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        poolTargetCount: '12',
+        switchIpRoundCount: '4',
+        autoRefreshPoolOnExhausted: true,
+      },
+    },
+  }, { fillDefaults: true });
+
+  assert.equal(payload.ipProxyPoolTargetCount, '12');
+  assert.equal(payload.ipProxySwitchIpRoundCount, '4');
+  assert.equal(payload.ipProxyServiceProfiles['711proxy'].switchIpRoundCount, '4');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
 });
 

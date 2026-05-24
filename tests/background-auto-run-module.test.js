@@ -229,6 +229,7 @@ const {
   normalizeIpProxyMode,
   normalizeIpProxyProviderValue,
   resolveIpProxyAutoSwitchThreshold,
+  resolveIpProxySwitchIpRoundCount,
   resolveIpProxyPoolTargetCountForMode,
   DEFAULT_IP_PROXY_SERVICE,
 } = deps;
@@ -275,6 +276,7 @@ return maybeSwitchIpProxyAfterAutoRunRoundSuccess;
     normalizeIpProxyMode: overrides.normalizeIpProxyMode || ((value) => String(value || '').trim().toLowerCase()),
     normalizeIpProxyProviderValue: overrides.normalizeIpProxyProviderValue || ((value) => String(value || '').trim().toLowerCase()),
     resolveIpProxyAutoSwitchThreshold: overrides.resolveIpProxyAutoSwitchThreshold || ((state) => Number(state.ipProxyPoolTargetCount) || 20),
+    resolveIpProxySwitchIpRoundCount: overrides.resolveIpProxySwitchIpRoundCount || ((state) => Number(state.ipProxySwitchIpRoundCount) || 1),
     resolveIpProxyPoolTargetCountForMode: overrides.resolveIpProxyPoolTargetCountForMode || (() => 100),
     DEFAULT_IP_PROXY_SERVICE: '711proxy',
   });
@@ -295,7 +297,8 @@ test('success rotation hook does not rotate before hitting threshold', async () 
       ipProxyEnabled: true,
       ipProxyService: '711proxy',
       ipProxyMode: 'api',
-      ipProxyPoolTargetCount: '3',
+      ipProxyPoolTargetCount: '20',
+      ipProxySwitchIpRoundCount: '3',
     },
     runtimeSnapshot: {
       pool: [{ host: '1.2.3.4', port: 9000 }, { host: '5.6.7.8', port: 10000 }],
@@ -309,13 +312,14 @@ test('success rotation hook does not rotate before hitting threshold', async () 
   assert.equal(harness.events.refreshCalls.length, 0);
 });
 
-test('success rotation hook switches to next entry when threshold hits before pool tail', async () => {
+test('success rotation hook switches to next entry when switch-IP round hits before pool tail', async () => {
   const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
     state: {
       ipProxyEnabled: true,
       ipProxyService: '711proxy',
       ipProxyMode: 'api',
-      ipProxyPoolTargetCount: '2',
+      ipProxyPoolTargetCount: '20',
+      ipProxySwitchIpRoundCount: '2',
     },
     runtimeSnapshot: {
       pool: [{ host: '1.2.3.4', port: 9000 }, { host: '5.6.7.8', port: 10000 }],
@@ -328,10 +332,11 @@ test('success rotation hook switches to next entry when threshold hits before po
   assert.equal(harness.events.switchCalls.length, 1);
   assert.equal(harness.events.switchCalls[0].direction, 'next');
   assert.equal(harness.events.switchCalls[0].options.forceRefresh, false);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换IP轮次命中/);
   assert.equal(result.display, '1.2.3.4:9000 (1/3)');
 });
 
-test('success rotation hook refreshes tail pool and then switches to first entry of refreshed pool', async () => {
+test('success rotation hook refreshes tail pool when switch-IP round hits and tail refresh is enabled', async () => {
   const refreshedPool = [
     { host: '9.9.9.9', port: 9000 },
     { host: '9.9.9.9', port: 9000 },
@@ -342,7 +347,8 @@ test('success rotation hook refreshes tail pool and then switches to first entry
       ipProxyEnabled: true,
       ipProxyService: '711proxy',
       ipProxyMode: 'api',
-      ipProxyPoolTargetCount: '2',
+      ipProxyPoolTargetCount: '20',
+      ipProxySwitchIpRoundCount: '2',
       ipProxyAutoRefreshPoolOnExhausted: true,
     },
     runtimeSnapshot: {
@@ -368,17 +374,19 @@ test('success rotation hook refreshes tail pool and then switches to first entry
   assert.equal(harness.runtimePatchCalls[0].runtime.index, refreshedPool.length - 1);
   assert.deepEqual(harness.runtimePatchCalls[0].runtime.current, refreshedPool[refreshedPool.length - 1]);
   assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
-  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已先从 711 同步新池/);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换IP轮次命中/);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已从 711 同步新池/);
   assert.equal(result.display, '9.9.9.9:9000 (1/3)');
 });
 
-test('success rotation hook skips tail rotation without auto refresh', async () => {
+test('success rotation hook skips tail switch-IP rotation when tail refresh is disabled', async () => {
   const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
     state: {
       ipProxyEnabled: true,
       ipProxyService: '711proxy',
       ipProxyMode: 'api',
-      ipProxyPoolTargetCount: '2',
+      ipProxyPoolTargetCount: '20',
+      ipProxySwitchIpRoundCount: '2',
       ipProxyAutoRefreshPoolOnExhausted: false,
     },
     runtimeSnapshot: {
@@ -393,4 +401,72 @@ test('success rotation hook skips tail rotation without auto refresh', async () 
   assert.equal(harness.events.refreshCalls.length, 0);
   assert.equal(harness.events.switchCalls.length, 0);
   assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /已到 API 池尾部/);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /未允许池尾拉新池/);
+});
+
+test('success rotation hook refreshes a new proxy pool when pool round hits', async () => {
+  const refreshedPool = [
+    { host: '7.7.7.7', port: 9000 },
+    { host: '6.6.6.6', port: 10000 },
+  ];
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '2',
+      ipProxySwitchIpRoundCount: '5',
+      ipProxyAutoRefreshPoolOnExhausted: false,
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
+      index: 0,
+    },
+    refreshIpProxyPool: async () => ({
+      display: '7.7.7.7:9000 (1/2)',
+      pool: refreshedPool,
+      proxyRouting: { applied: true },
+    }),
+  });
+
+  await harness.run({ successfulRuns: 2 });
+  assert.equal(harness.events.refreshCalls.length, 1);
+  assert.equal(harness.events.switchCalls.length, 1);
+  assert.equal(harness.events.switchCalls[0].direction, 'next');
+  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.match(harness.events.logs.map((entry) => entry.message).join('\n'), /换代理池轮次命中/);
+});
+
+test('success rotation hook prioritizes pool refresh when pool and switch-IP rounds both hit', async () => {
+  const refreshedPool = [
+    { host: '7.7.7.7', port: 9000 },
+    { host: '6.6.6.6', port: 10000 },
+  ];
+  const harness = createMaybeSwitchIpProxyAfterAutoRunRoundSuccessHarness({
+    state: {
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyPoolTargetCount: '2',
+      ipProxySwitchIpRoundCount: '2',
+      ipProxyAutoRefreshPoolOnExhausted: true,
+    },
+    runtimeSnapshot: {
+      pool: [{ host: '1.1.1.1', port: 9000 }, { host: '2.2.2.2', port: 10000 }],
+      index: 0,
+    },
+    refreshIpProxyPool: async () => ({
+      display: '7.7.7.7:9000 (1/2)',
+      pool: refreshedPool,
+      proxyRouting: { applied: true },
+    }),
+  });
+
+  await harness.run({ successfulRuns: 2 });
+  const logText = harness.events.logs.map((entry) => entry.message).join('\n');
+  assert.equal(harness.events.refreshCalls.length, 1);
+  assert.equal(harness.events.switchCalls.length, 1);
+  assert.deepEqual(harness.events.switchCalls[0].options.state.ipProxyApiPool, refreshedPool);
+  assert.match(logText, /换代理池轮次命中/);
+  assert.doesNotMatch(logText, /换IP轮次命中/);
 });

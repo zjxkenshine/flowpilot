@@ -536,6 +536,10 @@ function normalizeIpProxyPoolTargetCount(value = '', fallback = 20) {
   return String(Math.max(1, Math.min(500, numeric)));
 }
 
+function normalizeIpProxySwitchIpRoundCount(value = '', fallback = 1) {
+  return normalizeIpProxyPoolTargetCount(value, fallback);
+}
+
 function normalizeIpProxyAccountLifeMinutes(value = '') {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -714,6 +718,7 @@ function normalizeIpProxyServiceProfile(rawValue = {}) {
     accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(raw.accountSessionPrefix || ''),
     accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(raw.accountLifeMinutes || ''),
     poolTargetCount: normalizeIpProxyPoolTargetCount(raw.poolTargetCount || '', 20),
+    switchIpRoundCount: normalizeIpProxySwitchIpRoundCount(raw.switchIpRoundCount || '', 1),
     autoRefreshPoolOnExhausted: Boolean(raw.autoRefreshPoolOnExhausted),
     autoSyncEnabled: Boolean(raw.autoSyncEnabled),
     autoSyncIntervalMinutes: normalizeAutoSyncInterval(raw.autoSyncIntervalMinutes, 15),
@@ -748,6 +753,7 @@ function buildIpProxyServiceProfileFromState(state = {}) {
     accountSessionPrefix: state?.ipProxyAccountSessionPrefix,
     accountLifeMinutes: state?.ipProxyAccountLifeMinutes,
     poolTargetCount: state?.ipProxyPoolTargetCount,
+    switchIpRoundCount: state?.ipProxySwitchIpRoundCount,
     autoRefreshPoolOnExhausted: state?.ipProxyAutoRefreshPoolOnExhausted,
     autoSyncEnabled: state?.ipProxyAutoSyncEnabled,
     autoSyncIntervalMinutes: state?.ipProxyAutoSyncIntervalMinutes,
@@ -1271,7 +1277,7 @@ function getAccountListParseFailureHint(state = {}, provider = DEFAULT_IP_PROXY_
 
 function resolveIpProxyPoolTargetCountForMode(state = {}, mode = normalizeIpProxyMode(state?.ipProxyMode)) {
   const normalizedMode = normalizeIpProxyMode(mode);
-  // `ipProxyPoolTargetCount` 语义是“任务成功轮次阈值”，
+  // `ipProxyPoolTargetCount` 现在表示“换代理池轮次”；
   // 拉取/切换代理池条数不再复用该字段，避免语义混淆。
   if (normalizedMode === 'account') {
     return 500;
@@ -1283,6 +1289,13 @@ function resolveIpProxyAutoSwitchThreshold(state = {}) {
   return Math.max(
     1,
     Math.min(500, Number(normalizeIpProxyPoolTargetCount(state?.ipProxyPoolTargetCount, 20)) || 20)
+  );
+}
+
+function resolveIpProxySwitchIpRoundCount(state = {}) {
+  return Math.max(
+    1,
+    Math.min(500, Number(normalizeIpProxySwitchIpRoundCount(state?.ipProxySwitchIpRoundCount, 1)) || 1)
   );
 }
 

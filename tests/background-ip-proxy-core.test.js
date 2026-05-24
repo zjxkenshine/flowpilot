@@ -66,6 +66,7 @@ return {
   queryAutomationScopedTabs,
   resolveExitProbeEndpoints,
   resolveIpProxyAutoSwitchThreshold,
+  resolveIpProxySwitchIpRoundCount,
   resolveTargetReachabilityEndpoints,
   shouldEnableIpProxyLeakGuardForStatus,
   validate711ProxyApiConfig,
@@ -424,6 +425,15 @@ test('IP proxy auto-switch threshold is clamped to the supported range', () => {
   assert.equal(api.resolveIpProxyAutoSwitchThreshold({ ipProxyPoolTargetCount: '0' }), 1);
   assert.equal(api.resolveIpProxyAutoSwitchThreshold({ ipProxyPoolTargetCount: '25' }), 25);
   assert.equal(api.resolveIpProxyAutoSwitchThreshold({ ipProxyPoolTargetCount: '9999' }), 500);
+});
+
+test('IP proxy switch-IP round count defaults to one and is clamped to the supported range', () => {
+  const api = loadIpProxyCore();
+
+  assert.equal(api.resolveIpProxySwitchIpRoundCount({}), 1);
+  assert.equal(api.resolveIpProxySwitchIpRoundCount({ ipProxySwitchIpRoundCount: '0' }), 1);
+  assert.equal(api.resolveIpProxySwitchIpRoundCount({ ipProxySwitchIpRoundCount: '25' }), 25);
+  assert.equal(api.resolveIpProxySwitchIpRoundCount({ ipProxySwitchIpRoundCount: '9999' }), 500);
 });
 
 test('711 proxy region mismatch with missing auth challenge keeps routing as warning instead of hard failure', () => {

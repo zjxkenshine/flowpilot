@@ -15,6 +15,7 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
     'input-ip-proxy-api-region',
     'input-ip-proxy-api-zone',
     'input-ip-proxy-api-ptype',
+    'input-ip-proxy-switch-ip-round-count',
     'input-ip-proxy-auto-refresh-pool-on-exhausted',
     'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
@@ -82,6 +83,7 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
     'inputIpProxyApiZone',
     'inputIpProxyApiPtype',
     'selectIpProxyApiRouteMode',
+    'inputIpProxySwitchIpRoundCount',
     'inputIpProxyAutoRefreshPoolOnExhausted',
     'selectIpProxyApiHost',
     'selectIpProxyApiProto',
@@ -111,9 +113,15 @@ test('sidepanel shows success-rotation controls only for 711 API mode', () => {
   assert.match(panelSource, /const is711ApiMode = isApiMode && service === '711proxy';/);
   assert.match(panelSource, /rowIpProxyApiRouteMode\.style\.display = showSettings && apiModeAvailable && isApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyPoolTargetCount\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
+  assert.match(panelSource, /rowIpProxySwitchIpRoundCount\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyAutoRefreshPoolOnExhausted\.style\.display = showSettings && is711ApiMode \? '' : 'none';/);
   assert.match(panelSource, /rowIpProxyProtocol\.style\.display = showSettings && isAccountMode \? '' : 'none';/);
-  assert.match(html, /先自动请求 711 API 拉取新 IP 池，再切换到新池下一条/);
+  assert.match(html, /换代理池轮次/);
+  assert.match(html, /换IP轮次/);
+  assert.match(html, /池尾允许拉新池/);
+  assert.match(html, /换IP轮次命中且当前 API 池已用完时，允许自动请求 711 API 拉取新代理池/);
+  assert.doesNotMatch(html, /任务切换阈值/);
+  assert.doesNotMatch(html, /池尾自动拉新池/);
 });
 
 test('sidepanel IP proxy actions send current normalized proxy override payload', () => {

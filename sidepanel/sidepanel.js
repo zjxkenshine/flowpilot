@@ -179,6 +179,8 @@ const rowIpProxyAccountLifeMinutes = document.getElementById('row-ip-proxy-accou
 const inputIpProxyAccountLifeMinutes = document.getElementById('input-ip-proxy-account-life-minutes');
 const rowIpProxyPoolTargetCount = document.getElementById('row-ip-proxy-pool-target-count');
 const inputIpProxyPoolTargetCount = document.getElementById('input-ip-proxy-pool-target-count');
+const rowIpProxySwitchIpRoundCount = document.getElementById('row-ip-proxy-switch-ip-round-count');
+const inputIpProxySwitchIpRoundCount = document.getElementById('input-ip-proxy-switch-ip-round-count');
 const rowIpProxyAutoRefreshPoolOnExhausted = document.getElementById('row-ip-proxy-auto-refresh-pool-on-exhausted');
 const inputIpProxyAutoRefreshPoolOnExhausted = document.getElementById('input-ip-proxy-auto-refresh-pool-on-exhausted');
 const rowIpProxyAutoSyncEnabled = document.getElementById('row-ip-proxy-auto-sync-enabled');
@@ -4741,6 +4743,7 @@ function collectSettingsPayload() {
     ipProxyAccountSessionPrefix: currentIpProxyServiceProfile.accountSessionPrefix,
     ipProxyAccountLifeMinutes: currentIpProxyServiceProfile.accountLifeMinutes,
     ipProxyPoolTargetCount: currentIpProxyServiceProfile.poolTargetCount,
+    ipProxySwitchIpRoundCount: currentIpProxyServiceProfile.switchIpRoundCount,
     ipProxyAutoRefreshPoolOnExhausted: Boolean(currentIpProxyStateOverride.ipProxyAutoRefreshPoolOnExhausted),
     ipProxyAutoSyncEnabled: Boolean(currentIpProxyStateOverride.ipProxyAutoSyncEnabled),
     ipProxyAutoSyncIntervalMinutes: normalizeIpProxyAutoSyncIntervalMinutesSafe(
@@ -10864,6 +10867,11 @@ function applySettingsState(state) {
   const resolveIpProxyPoolTargetCount = (value) => (typeof normalizeIpProxyPoolTargetCount === 'function'
     ? normalizeIpProxyPoolTargetCount(value || '', 20)
     : String(value || '20').trim() || '20');
+  const resolveIpProxySwitchIpRoundCount = (value) => (typeof normalizeIpProxySwitchIpRoundCount === 'function'
+    ? normalizeIpProxySwitchIpRoundCount(value || '', 1)
+    : typeof normalizeIpProxyPoolTargetCount === 'function'
+      ? normalizeIpProxyPoolTargetCount(value || '', 1)
+    : String(value || '1').trim() || '1');
   const resolveIpProxyAutoSyncEnabled = (value) => Boolean(value);
   const resolveIpProxyAutoSyncIntervalMinutes = (value) => {
     const numeric = Number.parseInt(String(value ?? '').trim(), 10);
@@ -11049,6 +11057,7 @@ function applySettingsState(state) {
       accountSessionPrefix: resolveIpProxySessionPrefix(state?.ipProxyAccountSessionPrefix || ''),
       accountLifeMinutes: resolveIpProxyAccountLifeMinutes(state?.ipProxyAccountLifeMinutes || ''),
       poolTargetCount: resolveIpProxyPoolTargetCount(state?.ipProxyPoolTargetCount || ''),
+      switchIpRoundCount: resolveIpProxySwitchIpRoundCount(state?.ipProxySwitchIpRoundCount || ''),
       autoRefreshPoolOnExhausted: Boolean(state?.ipProxyAutoRefreshPoolOnExhausted),
       host: String(state?.ipProxyHost || '').trim(),
       port: String(resolveIpProxyPort(state?.ipProxyPort || '') || ''),
@@ -11115,6 +11124,9 @@ function applySettingsState(state) {
   }
   if (typeof inputIpProxyPoolTargetCount !== 'undefined' && inputIpProxyPoolTargetCount) {
     inputIpProxyPoolTargetCount.value = activeIpProxyProfile.poolTargetCount;
+  }
+  if (typeof inputIpProxySwitchIpRoundCount !== 'undefined' && inputIpProxySwitchIpRoundCount) {
+    inputIpProxySwitchIpRoundCount.value = activeIpProxyProfile.switchIpRoundCount;
   }
   if (typeof inputIpProxyAutoRefreshPoolOnExhausted !== 'undefined' && inputIpProxyAutoRefreshPoolOnExhausted) {
     inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(activeIpProxyProfile.autoRefreshPoolOnExhausted);
@@ -15687,6 +15699,9 @@ function syncCurrentIpProxyServiceProfileToLatestState() {
       accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(inputIpProxyAccountSessionPrefix?.value || ''),
       accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(inputIpProxyAccountLifeMinutes?.value || ''),
       poolTargetCount: normalizeIpProxyPoolTargetCount(inputIpProxyPoolTargetCount?.value || '', 20),
+      switchIpRoundCount: typeof normalizeIpProxySwitchIpRoundCount === 'function'
+        ? normalizeIpProxySwitchIpRoundCount(inputIpProxySwitchIpRoundCount?.value || '', 1)
+        : normalizeIpProxyPoolTargetCount(inputIpProxySwitchIpRoundCount?.value || '', 1),
       autoRefreshPoolOnExhausted: Boolean(inputIpProxyAutoRefreshPoolOnExhausted?.checked),
       host: String(inputIpProxyHost?.value || '').trim(),
       port: String(normalizeIpProxyPort(inputIpProxyPort?.value || '') || ''),
@@ -15762,6 +15777,9 @@ selectIpProxyService?.addEventListener('change', () => {
       accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(latestState?.ipProxyAccountSessionPrefix || ''),
       accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(latestState?.ipProxyAccountLifeMinutes || ''),
       poolTargetCount: normalizeIpProxyPoolTargetCount(latestState?.ipProxyPoolTargetCount || '', 20),
+      switchIpRoundCount: typeof normalizeIpProxySwitchIpRoundCount === 'function'
+        ? normalizeIpProxySwitchIpRoundCount(latestState?.ipProxySwitchIpRoundCount || '', 1)
+        : normalizeIpProxyPoolTargetCount(latestState?.ipProxySwitchIpRoundCount || '', 1),
       autoRefreshPoolOnExhausted: Boolean(latestState?.ipProxyAutoRefreshPoolOnExhausted),
       host: String(latestState?.ipProxyHost || '').trim(),
       port: String(normalizeIpProxyPort(latestState?.ipProxyPort || '') || ''),
@@ -16325,6 +16343,17 @@ inputIpProxyPoolTargetCount?.addEventListener('input', () => {
 });
 inputIpProxyPoolTargetCount?.addEventListener('blur', () => {
   inputIpProxyPoolTargetCount.value = normalizeIpProxyPoolTargetCount(inputIpProxyPoolTargetCount.value || '', 20);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxySwitchIpRoundCount?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputIpProxySwitchIpRoundCount?.addEventListener('blur', () => {
+  inputIpProxySwitchIpRoundCount.value = typeof normalizeIpProxySwitchIpRoundCount === 'function'
+    ? normalizeIpProxySwitchIpRoundCount(inputIpProxySwitchIpRoundCount.value || '', 1)
+    : normalizeIpProxyPoolTargetCount(inputIpProxySwitchIpRoundCount.value || '', 1);
   saveSettings({ silent: true }).catch(() => {});
 });
 
@@ -17551,6 +17580,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.ipProxyAccountSessionPrefix !== undefined
         || message.payload.ipProxyAccountLifeMinutes !== undefined
         || message.payload.ipProxyPoolTargetCount !== undefined
+        || message.payload.ipProxySwitchIpRoundCount !== undefined
         || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
         || message.payload.ipProxyApiCount !== undefined
         || message.payload.ipProxyApiRegion !== undefined
@@ -17617,6 +17647,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           || message.payload.ipProxyAccountSessionPrefix !== undefined
           || message.payload.ipProxyAccountLifeMinutes !== undefined
           || message.payload.ipProxyPoolTargetCount !== undefined
+          || message.payload.ipProxySwitchIpRoundCount !== undefined
           || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
           || message.payload.ipProxyHost !== undefined
           || message.payload.ipProxyPort !== undefined
@@ -17681,6 +17712,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               accountSessionPrefix: normalizeIpProxyAccountSessionPrefix(mergedProxyState?.ipProxyAccountSessionPrefix || ''),
               accountLifeMinutes: normalizeIpProxyAccountLifeMinutes(mergedProxyState?.ipProxyAccountLifeMinutes || ''),
               poolTargetCount: normalizeIpProxyPoolTargetCount(mergedProxyState?.ipProxyPoolTargetCount || '', 20),
+              switchIpRoundCount: typeof normalizeIpProxySwitchIpRoundCount === 'function'
+                ? normalizeIpProxySwitchIpRoundCount(mergedProxyState?.ipProxySwitchIpRoundCount || '', 1)
+                : normalizeIpProxyPoolTargetCount(mergedProxyState?.ipProxySwitchIpRoundCount || '', 1),
               autoRefreshPoolOnExhausted: Boolean(mergedProxyState?.ipProxyAutoRefreshPoolOnExhausted),
               host: String(mergedProxyState?.ipProxyHost || '').trim(),
               port: String(normalizeIpProxyPort(mergedProxyState?.ipProxyPort || '') || ''),
@@ -17699,6 +17733,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             if (inputIpProxyAccountSessionPrefix) inputIpProxyAccountSessionPrefix.value = activeProxyProfile.accountSessionPrefix;
             if (inputIpProxyAccountLifeMinutes) inputIpProxyAccountLifeMinutes.value = activeProxyProfile.accountLifeMinutes;
             if (inputIpProxyPoolTargetCount) inputIpProxyPoolTargetCount.value = activeProxyProfile.poolTargetCount;
+            if (inputIpProxySwitchIpRoundCount) inputIpProxySwitchIpRoundCount.value = activeProxyProfile.switchIpRoundCount;
             if (inputIpProxyAutoRefreshPoolOnExhausted) inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(activeProxyProfile.autoRefreshPoolOnExhausted);
             if (inputIpProxyHost) inputIpProxyHost.value = activeProxyProfile.host;
             if (inputIpProxyPort) inputIpProxyPort.value = activeProxyProfile.port;
