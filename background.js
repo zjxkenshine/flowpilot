@@ -46,6 +46,7 @@ importScripts(
   'background/tab-runtime.js',
   'background/navigation-utils.js',
   'background/logging-status.js',
+  'background/checkout-conversion-proxy.js',
   'background/steps/registry.js',
   'data/step-definitions.js',
   'data/address-sources.js',
@@ -14772,6 +14773,20 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS,
   throwIfStopped,
 });
+const checkoutConversionProxyManager = self.MultiPageBackgroundCheckoutConversionProxy?.createCheckoutConversionProxyManager?.({
+  chrome,
+  getState,
+  setState,
+  detectProxyExitInfoByPageContext,
+  detectProxyExitInfoByBackgroundFetch,
+  detectIpProxyTargetReachabilityByPageContext,
+  buildProbeDiagnosticsSummary,
+  buildTargetReachabilityFailureMessage,
+  installIpProxyAuthListener,
+  installIpProxyErrorListener,
+  getCurrentIpProxyAuthEntry,
+  setCurrentIpProxyAuthEntry,
+});
 const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.createPlusCheckoutCreateExecutor({
   addLog,
   broadcastDataUpdate,
@@ -14792,15 +14807,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   throwIfStopped,
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
-  detectProxyExitInfoByPageContext,
-  detectProxyExitInfoByBackgroundFetch,
-  detectIpProxyTargetReachabilityByPageContext,
-  buildProbeDiagnosticsSummary,
-  buildTargetReachabilityFailureMessage,
-  installIpProxyAuthListener,
-  installIpProxyErrorListener,
-  getCurrentIpProxyAuthEntry,
-  setCurrentIpProxyAuthEntry,
+  checkoutConversionProxyManager,
 });
 const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?.createPlusCheckoutBillingExecutor({
   addLog,
@@ -14824,6 +14831,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
   probeIpProxyExit,
+  checkoutConversionProxyManager,
 });
 const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.createGoPayManualConfirmExecutor({
   addLog,
@@ -14839,6 +14847,7 @@ const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.c
 const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPalApproveExecutor({
   addLog,
   chrome,
+  checkoutConversionProxyManager,
   completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
   queryTabsInAutomationWindow,

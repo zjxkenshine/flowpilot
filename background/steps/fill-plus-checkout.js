@@ -94,6 +94,7 @@
       sleepWithStop,
       waitForTabCompleteUntilStopped,
       probeIpProxyExit = null,
+      checkoutConversionProxyManager = null,
       throwIfStopped = () => {},
     } = deps;
 
@@ -105,12 +106,56 @@
       });
     }
 
+    const proxyManager = checkoutConversionProxyManager
+      || self.MultiPageBackgroundCheckoutConversionProxy?.createCheckoutConversionProxyManager?.({
+        chrome,
+        getState,
+        setState,
+      })
+      || null;
+
     function isPlusCheckoutUrl(url = '') {
       return PLUS_CHECKOUT_URL_PATTERN.test(String(url || ''));
     }
 
     function normalizeText(value = '') {
       return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    async function applyClassicPaypalCheckoutConversionProxySession(state = {}) {
+      if (!proxyManager?.applySessionFromState) {
+        return null;
+      }
+      const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+      if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+        return null;
+      }
+      const session = await proxyManager.applySessionFromState(state, {
+        flowType: 'classic-paypal',
+        releaseNodeKey: 'paypal-approve',
+        appliedStepKey: 'plus-checkout-billing',
+      });
+      if (!session?.active) {
+        return null;
+      }
+      await addLog(`步骤 7：点击订阅前已启用支付转换代理 ${session.displayName}。`, 'info');
+      return session;
+    }
+
+    async function releaseClassicPaypalCheckoutConversionProxySessionOnFailure(error = null) {
+      if (!proxyManager?.getStoredSession) {
+        return;
+      }
+      const state = typeof getState === 'function' ? await getState() : {};
+      const session = await proxyManager.getStoredSession(state);
+      if (!session?.active || session.flowType !== 'classic-paypal') {
+        return;
+      }
+      await proxyManager.restoreSession(session);
+      await addLog(
+        `步骤 7：支付提交流程未跳转到 PayPal，支付转换代理已释放。${error?.message ? `原因：${error.message}` : ''}`,
+        'warn'
+      );
     }
 
     function isGpcHelperCheckout(state = {}) {
