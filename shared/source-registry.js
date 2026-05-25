@@ -280,6 +280,18 @@
         || normalized === 'webmail.vip.163.com';
     }
 
+    function isPlusCheckoutHost(hostname = '') {
+      const normalized = normalizeHostname(hostname);
+      return normalized === 'pay.openai.com'
+        || normalized === 'checkout.stripe.com';
+    }
+
+    function isPayPalHost(hostname = '') {
+      const normalized = normalizeHostname(hostname);
+      return normalized === 'www.paypal.com'
+        || normalized === 'paypal.com';
+    }
+
     function matchesSourceUrlFamily(source, candidateUrl, referenceUrl) {
       const candidate = parseUrlSafely(candidateUrl);
       if (!candidate) return false;
@@ -330,8 +342,8 @@
               || candidate.pathname === '/'
             );
         case 'plus-checkout':
-          return candidate.hostname === 'chatgpt.com'
-            && candidate.pathname.startsWith('/checkout/');
+          return (candidate.hostname === 'chatgpt.com' && candidate.pathname.startsWith('/checkout/'))
+            || isPlusCheckoutHost(candidate.hostname);
         case 'paypal-flow':
           return candidate.hostname.endsWith('paypal.com');
         case 'gopay-flow':
@@ -362,6 +374,8 @@
       if (normalizedHostname === 'www.icloud.com' || normalizedHostname === 'www.icloud.com.cn') return 'icloud-mail';
       if (normalizedUrl.includes('duckduckgo.com/email/settings/autofill')) return 'duck-mail';
       if (normalizedUrl.includes('2925.com')) return 'mail-2925';
+      if (isPlusCheckoutHost(normalizedHostname)) return 'plus-checkout';
+      if (isPayPalHost(normalizedHostname)) return 'paypal-flow';
       if (isKiroRegisterHost(normalizedHostname)) return 'kiro-register-page';
       if (isSignupEntryHost(normalizedHostname)) return 'chatgpt';
       return 'unknown-source';

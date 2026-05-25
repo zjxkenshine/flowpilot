@@ -116,6 +116,34 @@
         "content/duck-mail.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://pay.openai.com/*",
+        "https://checkout.stripe.com/*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "shared/source-registry.js",
+        "content/utils.js",
+        "content/operation-delay.js",
+        "content/plus-checkout.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.paypal.com/*",
+        "https://paypal.com/*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "shared/source-registry.js",
+        "content/utils.js",
+        "content/operation-delay.js",
+        "content/paypal-flow.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "action": {

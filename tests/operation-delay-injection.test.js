@@ -19,6 +19,14 @@ test('manifest loads operation delay after utils only for covered auth/provider 
   assertOrdered(duckBundle, 'content/utils.js', 'content/operation-delay.js');
   assertOrdered(duckBundle, 'content/operation-delay.js', 'content/duck-mail.js');
 
+  const plusCheckoutBundle = manifest.content_scripts.find((entry) => entry.js.includes('content/plus-checkout.js')).js;
+  assertOrdered(plusCheckoutBundle, 'content/utils.js', 'content/operation-delay.js');
+  assertOrdered(plusCheckoutBundle, 'content/operation-delay.js', 'content/plus-checkout.js');
+
+  const paypalBundle = manifest.content_scripts.find((entry) => entry.js.includes('content/paypal-flow.js')).js;
+  assertOrdered(paypalBundle, 'content/utils.js', 'content/operation-delay.js');
+  assertOrdered(paypalBundle, 'content/operation-delay.js', 'content/paypal-flow.js');
+
   for (const pollingFile of ['content/qq-mail.js', 'content/mail-163.js', 'content/icloud-mail.js']) {
     const bundle = manifest.content_scripts.find((entry) => entry.js.includes(pollingFile))?.js || [];
     assert.equal(bundle.includes('content/operation-delay.js'), false, `${pollingFile} polling bundle must not load operation delay`);
