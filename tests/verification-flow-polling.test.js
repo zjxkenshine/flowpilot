@@ -17,6 +17,7 @@ const TEST_STEP_NODE_IDS = Object.freeze({
 const TEST_NODE_STEP_IDS = Object.fromEntries(
   Object.entries(TEST_STEP_NODE_IDS).map(([step, nodeId]) => [nodeId, Number(step)])
 );
+const LOCALIZED_STEP4_TRANSPORT_ERROR = '认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。';
 
 function getTestNodeIdByStepForState(step) {
   return TEST_STEP_NODE_IDS[Number(step)] || '';
@@ -2057,6 +2058,58 @@ test('verification flow treats retryable submit transport failure as success whe
   assert.equal(logs.some(({ message }) => /验证码提交后原认证页已切换到ChatGPT 已登录首页/.test(message)), true);
 });
 
+test('verification flow treats localized wrapped submit transport failure as success when step 4 already redirected to logged-in home', async () => {
+  const logs = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://chatgpt.com/' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: () => false,
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async () => {
+      throw new Error(LOCALIZED_STEP4_TRANSPORT_ERROR);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.equal(result.success, true);
+  assert.equal(result.skipProfileStep, true);
+  assert.equal(result.assumed, true);
+  assert.equal(result.transportRecovered, true);
+  assert.equal(logs.some(({ message }) => /验证码提交后原认证页已切换到ChatGPT 已登录首页/.test(message)), true);
+});
+
 test('verification flow treats retryable submit transport failure as success when another automation tab already reached logged-in home', async () => {
   const logs = [];
 
@@ -2227,6 +2280,71 @@ test('verification flow treats retryable submit transport failure as success whe
   assert.deepStrictEqual(resilientMessages, ['FILL_CODE', 'GET_STEP4_POST_SUBMIT_STATE']);
 });
 
+test('verification flow treats localized wrapped submit transport failure as success when step 4 probe returns profile page', async () => {
+  const logs = [];
+  const resilientMessages = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/u/login/email-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: () => false,
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => [],
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      resilientMessages.push(message.type);
+      if (message.type === 'FILL_CODE') {
+        throw new Error(LOCALIZED_STEP4_TRANSPORT_ERROR);
+      }
+      if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
+        return {
+          state: 'profile_page',
+          url: 'https://auth.openai.com/u/signup/profile',
+        };
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.equal(result.success, true);
+  assert.equal(result.skipProfileStep, false);
+  assert.equal(result.assumed, true);
+  assert.equal(result.transportRecovered, true);
+  assert.equal(logs.some(({ message }) => /已切换到注册资料页/.test(message)), true);
+  assert.deepStrictEqual(resilientMessages, ['FILL_CODE', 'GET_STEP4_POST_SUBMIT_STATE']);
+});
+
 test('verification flow treats retryable submit transport failure as success when step 4 probe returns email verification handoff', async () => {
   const logs = [];
 
@@ -2263,6 +2381,70 @@ test('verification flow treats retryable submit transport failure as success whe
     sendToContentScriptResilient: async (_source, message) => {
       if (message.type === 'FILL_CODE') {
         throw new Error('The page keeping the extension port is moved into back/forward cache, so the message channel is closed.');
+      }
+      if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
+        return {
+          state: 'verification_page',
+          url: 'https://auth.openai.com/email-verification',
+          emailVerificationRequired: true,
+          emailVerificationPage: true,
+        };
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.equal(result.success, true);
+  assert.equal(result.emailVerificationRequired, true);
+  assert.equal(result.emailVerificationPage, true);
+  assert.equal(result.transportRecovered, true);
+  assert.equal(logs.some(({ message }) => /已切换到邮箱验证码页/.test(message)), true);
+});
+
+test('verification flow treats localized wrapped submit transport failure as success when step 4 probe returns email verification handoff', async () => {
+  const logs = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/phone-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: () => false,
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => [],
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'FILL_CODE') {
+        throw new Error(LOCALIZED_STEP4_TRANSPORT_ERROR);
       }
       if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
         return {
@@ -2356,6 +2538,71 @@ test('verification flow returns invalid code when step 4 probe detects rejection
   assert.equal(logs.some(({ message }) => /检测到验证码被拒绝/.test(message)), true);
 });
 
+test('verification flow returns invalid code when localized wrapped submit transport failure probes rejection', async () => {
+  const logs = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/email-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: () => false,
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => [],
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'FILL_CODE') {
+        throw new Error(LOCALIZED_STEP4_TRANSPORT_ERROR);
+      }
+      if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
+        return {
+          state: 'verification_page',
+          url: 'https://auth.openai.com/email-verification',
+          invalidCode: true,
+          errorText: '验证码无效',
+        };
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.deepStrictEqual(result, {
+    invalidCode: true,
+    errorText: '验证码无效',
+    url: 'https://auth.openai.com/email-verification',
+  });
+  assert.equal(logs.some(({ message }) => /检测到验证码被拒绝/.test(message)), true);
+});
+
 test('verification flow throws user exists when step 4 probe detects user_already_exists after transport failure', async () => {
   const helpers = api.createVerificationFlowHelpers({
     addLog: async () => {},
@@ -2388,6 +2635,63 @@ test('verification flow throws user exists when step 4 probe detects user_alread
     sendToContentScriptResilient: async (_source, message) => {
       if (message.type === 'FILL_CODE') {
         throw new Error('The page keeping the extension port is moved into back/forward cache, so the message channel is closed.');
+      }
+      if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
+        return {
+          state: 'signup_retry_page',
+          url: 'https://auth.openai.com/email-verification',
+          userAlreadyExistsBlocked: true,
+          retryEnabled: true,
+        };
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  await assert.rejects(
+    () => helpers.submitVerificationCode(4, '654321'),
+    /SIGNUP_USER_ALREADY_EXISTS::/
+  );
+});
+
+test('verification flow throws user exists when localized wrapped submit transport failure probes user_already_exists', async () => {
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/email-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: () => false,
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => [],
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'FILL_CODE') {
+        throw new Error(LOCALIZED_STEP4_TRANSPORT_ERROR);
       }
       if (message.type === 'GET_STEP4_POST_SUBMIT_STATE') {
         return {

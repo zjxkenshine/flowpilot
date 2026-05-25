@@ -206,6 +206,109 @@ test('tab runtime replays retryable transport recovery hook and surfaces a local
   assert.equal(recoveryCalls > 0, true);
 });
 
+test('tab runtime localized reconnect error remains recoverable for step 4 verification fallback', async () => {
+  const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const verificationFlowSource = fs.readFileSync('background/verification-flow.js', 'utf8');
+  const runtimeApi = new Function('self', `${runtimeSource}; return self.MultiPageBackgroundTabRuntime;`)({});
+  const verificationFlowApi = new Function('self', `${verificationFlowSource}; return self.MultiPageBackgroundVerificationFlow;`)({});
+
+  const runtime = runtimeApi.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async () => ({
+          id: 9,
+          windowId: 1,
+          url: 'https://auth.openai.com/email-verification',
+          status: 'complete',
+        }),
+        query: async () => [],
+        sendMessage: async () => {
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        },
+      },
+    },
+    getSourceLabel: () => 'auth-page',
+    getState: async () => ({
+      tabRegistry: {
+        'signup-page': { tabId: 9, ready: true },
+      },
+      sourceLastUrls: {},
+    }),
+    isRetryableContentScriptTransportError: (error) => /Receiving end does not exist/i.test(String(error?.message || error || '')),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  let wrappedError = null;
+  await assert.rejects(
+    runtime.sendToContentScriptResilient('signup-page', {
+      type: 'FILL_CODE',
+      step: 4,
+      payload: { code: '654321' },
+    }, {
+      timeoutMs: 5,
+      retryDelayMs: 0,
+    }),
+    (error) => {
+      wrappedError = error;
+      return /页面刚完成跳转或刷新，内容脚本还没有重新接回/.test(String(error?.message || error || ''));
+    }
+  );
+
+  const helpers = verificationFlowApi.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://chatgpt.com/' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getNodeIdByStepForState: () => 'fetch-signup-code',
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: (error) => /Receiving end does not exist/i.test(String(error?.message || error || '')),
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollCloudMailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'FILL_CODE') {
+        throw wrappedError;
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setNodeStatus: async () => {},
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.equal(result.success, true);
+  assert.equal(result.transportRecovered, true);
+  assert.equal(result.skipProfileStep, true);
+});
+
 test('tab runtime waitForTabComplete waits until tab status becomes complete', async () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};

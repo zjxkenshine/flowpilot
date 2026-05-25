@@ -107,9 +107,20 @@ ${extractFunction('serializeStep4PostSubmitState')}
 return serializeStep4PostSubmitState(inspectStep4PostSubmitState());
 `)();
 
-  assert.equal(api.state, 'logged_in_home');
-  assert.equal(api.url, 'https://chatgpt.com/');
-  assert.equal(api.skipProfileStep, true);
+  assert.deepStrictEqual(api, {
+    state: 'logged_in_home',
+    url: 'https://chatgpt.com/',
+    skipProfileStep: true,
+    emailVerificationRequired: false,
+    emailVerificationPage: false,
+    invalidCode: false,
+    errorText: '',
+    userAlreadyExistsBlocked: false,
+    retryEnabled: false,
+    detailText: '',
+    displayedEmail: '',
+    displayedPhone: '',
+  });
 });
 
 test('inspectStep4PostSubmitState returns signup email verification handoff state', () => {

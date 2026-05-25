@@ -77,11 +77,20 @@
         : '';
     }
 
-    const isRetryableVerificationTransportError = typeof deps.isRetryableContentScriptTransportError === 'function'
-      ? deps.isRetryableContentScriptTransportError
-      : ((error) => /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s/i.test(
-        String(typeof error === 'string' ? error : error?.message || '')
-      ));
+    function isRetryableVerificationTransportError(error) {
+      if (typeof deps.isRetryableContentScriptTransportError === 'function') {
+        try {
+          if (deps.isRetryableContentScriptTransportError(error)) {
+            return true;
+          }
+        } catch {
+          // Fall through to the local message matcher below.
+        }
+      }
+
+      const message = String(typeof error === 'string' ? error : error?.message || '');
+      return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed|页面刚完成跳转或刷新，内容脚本还没有重新接回|页面未能重新就绪|页面通信异常/i.test(message);
+    }
 
     function getVerificationCodeStateKey(step) {
       return step === 4 ? 'lastSignupCode' : 'lastLoginCode';
@@ -225,7 +234,7 @@
         throwIfStopped();
         try {
           const tab = await chrome.tabs.get(tabId);
-          const currentUrl = String(tab?.url || '').trim();
+          const currentUrl = String(tab?.url || tab?.pendingUrl || '').trim();
           if (currentUrl) {
             lastUrl = currentUrl;
           }
