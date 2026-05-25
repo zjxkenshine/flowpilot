@@ -259,8 +259,26 @@ const payPalAccountMenu = document.getElementById('paypal-account-menu');
 const btnAddPayPalAccount = document.getElementById('btn-add-paypal-account');
 const rowHostedCheckoutVerificationUrl = document.getElementById('row-hosted-checkout-verification-url');
 const inputHostedCheckoutVerificationUrl = document.getElementById('input-hosted-checkout-verification-url');
+const rowHostedCheckoutManualFetch = document.getElementById('row-hosted-checkout-manual-fetch');
+const btnHostedCheckoutManualFetch = document.getElementById('btn-hosted-checkout-manual-fetch');
+const displayHostedCheckoutManualCode = document.getElementById('display-hosted-checkout-manual-code');
+const rowHostedCheckoutVerificationPopupDelay = document.getElementById('row-hosted-checkout-verification-popup-delay');
+const inputHostedCheckoutVerificationPopupDelaySeconds = document.getElementById('input-hosted-checkout-verification-popup-delay-seconds');
 const rowHostedCheckoutPhone = document.getElementById('row-hosted-checkout-phone');
 const inputHostedCheckoutPhone = document.getElementById('input-hosted-checkout-phone');
+const rowHostedCheckoutSmsPool = document.getElementById('row-hosted-checkout-sms-pool');
+const btnToggleHostedSmsPool = document.getElementById('btn-toggle-hosted-sms-pool');
+const hostedSmsPoolShell = document.getElementById('hosted-sms-pool-shell');
+const inputHostedCheckoutSmsPool = document.getElementById('input-hosted-checkout-sms-pool');
+const btnHostedSmsPoolRefresh = document.getElementById('btn-hosted-sms-pool-refresh');
+const btnHostedSmsPoolClearUsed = document.getElementById('btn-hosted-sms-pool-clear-used');
+const btnHostedSmsPoolDeleteAll = document.getElementById('btn-hosted-sms-pool-delete-all');
+const inputHostedSmsPoolImport = document.getElementById('input-hosted-sms-pool-import');
+const btnHostedSmsPoolImport = document.getElementById('btn-hosted-sms-pool-import');
+const hostedSmsPoolSummary = document.getElementById('hosted-sms-pool-summary');
+const inputHostedSmsPoolSearch = document.getElementById('input-hosted-sms-pool-search');
+const selectHostedSmsPoolFilter = document.getElementById('select-hosted-sms-pool-filter');
+const hostedSmsPoolList = document.getElementById('hosted-sms-pool-list');
 const rowPlusHostedCheckoutOauthDelay = document.getElementById('row-plus-hosted-checkout-oauth-delay');
 const inputPlusHostedCheckoutOauthDelaySeconds = document.getElementById('input-plus-hosted-checkout-oauth-delay-seconds');
 const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkout-conversion-proxy');
@@ -617,6 +635,7 @@ const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
 const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
+const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
@@ -630,6 +649,7 @@ const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED = false;
 const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复用，切回邮箱注册后会恢复原设置';
 let latestState = null;
+let hostedSmsPoolExpanded = false;
 let currentPlusModeEnabled = false;
 let currentPhonePlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
@@ -2109,6 +2129,14 @@ function dismissToast(toast) {
   toast.addEventListener('animationend', () => toast.remove());
 }
 
+function setHostedCheckoutManualCodeDisplay(value = '未获取', title = '') {
+  if (!displayHostedCheckoutManualCode) {
+    return;
+  }
+  displayHostedCheckoutManualCode.textContent = String(value || '').trim() || '未获取';
+  displayHostedCheckoutManualCode.title = String(title || '').trim();
+}
+
 function resetActionModalOption() {
   if (!modalOptionRow || !modalOptionInput || !modalOptionText) {
     return;
@@ -3299,6 +3327,14 @@ function normalizePlusHostedCheckoutOauthDelaySeconds(value) {
   return Math.min(120, Math.max(0, Math.floor(numeric)));
 }
 
+function normalizeHostedCheckoutVerificationPopupDelaySeconds(value) {
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS;
+  }
+  return Math.min(60, Math.max(0, Math.floor(numeric)));
+}
+
 function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -3324,6 +3360,79 @@ function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   } catch {
     return rawValue;
   }
+}
+
+function normalizeHostedCheckoutVerificationUrlValue(value = '') {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) {
+    return '';
+  }
+  try {
+    const parsed = new URL(rawValue);
+    parsed.searchParams.delete('t');
+    return parsed.toString();
+  } catch {
+    return rawValue
+      .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+      .replace(/[?&]$/g, '');
+  }
+}
+
+function normalizeHostedCheckoutPhoneValue(value = '') {
+  const rawValue = String(value || '').trim();
+  const digits = rawValue.replace(/\D+/g, '');
+  if (!digits) {
+    return '';
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return digits.slice(1);
+  }
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+function normalizeHostedCheckoutPoolUrlValue(value = '') {
+  return normalizeHostedCheckoutVerificationUrlValue(value);
+}
+
+function parseHostedCheckoutSmsPoolEntries(value = '') {
+  const separator = '----';
+  const lines = String(value || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const entries = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const separatorIndex = line.indexOf(separator);
+    const hasSeparator = separatorIndex > 0;
+    const phone = hasSeparator
+      ? normalizeHostedCheckoutPhoneValue(line.slice(0, separatorIndex))
+      : normalizeHostedCheckoutPhoneValue(line);
+    const verificationUrl = hasSeparator
+      ? normalizeHostedCheckoutPoolUrlValue(line.slice(separatorIndex + separator.length))
+      : normalizeHostedCheckoutPoolUrlValue(lines[index + 1] || '');
+    if (!hasSeparator && verificationUrl) {
+      index += 1;
+    }
+    const key = phone && verificationUrl ? `${phone}${separator}${verificationUrl}` : '';
+    if (!phone || !verificationUrl || !key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    entries.push({
+      phone,
+      verificationUrl,
+    });
+  }
+  return entries;
+}
+
+function normalizeHostedCheckoutSmsPoolTextValue(value = '') {
+  return parseHostedCheckoutSmsPoolEntries(value)
+    .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+    .join('\n');
 }
 
 function normalizePlusAccountAccessStrategy(value = '') {
@@ -4921,12 +5030,21 @@ function collectSettingsPayload() {
     plusAccountAccessStrategy: effectivePhonePlusModeEnabled
       ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
       : requestedPlusAccountAccessStrategy,
+    hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
+      ? normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
+      : DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS,
     hostedCheckoutVerificationUrl: typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl
-      ? String(inputHostedCheckoutVerificationUrl.value || '').trim()
-      : String(latestState?.hostedCheckoutVerificationUrl || '').trim(),
+      ? normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl.value)
+      : normalizeHostedCheckoutVerificationUrlValue(latestState?.hostedCheckoutVerificationUrl || ''),
     hostedCheckoutPhoneNumber: typeof inputHostedCheckoutPhone !== 'undefined' && inputHostedCheckoutPhone
-      ? String(inputHostedCheckoutPhone.value || '').trim()
-      : String(latestState?.hostedCheckoutPhoneNumber || '').trim(),
+      ? normalizeHostedCheckoutPhoneValue(inputHostedCheckoutPhone.value)
+      : normalizeHostedCheckoutPhoneValue(latestState?.hostedCheckoutPhoneNumber || ''),
+    hostedCheckoutSmsPoolText: typeof inputHostedCheckoutSmsPool !== 'undefined' && inputHostedCheckoutSmsPool
+      ? normalizeHostedCheckoutSmsPoolTextValue(inputHostedCheckoutSmsPool.value)
+      : normalizeHostedCheckoutSmsPoolTextValue(latestState?.hostedCheckoutSmsPoolText || ''),
+    hostedCheckoutSmsPoolUsage: latestState?.hostedCheckoutSmsPoolUsage && typeof latestState.hostedCheckoutSmsPoolUsage === 'object'
+      ? latestState.hostedCheckoutSmsPoolUsage
+      : {},
     plusHostedCheckoutOauthDelaySeconds: normalizeHostedCheckoutDelaySecondsSafe(
       typeof inputPlusHostedCheckoutOauthDelaySeconds !== 'undefined' && inputPlusHostedCheckoutOauthDelaySeconds
         ? inputPlusHostedCheckoutOauthDelaySeconds.value
@@ -10194,7 +10312,10 @@ function updatePlusModeUI() {
   });
   [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
+    typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
+    typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
     typeof rowHostedCheckoutPhone !== 'undefined' ? rowHostedCheckoutPhone : null,
+    typeof rowHostedCheckoutSmsPool !== 'undefined' ? rowHostedCheckoutSmsPool : null,
     typeof rowPlusHostedCheckoutOauthDelay !== 'undefined' ? rowPlusHostedCheckoutOauthDelay : null,
   ].forEach((row) => {
     if (!row) {
@@ -10202,6 +10323,15 @@ function updatePlusModeUI() {
     }
     row.style.display = hostedRowsVisible ? '' : 'none';
   });
+  if (typeof rowHostedCheckoutSmsPool !== 'undefined' && rowHostedCheckoutSmsPool) {
+    if (hostedRowsVisible) {
+      if (hostedSmsPoolExpanded && typeof queueHostedSmsPoolRefresh === 'function') {
+        queueHostedSmsPoolRefresh();
+      }
+    } else if (typeof resetHostedSmsPoolManager === 'function') {
+      resetHostedSmsPoolManager();
+    }
+  }
   [
     typeof rowGpcHelperApi !== 'undefined' ? rowGpcHelperApi : null,
     typeof rowGpcHelperCardKey !== 'undefined' ? rowGpcHelperCardKey : null,
@@ -11388,16 +11518,26 @@ function applySettingsState(state) {
     inputGoPayPin.value = state?.gopayPin || '';
   }
   if (typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl) {
-    inputHostedCheckoutVerificationUrl.value = String(state?.hostedCheckoutVerificationUrl || '').trim();
+    inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(state?.hostedCheckoutVerificationUrl || '');
   }
+  if (typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds) {
+    inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
+      normalizeHostedCheckoutVerificationPopupDelaySeconds(state?.hostedCheckoutVerificationPopupDelaySeconds)
+    );
+  }
+  setHostedCheckoutManualCodeDisplay('未获取');
   if (typeof inputHostedCheckoutPhone !== 'undefined' && inputHostedCheckoutPhone) {
-    inputHostedCheckoutPhone.value = String(state?.hostedCheckoutPhoneNumber || '').trim();
+    inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(state?.hostedCheckoutPhoneNumber || '');
+  }
+  if (typeof inputHostedCheckoutSmsPool !== 'undefined' && inputHostedCheckoutSmsPool) {
+    inputHostedCheckoutSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(state?.hostedCheckoutSmsPoolText || '');
   }
   if (typeof inputPlusHostedCheckoutOauthDelaySeconds !== 'undefined' && inputPlusHostedCheckoutOauthDelaySeconds) {
     inputPlusHostedCheckoutOauthDelaySeconds.value = String(
       normalizePlusHostedCheckoutOauthDelaySeconds(state?.plusHostedCheckoutOauthDelaySeconds)
     );
   }
+  validateHostedCheckoutContactConfig();
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(state?.plusCheckoutConversionProxyUrl || '');
   }
@@ -13123,6 +13263,186 @@ function updateIpProxyServiceLoginButtonState(options = {}) {
   btnIpProxyServiceLogin.title = loginUrl
     ? `打开 ${loginConfig?.label || service} ${buttonLabel}页`
     : '当前代理服务没有可跳转的登录页';
+}
+
+const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedSmsPoolManager({
+  dom: {
+    btnHostedSmsPoolRefresh,
+    btnHostedSmsPoolClearUsed,
+    btnHostedSmsPoolDeleteAll,
+    inputHostedSmsPoolImport,
+    btnHostedSmsPoolImport,
+    hostedSmsPoolSummary,
+    inputHostedSmsPoolSearch,
+    selectHostedSmsPoolFilter,
+    hostedSmsPoolList,
+  },
+  helpers: {
+    copyTextToClipboard,
+    escapeHtml,
+    openConfirmModal,
+    showToast,
+  },
+  state: {
+    getText: () => normalizeHostedCheckoutSmsPoolTextValue(inputHostedCheckoutSmsPool?.value || latestState?.hostedCheckoutSmsPoolText || ''),
+    setText: (text) => {
+      const normalized = normalizeHostedCheckoutSmsPoolTextValue(text);
+      if (inputHostedCheckoutSmsPool) {
+        inputHostedCheckoutSmsPool.value = normalized;
+      }
+      syncLatestState({ hostedCheckoutSmsPoolText: normalized });
+      validateHostedCheckoutContactConfig();
+    },
+    getUsage: () => latestState?.hostedCheckoutSmsPoolUsage || {},
+    setUsage: (usage) => {
+      syncLatestState({ hostedCheckoutSmsPoolUsage: usage && typeof usage === 'object' ? usage : {} });
+    },
+    getCurrentEntry: () => latestState?.hostedCheckoutCurrentSmsEntry || null,
+    isVisible: () => Boolean(rowHostedCheckoutSmsPool) && rowHostedCheckoutSmsPool.style.display !== 'none',
+  },
+  actions: {
+    persistPool: async () => {
+      markSettingsDirty(true);
+      await saveSettings({ silent: true });
+    },
+    clearCurrentEntry: () => {
+      syncLatestState({ hostedCheckoutCurrentSmsEntry: null });
+    },
+    restoreCurrentEntry: () => {},
+  },
+  constants: {
+    copyIcon: COPY_ICON,
+  },
+});
+const queueHostedSmsPoolRefresh = hostedSmsPoolManager?.queueRefresh || (() => {});
+const refreshHostedSmsPool = hostedSmsPoolManager?.refresh || (() => {});
+const renderHostedSmsPool = hostedSmsPoolManager?.render || (() => {});
+const resetHostedSmsPoolManager = hostedSmsPoolManager?.reset || (() => {});
+const bindHostedSmsPoolEvents = hostedSmsPoolManager?.bindEvents || (() => {});
+bindHostedSmsPoolEvents();
+
+function updateHostedSmsPoolCollapseUI(expanded = hostedSmsPoolExpanded) {
+  hostedSmsPoolExpanded = Boolean(expanded);
+  if (btnToggleHostedSmsPool) {
+    btnToggleHostedSmsPool.textContent = hostedSmsPoolExpanded ? '收起' : '展开';
+    btnToggleHostedSmsPool.setAttribute('aria-expanded', String(hostedSmsPoolExpanded));
+  }
+  if (hostedSmsPoolShell) {
+    hostedSmsPoolShell.hidden = !hostedSmsPoolExpanded;
+    hostedSmsPoolShell.classList.toggle('is-expanded', hostedSmsPoolExpanded);
+    hostedSmsPoolShell.classList.toggle('is-collapsed', !hostedSmsPoolExpanded);
+  }
+  if (hostedSmsPoolExpanded) {
+    queueHostedSmsPoolRefresh();
+  }
+}
+
+btnToggleHostedSmsPool?.addEventListener('click', () => {
+  updateHostedSmsPoolCollapseUI(!hostedSmsPoolExpanded);
+});
+
+function validateHostedCheckoutContactConfig(options = {}) {
+  const paymentMethod = typeof getSelectedPlusPaymentMethod === 'function'
+    ? getSelectedPlusPaymentMethod(latestState)
+    : 'paypal';
+  const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : Boolean(latestState?.plusModeEnabled);
+  const poolText = normalizeHostedCheckoutSmsPoolTextValue(inputHostedCheckoutSmsPool?.value || latestState?.hostedCheckoutSmsPoolText || '');
+  const phone = normalizeHostedCheckoutPhoneValue(inputHostedCheckoutPhone?.value || latestState?.hostedCheckoutPhoneNumber || '');
+  const verificationUrl = normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl?.value || latestState?.hostedCheckoutVerificationUrl || '');
+  const required = plusModeEnabled && paymentMethod === 'paypal' && !poolText;
+  const missingPhone = required && !phone;
+  const missingVerificationUrl = required && !verificationUrl;
+  const valid = !missingPhone && !missingVerificationUrl;
+  const message = (() => {
+    if (!required || valid) {
+      return '';
+    }
+    if (missingPhone && missingVerificationUrl) {
+      return '当前 PayPal 接码池为空，请先填写 PayPal 电话(不带+1) 和 验证码接口，或导入 PayPal 接码池。';
+    }
+    if (missingPhone) {
+      return '当前 PayPal 接码池为空，请先填写 PayPal 电话(不带+1)，或导入 PayPal 接码池。';
+    }
+    return '当前 PayPal 接码池为空，请先填写验证码接口，或导入 PayPal 接码池。';
+  })();
+
+  if (inputHostedCheckoutPhone) {
+    inputHostedCheckoutPhone.classList.toggle('is-invalid', missingPhone);
+    inputHostedCheckoutPhone.title = missingPhone ? message : '';
+  }
+  if (inputHostedCheckoutVerificationUrl) {
+    inputHostedCheckoutVerificationUrl.classList.toggle('is-invalid', missingVerificationUrl);
+    inputHostedCheckoutVerificationUrl.title = missingVerificationUrl ? message : '';
+  }
+
+  if (options.focusOnError && !valid) {
+    if (missingPhone) {
+      inputHostedCheckoutPhone?.focus?.();
+    } else if (missingVerificationUrl) {
+      inputHostedCheckoutVerificationUrl?.focus?.();
+    }
+  }
+
+  return {
+    valid,
+    required,
+    missingPhone,
+    missingVerificationUrl,
+    message,
+  };
+}
+
+function syncHostedCheckoutVerificationPopupDelayInput() {
+  if (!inputHostedCheckoutVerificationPopupDelaySeconds) {
+    return;
+  }
+  inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
+    normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
+  );
+}
+
+async function handleHostedCheckoutManualFetch() {
+  if (!btnHostedCheckoutManualFetch) {
+    return;
+  }
+
+  const normalizedVerificationUrl = normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl?.value || '');
+  if (inputHostedCheckoutVerificationUrl) {
+    inputHostedCheckoutVerificationUrl.value = normalizedVerificationUrl;
+  }
+
+  const previousLabel = btnHostedCheckoutManualFetch.textContent;
+  btnHostedCheckoutManualFetch.disabled = true;
+  btnHostedCheckoutManualFetch.textContent = '获取中...';
+  setHostedCheckoutManualCodeDisplay('获取中...');
+
+  try {
+    const response = await sendRuntimeMessageWithTimeout({
+      type: 'FETCH_HOSTED_CHECKOUT_VERIFICATION_CODE',
+      source: 'sidepanel',
+      payload: {
+        verificationUrl: normalizedVerificationUrl,
+      },
+    }, 20000, '手动获取验证码');
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    const code = String(response?.code || '').trim();
+    if (!code) {
+      throw new Error('未返回有效验证码。');
+    }
+    setHostedCheckoutManualCodeDisplay(code, response?.verificationUrl || normalizedVerificationUrl);
+    showToast('已获取 hosted checkout 验证码。', 'success', 2500);
+  } catch (error) {
+    const message = error?.message || String(error || '手动获取验证码失败');
+    setHostedCheckoutManualCodeDisplay('获取失败', message);
+    showToast(message, 'error');
+  } finally {
+    btnHostedCheckoutManualFetch.disabled = false;
+    btnHostedCheckoutManualFetch.textContent = previousLabel || '手动获取验证码';
+  }
 }
 
 function updateMailProviderUI() {
@@ -15780,6 +16100,47 @@ async function handlePlusCheckoutConversionProxyTest() {
   }
 }
 
+inputHostedCheckoutVerificationPopupDelaySeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputHostedCheckoutVerificationPopupDelaySeconds?.addEventListener('blur', () => {
+  syncHostedCheckoutVerificationPopupDelayInput();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHostedCheckoutVerificationUrl?.addEventListener('input', () => {
+  setHostedCheckoutManualCodeDisplay('未获取');
+  validateHostedCheckoutContactConfig();
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputHostedCheckoutVerificationUrl?.addEventListener('blur', () => {
+  inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl.value);
+  validateHostedCheckoutContactConfig();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+btnHostedCheckoutManualFetch?.addEventListener('click', () => {
+  handleHostedCheckoutManualFetch().catch((error) => {
+    showToast(error?.message || String(error || '手动获取验证码失败'), 'error');
+  });
+});
+
+inputHostedCheckoutPhone?.addEventListener('input', () => {
+  validateHostedCheckoutContactConfig();
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputHostedCheckoutPhone?.addEventListener('blur', () => {
+  inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(inputHostedCheckoutPhone.value);
+  validateHostedCheckoutContactConfig();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputPlusCheckoutConversionProxy?.addEventListener('input', () => {
   setPlusCheckoutConversionProxyTestResult('未测试');
   markSettingsDirty(true);
@@ -18153,6 +18514,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       ) {
         syncPasswordField(latestState || {});
       }
+      if (message.payload.hostedCheckoutVerificationPopupDelaySeconds !== undefined && inputHostedCheckoutVerificationPopupDelaySeconds) {
+        inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
+          normalizeHostedCheckoutVerificationPopupDelaySeconds(message.payload.hostedCheckoutVerificationPopupDelaySeconds)
+        );
+      }
+      if (message.payload.hostedCheckoutVerificationUrl !== undefined && inputHostedCheckoutVerificationUrl) {
+        inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
+        setHostedCheckoutManualCodeDisplay('未获取');
+        validateHostedCheckoutContactConfig();
+      }
+      if (message.payload.hostedCheckoutPhoneNumber !== undefined && inputHostedCheckoutPhone) {
+        inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(message.payload.hostedCheckoutPhoneNumber);
+        validateHostedCheckoutContactConfig();
+      }
+      if (message.payload.hostedCheckoutSmsPoolText !== undefined && inputHostedCheckoutSmsPool) {
+        inputHostedCheckoutSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(message.payload.hostedCheckoutSmsPoolText);
+        queueHostedSmsPoolRefresh();
+        validateHostedCheckoutContactConfig();
+      }
+      if (message.payload.hostedCheckoutSmsPoolUsage !== undefined || message.payload.hostedCheckoutCurrentSmsEntry !== undefined) {
+        queueHostedSmsPoolRefresh();
+      }
       if (message.payload.localCpaStep9Mode !== undefined) {
         setLocalCpaStep9Mode(message.payload.localCpaStep9Mode);
       }
@@ -19080,3 +19463,5 @@ Promise.allSettled([
     console.error('Failed to initialize sidepanel state:', err);
   });
 });
+
+updateHostedSmsPoolCollapseUI(false);

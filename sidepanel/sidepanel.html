@@ -384,10 +384,69 @@
         <input type="text" id="input-hosted-checkout-verification-url" class="data-input"
           placeholder="用于读取 PayPal / OpenAI 验证码的接口地址" autocomplete="off" />
       </div>
+      <div class="data-row" id="row-hosted-checkout-manual-fetch" style="display:none;">
+        <span class="data-label">手动取码</span>
+        <div class="data-inline data-value-actions hosted-checkout-manual-fetch-inline">
+          <button id="btn-hosted-checkout-manual-fetch" class="btn btn-outline btn-sm data-inline-btn" type="button">手动获取验证码</button>
+          <span id="display-hosted-checkout-manual-code" class="data-value mono hosted-checkout-manual-fetch-code">未获取</span>
+        </div>
+      </div>
+      <div class="data-row" id="row-hosted-checkout-verification-popup-delay" style="display:none;">
+        <span class="data-label">弹窗延迟</span>
+        <div class="data-inline">
+          <input type="number" id="input-hosted-checkout-verification-popup-delay-seconds" class="data-input auto-delay-input"
+            value="20" min="0" max="60" step="1" title="检测到 PayPal hosted checkout 验证码弹窗后，等待多少秒再开始获取验证码" />
+          <span class="setting-caption">检测到验证码弹窗后，先等待多少秒再开始获取验证码；默认 20 秒</span>
+        </div>
+      </div>
       <div class="data-row" id="row-hosted-checkout-phone" style="display:none;">
         <span class="data-label">直绑电话</span>
         <input type="text" id="input-hosted-checkout-phone" class="data-input"
           placeholder="填 10 位美国本地号码，不要带 +1" autocomplete="tel" />
+      </div>
+      <div class="data-row data-check-row" id="row-hosted-checkout-sms-pool" style="display:none;">
+        <span class="data-label">PayPal 接码池</span>
+        <div class="hotmail-import-box hosted-sms-pool-box">
+          <textarea id="input-hosted-checkout-sms-pool" class="data-textarea mono" hidden
+            placeholder="1234567890&#10;&#10;https://mail.test.com/api/text-relay/eca_tr_xxxxxxxxx"></textarea>
+          <div class="section-mini-header">
+            <div class="section-mini-copy">
+              <span class="section-label">PayPal 接码池</span>
+              <span class="data-value">号码和验证码接口按行绑定</span>
+            </div>
+            <div class="section-mini-actions">
+              <button id="btn-toggle-hosted-sms-pool" class="btn btn-ghost btn-xs" type="button"
+                aria-expanded="false">展开</button>
+            </div>
+          </div>
+          <div id="hosted-sms-pool-shell" class="hosted-sms-pool-shell is-collapsed" hidden>
+            <div class="section-mini-actions hosted-sms-pool-toolbar">
+              <button id="btn-hosted-sms-pool-refresh" class="btn btn-ghost btn-xs" type="button">刷新</button>
+              <button id="btn-hosted-sms-pool-clear-used" class="btn btn-ghost btn-xs" type="button">清空次数</button>
+              <button id="btn-hosted-sms-pool-delete-all" class="btn btn-ghost btn-xs" type="button">全部删除</button>
+            </div>
+            <textarea id="input-hosted-sms-pool-import" class="data-textarea mono" rows="4"
+              placeholder="1234567890&#10;&#10;https://mail.test.com/api/text-relay/eca_tr_xxxxxxxxx"></textarea>
+            <div class="data-inline">
+              <button id="btn-hosted-sms-pool-import" class="btn btn-primary btn-sm" type="button">导入号码</button>
+            </div>
+            <div class="icloud-card">
+              <div id="hosted-sms-pool-summary" class="icloud-summary">导入 PayPal 接码号码，每行一个号码和验证码接口。</div>
+              <div class="icloud-toolbar">
+                <input id="input-hosted-sms-pool-search" class="data-input icloud-search" type="text"
+                  placeholder="搜索号码 / 接口" />
+                <select id="select-hosted-sms-pool-filter" class="data-select icloud-filter">
+                  <option value="all">全部</option>
+                  <option value="current">当前</option>
+                  <option value="unused">0 次</option>
+                  <option value="used">已使用</option>
+                  <option value="error">异常</option>
+                </select>
+              </div>
+              <div id="hosted-sms-pool-list" class="luckmail-list"></div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="data-row" id="row-plus-hosted-checkout-oauth-delay" style="display:none;">
         <span class="data-label">成功等待</span>
@@ -2125,6 +2184,7 @@
   <script src="paypal-manager.js"></script>
   <script src="icloud-manager.js"></script>
   <script src="luckmail-manager.js"></script>
+  <script src="hosted-sms-pool-manager.js"></script>
   <script src="custom-email-pool-manager.js"></script>
   <script src="contribution-mode.js"></script>
   <script src="ip-proxy-provider-711proxy.js"></script>

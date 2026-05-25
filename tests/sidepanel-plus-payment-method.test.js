@@ -210,6 +210,7 @@ test('sidepanel Plus UI separates PayPal account mode from PayPal no-card bindin
 let latestState = { plusPaymentMethod: 'paypal-hosted' };
 let currentPlusPaymentMethod = 'paypal-hosted';
 let currentPlusAccountAccessStrategy = 'oauth';
+let hostedSmsPoolExpanded = false;
 const inputPlusModeEnabled = { checked: true };
 const selectPlusPaymentMethod = { value: 'paypal-hosted', style: { display: 'none' } };
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
@@ -221,7 +222,10 @@ const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const plusPaymentMethodCaption = { textContent: '' };
 const rowPayPalAccount = { style: { display: '' } };
 const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
+const rowHostedCheckoutManualFetch = { style: { display: 'none' } };
+const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
+const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
 const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
 ${bundle}
 return {
@@ -229,7 +233,7 @@ return {
   selectPlusPaymentMethod,
   rowPayPalAccount,
   plusPaymentMethodCaption,
-  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutPhone, rowPlusHostedCheckoutOauthDelay },
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
 };
 `)();
 
@@ -272,6 +276,7 @@ test('sidepanel Plus UI restores traditional PayPal account mode when hosted fin
 let latestState = { plusPaymentMethod: 'paypal', plusHostedCheckoutIsFinalStep: false };
 let currentPlusPaymentMethod = 'paypal';
 let currentPlusAccountAccessStrategy = 'oauth';
+let hostedSmsPoolExpanded = false;
 const inputPlusModeEnabled = { checked: true };
 const selectPlusPaymentMethod = { value: 'paypal', style: { display: 'none' } };
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
@@ -285,14 +290,17 @@ const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const plusPaymentMethodCaption = { textContent: '' };
 const rowPayPalAccount = { style: { display: 'none' } };
 const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
+const rowHostedCheckoutManualFetch = { style: { display: 'none' } };
+const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
+const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
 const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
 ${bundle}
 return {
   updatePlusModeUI,
   rowPayPalAccount,
   plusPaymentMethodCaption,
-  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutPhone, rowPlusHostedCheckoutOauthDelay },
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
 };
 `)();
 

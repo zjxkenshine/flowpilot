@@ -1415,8 +1415,11 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusHostedCheckoutIsFinalStep: true,
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutConversionProxyUrl: '',
+  hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
+  hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolUsage: {},
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
   paypalEmail: '',
   paypalPassword: '',
@@ -1598,8 +1601,11 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusHostedCheckoutIsFinalStep',
   'plusAccountAccessStrategy',
   'plusCheckoutConversionProxyUrl',
+  'hostedCheckoutVerificationPopupDelaySeconds',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
+  'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolUsage',
   'plusHostedCheckoutOauthDelaySeconds',
   'autoRunRetryPaypalCallback',
   'mailProvider',
@@ -3426,10 +3432,31 @@ function normalizePersistentSettingValue(key, value) {
         return rawValue;
       }
     }
+    case 'hostedCheckoutVerificationPopupDelaySeconds': {
+      const numeric = Number(value);
+      return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
       return String(value || '').trim();
+    case 'hostedCheckoutSmsPoolText':
+      return String(value || '').replace(/\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolUsage':
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+      }
+      return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
+        const usage = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+        const legacyUsedCount = Number(usage.usedAt) > 0 ? 1 : 0;
+        const useCount = Math.max(0, Math.floor(Number(usage.useCount ?? usage.usageCount ?? legacyUsedCount) || 0));
+        return [String(entryKey || '').trim(), {
+          useCount,
+          usedAt: Math.max(0, Number(usage.usedAt) || 0),
+          lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+          lastError: String(usage.lastError || '').trim(),
+        }];
+      }).filter(([entryKey]) => Boolean(entryKey)));
     case 'plusHostedCheckoutOauthDelaySeconds': {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS)));

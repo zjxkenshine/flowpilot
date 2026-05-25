@@ -1579,3 +1579,107 @@ test('PayPal hosted card node throws resend-limit error after repeated invalid v
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.resendVerificationCode), true);
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
+
+test('hosted checkout runtime prefers sms pool entry and records final success usage only on payments success', async () => {
+  const events = [];
+  let currentUrl = 'https://chatgpt.com/payments/success';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        data: {
+          message: "PayPal: 666666 is your security code. Don't share it.",
+        },
+      }),
+    }),
+    getState: async () => ({
+      hostedCheckoutVerificationUrl: 'http://fallback.test/api/sms',
+      hostedCheckoutPhoneNumber: '4155559999',
+      hostedCheckoutSmsPoolText: [
+        '4155551234----http://pool-a.test/api/sms',
+        '4155555678----http://pool-b.test/api/sms',
+      ].join('\n'),
+      hostedCheckoutSmsPoolUsage: {
+        '4155551234----http://pool-a.test/api/sms': {
+          useCount: 3,
+          lastAttemptAt: 50,
+        },
+        '4155555678----http://pool-b.test/api/sms': {
+          useCount: 1,
+          lastAttemptAt: 100,
+        },
+      },
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+  });
+
+  const selectedEntryUpdate = events.find((event) => event.type === 'set-state' && event.payload.hostedCheckoutCurrentSmsEntry);
+  assert.equal(selectedEntryUpdate?.payload?.hostedCheckoutCurrentSmsEntry?.phone, '4155555678');
+
+  const usageUpdate = events.find((event) => event.type === 'set-state' && event.payload.hostedCheckoutSmsPoolUsage);
+  assert.equal(
+    usageUpdate?.payload?.hostedCheckoutSmsPoolUsage?.['4155555678----http://pool-b.test/api/sms']?.useCount,
+    2
+  );
+});
+
+test('hosted checkout pool failure records lastError without incrementing useCount', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    fetch: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        data: {
+          message: 'No code available yet',
+        },
+      }),
+    }),
+    getState: async () => ({
+      hostedCheckoutSmsPoolText: '4155555678----http://pool-b.test/api/sms',
+      hostedCheckoutSmsPoolUsage: {
+        '4155555678----http://pool-b.test/api/sms': {
+          useCount: 1,
+          lastAttemptAt: 100,
+        },
+      },
+      hostedCheckoutCurrentSmsEntry: {
+        key: '4155555678----http://pool-b.test/api/sms',
+        phone: '4155555678',
+        verificationUrl: 'http://pool-b.test/api/sms',
+      },
+    }),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+  });
+
+  await assert.rejects(
+    () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
+    /6/
+  );
+
+  const usageUpdate = events.find((event) => event.type === 'set-state' && event.payload.hostedCheckoutSmsPoolUsage);
+  assert.equal(
+    usageUpdate?.payload?.hostedCheckoutSmsPoolUsage?.['4155555678----http://pool-b.test/api/sms']?.useCount,
+    1
+  );
+  assert.match(
+    usageUpdate?.payload?.hostedCheckoutSmsPoolUsage?.['4155555678----http://pool-b.test/api/sms']?.lastError || '',
+    /6|code|验证码/i
+  );
+});

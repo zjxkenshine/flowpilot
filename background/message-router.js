@@ -1850,6 +1850,16 @@
           return { ok: true, ...result };
         }
 
+        case 'FETCH_HOSTED_CHECKOUT_VERIFICATION_CODE': {
+          if (typeof plusCheckoutCreateExecutor?.fetchHostedCheckoutVerificationCodeManually !== 'function') {
+            throw new Error('hosted checkout 手动取码能力尚未接入。');
+          }
+          const result = await plusCheckoutCreateExecutor.fetchHostedCheckoutVerificationCodeManually({
+            verificationUrl: message.payload?.verificationUrl,
+          });
+          return { ok: true, ...result };
+        }
+
         case 'REFRESH_IP_PROXY_POOL': {
           const currentState = await getState();
           const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});

@@ -620,6 +620,181 @@
       return digits.length > 10 ? digits.slice(-10) : digits;
     }
 
+    function normalizeHostedCheckoutPoolPhone(value = '') {
+      return normalizeHostedPhoneForPayload(value);
+    }
+
+    function normalizeHostedCheckoutPoolUrl(value = '') {
+      const rawValue = String(value || '').trim();
+      if (!rawValue) {
+        return '';
+      }
+      try {
+        const parsed = new URL(rawValue);
+        parsed.searchParams.delete('t');
+        return parsed.toString();
+      } catch {
+        return rawValue
+          .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+          .replace(/[?&]$/g, '');
+      }
+    }
+
+    function buildHostedCheckoutPoolKey(phone = '', verificationUrl = '') {
+      const normalizedPhone = normalizeHostedCheckoutPoolPhone(phone);
+      const normalizedUrl = normalizeHostedCheckoutPoolUrl(verificationUrl);
+      return normalizedPhone && normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : '';
+    }
+
+    function parseHostedCheckoutSmsPoolEntries(value = '') {
+      const lines = String(value || '')
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const seen = new Set();
+      const entries = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const separatorIndex = line.indexOf('----');
+        const hasSeparator = separatorIndex > 0;
+        const phone = hasSeparator
+          ? normalizeHostedCheckoutPoolPhone(line.slice(0, separatorIndex))
+          : normalizeHostedCheckoutPoolPhone(line);
+        const verificationUrl = hasSeparator
+          ? normalizeHostedCheckoutPoolUrl(line.slice(separatorIndex + 4))
+          : normalizeHostedCheckoutPoolUrl(lines[index + 1] || '');
+        if (!hasSeparator && verificationUrl) {
+          index += 1;
+        }
+        const key = buildHostedCheckoutPoolKey(phone, verificationUrl);
+        if (!phone || !verificationUrl || !key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        entries.push({
+          index: entries.length,
+          key,
+          phone,
+          verificationUrl,
+        });
+      }
+      return entries;
+    }
+
+    function normalizeHostedCheckoutSmsPoolUsage(value = {}) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+      }
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+        const usage = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+        const legacyUsedCount = Number(usage.usedAt) > 0 ? 1 : 0;
+        const useCount = Math.max(0, Math.floor(Number(usage.useCount ?? usage.usageCount ?? legacyUsedCount) || 0));
+        return [String(key || '').trim(), {
+          useCount,
+          usedAt: Math.max(0, Number(usage.usedAt) || 0),
+          lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+          lastError: String(usage.lastError || '').trim(),
+        }];
+      }).filter(([key]) => Boolean(key)));
+    }
+
+    function normalizeHostedCheckoutCurrentSmsEntry(entry = null, entries = []) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const key = String(
+        entry.key
+        || buildHostedCheckoutPoolKey(entry.phone, entry.verificationUrl)
+      ).trim();
+      if (!key) {
+        return null;
+      }
+      const matchedEntry = Array.isArray(entries)
+        ? entries.find((candidate) => candidate.key === key)
+        : null;
+      if (matchedEntry) {
+        return { ...matchedEntry };
+      }
+      const phone = normalizeHostedCheckoutPoolPhone(entry.phone);
+      const verificationUrl = normalizeHostedCheckoutPoolUrl(entry.verificationUrl);
+      if (!phone || !verificationUrl) {
+        return null;
+      }
+      return {
+        key,
+        phone,
+        verificationUrl,
+      };
+    }
+
+    function chooseHostedCheckoutSmsPoolEntry(entries = [], usage = {}) {
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return null;
+      }
+      const normalizedUsage = normalizeHostedCheckoutSmsPoolUsage(usage);
+      return entries
+        .map((entry, index) => {
+          const itemUsage = normalizedUsage[entry.key] || {};
+          return {
+            ...entry,
+            index: Number.isFinite(entry.index) ? entry.index : index,
+            useCount: Math.max(0, Math.floor(Number(itemUsage.useCount) || 0)),
+            lastAttemptAt: Math.max(0, Number(itemUsage.lastAttemptAt) || 0),
+          };
+        })
+        .sort((left, right) => {
+          if (left.useCount !== right.useCount) {
+            return left.useCount - right.useCount;
+          }
+          if (left.lastAttemptAt !== right.lastAttemptAt) {
+            return left.lastAttemptAt - right.lastAttemptAt;
+          }
+          return left.index - right.index;
+        })[0] || null;
+    }
+
+    async function applyHostedCheckoutRuntimePatch(patch = {}) {
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) {
+        return;
+      }
+      await setState(patch);
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate(patch);
+      }
+    }
+
+    async function updateHostedCheckoutPoolUsage(entry = null, options = {}) {
+      const normalizedEntry = normalizeHostedCheckoutCurrentSmsEntry(entry);
+      if (!normalizedEntry?.key || typeof getState !== 'function') {
+        return null;
+      }
+      const state = await getState().catch(() => ({}));
+      const usage = normalizeHostedCheckoutSmsPoolUsage(state?.hostedCheckoutSmsPoolUsage || {});
+      const previous = usage[normalizedEntry.key] || {};
+      const now = Date.now();
+      const incrementUseCount = Boolean(options.incrementUseCount);
+      const success = options.success === true;
+      const nextUsage = {
+        ...usage,
+        [normalizedEntry.key]: {
+          useCount: incrementUseCount
+            ? Math.max(0, Math.floor(Number(previous.useCount) || 0)) + 1
+            : Math.max(0, Math.floor(Number(previous.useCount) || 0)),
+          usedAt: incrementUseCount
+            ? now
+            : Math.max(0, Number(previous.usedAt) || 0),
+          lastAttemptAt: now,
+          lastError: success ? '' : String(options.error || '').trim(),
+        },
+      };
+      await applyHostedCheckoutRuntimePatch({
+        hostedCheckoutCurrentSmsEntry: normalizedEntry,
+        hostedCheckoutSmsPoolUsage: nextUsage,
+      });
+      return nextUsage;
+    }
+
     function getHostedProfileFromState(state = {}) {
       const profile = state?.plusHostedCheckoutGuestProfile || state?.hostedCheckoutGuestProfile || null;
       return profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : null;
@@ -759,7 +934,15 @@
       if (!isHostedCheckoutSuccessUrl(currentUrl)) {
         return false;
       }
-      const config = await getHostedCheckoutRuntimeConfig(state);
+      const config = await getHostedCheckoutRuntimeConfig(state, {
+        ensureCurrentSmsEntry: true,
+      });
+      if (config.hostedCheckoutUsesSmsPool && config.hostedCheckoutCurrentSmsEntry) {
+        await updateHostedCheckoutPoolUsage(config.hostedCheckoutCurrentSmsEntry, {
+          incrementUseCount: true,
+          success: true,
+        });
+      }
       const shouldWait = Boolean(options.waitBeforeComplete);
       if (shouldWait && config.oauthDelaySeconds > 0) {
         await addHostedStepLog(stepKey, `步骤 ${getHostedStepNumber(stepKey)}：支付成功后等待 ${config.oauthDelaySeconds} 秒，再继续账号接入。`, 'info');
@@ -789,23 +972,40 @@
       return null;
     }
 
-    async function getHostedCheckoutRuntimeConfig(state = {}) {
+    async function getHostedCheckoutRuntimeConfig(state = {}, options = {}) {
+      const { ensureCurrentSmsEntry = false } = options || {};
       const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
+      const mergedState = {
+        ...(state && typeof state === 'object' ? state : {}),
+        ...(latestState && typeof latestState === 'object' ? latestState : {}),
+      };
+      const poolEntries = parseHostedCheckoutSmsPoolEntries(mergedState?.hostedCheckoutSmsPoolText || '');
+      const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
+      let selectedSmsEntry = normalizeHostedCheckoutCurrentSmsEntry(mergedState?.hostedCheckoutCurrentSmsEntry, poolEntries);
+      if (!selectedSmsEntry && ensureCurrentSmsEntry && poolEntries.length > 0) {
+        selectedSmsEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, poolUsage);
+        if (selectedSmsEntry) {
+          await applyHostedCheckoutRuntimePatch({
+            hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
+          });
+        }
+      }
       return {
         verificationUrl: String(
-          latestState?.hostedCheckoutVerificationUrl
-          || state?.hostedCheckoutVerificationUrl
+          selectedSmsEntry?.verificationUrl
+          || mergedState?.hostedCheckoutVerificationUrl
           || ''
         ).trim(),
         phone: String(
-          latestState?.hostedCheckoutPhoneNumber
-          || state?.hostedCheckoutPhoneNumber
+          selectedSmsEntry?.phone
+          || mergedState?.hostedCheckoutPhoneNumber
           || HOSTED_CHECKOUT_DEFAULT_PHONE
         ).trim(),
         oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
-          latestState?.plusHostedCheckoutOauthDelaySeconds
-          ?? state?.plusHostedCheckoutOauthDelaySeconds
+          mergedState?.plusHostedCheckoutOauthDelaySeconds
         ),
+        hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
+        hostedCheckoutUsesSmsPool: Boolean(selectedSmsEntry),
       };
     }
 
@@ -998,11 +1198,23 @@
           verificationUrl: manualVerificationUrl,
         };
       }
-      const runtimeConfig = await getHostedCheckoutRuntimeConfig(options?.state || {});
-      return {
-        code: await fetchHostedVerificationCode(runtimeConfig.verificationUrl),
-        verificationUrl: String(runtimeConfig.verificationUrl || '').trim(),
-      };
+      const runtimeConfig = await getHostedCheckoutRuntimeConfig(options?.state || {}, {
+        ensureCurrentSmsEntry: true,
+      });
+      try {
+        return {
+          code: await fetchHostedVerificationCode(runtimeConfig.verificationUrl),
+          verificationUrl: String(runtimeConfig.verificationUrl || '').trim(),
+        };
+      } catch (error) {
+        if (runtimeConfig?.hostedCheckoutUsesSmsPool && runtimeConfig?.hostedCheckoutCurrentSmsEntry) {
+          await updateHostedCheckoutPoolUsage(runtimeConfig.hostedCheckoutCurrentSmsEntry, {
+            success: false,
+            error: error?.message || String(error || '验证码接口返回失败'),
+          }).catch(() => {});
+        }
+        throw error;
+      }
     }
 
     async function pollHostedVerificationCode(verificationUrl = '') {
@@ -1015,6 +1227,15 @@
           return code;
         } catch (error) {
           lastError = error;
+          const runtimeConfig = await getHostedCheckoutRuntimeConfig({}, {
+            ensureCurrentSmsEntry: false,
+          }).catch(() => null);
+          if (runtimeConfig?.hostedCheckoutUsesSmsPool && runtimeConfig?.hostedCheckoutCurrentSmsEntry) {
+            await updateHostedCheckoutPoolUsage(runtimeConfig.hostedCheckoutCurrentSmsEntry, {
+              success: false,
+              error: error?.message || String(error || '验证码接口返回失败'),
+            }).catch(() => {});
+          }
           await addLog(`步骤 6：OpenAI Checkout 验证码暂不可用（${attempt}/${HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS}）：${error?.message || error}`, 'warn');
           if (attempt < HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS) {
             await sleepWithStop(HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_MS);
