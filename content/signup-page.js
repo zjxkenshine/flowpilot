@@ -6621,6 +6621,23 @@ function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted 
   return payload;
 }
 
+function getStep5DirectAdoptableSuccessState() {
+  const successState = getStep5PostSubmitSuccessState();
+  if (successState) {
+    return successState;
+  }
+
+  const step4State = getStep4PostVerificationState({ ignoreVerificationVisibility: true });
+  if (step4State?.state === 'logged_in_home') {
+    return {
+      state: 'logged_in_home',
+      url: step4State.url || location.href,
+    };
+  }
+
+  return null;
+}
+
 function isCombinedSignupVerificationProfilePage() {
   if (!isEmailVerificationPage() || !isVerificationPageStillVisible()) {
     return false;
@@ -7035,6 +7052,16 @@ async function step5_fillNameBirthday(payload) {
   const hasBirthdayData = [year, month, day].every(value => value != null && !Number.isNaN(Number(value)));
   if (!hasBirthdayData && (resolvedAge == null || Number.isNaN(Number(resolvedAge)))) {
     throw new Error('未提供生日或年龄数据。');
+  }
+
+  const adoptableSuccessState = getStep5DirectAdoptableSuccessState();
+  if (adoptableSuccessState) {
+    const completionPayload = getStep5DirectCompletionPayload({
+      outcome: adoptableSuccessState,
+    });
+    reportComplete(5, completionPayload);
+    log(`步骤 5：检测到当前页面已进入 ${adoptableSuccessState.state}，本步骤按已完成处理。`, 'ok');
+    return completionPayload;
   }
 
   const fullName = `${firstName} ${lastName}`;
