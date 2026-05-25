@@ -40,6 +40,7 @@
     '*.ipinfo.io',
   ];
   const CHECKOUT_CONVERSION_PROXY_SESSION_KEY = 'plusCheckoutConversionProxySession';
+  const CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY = 'plusCheckoutConversionProxyManualSession';
 
   function createCheckoutConversionProxyManager(deps = {}) {
     const {
@@ -342,6 +343,25 @@
       };
     }
 
+    function sanitizeCheckoutConversionProxyEntry(entry = null) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const protocol = normalizeCheckoutConversionProxyProtocol(entry.protocol);
+      const host = String(entry.host || '').trim();
+      const port = normalizeCheckoutConversionProxyPort(entry.port);
+      if (!protocol || !host || !port) {
+        return null;
+      }
+      return {
+        protocol,
+        host,
+        port,
+        username: String(entry.username || ''),
+        password: String(entry.password || ''),
+      };
+    }
+
     function buildSessionPayload(session = {}) {
       const normalizedSession = session && typeof session === 'object' && !Array.isArray(session)
         ? session
@@ -365,10 +385,40 @@
       };
     }
 
+    function buildManualSessionPayload(session = {}) {
+      const normalizedSession = session && typeof session === 'object' && !Array.isArray(session)
+        ? session
+        : {};
+      const proxyUrl = normalizeCheckoutConversionProxyUrl(normalizedSession.proxyUrl);
+      const displayName = String(normalizedSession.displayName || '').trim();
+      const entry = sanitizeCheckoutConversionProxyEntry(normalizedSession.entry);
+      const baseSnapshot = sanitizeSnapshot(normalizedSession.baseSnapshot);
+      const appliedAt = Math.max(0, Number(normalizedSession.appliedAt) || Date.now());
+      const lastSwitchedAt = Math.max(0, Number(normalizedSession.lastSwitchedAt) || appliedAt);
+      if (!proxyUrl || !displayName || !entry?.host || !entry?.port || !baseSnapshot?.applied) {
+        return null;
+      }
+      return {
+        active: true,
+        mode: 'manual',
+        proxyUrl,
+        displayName,
+        entry,
+        baseSnapshot,
+        appliedAt,
+        lastSwitchedAt,
+      };
+    }
+
+    async function loadState(state = null) {
+      if (state && typeof state === 'object') {
+        return state;
+      }
+      return typeof getState === 'function' ? await getState() : {};
+    }
+
     async function getStoredSession(state = null) {
-      const sourceState = state && typeof state === 'object'
-        ? state
-        : (typeof getState === 'function' ? await getState() : {});
+      const sourceState = await loadState(state);
       const session = sourceState?.[CHECKOUT_CONVERSION_PROXY_SESSION_KEY];
       return buildSessionPayload(session);
     }
@@ -401,6 +451,82 @@
       return true;
     }
 
+    async function getStoredManualSession(state = null) {
+      const sourceState = await loadState(state);
+      const session = sourceState?.[CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY];
+      return buildManualSessionPayload(session);
+    }
+
+    async function clearStoredManualSession() {
+      await setState({
+        [CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY]: null,
+      });
+    }
+
+    async function persistManualSession(session = {}) {
+      const payload = buildManualSessionPayload(session);
+      if (!payload) {
+        throw new Error('支付转换代理手动会话无效，无法保存。');
+      }
+      await setState({
+        [CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY]: payload,
+      });
+      return payload;
+    }
+
+    async function switchManualSession(options = {}) {
+      const sourceState = await loadState(options?.state);
+      const proxyUrl = normalizeCheckoutConversionProxyUrl(
+        options?.proxyUrl ?? sourceState?.plusCheckoutConversionProxyUrl
+      );
+      if (!proxyUrl) {
+        throw new Error('请先填写支付转换代理地址。');
+      }
+      const existingSession = await getStoredManualSession(sourceState);
+      if (existingSession?.active && existingSession.proxyUrl === proxyUrl) {
+        return {
+          switched: false,
+          alreadyActive: true,
+          session: existingSession,
+          displayName: existingSession.displayName,
+        };
+      }
+      const snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
+      const payload = await persistManualSession({
+        proxyUrl,
+        displayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim(),
+        entry: snapshot?.entry,
+        baseSnapshot: existingSession?.baseSnapshot || snapshot,
+        appliedAt: existingSession?.appliedAt || Date.now(),
+        lastSwitchedAt: Date.now(),
+      });
+      return {
+        switched: true,
+        alreadyActive: false,
+        session: payload,
+        displayName: payload.displayName,
+      };
+    }
+
+    async function cancelManualSession(state = null) {
+      const session = await getStoredManualSession(state);
+      if (!session?.active) {
+        await clearStoredManualSession();
+        return {
+          cancelled: false,
+          alreadyInactive: true,
+          session: null,
+        };
+      }
+      await defaultRestoreCheckoutScopedProxySnapshot(session.baseSnapshot);
+      await clearStoredManualSession();
+      return {
+        cancelled: true,
+        alreadyInactive: false,
+        session,
+      };
+    }
+
     async function cleanupResidualSession(state = null, context = {}) {
       const existingSession = await getStoredSession(state);
       if (!existingSession) {
@@ -425,6 +551,10 @@
       const proxyUrl = normalizeCheckoutConversionProxyUrl(state?.plusCheckoutConversionProxyUrl);
       if (!proxyUrl) {
         return null;
+      }
+      const manualSession = await getStoredManualSession(state);
+      if (manualSession?.active) {
+        throw new Error(`当前已手动启用支付转换代理 ${manualSession.displayName}。请先点击“取消代理”后再运行支付流程。`);
       }
       await cleanupResidualSession(state, {
         failureMessage: `检测到残留的支付转换代理会话，无法在当前支付提交前继续切换代理。请先处理残留代理：${sessionOptions.flowType || 'unknown'}`,
@@ -549,6 +679,7 @@
 
     return {
       CHECKOUT_CONVERSION_PROXY_SESSION_KEY,
+      CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY,
       CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS,
       CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
       defaultApplyCheckoutScopedProxyFromUrl,
@@ -561,6 +692,11 @@
       persistSession,
       clearStoredSession,
       restoreSession,
+      getStoredManualSession,
+      persistManualSession,
+      clearStoredManualSession,
+      switchManualSession,
+      cancelManualSession,
       cleanupResidualSession,
       applySessionFromState,
       releaseSessionForNode,
@@ -570,6 +706,7 @@
 
   return {
     CHECKOUT_CONVERSION_PROXY_SESSION_KEY,
+    CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY,
     CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS,
     CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
     createCheckoutConversionProxyManager,

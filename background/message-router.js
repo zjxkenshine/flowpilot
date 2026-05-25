@@ -1886,6 +1886,61 @@
           return { ok: true, ...result };
         }
 
+        case 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL': {
+          if (!checkoutConversionProxyManager?.switchManualSession) {
+            throw new Error('支付转换代理手动切换能力尚未接入。');
+          }
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能手动切换支付转换代理。');
+          }
+          const result = await checkoutConversionProxyManager.switchManualSession({
+            state,
+            proxyUrl: message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl,
+          });
+          const patch = {
+            plusCheckoutConversionProxyManualSession: result?.session || null,
+          };
+          if (message.payload?.proxyUrl !== undefined || state?.plusCheckoutConversionProxyUrl !== undefined) {
+            patch.plusCheckoutConversionProxyUrl = message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl ?? '';
+          }
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(patch);
+          }
+          return {
+            ok: true,
+            switched: Boolean(result?.switched),
+            alreadyActive: Boolean(result?.alreadyActive),
+            plusCheckoutConversionProxyManualSession: result?.session || null,
+            plusCheckoutConversionProxyUrl: patch.plusCheckoutConversionProxyUrl,
+            displayName: String(result?.displayName || result?.session?.displayName || '').trim(),
+          };
+        }
+
+        case 'CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL': {
+          if (!checkoutConversionProxyManager?.cancelManualSession) {
+            throw new Error('支付转换代理取消能力尚未接入。');
+          }
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能取消支付转换代理。');
+          }
+          const result = await checkoutConversionProxyManager.cancelManualSession(state);
+          const patch = {
+            plusCheckoutConversionProxyManualSession: null,
+          };
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(patch);
+          }
+          return {
+            ok: true,
+            cancelled: Boolean(result?.cancelled),
+            alreadyInactive: Boolean(result?.alreadyInactive),
+            plusCheckoutConversionProxyManualSession: null,
+            displayName: String(result?.session?.displayName || '').trim(),
+          };
+        }
+
         case 'FETCH_HOSTED_CHECKOUT_VERIFICATION_CODE': {
           if (typeof plusCheckoutCreateExecutor?.fetchHostedCheckoutVerificationCodeManually !== 'function') {
             throw new Error('hosted checkout 手动取码能力尚未接入。');

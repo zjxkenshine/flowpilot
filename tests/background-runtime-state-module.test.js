@@ -171,3 +171,59 @@ test('runtime-state patch prefers explicit activeFlowId over stale legacy flowId
     'kiro-open-register-page': 'running',
   });
 });
+
+test('runtime-state view preserves manual checkout conversion proxy session in openai plus group', () => {
+  const api = loadRuntimeStateApi();
+  const helpers = api.createRuntimeStateHelpers({
+    DEFAULT_ACTIVE_FLOW_ID: 'openai',
+    defaultNodeStatuses: {
+      'open-chatgpt': 'pending',
+    },
+  });
+
+  const view = helpers.buildStateView({
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      proxyUrl: 'http://proxy.example:8080',
+      displayName: 'http://proxy.example:8080',
+      entry: {
+        protocol: 'http',
+        host: 'proxy.example',
+        port: 8080,
+      },
+      baseSnapshot: { applied: true },
+      appliedAt: 100,
+      lastSwitchedAt: 200,
+    },
+  });
+
+  assert.deepStrictEqual(view.runtimeState.flowState.openai.plus.plusCheckoutConversionProxyManualSession, {
+    active: true,
+    mode: 'manual',
+    proxyUrl: 'http://proxy.example:8080',
+    displayName: 'http://proxy.example:8080',
+    entry: {
+      protocol: 'http',
+      host: 'proxy.example',
+      port: 8080,
+    },
+    baseSnapshot: { applied: true },
+    appliedAt: 100,
+    lastSwitchedAt: 200,
+  });
+  assert.deepStrictEqual(view.plusCheckoutConversionProxyManualSession, {
+    active: true,
+    mode: 'manual',
+    proxyUrl: 'http://proxy.example:8080',
+    displayName: 'http://proxy.example:8080',
+    entry: {
+      protocol: 'http',
+      host: 'proxy.example',
+      port: 8080,
+    },
+    baseSnapshot: { applied: true },
+    appliedAt: 100,
+    lastSwitchedAt: 200,
+  });
+});

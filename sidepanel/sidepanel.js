@@ -288,7 +288,11 @@ const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkou
 const inputPlusCheckoutConversionProxy = document.getElementById('input-plus-checkout-conversion-proxy');
 const rowPlusCheckoutConversionProxyTest = document.getElementById('row-plus-checkout-conversion-proxy-test');
 const btnPlusCheckoutConversionProxyTest = document.getElementById('btn-plus-checkout-conversion-proxy-test');
+const btnPlusCheckoutConversionProxySwitch = document.getElementById('btn-plus-checkout-conversion-proxy-switch');
+const btnPlusCheckoutConversionProxyCancel = document.getElementById('btn-plus-checkout-conversion-proxy-cancel');
 const displayPlusCheckoutConversionProxyTestResult = document.getElementById('display-plus-checkout-conversion-proxy-test-result');
+const rowPlusCheckoutConversionProxyRuntime = document.getElementById('row-plus-checkout-conversion-proxy-runtime');
+const displayPlusCheckoutConversionProxyRuntimeStatus = document.getElementById('display-plus-checkout-conversion-proxy-runtime-status');
 const rowGpcHelperApi = document.getElementById('row-gpc-helper-api');
 const inputGpcHelperApi = document.getElementById('input-gpc-helper-api');
 const btnGpcHelperConvertApiKey = document.getElementById('btn-gpc-helper-convert-api-key');
@@ -10270,12 +10274,16 @@ function updatePlusModeUI() {
   [
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
+    typeof rowPlusCheckoutConversionProxyRuntime !== 'undefined' ? rowPlusCheckoutConversionProxyRuntime : null,
   ].forEach((row) => {
     if (!row) {
       return;
     }
     row.style.display = enabled ? '' : 'none';
   });
+  if (enabled) {
+    renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
+  }
   [
     typeof rowPlusAccountAccessStrategy !== 'undefined' ? rowPlusAccountAccessStrategy : null,
   ].forEach((row) => {
@@ -11604,6 +11612,7 @@ function applySettingsState(state) {
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(state?.plusCheckoutConversionProxyUrl || '');
   }
+  renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
   setLocalCpaStep9Mode(state?.localCpaStep9Mode);
@@ -16109,6 +16118,74 @@ function setPlusCheckoutConversionProxyTestResult(message = '未测试', options
   }
 }
 
+function getPlusCheckoutConversionProxyManualSession(state = latestState) {
+  const session = state?.plusCheckoutConversionProxyManualSession;
+  return session && typeof session === 'object' && !Array.isArray(session) && session.active
+    ? session
+    : null;
+}
+
+function setPlusCheckoutConversionProxyButtonsBusy(isBusy = false, labels = {}) {
+  const busy = Boolean(isBusy);
+  if (btnPlusCheckoutConversionProxyTest) {
+    btnPlusCheckoutConversionProxyTest.disabled = busy;
+    if (labels.test) {
+      btnPlusCheckoutConversionProxyTest.textContent = labels.test;
+    } else if (!busy) {
+      btnPlusCheckoutConversionProxyTest.textContent = '测试代理';
+    }
+  }
+  if (btnPlusCheckoutConversionProxySwitch) {
+    btnPlusCheckoutConversionProxySwitch.disabled = busy;
+    if (labels.switch) {
+      btnPlusCheckoutConversionProxySwitch.textContent = labels.switch;
+    } else if (!busy) {
+      btnPlusCheckoutConversionProxySwitch.textContent = '切换代理';
+    }
+  }
+  if (btnPlusCheckoutConversionProxyCancel) {
+    btnPlusCheckoutConversionProxyCancel.disabled = busy;
+    if (labels.cancel) {
+      btnPlusCheckoutConversionProxyCancel.textContent = labels.cancel;
+    } else if (!busy) {
+      btnPlusCheckoutConversionProxyCancel.textContent = '取消代理';
+    }
+  }
+}
+
+function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
+  if (!displayPlusCheckoutConversionProxyRuntimeStatus) {
+    return;
+  }
+  const session = getPlusCheckoutConversionProxyManualSession(state);
+  const inputProxyUrl = normalizePlusCheckoutConversionProxyUrlValue(
+    typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy
+      ? inputPlusCheckoutConversionProxy.value
+      : state?.plusCheckoutConversionProxyUrl || ''
+  );
+  let text = '手动代理未开启';
+  let title = text;
+  let nextClass = '';
+  if (session?.active) {
+    const displayName = String(session.displayName || '').trim() || '未知代理';
+    if (inputProxyUrl && inputProxyUrl !== String(session.proxyUrl || '').trim()) {
+      text = `当前生效：${displayName}；待切换：${inputProxyUrl}`;
+      title = text;
+      nextClass = 'state-pending';
+    } else {
+      text = `当前生效：${displayName}`;
+      title = text;
+      nextClass = 'state-active';
+    }
+  }
+  displayPlusCheckoutConversionProxyRuntimeStatus.textContent = text;
+  displayPlusCheckoutConversionProxyRuntimeStatus.title = title;
+  displayPlusCheckoutConversionProxyRuntimeStatus.classList.remove('state-active', 'state-pending');
+  if (nextClass) {
+    displayPlusCheckoutConversionProxyRuntimeStatus.classList.add(nextClass);
+  }
+}
+
 async function handlePlusCheckoutConversionProxyTest() {
   if (!btnPlusCheckoutConversionProxyTest || !inputPlusCheckoutConversionProxy) {
     return;
@@ -16125,9 +16202,7 @@ async function handlePlusCheckoutConversionProxyTest() {
     return;
   }
 
-  const previousLabel = btnPlusCheckoutConversionProxyTest.textContent;
-  btnPlusCheckoutConversionProxyTest.disabled = true;
-  btnPlusCheckoutConversionProxyTest.textContent = '测试中...';
+  setPlusCheckoutConversionProxyButtonsBusy(true, { test: '测试中...' });
   setPlusCheckoutConversionProxyTestResult('测试中...', {
     status: 'running',
     detail: '正在检测代理出口和 chatgpt.com 可达性。',
@@ -16166,8 +16241,67 @@ async function handlePlusCheckoutConversionProxyTest() {
     });
     showToast(message, 'error');
   } finally {
-    btnPlusCheckoutConversionProxyTest.disabled = false;
-    btnPlusCheckoutConversionProxyTest.textContent = previousLabel || '测试代理';
+    setPlusCheckoutConversionProxyButtonsBusy(false);
+  }
+}
+
+async function handlePlusCheckoutConversionProxyManualSwitch() {
+  if (!inputPlusCheckoutConversionProxy) {
+    return;
+  }
+  const proxyUrl = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
+  inputPlusCheckoutConversionProxy.value = proxyUrl;
+  if (!proxyUrl) {
+    showToast('请先填写支付转换代理地址。', 'error');
+    return;
+  }
+  setPlusCheckoutConversionProxyButtonsBusy(true, { switch: '切换中...' });
+  try {
+    const response = await sendRuntimeMessageWithTimeout({
+      type: 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
+      source: 'sidepanel',
+      payload: { proxyUrl },
+    }, 30000, '支付转换代理手动切换');
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    syncLatestState({
+      plusCheckoutConversionProxyManualSession: response?.plusCheckoutConversionProxyManualSession || null,
+      plusCheckoutConversionProxyUrl: response?.plusCheckoutConversionProxyUrl ?? proxyUrl,
+    });
+    renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
+    if (response?.alreadyActive) {
+      showToast(`当前代理已生效：${response?.displayName || proxyUrl}`, 'info', 2200);
+      return;
+    }
+    showToast(`已切换支付转换代理：${response?.displayName || proxyUrl}`, 'success', 2200);
+  } finally {
+    setPlusCheckoutConversionProxyButtonsBusy(false);
+  }
+}
+
+async function handlePlusCheckoutConversionProxyManualCancel() {
+  setPlusCheckoutConversionProxyButtonsBusy(true, { cancel: '取消中...' });
+  try {
+    const response = await sendRuntimeMessageWithTimeout({
+      type: 'CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
+      source: 'sidepanel',
+      payload: {},
+    }, 30000, '支付转换代理取消');
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    syncLatestState({
+      plusCheckoutConversionProxyManualSession: null,
+    });
+    renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
+    if (response?.alreadyInactive) {
+      showToast('当前没有手动开启的支付转换代理。', 'info', 2200);
+      return;
+    }
+    showToast('已取消支付转换代理，并恢复切换前网络环境。', 'success', 2200);
+  } finally {
+    setPlusCheckoutConversionProxyButtonsBusy(false);
   }
 }
 
@@ -16214,6 +16348,7 @@ inputHostedCheckoutPhone?.addEventListener('blur', () => {
 
 inputPlusCheckoutConversionProxy?.addEventListener('input', () => {
   setPlusCheckoutConversionProxyTestResult('未测试');
+  renderPlusCheckoutConversionProxyRuntimeStatus();
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
 });
@@ -16221,12 +16356,25 @@ inputPlusCheckoutConversionProxy?.addEventListener('input', () => {
 inputPlusCheckoutConversionProxy?.addEventListener('blur', () => {
   inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
   setPlusCheckoutConversionProxyTestResult('未测试');
+  renderPlusCheckoutConversionProxyRuntimeStatus();
   saveSettings({ silent: true }).catch(() => { });
 });
 
 btnPlusCheckoutConversionProxyTest?.addEventListener('click', () => {
   handlePlusCheckoutConversionProxyTest().catch((error) => {
     showToast(error?.message || String(error || '支付转换代理测试失败'), 'error');
+  });
+});
+
+btnPlusCheckoutConversionProxySwitch?.addEventListener('click', () => {
+  handlePlusCheckoutConversionProxyManualSwitch().catch((error) => {
+    showToast(error?.message || String(error || '支付转换代理切换失败'), 'error');
+  });
+});
+
+btnPlusCheckoutConversionProxyCancel?.addEventListener('click', () => {
+  handlePlusCheckoutConversionProxyManualCancel().catch((error) => {
+    showToast(error?.message || String(error || '支付转换代理取消失败'), 'error');
   });
 });
 
@@ -18888,6 +19036,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.plusCheckoutConversionProxyUrl !== undefined && inputPlusCheckoutConversionProxy) {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
+      }
+      if (
+        message.payload.plusCheckoutConversionProxyManualSession !== undefined
+        || message.payload.plusCheckoutConversionProxyUrl !== undefined
+      ) {
+        renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
       }
       if (message.payload.gopayHelperPhoneMode !== undefined && selectGpcHelperPhoneMode) {
         selectGpcHelperPhoneMode.value = normalizeGpcHelperPhoneModeValue(message.payload.gopayHelperPhoneMode);

@@ -1720,3 +1720,85 @@ test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY is rejected while auto-run is locked',
   );
   assert.equal(called, false);
 });
+
+test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session when auto-run is idle', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const broadcasts = [];
+  const calls = [];
+
+  const router = api.createMessageRouter({
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    checkoutConversionProxyManager: {
+      switchManualSession: async (options) => {
+        calls.push(options);
+        return {
+          switched: true,
+          alreadyActive: false,
+          displayName: 'socks5://proxy.example:1080',
+          session: {
+            active: true,
+            mode: 'manual',
+            proxyUrl: 'socks5h://proxy.example:1080',
+            displayName: 'socks5://proxy.example:1080',
+          },
+        };
+      },
+    },
+    getState: async () => ({
+      autoRunning: false,
+      plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+    }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+  });
+
+  const response = await router.handleMessage({
+    type: 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
+    source: 'sidepanel',
+    payload: { proxyUrl: 'socks5h://proxy.example:1080' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.switched, true);
+  assert.equal(response.displayName, 'socks5://proxy.example:1080');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].proxyUrl, 'socks5h://proxy.example:1080');
+  assert.deepStrictEqual(broadcasts[0], {
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      proxyUrl: 'socks5h://proxy.example:1080',
+      displayName: 'socks5://proxy.example:1080',
+    },
+    plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+  });
+});
+
+test('CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL is rejected while auto-run is locked', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let called = false;
+
+  const router = api.createMessageRouter({
+    checkoutConversionProxyManager: {
+      cancelManualSession: async () => {
+        called = true;
+        return { cancelled: true };
+      },
+    },
+    getState: async () => ({ autoRunning: true }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
+      source: 'sidepanel',
+      payload: {},
+    }, {}),
+    /自动流程运行中/
+  );
+  assert.equal(called, false);
+});

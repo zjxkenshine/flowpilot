@@ -175,6 +175,7 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_sessio
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const rowPayPalAccount = { style: { display: '' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return { updatePlusModeUI, selectPlusPaymentMethod, rowPayPalAccount };
 `)();
@@ -227,6 +228,7 @@ const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
 const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
 const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return {
   updatePlusModeUI,
@@ -295,6 +297,7 @@ const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
 const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
 const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return {
   updatePlusModeUI,
@@ -346,30 +349,90 @@ const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const rowPlusPaymentMethod = { style: { display: 'none' } };
 const rowPlusCheckoutConversionProxy = { style: { display: 'none' } };
 const rowPlusCheckoutConversionProxyTest = { style: { display: 'none' } };
+const rowPlusCheckoutConversionProxyRuntime = { style: { display: 'none' } };
 const rowPayPalAccount = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return {
   updatePlusModeUI,
   inputPlusModeEnabled,
   inputPhonePlusModeEnabled,
-  rows: { rowPlusCheckoutConversionProxy, rowPlusCheckoutConversionProxyTest },
+  rows: { rowPlusCheckoutConversionProxy, rowPlusCheckoutConversionProxyTest, rowPlusCheckoutConversionProxyRuntime },
 };
 `)();
 
   api.updatePlusModeUI();
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, '');
 
   api.inputPlusModeEnabled.checked = false;
   api.inputPhonePlusModeEnabled.checked = true;
   api.updatePlusModeUI();
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, '');
 
   api.inputPhonePlusModeEnabled.checked = false;
   api.updatePlusModeUI();
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, 'none');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, 'none');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, 'none');
+});
+
+test('sidepanel renders manual checkout conversion proxy runtime status for active and draft states', () => {
+  const bundle = [
+    extractFunction('normalizePlusCheckoutConversionProxyUrlValue'),
+    extractFunction('getPlusCheckoutConversionProxyManualSession'),
+    extractFunction('renderPlusCheckoutConversionProxyRuntimeStatus'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {
+  plusCheckoutConversionProxyManualSession: null,
+  plusCheckoutConversionProxyUrl: '',
+};
+const inputPlusCheckoutConversionProxy = { value: '' };
+const displayPlusCheckoutConversionProxyRuntimeStatus = {
+  textContent: '',
+  title: '',
+  classList: {
+    active: new Set(),
+    remove(...names) { names.forEach((name) => this.active.delete(name)); },
+    add(name) { this.active.add(name); },
+    has(name) { return this.active.has(name); },
+  },
+};
+${bundle}
+return {
+  renderPlusCheckoutConversionProxyRuntimeStatus,
+  inputPlusCheckoutConversionProxy,
+  displayPlusCheckoutConversionProxyRuntimeStatus,
+  setState(nextState) { latestState = { ...latestState, ...nextState }; },
+  getText() { return displayPlusCheckoutConversionProxyRuntimeStatus.textContent; },
+  hasClass(name) { return displayPlusCheckoutConversionProxyRuntimeStatus.classList.has(name); },
+};
+`)();
+
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), '手动代理未开启');
+
+  api.setState({
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      proxyUrl: 'http://proxy-a.example:8080',
+      displayName: 'http://proxy-a.example:8080',
+    },
+  });
+  api.inputPlusCheckoutConversionProxy.value = 'http://proxy-a.example:8080';
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), '当前生效：http://proxy-a.example:8080');
+  assert.equal(api.hasClass('state-active'), true);
+
+  api.inputPlusCheckoutConversionProxy.value = 'socks5h://proxy-b.example:1080';
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), '当前生效：http://proxy-a.example:8080；待切换：socks5h://proxy-b.example:1080');
+  assert.equal(api.hasClass('state-pending'), true);
 });
 
 test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {
@@ -541,6 +604,7 @@ const rowGoPayCountryCode = { style: { display: 'none' } };
 const rowGoPayPhone = { style: { display: 'none' } };
 const rowGoPayOtp = { style: { display: 'none' } };
 const rowGoPayPin = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return {
   updatePlusModeUI,
@@ -640,6 +704,7 @@ const rowGpcHelperLocalSmsEnabled = { style: { display: 'none' } };
 const inputGpcHelperLocalSmsEnabled = { checked: false };
 const rowGpcHelperLocalSmsUrl = { style: { display: 'none' } };
 const rowGpcHelperPin = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return { updatePlusModeUI, selectGpcHelperPhoneMode, plusPaymentMethodCaption, rows: { rowGpcHelperPhoneMode, rowGpcHelperPhone, rowGpcHelperOtpChannel, rowGpcHelperPin } };
 `)();
@@ -703,6 +768,7 @@ const rowGpcHelperLocalSmsEnabled = { style: { display: 'none' } };
 const inputGpcHelperLocalSmsEnabled = { checked: false };
 const rowGpcHelperLocalSmsUrl = { style: { display: 'none' } };
 const rowGpcHelperPin = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 function syncLatestState(nextState) { latestState = { ...latestState, ...nextState }; }
 return {
@@ -786,6 +852,7 @@ const rowGpcHelperLocalSmsEnabled = { style: { display: 'none' } };
 const inputGpcHelperLocalSmsEnabled = { checked: false };
 const rowGpcHelperLocalSmsUrl = { style: { display: 'none' } };
 const rowGpcHelperPin = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
 ${bundle}
 return { updatePlusModeUI, selectGpcHelperPhoneMode, plusPaymentMethodCaption, rows: { rowGpcHelperPhoneMode, rowGpcHelperPhone, rowGpcHelperOtpChannel, rowGpcHelperPin } };
 `)();

@@ -560,6 +560,154 @@ test('checkout conversion proxy getStoredSession tolerates null runtime session'
   assert.equal(session, null);
 });
 
+test('checkout conversion proxy manual switch persists base snapshot and cancel restores original settings', async () => {
+  let state = {
+    plusCheckoutConversionProxyManualSession: null,
+    plusCheckoutConversionProxyUrl: '',
+  };
+  let authEntry = {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  };
+  let currentProxyValue = {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  };
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+  });
+
+  const first = await manager.switchManualSession({ proxyUrl: 'socks5h://user:pass@proxy-a.example:1080' });
+  assert.equal(first.switched, true);
+  assert.equal(first.session.proxyUrl, 'socks5h://user:pass@proxy-a.example:1080');
+  assert.equal(first.session.baseSnapshot.previousProxySettings.value.mode, 'pac_script');
+
+  currentProxyValue = {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'socks5',
+        host: 'proxy-a.example',
+        port: 1080,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  };
+
+  const second = await manager.switchManualSession({
+    state,
+    proxyUrl: 'http://proxy-b.example:8080',
+  });
+  assert.equal(second.switched, true);
+  assert.equal(second.session.proxyUrl, 'http://proxy-b.example:8080');
+  assert.equal(second.session.baseSnapshot.previousProxySettings.value.mode, 'pac_script');
+
+  const cancelResult = await manager.cancelManualSession(state);
+  assert.equal(cancelResult.cancelled, true);
+  assert.equal(state.plusCheckoutConversionProxyManualSession, null);
+  assert.deepStrictEqual(currentProxyValue, {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  });
+  assert.deepStrictEqual(authEntry, {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  });
+});
+
+test('checkout conversion proxy manual switch is noop for same proxy and blocks auto flow session apply', async () => {
+  let state = {
+    plusCheckoutConversionProxyUrl: 'http://saved.proxy:8080',
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      proxyUrl: 'http://saved.proxy:8080',
+      displayName: 'http://saved.proxy:8080',
+      entry: {
+        protocol: 'http',
+        host: 'saved.proxy',
+        port: 8080,
+        username: '',
+        password: '',
+      },
+      baseSnapshot: {
+        applied: true,
+        entry: {
+          protocol: 'http',
+          host: 'saved.proxy',
+          port: 8080,
+          username: '',
+          password: '',
+        },
+        previousProxySettings: {
+          value: {
+            mode: 'pac_script',
+            pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+          },
+        },
+        previousAuthEntry: null,
+      },
+      appliedAt: 100,
+      lastSwitchedAt: 100,
+    },
+  };
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: { runtime: {} },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const sameProxy = await manager.switchManualSession({
+    state,
+    proxyUrl: 'http://saved.proxy:8080',
+  });
+  assert.equal(sameProxy.switched, false);
+  assert.equal(sameProxy.alreadyActive, true);
+
+  await assert.rejects(
+    () => manager.applySessionFromState(state, {
+      flowType: 'classic-paypal',
+      releaseNodeKey: 'paypal-approve',
+      appliedStepKey: 'plus-checkout-billing',
+    }),
+    /请先点击“取消代理”/
+  );
+});
+
 test('PayPal no-card binding create opens and submits hosted OpenAI checkout before completing', async () => {
   const events = [];
   let currentUrl = 'https://chatgpt.com/';

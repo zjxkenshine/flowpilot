@@ -48,6 +48,7 @@
         'plusCheckoutCurrency',
         'plusCheckoutSource',
         'plusCheckoutConversionProxySession',
+        'plusCheckoutConversionProxyManualSession',
         'plusBillingCountryText',
         'plusBillingAddress',
         'plusPaypalApprovedAt',

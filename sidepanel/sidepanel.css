@@ -1391,6 +1391,18 @@ header {
   color: var(--red);
 }
 
+.plus-checkout-conversion-proxy-runtime-status {
+  color: var(--muted);
+}
+
+.plus-checkout-conversion-proxy-runtime-status.state-active {
+  color: var(--green);
+}
+
+.plus-checkout-conversion-proxy-runtime-status.state-pending {
+  color: var(--amber);
+}
+
 .input-with-icon {
   position: relative;
   flex: 1;
