@@ -985,6 +985,120 @@ test('SAVE_SETTING applies shared mode-switch normalization before persisting in
   assert.equal(response.modeValidation?.errors?.[0]?.code, 'plus_mode_unsupported');
 });
 
+test('SAVE_SETTING treats Phone Plus changes as signup and step topology updates', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const persistedPayloads = [];
+  const broadcasts = [];
+  let state = {
+    activeFlowId: 'openai',
+    signupMethod: 'email',
+    phoneVerificationEnabled: false,
+    plusModeEnabled: true,
+    phonePlusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+    plusAccountAccessStrategy: 'sub2api_codex_session',
+    currentNodeId: 'sub2api-session-import',
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'plus-checkout-create': 'completed',
+      'sub2api-session-import': 'running',
+    },
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({
+      phonePlusModeEnabled: Boolean(input.phonePlusModeEnabled),
+      plusModeEnabled: Boolean(input.plusModeEnabled),
+      phoneVerificationEnabled: Boolean(input.phoneVerificationEnabled),
+      signupMethod: String(input.signupMethod || 'email'),
+      plusAccountAccessStrategy: String(input.plusAccountAccessStrategy || 'oauth'),
+    }),
+    broadcastDataUpdate: (payload) => broadcasts.push({ ...payload }),
+    getNodeIdsForState: (nextState = {}) => (
+      nextState.phonePlusModeEnabled
+        ? [
+          'open-chatgpt',
+          'submit-signup-email',
+          'fill-password',
+          'fetch-signup-code',
+          'fill-profile',
+          'wait-registration-success',
+          'plus-checkout-create',
+          'plus-checkout-billing',
+          'paypal-approve',
+          'plus-checkout-return',
+          'oauth-login',
+          'fetch-login-code',
+          'bind-email',
+          'fetch-bind-email-code',
+          'confirm-oauth',
+          'platform-verify',
+        ]
+        : ['open-chatgpt', 'plus-checkout-create', 'sub2api-session-import']
+    ),
+    getState: async () => ({ ...state }),
+    resolveSignupMethod: (nextState = {}) => (nextState.phonePlusModeEnabled ? 'phone' : 'email'),
+    setPersistentSettings: async (updates) => {
+      persistedPayloads.push({ ...updates });
+      return { ...updates };
+    },
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    validateModeSwitch: () => ({
+      ok: true,
+      errors: [],
+      normalizedUpdates: {
+        phonePlusModeEnabled: true,
+        plusModeEnabled: false,
+        phoneVerificationEnabled: true,
+        signupMethod: 'phone',
+        plusAccountAccessStrategy: 'oauth',
+      },
+    }),
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      phonePlusModeEnabled: true,
+      plusModeEnabled: true,
+      phoneVerificationEnabled: false,
+      signupMethod: 'email',
+      plusAccountAccessStrategy: 'sub2api_codex_session',
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.phonePlusModeEnabled, true);
+  assert.equal(state.plusModeEnabled, false);
+  assert.equal(state.phoneVerificationEnabled, true);
+  assert.equal(state.signupMethod, 'phone');
+  assert.equal(state.plusAccountAccessStrategy, 'oauth');
+  assert.equal(state.currentNodeId, '');
+  assert.equal(state.nodeStatuses['wait-registration-success'], 'pending');
+  assert.equal(state.nodeStatuses['plus-checkout-create'], 'pending');
+  assert.equal(state.nodeStatuses['bind-email'], 'pending');
+  assert.equal(Object.prototype.hasOwnProperty.call(state.nodeStatuses, 'sub2api-session-import'), false);
+  assert.deepEqual(persistedPayloads[0], {
+    phonePlusModeEnabled: true,
+    plusModeEnabled: false,
+    phoneVerificationEnabled: true,
+    signupMethod: 'phone',
+    plusAccountAccessStrategy: 'oauth',
+  });
+  assert.equal(broadcasts.at(-1).phonePlusModeEnabled, true);
+  assert.equal(broadcasts.at(-1).plusModeEnabled, false);
+  assert.equal(broadcasts.at(-1).phoneVerificationEnabled, true);
+  assert.equal(broadcasts.at(-1).signupMethod, 'phone');
+  assert.equal(broadcasts.at(-1).plusAccountAccessStrategy, 'oauth');
+  assert.equal(broadcasts.at(-1).currentNodeId, '');
+});
+
 test('REFRESH_IP_PROXY_POOL prefers sidepanel ipProxyStateOverride over stale saved proxy API URL', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const calls = [];

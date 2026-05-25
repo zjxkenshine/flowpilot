@@ -52,6 +52,99 @@ test('flow capability registry keeps OpenAI phone signup available only when run
   assert.deepEqual(plusLockedState.effectiveSignupMethods, ['email']);
 });
 
+test('flow capability registry forces Phone Plus to phone signup, SMS, normal Plus off, and OAuth', () => {
+  const api = loadApi();
+  const registry = api.createFlowCapabilityRegistry();
+
+  const capabilityState = registry.resolveSidepanelCapabilities({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'cpa',
+      phoneVerificationEnabled: false,
+      plusModeEnabled: true,
+      phonePlusModeEnabled: true,
+      signupMethod: 'email',
+      plusAccountAccessStrategy: 'cpa_codex_session',
+    },
+  });
+
+  assert.equal(capabilityState.runtimeLocks.plusModeEnabled, false);
+  assert.equal(capabilityState.runtimeLocks.phonePlusModeEnabled, true);
+  assert.equal(capabilityState.runtimeLocks.phoneVerificationEnabled, true);
+  assert.equal(capabilityState.effectiveSignupMethod, 'phone');
+  assert.deepEqual(capabilityState.availablePlusAccountAccessStrategies, ['oauth']);
+  assert.equal(capabilityState.effectivePlusAccountAccessStrategy, 'oauth');
+  assert.equal(capabilityState.canEditPlusAccountAccessStrategy, false);
+  assert.equal(capabilityState.stepDefinitionOptions.plusModeEnabled, false);
+  assert.equal(capabilityState.stepDefinitionOptions.phonePlusModeEnabled, true);
+  assert.equal(capabilityState.stepDefinitionOptions.signupMethod, 'phone');
+  assert.equal(capabilityState.stepDefinitionOptions.plusAccountAccessStrategy, 'oauth');
+
+  const validation = registry.validateModeSwitch({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'cpa',
+      phoneVerificationEnabled: false,
+      plusModeEnabled: true,
+      phonePlusModeEnabled: true,
+      signupMethod: 'email',
+      plusAccountAccessStrategy: 'cpa_codex_session',
+    },
+    changedKeys: ['phonePlusModeEnabled'],
+  });
+
+  assert.equal(validation.ok, true);
+  assert.deepEqual(validation.normalizedUpdates, {
+    plusModeEnabled: false,
+    phoneVerificationEnabled: true,
+    signupMethod: 'phone',
+    plusAccountAccessStrategy: 'oauth',
+  });
+});
+
+test('flow capability registry blocks Phone Plus for contribution mode and phone-unsupported targets', () => {
+  const api = loadApi();
+  const registry = api.createFlowCapabilityRegistry();
+
+  const contributionResult = registry.validateModeSwitch({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'cpa',
+      accountContributionEnabled: true,
+      phonePlusModeEnabled: true,
+      signupMethod: 'phone',
+    },
+    changedKeys: ['phonePlusModeEnabled'],
+  });
+
+  assert.equal(contributionResult.ok, false);
+  assert.equal(contributionResult.normalizedUpdates.phonePlusModeEnabled, false);
+  assert.equal(contributionResult.errors[0].code, 'phone_plus_contribution_mode_locked');
+
+  const targetLimitedRegistry = api.createFlowCapabilityRegistry({
+    targetCapabilities: {
+      ...api.OPENAI_TARGET_CAPABILITIES,
+      codex2api: {
+        ...api.OPENAI_TARGET_CAPABILITIES.codex2api,
+        supportsPhoneSignup: false,
+      },
+    },
+  });
+  const targetResult = targetLimitedRegistry.validateModeSwitch({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'codex2api',
+      phonePlusModeEnabled: true,
+      signupMethod: 'phone',
+    },
+    changedKeys: ['phonePlusModeEnabled'],
+  });
+
+  assert.equal(targetResult.ok, false);
+  assert.equal(targetResult.normalizedUpdates.phonePlusModeEnabled, false);
+  assert.equal(targetResult.errors[0].code, 'phone_plus_panel_unsupported');
+});
+
 test('flow capability registry defaults unknown flows to minimal non-phone capabilities', () => {
   const api = loadApi();
   const registry = api.createFlowCapabilityRegistry();
@@ -181,7 +274,7 @@ test('flow capability registry normalizes unsupported mode switches back to the 
     signupMethod: 'email',
     phoneVerificationEnabled: false,
     plusModeEnabled: false,
-    accountContributionEnabled: false,
+    phonePlusModeEnabled: false,
     accountContributionEnabled: false,
   });
   assert.deepEqual(

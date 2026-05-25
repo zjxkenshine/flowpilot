@@ -219,6 +219,30 @@ const PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = self.MultiPageStepDe
   signupMethod: 'phone',
   phoneSignupReloginAfterBindEmailEnabled: true,
 }) || PLUS_GPC_PHONE_STEP_DEFINITIONS;
+const PHONE_PLUS_PAYPAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  phonePlusModeEnabled: true,
+  plusPaymentMethod: 'paypal',
+  signupMethod: 'phone',
+}) || PLUS_PAYPAL_PHONE_STEP_DEFINITIONS;
+const PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  phonePlusModeEnabled: true,
+  plusPaymentMethod: 'paypal-hosted',
+  signupMethod: 'phone',
+}) || PHONE_PLUS_PAYPAL_STEP_DEFINITIONS;
+const PHONE_PLUS_GOPAY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  phonePlusModeEnabled: true,
+  plusPaymentMethod: 'gopay',
+  signupMethod: 'phone',
+}) || PHONE_PLUS_PAYPAL_STEP_DEFINITIONS;
+const PHONE_PLUS_GPC_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  phonePlusModeEnabled: true,
+  plusPaymentMethod: 'gpc-helper',
+  signupMethod: 'phone',
+}) || PHONE_PLUS_GOPAY_STEP_DEFINITIONS;
 const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
 const REGISTERED_STEP_FLOW_IDS = self.MultiPageStepDefinitions?.getRegisteredFlowIds?.() || [DEFAULT_ACTIVE_FLOW_ID];
 const ALL_STEP_DEFINITIONS = (() => {
@@ -260,6 +284,10 @@ const ALL_STEP_DEFINITIONS = (() => {
     ...PLUS_GPC_CPA_SESSION_STEP_DEFINITIONS,
     ...PLUS_GPC_PHONE_STEP_DEFINITIONS,
     ...PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    ...PHONE_PLUS_PAYPAL_STEP_DEFINITIONS,
+    ...PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS,
+    ...PHONE_PLUS_GOPAY_STEP_DEFINITIONS,
+    ...PHONE_PLUS_GPC_STEP_DEFINITIONS,
   ];
 })();
 const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
@@ -291,13 +319,33 @@ const PLUS_GPC_STEP_IDS = PLUS_GPC_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
+const PHONE_PLUS_PAYPAL_STEP_IDS = PHONE_PLUS_PAYPAL_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
+const PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS = PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
+const PHONE_PLUS_GOPAY_STEP_IDS = PHONE_PLUS_GOPAY_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
+const PHONE_PLUS_GPC_STEP_IDS = PHONE_PLUS_GPC_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
 const PLUS_STEP_IDS = PLUS_PAYPAL_STEP_IDS;
 const LAST_STEP_ID = Math.max(
   NORMAL_STEP_IDS[NORMAL_STEP_IDS.length - 1] || 10,
   PLUS_PAYPAL_STEP_IDS[PLUS_PAYPAL_STEP_IDS.length - 1] || 10,
   PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS[PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS.length - 1] || 10,
   PLUS_GOPAY_STEP_IDS[PLUS_GOPAY_STEP_IDS.length - 1] || 10,
-  PLUS_GPC_STEP_IDS[PLUS_GPC_STEP_IDS.length - 1] || 10
+  PLUS_GPC_STEP_IDS[PLUS_GPC_STEP_IDS.length - 1] || 10,
+  PHONE_PLUS_PAYPAL_STEP_IDS[PHONE_PLUS_PAYPAL_STEP_IDS.length - 1] || 10,
+  PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS[PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS.length - 1] || 10,
+  PHONE_PLUS_GOPAY_STEP_IDS[PHONE_PLUS_GOPAY_STEP_IDS.length - 1] || 10,
+  PHONE_PLUS_GPC_STEP_IDS[PHONE_PLUS_GPC_STEP_IDS.length - 1] || 10
 );
 const FINAL_OAUTH_CHAIN_START_STEP = 7;
 
@@ -826,8 +874,12 @@ function buildFlowContributionRuntimePatch(currentRuntime = {}, flowId = DEFAULT
   };
 }
 
+function isPhonePlusModeState(state = {}) {
+  return Boolean(state?.phonePlusModeEnabled);
+}
+
 function isPlusModeState(state = {}) {
-  return Boolean(state?.plusModeEnabled);
+  return Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
 }
 
 function normalizePlusPaymentMethod(value = '') {
@@ -891,7 +943,10 @@ function buildResolvedStepDefinitionState(state = {}) {
   const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
   const requestedActiveFlowId = String(state?.activeFlowId || state?.flowId || '').trim().toLowerCase() || defaultFlowId;
   const requestedSignupMethod = getSignupMethodForStepDefinitions(state);
-  const plusModeEnabled = isPlusModeState(state);
+  const phonePlusModeEnabled = typeof isPhonePlusModeState === 'function'
+    ? isPhonePlusModeState(state)
+    : Boolean(state?.phonePlusModeEnabled);
+  const plusModeEnabled = Boolean(state?.plusModeEnabled) && !phonePlusModeEnabled;
   const plusPaymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   const capabilityState = typeof resolveCurrentFlowCapabilities === 'function'
     ? resolveCurrentFlowCapabilities({
@@ -899,6 +954,7 @@ function buildResolvedStepDefinitionState(state = {}) {
       activeFlowId: requestedActiveFlowId,
       flowId: requestedActiveFlowId,
       plusModeEnabled,
+      phonePlusModeEnabled,
       plusPaymentMethod,
       signupMethod: requestedSignupMethod,
     }, {
@@ -924,6 +980,9 @@ function buildResolvedStepDefinitionState(state = {}) {
     plusModeEnabled: stepDefinitionOptions.plusModeEnabled === undefined
       ? plusModeEnabled
       : Boolean(stepDefinitionOptions.plusModeEnabled),
+    phonePlusModeEnabled: stepDefinitionOptions.phonePlusModeEnabled === undefined
+      ? phonePlusModeEnabled
+      : Boolean(stepDefinitionOptions.phonePlusModeEnabled),
     plusPaymentMethod,
     plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(
       stepDefinitionOptions.plusAccountAccessStrategy
@@ -945,6 +1004,7 @@ function getStepDefinitionsForState(state = {}) {
     const definitions = rootScope.MultiPageStepDefinitions.getSteps({
       activeFlowId,
       plusModeEnabled: Boolean(resolvedState?.plusModeEnabled),
+      phonePlusModeEnabled: Boolean(resolvedState?.phonePlusModeEnabled),
       plusPaymentMethod: normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod),
       plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(resolvedState?.plusAccountAccessStrategy),
       signupMethod: getSignupMethodForStepDefinitions(resolvedState),
@@ -957,6 +1017,19 @@ function getStepDefinitionsForState(state = {}) {
   const activeFlowId = String(resolvedState?.activeFlowId || '').trim().toLowerCase();
   if (activeFlowId && activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
     return [];
+  }
+  if (Boolean(resolvedState?.phonePlusModeEnabled)) {
+    const paymentMethod = normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod);
+    if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+      return PHONE_PLUS_GPC_STEP_DEFINITIONS;
+    }
+    if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+      return PHONE_PLUS_GOPAY_STEP_DEFINITIONS;
+    }
+    if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      return PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+    }
+    return PHONE_PLUS_PAYPAL_STEP_DEFINITIONS;
   }
   if (!Boolean(resolvedState?.plusModeEnabled)) {
     return NORMAL_STEP_DEFINITIONS;
@@ -1035,6 +1108,21 @@ function getStepIdsForState(state = {}) {
     return NORMAL_STEP_IDS;
   }
   const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+  const phonePlusModeEnabled = typeof isPhonePlusModeState === 'function'
+    ? isPhonePlusModeState(state)
+    : Boolean(state?.phonePlusModeEnabled);
+  if (phonePlusModeEnabled) {
+    if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+      return PHONE_PLUS_GPC_STEP_IDS;
+    }
+    if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+      return PHONE_PLUS_GOPAY_STEP_IDS;
+    }
+    if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      return PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS;
+    }
+    return PHONE_PLUS_PAYPAL_STEP_IDS;
+  }
   if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
     return PLUS_GPC_STEP_IDS;
   }
@@ -1295,6 +1383,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   codex2apiAdminKey: '',
   customPassword: '',
   plusModeEnabled: false,
+  phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusAccountAccessStrategy: 'oauth',
   hostedCheckoutVerificationUrl: '',
@@ -1474,6 +1563,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
   'plusModeEnabled',
+  'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
   'hostedCheckoutVerificationUrl',
@@ -1976,8 +2066,8 @@ function canUsePhoneSignup(state = {}) {
   if (capabilityState && typeof capabilityState.canUsePhoneSignup === 'boolean') {
     return capabilityState.canUsePhoneSignup;
   }
-  return Boolean(state?.phoneVerificationEnabled)
-    && !Boolean(state?.plusModeEnabled)
+  return Boolean(state?.phoneVerificationEnabled || state?.phonePlusModeEnabled)
+    && (!Boolean(state?.plusModeEnabled) || Boolean(state?.phonePlusModeEnabled))
     && !Boolean(state?.accountContributionEnabled);
 }
 
@@ -3407,6 +3497,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'freePhoneReuseEnabled':
     case 'freePhoneReuseAutoEnabled':
     case 'plusModeEnabled':
+    case 'phonePlusModeEnabled':
       return Boolean(value);
     case 'phoneSmsProvider':
       return normalizePhoneSmsProvider(value);
@@ -3704,8 +3795,40 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     ...payload,
     resolvedSignupMethod: null,
   };
+  const applyPhonePlusPersistentConstraints = () => {
+    if (!Boolean(payload.phonePlusModeEnabled)) {
+      return;
+    }
+    payload.plusModeEnabled = false;
+    payload.phoneVerificationEnabled = true;
+    payload.signupMethod = SIGNUP_METHOD_PHONE;
+    payload.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    nextSignupConstraintState.plusModeEnabled = false;
+    nextSignupConstraintState.phoneVerificationEnabled = true;
+    nextSignupConstraintState.signupMethod = SIGNUP_METHOD_PHONE;
+    nextSignupConstraintState.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    if (isPlainObjectForSettingsSchema(payload.settingsState)) {
+      payload.settingsState = mergeSettingsStatePatch(payload.settingsState, {
+        flows: {
+          openai: {
+            signup: {
+              signupMethod: SIGNUP_METHOD_PHONE,
+              phoneVerificationEnabled: true,
+            },
+            plus: {
+              plusModeEnabled: false,
+              phonePlusModeEnabled: true,
+              plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+            },
+          },
+        },
+      });
+    }
+  };
+  applyPhonePlusPersistentConstraints();
   if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'plusModeEnabled')
+    || Object.prototype.hasOwnProperty.call(payload, 'phonePlusModeEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')
     || Object.prototype.hasOwnProperty.call(payload, 'panelMode')
     || Object.prototype.hasOwnProperty.call(payload, 'activeFlowId')) {
@@ -3790,6 +3913,19 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
           ? { settingsSchemaVersion: normalizedInput.settingsSchemaVersion }
           : {}),
       }, payload));
+      applyPhonePlusPersistentConstraints();
+      if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
+        || Object.prototype.hasOwnProperty.call(payload, 'plusModeEnabled')
+        || Object.prototype.hasOwnProperty.call(payload, 'phonePlusModeEnabled')
+        || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')
+        || Object.prototype.hasOwnProperty.call(payload, 'panelMode')
+        || Object.prototype.hasOwnProperty.call(payload, 'activeFlowId')) {
+        payload.signupMethod = resolveSignupMethod({
+          ...PERSISTED_SETTING_DEFAULTS,
+          ...payload,
+          resolvedSignupMethod: null,
+        });
+      }
     }
   }
 
@@ -3881,6 +4017,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('phoneVerificationEnabled', ['flows', 'openai', 'signup', 'phoneVerificationEnabled']);
   assignIfUpdated('phoneSignupReloginAfterBindEmailEnabled', ['flows', 'openai', 'signup', 'phoneSignupReloginAfterBindEmailEnabled']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
+  assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
@@ -4351,6 +4488,7 @@ async function importSettingsBundle(configBundle) {
   if (
     Object.prototype.hasOwnProperty.call(importedSettings, 'phoneVerificationEnabled')
     || Object.prototype.hasOwnProperty.call(importedSettings, 'plusModeEnabled')
+    || Object.prototype.hasOwnProperty.call(importedSettings, 'phonePlusModeEnabled')
     || Object.prototype.hasOwnProperty.call(importedSettings, 'signupMethod')
     || Object.prototype.hasOwnProperty.call(importedSettings, 'panelMode')
     || Object.prototype.hasOwnProperty.call(importedSettings, 'activeFlowId')
@@ -9554,12 +9692,21 @@ function isGpcCheckoutRestartRequiredFailure(error) {
 
 function isPlusCheckoutRestartStep(step, stepExecutionKey = '', state = {}) {
   const normalizedKey = String(stepExecutionKey || '').trim();
-  if (normalizedKey === 'plus-checkout-create'
-    || normalizedKey === 'plus-checkout-billing'
-    || normalizedKey === 'gopay-subscription-confirm') {
+  const restartStepKeys = new Set([
+    'plus-checkout-create',
+    'plus-checkout-billing',
+    'gopay-subscription-confirm',
+  ]);
+  if (restartStepKeys.has(normalizedKey)) {
     return true;
   }
   const numericStep = Number(step);
+  if (Number.isInteger(numericStep) && numericStep > 0 && typeof getStepDefinitionForState === 'function') {
+    const resolvedKey = String(getStepDefinitionForState(numericStep, state)?.key || '').trim();
+    if (restartStepKeys.has(resolvedKey)) {
+      return true;
+    }
+  }
   return Boolean(state?.plusModeEnabled) && (numericStep === 6 || numericStep === 7);
 }
 

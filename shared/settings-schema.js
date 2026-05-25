@@ -105,6 +105,7 @@
             },
             plus: {
               plusModeEnabled: false,
+              phonePlusModeEnabled: false,
               plusPaymentMethod: 'paypal-hosted',
               plusAccountAccessStrategy: 'oauth',
               hostedCheckoutVerificationUrl: '',
@@ -310,6 +311,11 @@
                 ?? nested?.flows?.openai?.plus?.plusModeEnabled
                 ?? defaults.flows.openai.plus.plusModeEnabled
               ),
+              phonePlusModeEnabled: Boolean(
+                input?.phonePlusModeEnabled
+                ?? nested?.flows?.openai?.plus?.phonePlusModeEnabled
+                ?? defaults.flows.openai.plus.phonePlusModeEnabled
+              ),
               plusPaymentMethod: String(
                 input?.plusPaymentMethod
                 ?? nested?.flows?.openai?.plus?.plusPaymentMethod
@@ -475,6 +481,7 @@
       next.phoneVerificationEnabled = openaiState.signup.phoneVerificationEnabled;
       next.phoneSignupReloginAfterBindEmailEnabled = openaiState.signup.phoneSignupReloginAfterBindEmailEnabled;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
+      next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;

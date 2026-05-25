@@ -323,6 +323,7 @@ return {
       options: {
         activeFlowId: 'openai',
         plusModeEnabled: true,
+        phonePlusModeEnabled: false,
         plusPaymentMethod: 'paypal',
         plusAccountAccessStrategy: 'sub2api_codex_session',
         signupMethod: 'email',
@@ -335,6 +336,7 @@ return {
       options: {
         activeFlowId: 'openai',
         plusModeEnabled: true,
+        phonePlusModeEnabled: false,
         plusPaymentMethod: 'paypal',
         plusAccountAccessStrategy: 'sub2api_codex_session',
         signupMethod: 'email',

@@ -79,6 +79,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
   'plusModeEnabled',
+  'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
   'mailProvider',
@@ -95,6 +96,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   panelMode: 'cpa',
   signupMethod: 'email',
   plusModeEnabled: false,
+  phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
   phoneVerificationEnabled: false,
@@ -121,6 +123,8 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const SIGNUP_METHOD_EMAIL = 'email';
+const SIGNUP_METHOD_PHONE = 'phone';
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -374,6 +378,96 @@ test('buildPersistentSettingsPayload accepts schema-only input when requireKnown
   assert.equal(Object.prototype.hasOwnProperty.call(payload, 'kiroRegion'), false);
   assert.equal(payload.settingsSchemaVersion, 4);
   assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
+});
+
+test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with forced constraints', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+    plusModeEnabled: true,
+    phonePlusModeEnabled: true,
+    phoneVerificationEnabled: false,
+    signupMethod: 'email',
+    plusAccountAccessStrategy: 'sub2api_codex_session',
+  }, { fillDefaults: true });
+
+  assert.equal(payload.phonePlusModeEnabled, true);
+  assert.equal(payload.plusModeEnabled, false);
+  assert.equal(payload.phoneVerificationEnabled, true);
+  assert.equal(payload.signupMethod, 'phone');
+  assert.equal(payload.plusAccountAccessStrategy, 'oauth');
+  assert.equal(payload.settingsState.flows.openai.plus.phonePlusModeEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.plus.plusModeEnabled, false);
+  assert.equal(payload.settingsState.flows.openai.signup.phoneVerificationEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
+  assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
+});
+
+test('buildPersistentSettingsPayload projects nested Phone Plus settings into flat view and canonical schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      activeFlowId: 'openai',
+      services: {
+        account: { customPassword: '' },
+        email: { provider: '163' },
+        proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+      },
+      flows: {
+        openai: {
+          integrationTargetId: 'cpa',
+          integrationTargets: {
+            cpa: {
+              vpsUrl: '',
+              vpsPassword: '',
+              localCpaStep9Mode: 'submit',
+            },
+            sub2api: {
+              sub2apiUrl: '',
+              sub2apiEmail: '',
+              sub2apiPassword: '',
+              sub2apiGroupName: 'codex',
+              sub2apiGroupNames: ['codex', 'openai-plus'],
+              sub2apiAccountPriority: 1,
+              sub2apiDefaultProxyName: '',
+            },
+            codex2api: {
+              codex2apiUrl: '',
+              codex2apiAdminKey: '',
+            },
+          },
+          signup: {
+            signupMethod: 'email',
+            phoneVerificationEnabled: false,
+            phoneSignupReloginAfterBindEmailEnabled: false,
+          },
+          plus: {
+            plusModeEnabled: true,
+            phonePlusModeEnabled: true,
+            plusPaymentMethod: 'paypal',
+            plusAccountAccessStrategy: 'cpa_codex_session',
+          },
+          autoRun: {
+            stepExecutionRange: { enabled: false, fromStep: 1, toStep: 11 },
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+
+  assert.equal(payload.phonePlusModeEnabled, true);
+  assert.equal(payload.plusModeEnabled, false);
+  assert.equal(payload.phoneVerificationEnabled, true);
+  assert.equal(payload.signupMethod, 'phone');
+  assert.equal(payload.plusAccountAccessStrategy, 'oauth');
+  assert.equal(payload.settingsState.flows.openai.plus.phonePlusModeEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.plus.plusModeEnabled, false);
+  assert.equal(payload.settingsState.flows.openai.signup.phoneVerificationEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
 });
 
 test('getPersistedSettings reads schema keys alongside legacy flat settings keys', async () => {

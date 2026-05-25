@@ -218,6 +218,37 @@
     ];
   }
 
+  function rebaseSteps(steps = [], startId = 1, startOrder = startId * 10) {
+    const baseId = Number(startId) || 1;
+    const baseOrder = Number(startOrder) || baseId * 10;
+    return steps.map((step, index) => ({
+      ...step,
+      id: baseId + index,
+      order: baseOrder + (index * 10),
+    }));
+  }
+
+  function createPhonePlusSteps(prefixSteps, options = {}) {
+    const registrationSteps = NORMAL_PREFIX_STEP_DEFINITIONS;
+    const paymentSegment = rebaseSteps(
+      prefixSteps.slice(5),
+      registrationSteps.length + 1,
+      (registrationSteps.length + 1) * 10
+    );
+    const tailStartId = registrationSteps.length + paymentSegment.length + 1;
+    const tailSteps = createOpenAiAuthTail(
+      tailStartId,
+      tailStartId * 10,
+      SIGNUP_METHOD_PHONE,
+      options
+    );
+    return [
+      ...registrationSteps,
+      ...paymentSegment,
+      ...tailSteps,
+    ];
+  }
+
   const NORMAL_STEP_DEFINITIONS = createOpenAiSteps(NORMAL_PREFIX_STEP_DEFINITIONS, 7, 70, SIGNUP_METHOD_EMAIL);
   const NORMAL_PHONE_STEP_DEFINITIONS = createOpenAiSteps(NORMAL_PREFIX_STEP_DEFINITIONS, 7, 70, SIGNUP_METHOD_PHONE);
   const NORMAL_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createOpenAiSteps(NORMAL_PREFIX_STEP_DEFINITIONS, 7, 70, SIGNUP_METHOD_PHONE, { phoneSignupReloginAfterBindEmailEnabled: true });
@@ -289,6 +320,14 @@
   );
   const PLUS_GPC_PHONE_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_PHONE);
   const PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createOpenAiSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, 10, 100, SIGNUP_METHOD_PHONE, { phoneSignupReloginAfterBindEmailEnabled: true });
+  const PHONE_PLUS_PAYPAL_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS);
+  const PHONE_PLUS_PAYPAL_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
+  const PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_PAYPAL_HOSTED_CHECKOUT_PREFIX_STEP_DEFINITIONS);
+  const PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_PAYPAL_HOSTED_CHECKOUT_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
+  const PHONE_PLUS_GOPAY_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS);
+  const PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
+  const PHONE_PLUS_GPC_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS);
+  const PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
   const KIRO_STEP_DEFINITIONS = [
     {
       id: 1,
@@ -379,8 +418,12 @@
   });
   const KIRO_CONTRIBUTION_STEP_TITLE = '贡献上传';
 
+  function isPhonePlusModeEnabled(options = {}) {
+    return Boolean(options?.phonePlusModeEnabled || options?.phonePlusMode);
+  }
+
   function isPlusModeEnabled(options = {}) {
-    return Boolean(options?.plusModeEnabled || options?.plusMode);
+    return Boolean(options?.plusModeEnabled || options?.plusMode || isPhonePlusModeEnabled(options));
   }
 
   function normalizePlusPaymentMethod(value = '') {
@@ -410,6 +453,9 @@
   }
 
   function getResolvedSignupMethod(options = {}) {
+    if (isPhonePlusModeEnabled(options)) {
+      return SIGNUP_METHOD_PHONE;
+    }
     return normalizeSignupMethod(options?.resolvedSignupMethod || options?.signupMethod);
   }
 
@@ -417,6 +463,27 @@
     const signupMethod = getResolvedSignupMethod(options);
     const reloginAfterBindEmail = signupMethod === SIGNUP_METHOD_PHONE
       && isPhoneSignupReloginAfterBindEmailEnabled(options);
+    const paymentMethod = normalizePlusPaymentMethod(options?.plusPaymentMethod || options?.paymentMethod);
+    if (isPhonePlusModeEnabled(options)) {
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+        return reloginAfterBindEmail
+          ? PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
+          : PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
+      }
+      if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+        return reloginAfterBindEmail
+          ? PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
+          : PHONE_PLUS_GPC_STEP_DEFINITIONS;
+      }
+      if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+        return reloginAfterBindEmail
+          ? PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
+          : PHONE_PLUS_GOPAY_STEP_DEFINITIONS;
+      }
+      return reloginAfterBindEmail
+        ? PHONE_PLUS_PAYPAL_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
+        : PHONE_PLUS_PAYPAL_STEP_DEFINITIONS;
+    }
     if (!isPlusModeEnabled(options)) {
       if (signupMethod === SIGNUP_METHOD_PHONE) {
         return reloginAfterBindEmail
@@ -425,7 +492,6 @@
       }
       return NORMAL_STEP_DEFINITIONS;
     }
-    const paymentMethod = normalizePlusPaymentMethod(options?.plusPaymentMethod || options?.paymentMethod);
     const plusAccountAccessStrategy = normalizePlusAccountAccessStrategy(options?.plusAccountAccessStrategy);
     if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
       if (signupMethod === SIGNUP_METHOD_PHONE) {
@@ -537,6 +603,14 @@
           ...PLUS_GPC_CPA_SESSION_STEP_DEFINITIONS,
           ...PLUS_GPC_PHONE_STEP_DEFINITIONS,
           ...PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...PHONE_PLUS_PAYPAL_STEP_DEFINITIONS,
+          ...PHONE_PLUS_PAYPAL_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS,
+          ...PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...PHONE_PLUS_GOPAY_STEP_DEFINITIONS,
+          ...PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...PHONE_PLUS_GPC_STEP_DEFINITIONS,
+          ...PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
         ]) {
           keyed.set(`${step.id}:${step.key}`, step);
         }
@@ -746,6 +820,14 @@
     PLUS_GPC_SUB2API_SESSION_STEP_DEFINITIONS,
     PLUS_GPC_PHONE_STEP_DEFINITIONS,
     PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    PHONE_PLUS_PAYPAL_STEP_DEFINITIONS,
+    PHONE_PLUS_PAYPAL_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS,
+    PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    PHONE_PLUS_GOPAY_STEP_DEFINITIONS,
+    PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    PHONE_PLUS_GPC_STEP_DEFINITIONS,
+    PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
     SIGNUP_METHOD_EMAIL,
     SIGNUP_METHOD_PHONE,
     getAllSteps,
@@ -762,6 +844,7 @@
     getSteps,
     getWorkflow,
     hasFlow,
+    isPhonePlusModeEnabled,
     isPlusModeEnabled,
     normalizeActiveFlowId,
     normalizePlusPaymentMethod,

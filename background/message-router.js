@@ -1543,6 +1543,7 @@
           if (
             Object.prototype.hasOwnProperty.call(updates, 'phoneVerificationEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
+            || Object.prototype.hasOwnProperty.call(updates, 'phonePlusModeEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
             || Object.prototype.hasOwnProperty.call(updates, 'panelMode')
             || Object.prototype.hasOwnProperty.call(updates, 'activeFlowId')
@@ -1556,8 +1557,11 @@
           if (normalizeSignupMethod(nextPersistedSignupMethod) === 'phone') {
             preservePhoneReuseSettingsForPhoneSignup(updates, currentState);
           }
-          const modeChanged = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
+          const plusModeChanged = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             && Boolean(currentState?.plusModeEnabled) !== Boolean(updates.plusModeEnabled);
+          const phonePlusModeChanged = Object.prototype.hasOwnProperty.call(updates, 'phonePlusModeEnabled')
+            && Boolean(currentState?.phonePlusModeEnabled) !== Boolean(updates.phonePlusModeEnabled);
+          const modeChanged = plusModeChanged || phonePlusModeChanged;
           const plusPaymentChanged = Object.prototype.hasOwnProperty.call(updates, 'plusPaymentMethod')
             && normalizePlusPaymentMethodForDisplay(currentState?.plusPaymentMethod || 'paypal')
               !== normalizePlusPaymentMethodForDisplay(updates.plusPaymentMethod || 'paypal');
@@ -1569,9 +1573,14 @@
           const nextPlusModeEnabled = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             ? Boolean(updates.plusModeEnabled)
             : Boolean(currentState?.plusModeEnabled);
+          const nextPhonePlusModeEnabled = Object.prototype.hasOwnProperty.call(updates, 'phonePlusModeEnabled')
+            ? Boolean(updates.phonePlusModeEnabled)
+            : Boolean(currentState?.phonePlusModeEnabled);
           const stepModeChanged = modeChanged
             || (nextPlusModeEnabled && plusPaymentChanged)
+            || (nextPhonePlusModeEnabled && plusPaymentChanged)
             || (nextPlusModeEnabled && plusAccountAccessStrategyChanged)
+            || (nextPhonePlusModeEnabled && plusAccountAccessStrategyChanged)
             || phoneSignupReloginAfterBindEmailChanged;
           const oauthFlowTimeoutDisabled = Object.prototype.hasOwnProperty.call(updates, 'oauthFlowTimeoutEnabled')
             && updates.oauthFlowTimeoutEnabled === false;
@@ -1700,17 +1709,17 @@
                 ?? 'cpa'
             );
             await addLog(
-              Boolean(updates.plusModeEnabled)
+              Boolean(updates.phonePlusModeEnabled || updates.plusModeEnabled)
                 ? `Plus 模式已开启，已切换为 Plus Checkout 步骤，当前支付方式：${selectedPlusPaymentMethod}，账号接入策略：${selectedPlusAccountAccessStrategy}。`
                 : 'Plus 模式已关闭，已恢复普通注册授权步骤。',
               'info'
             );
-          } else if (plusPaymentChanged && nextPlusModeEnabled) {
+          } else if (plusPaymentChanged && (nextPlusModeEnabled || nextPhonePlusModeEnabled)) {
             const selectedPlusPaymentMethod = getPlusPaymentMethodLabel(
               stateUpdates.plusPaymentMethod ?? currentState?.plusPaymentMethod ?? 'paypal'
             );
             await addLog(`Plus 支付方式已切换为 ${selectedPlusPaymentMethod}，已更新对应的 Plus 步骤。`, 'info');
-          } else if (plusAccountAccessStrategyChanged && nextPlusModeEnabled) {
+          } else if (plusAccountAccessStrategyChanged && (nextPlusModeEnabled || nextPhonePlusModeEnabled)) {
             const selectedPlusAccountAccessStrategy = getPlusAccountAccessStrategyLabel(
               stateUpdates.plusAccountAccessStrategy ?? currentState?.plusAccountAccessStrategy ?? 'oauth',
               stateUpdates.panelMode

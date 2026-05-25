@@ -66,6 +66,7 @@
     'panelMode',
     'phoneVerificationEnabled',
     'plusModeEnabled',
+    'phonePlusModeEnabled',
     'signupMethod',
     'plusAccountAccessStrategy',
     'openaiIntegrationTargetId',
@@ -366,11 +367,21 @@
       const targetState = activeFlowId === 'openai'
         ? getOpenAiTargetCapabilities(effectiveTargetId)
         : defaultTargetCapabilities;
+      const rawPhonePlusModeEnabled = activeFlowId === 'openai'
+        && flowState.supportsPlusMode
+        && Boolean(state?.phonePlusModeEnabled);
+      const rawPlusModeEnabled = activeFlowId === 'openai'
+        && flowState.supportsPlusMode
+        && Boolean(state?.plusModeEnabled)
+        && !rawPhonePlusModeEnabled;
       const runtimeLocks = {
         autoRunLocked: Boolean(options?.autoRunLocked ?? state?.autoRunLocked),
         accountContribution: Boolean(flowState.supportsAccountContribution) && Boolean(state?.accountContributionEnabled),
-        phoneVerificationEnabled: activeFlowId === 'openai' && flowState.supportsPhoneVerificationSettings && Boolean(state?.phoneVerificationEnabled),
-        plusModeEnabled: activeFlowId === 'openai' && flowState.supportsPlusMode && Boolean(state?.plusModeEnabled),
+        phoneVerificationEnabled: activeFlowId === 'openai'
+          && flowState.supportsPhoneVerificationSettings
+          && Boolean(state?.phoneVerificationEnabled || rawPhonePlusModeEnabled),
+        plusModeEnabled: rawPlusModeEnabled,
+        phonePlusModeEnabled: rawPhonePlusModeEnabled,
         settingsMenuLocked: Boolean(options?.settingsMenuLocked ?? state?.settingsMenuLocked),
       };
       const effectiveSignupMethods = [];
@@ -389,9 +400,9 @@
       if (!effectiveSignupMethods.length) {
         effectiveSignupMethods.push(SIGNUP_METHOD_EMAIL);
       }
-      const requestedSignupMethod = normalizeSignupMethod(
-        options?.signupMethod ?? state?.signupMethod
-      );
+      const requestedSignupMethod = runtimeLocks.phonePlusModeEnabled
+        ? SIGNUP_METHOD_PHONE
+        : normalizeSignupMethod(options?.signupMethod ?? state?.signupMethod);
       const effectiveSignupMethod = requestedSignupMethod === SIGNUP_METHOD_PHONE && canSelectPhoneSignup
         ? SIGNUP_METHOD_PHONE
         : (effectiveSignupMethods.includes(SIGNUP_METHOD_EMAIL)
@@ -415,7 +426,9 @@
           ? [PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION]
           : targetPlusAccountAccessStrategies)
         : [PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH];
-      const effectivePlusAccountAccessStrategy = runtimeLocks.accountContribution
+      const effectivePlusAccountAccessStrategy = runtimeLocks.phonePlusModeEnabled
+        ? PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH
+        : runtimeLocks.accountContribution
         && runtimeLocks.plusModeEnabled
         && effectiveSignupMethod === SIGNUP_METHOD_EMAIL
         ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION
@@ -425,6 +438,7 @@
       const canEditPlusAccountAccessStrategy = activeFlowId === 'openai'
         && Boolean(flowState.supportsPlusMode)
         && Boolean(runtimeLocks.plusModeEnabled)
+        && !runtimeLocks.phonePlusModeEnabled
         && effectiveSignupMethod === SIGNUP_METHOD_EMAIL
         && !runtimeLocks.accountContribution
         && availablePlusAccountAccessStrategies.length > 1;
@@ -465,6 +479,7 @@
           targetId: effectiveTargetId,
           plusAccountAccessStrategy: effectivePlusAccountAccessStrategy,
           plusModeEnabled: runtimeLocks.plusModeEnabled,
+          phonePlusModeEnabled: runtimeLocks.phonePlusModeEnabled,
           signupMethod: effectiveSignupMethod,
         },
         supportedPanelModes: supportedTargetIds,
@@ -516,6 +531,39 @@
       };
     }
 
+    function buildPhonePlusValidationError(capabilityState = {}) {
+      const phoneSignupError = buildPhoneSignupValidationError({
+        ...capabilityState,
+        runtimeLocks: {
+          ...(capabilityState.runtimeLocks || {}),
+          plusModeEnabled: false,
+          phoneVerificationEnabled: true,
+        },
+      });
+      if (phoneSignupError.code === 'phone_signup_contribution_mode_locked') {
+        return {
+          code: 'phone_plus_contribution_mode_locked',
+          message: '贡献模式开启时不能使用 Phone Plus 模式。',
+        };
+      }
+      if (phoneSignupError.code === 'phone_signup_flow_unsupported') {
+        return {
+          code: 'phone_plus_flow_unsupported',
+          message: '当前 flow 不支持 Phone Plus 模式。',
+        };
+      }
+      if (phoneSignupError.code === 'phone_signup_panel_unsupported') {
+        return {
+          code: 'phone_plus_panel_unsupported',
+          message: `当前来源 ${getTargetLabel(capabilityState.activeFlowId, capabilityState.requestedTargetId)} 不支持 Phone Plus 模式。`,
+        };
+      }
+      return {
+        code: 'phone_plus_unavailable',
+        message: '当前设置暂不支持 Phone Plus 模式。',
+      };
+    }
+
     function validateAutoRunStart(options = {}) {
       const state = options?.state || {};
       const capabilityState = resolveSidepanelCapabilities(options);
@@ -537,6 +585,20 @@
           code: 'plus_mode_unsupported',
           message: '当前 flow 不支持 Plus 模式。',
         });
+      }
+
+      if (Boolean(state?.phonePlusModeEnabled) && !capabilityState.flowCapabilities?.supportsPlusMode) {
+        errors.push({
+          code: 'phone_plus_mode_unsupported',
+          message: '当前 flow 不支持 Phone Plus 模式。',
+        });
+      }
+
+      if (
+        Boolean(state?.phonePlusModeEnabled)
+        && capabilityState.effectiveSignupMethod !== SIGNUP_METHOD_PHONE
+      ) {
+        errors.push(buildPhonePlusValidationError(capabilityState));
       }
 
       if (Boolean(state?.accountContributionEnabled) && !capabilityState.flowCapabilities?.supportsAccountContribution) {
@@ -598,6 +660,23 @@
         });
       }
 
+      if (changedKeySet.has('phonePlusModeEnabled') && Boolean(state?.phonePlusModeEnabled) && !flowState.supportsPlusMode) {
+        normalizedUpdates.phonePlusModeEnabled = false;
+        errors.push({
+          code: 'phone_plus_mode_unsupported',
+          message: '当前 flow 不支持 Phone Plus 模式。',
+        });
+      }
+
+      if (
+        changedKeySet.has('phonePlusModeEnabled')
+        && Boolean(state?.phonePlusModeEnabled)
+        && capabilityState.effectiveSignupMethod !== SIGNUP_METHOD_PHONE
+      ) {
+        normalizedUpdates.phonePlusModeEnabled = false;
+        errors.push(buildPhonePlusValidationError(capabilityState));
+      }
+
       if (
         changedKeySet.has('accountContributionEnabled')
         && Boolean(state?.accountContributionEnabled)
@@ -629,6 +708,33 @@
       ) {
         normalizedUpdates.signupMethod = capabilityState.effectiveSignupMethod;
         errors.push(buildPhoneSignupValidationError(capabilityState));
+      }
+
+      const phonePlusModeWins = Boolean(state?.phonePlusModeEnabled)
+        && capabilityState.runtimeLocks?.phonePlusModeEnabled
+        && (
+          changedKeySet.has('phonePlusModeEnabled')
+          || !changedKeySet.has('plusModeEnabled')
+          || !Boolean(state?.plusModeEnabled)
+        );
+
+      if (phonePlusModeWins) {
+        if (capabilityState.effectiveSignupMethod === SIGNUP_METHOD_PHONE) {
+          normalizedUpdates.plusModeEnabled = false;
+          normalizedUpdates.phoneVerificationEnabled = true;
+          normalizedUpdates.signupMethod = SIGNUP_METHOD_PHONE;
+          normalizedUpdates.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+        } else {
+          normalizedUpdates.phonePlusModeEnabled = false;
+        }
+      }
+
+      if (
+        Boolean(state?.plusModeEnabled)
+        && changedKeySet.has('plusModeEnabled')
+        && !changedKeySet.has('phonePlusModeEnabled')
+      ) {
+        normalizedUpdates.phonePlusModeEnabled = false;
       }
 
       return {

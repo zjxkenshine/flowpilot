@@ -162,6 +162,7 @@ const self = {
     },
   },
 };
+${extractFunction('isPhonePlusModeState')}
 ${extractFunction('isPlusModeState')}
 ${extractFunction('normalizePlusPaymentMethod')}
 ${extractFunction('normalizePlusAccountAccessStrategy')}
@@ -185,6 +186,7 @@ return {
   assert.deepEqual(api.getCaptured(), [{
     activeFlowId: 'openai',
     plusModeEnabled: true,
+    phonePlusModeEnabled: false,
     plusPaymentMethod: 'gopay',
     plusAccountAccessStrategy: 'oauth',
     signupMethod: 'phone',

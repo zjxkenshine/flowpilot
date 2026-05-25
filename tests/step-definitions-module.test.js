@@ -376,6 +376,136 @@ test('Plus phone signup never switches to SUB2API session tail even if the reque
   assert.equal(stepKeys.includes('platform-verify'), true);
 });
 
+test('Phone Plus inserts payment steps after full phone registration for each payment method', () => {
+  const source = fs.readFileSync('data/step-definitions.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
+  const cases = [
+    {
+      label: 'paypal',
+      options: { phonePlusModeEnabled: true, plusPaymentMethod: 'paypal' },
+      expectedKeys: [
+        'open-chatgpt',
+        'submit-signup-email',
+        'fill-password',
+        'fetch-signup-code',
+        'fill-profile',
+        'wait-registration-success',
+        'plus-checkout-create',
+        'plus-checkout-billing',
+        'paypal-approve',
+        'plus-checkout-return',
+        'oauth-login',
+        'fetch-login-code',
+        'bind-email',
+        'fetch-bind-email-code',
+        'confirm-oauth',
+        'platform-verify',
+      ],
+    },
+    {
+      label: 'paypal-hosted',
+      options: { phonePlusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' },
+      expectedKeys: [
+        'open-chatgpt',
+        'submit-signup-email',
+        'fill-password',
+        'fetch-signup-code',
+        'fill-profile',
+        'wait-registration-success',
+        'plus-checkout-create',
+        'paypal-hosted-email',
+        'paypal-hosted-card',
+        'paypal-hosted-create-account',
+        'paypal-hosted-review',
+        'oauth-login',
+        'fetch-login-code',
+        'bind-email',
+        'fetch-bind-email-code',
+        'confirm-oauth',
+        'platform-verify',
+      ],
+    },
+    {
+      label: 'gopay',
+      options: { phonePlusModeEnabled: true, plusPaymentMethod: 'gopay' },
+      expectedKeys: [
+        'open-chatgpt',
+        'submit-signup-email',
+        'fill-password',
+        'fetch-signup-code',
+        'fill-profile',
+        'wait-registration-success',
+        'plus-checkout-create',
+        'gopay-subscription-confirm',
+        'oauth-login',
+        'fetch-login-code',
+        'bind-email',
+        'fetch-bind-email-code',
+        'confirm-oauth',
+        'platform-verify',
+      ],
+    },
+    {
+      label: 'gpc-helper',
+      options: { phonePlusModeEnabled: true, plusPaymentMethod: 'gpc-helper' },
+      expectedKeys: [
+        'open-chatgpt',
+        'submit-signup-email',
+        'fill-password',
+        'fetch-signup-code',
+        'fill-profile',
+        'wait-registration-success',
+        'plus-checkout-create',
+        'plus-checkout-billing',
+        'oauth-login',
+        'fetch-login-code',
+        'bind-email',
+        'fetch-bind-email-code',
+        'confirm-oauth',
+        'platform-verify',
+      ],
+    },
+  ];
+
+  cases.forEach(({ label, options, expectedKeys }) => {
+    const steps = api.getSteps(options);
+    const stepKeys = steps.map((step) => step.key);
+    const expectedIds = Array.from({ length: expectedKeys.length }, (_, index) => index + 1);
+    const waitIndex = stepKeys.indexOf('wait-registration-success');
+
+    assert.deepStrictEqual(stepKeys, expectedKeys, `${label} keys should follow phone registration, payment, OAuth tail`);
+    assert.deepStrictEqual(api.getStepIds(options), expectedIds, `${label} ids should be contiguous`);
+    assert.equal(api.getLastStepId(options), expectedIds.at(-1), `${label} last step id should match the tail`);
+    assert.equal(waitIndex >= 0, true, `${label} should keep wait-registration-success`);
+    assert.equal(stepKeys[waitIndex + 1], 'plus-checkout-create', `${label} should start payment after registration success`);
+  });
+});
+
+test('Phone Plus always uses OAuth tail even when a session import strategy is requested', () => {
+  const source = fs.readFileSync('data/step-definitions.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
+
+  ['sub2api_codex_session', 'cpa_codex_session'].forEach((plusAccountAccessStrategy) => {
+    ['paypal', 'paypal-hosted', 'gopay', 'gpc-helper'].forEach((plusPaymentMethod) => {
+      const steps = api.getSteps({
+        plusModeEnabled: true,
+        phonePlusModeEnabled: true,
+        plusPaymentMethod,
+        plusAccountAccessStrategy,
+      });
+      const stepKeys = steps.map((step) => step.key);
+
+      assert.equal(stepKeys.includes('sub2api-session-import'), false, `${plusPaymentMethod} should not import SUB2API sessions`);
+      assert.equal(stepKeys.includes('cpa-session-import'), false, `${plusPaymentMethod} should not import CPA sessions`);
+      assert.equal(stepKeys.includes('oauth-login'), true, `${plusPaymentMethod} should keep OAuth login`);
+      assert.equal(stepKeys.includes('bind-email'), true, `${plusPaymentMethod} should keep phone signup bind-email tail`);
+      assert.equal(stepKeys.includes('platform-verify'), true, `${plusPaymentMethod} should keep platform verification`);
+    });
+  });
+});
+
 test('Plus session strategy swaps the OAuth tail for a single CPA import node', () => {
   const source = fs.readFileSync('data/step-definitions.js', 'utf8');
   const globalScope = {};

@@ -119,6 +119,7 @@ return {
     options: {
       activeFlowId: 'kiro',
       plusModeEnabled: false,
+      phonePlusModeEnabled: false,
       plusPaymentMethod: 'paypal',
       plusAccountAccessStrategy: 'oauth',
       signupMethod: 'email',

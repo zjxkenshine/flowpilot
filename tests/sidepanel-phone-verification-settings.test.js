@@ -152,6 +152,19 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.doesNotMatch(html, /id="input-account-run-history-text-enabled"/);
 });
 
+test('sidepanel html places Phone Plus switch directly below Plus mode', () => {
+  const plusModeIndex = sidepanelHtml.indexOf('id="row-plus-mode"');
+  const phonePlusIndex = sidepanelHtml.indexOf('id="row-phone-plus-mode"');
+  const accountAccessIndex = sidepanelHtml.indexOf('id="row-plus-account-access-strategy"');
+
+  assert.notEqual(plusModeIndex, -1);
+  assert.notEqual(phonePlusIndex, -1);
+  assert.notEqual(accountAccessIndex, -1);
+  assert.match(sidepanelHtml, /id="input-phone-plus-mode-enabled"/);
+  assert.ok(plusModeIndex < phonePlusIndex);
+  assert.ok(phonePlusIndex < accountAccessIndex);
+});
+
 test('sidepanel loads SMS country lists silently during startup fallback', () => {
   const heroLoader = extractFunction('loadHeroSmsCountries');
   const fiveSimLoader = extractFunction('loadFiveSimCountries');
