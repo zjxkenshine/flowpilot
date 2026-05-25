@@ -792,6 +792,16 @@
         : String(price);
     }
 
+    function formatPhoneActivationPriceListForLog(prices = []) {
+      const source = Array.isArray(prices) ? prices : [];
+      if (!source.length) {
+        return '无';
+      }
+      return source
+        .map((value) => formatPhoneActivationTierPrice(value))
+        .join(', ');
+    }
+
     function buildPhoneActivationTierKey(provider, countryId, price) {
       return [
         normalizePhoneSmsProvider(provider || ''),
@@ -934,8 +944,20 @@
 
       const remainingTiers = Math.max(0, eligibleQueue.length - attemptedTiers.length);
       if (remainingTiers > 0) {
+        if (safeUpgradeLimit <= 0) {
+          await addLog(
+            `步骤 9：${providerLabel} 升档已禁用（升档次数=0），仍有 ${remainingTiers} 个候选档位未尝试。`,
+            'warn'
+          );
+        } else {
+          await addLog(
+            `步骤 9：${providerLabel} 升档次数已用尽（${safeUpgradeLimit} 次），仍有 ${remainingTiers} 个候选档位未尝试。`,
+            'warn'
+          );
+        }
+      } else if (tierFailures.length && eligibleQueue.length <= 1) {
         await addLog(
-          `步骤 9：${providerLabel} 升档次数已用尽（${safeUpgradeLimit} 次），仍有 ${remainingTiers} 个候选档位未尝试。`,
+          `步骤 9：${providerLabel} 只有 ${eligibleQueue.length} 个候选档位，无后续候选档位，未触发升档。`,
           'warn'
         );
       }
@@ -1314,6 +1336,12 @@
         return '未知错误';
       }
       text = text.replace(/^Step\s+\d+\s*[:：]\s*/i, '').trim();
+      if (/升档次数已用尽|已尝试\s*\d+\s*个候选档位|候选档位未尝试|tier\s+upgrade/i.test(text)) {
+        return text
+          .replace(/^(?:HeroSMS|5sim|NexSMS)\s*[：:]\s*/i, '')
+          .replace(/^(?:HeroSMS|5sim|NexSMS)\s+/i, '')
+          .trim();
+      }
       const heroFailureMatch = text.match(/^HeroSMS\s+([A-Za-z0-9]+)\s+failed\s*:\s*(.+)$/i);
       if (heroFailureMatch) {
         return `${formatHeroSmsActionName(heroFailureMatch[1])}失败：${formatPhoneSmsApiFailureReason(stripRepeatedHeroSmsFailurePrefix(heroFailureMatch[1], heroFailureMatch[2]))}`;
@@ -4091,21 +4119,46 @@
               : (hasAlternativeCountries ? [] : candidatePrices.slice(0, 1))
           )
           : (floorFilteredPrices.length ? floorFilteredPrices : candidatePrices);
-        const rawTierText = Array.isArray(pricePlan?.prices) && pricePlan.prices.length
-          ? pricePlan.prices
-            .map((value) => (value === null || value === undefined ? '自动' : String(value)))
-            .join(', ')
-          : '无';
+        const rawTierText = formatPhoneActivationPriceListForLog(pricePlan?.prices);
         await addLog(
           `步骤 9：HeroSMS ${countryLabel} 价格方案：档位=[${rawTierText}]，用户上限=${pricePlan?.userLimit ?? '未设置'}，目录最低价=${pricePlan?.minCatalogPrice ?? '未知'}。`,
           'info'
         );
-        if (pricesToTry.length > 1 || countryPriceFloor !== null) {
-          const tierText = pricesToTry
-            .map((value) => (value === null || value === undefined ? '自动' : String(value)))
-            .join(', ');
+        if (rangeFilteredPrices.length !== orderedPrices.length) {
           await addLog(
-            `步骤 9：HeroSMS ${countryLabel} 本轮候选价格：${tierText}${countryPriceFloor !== null ? `（高于 ${countryPriceFloor}）` : ''}。`,
+            `步骤 9：HeroSMS ${countryLabel} 价格区间过滤：区间=${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)}，过滤前=[${formatPhoneActivationPriceListForLog(orderedPrices)}]，过滤后=[${formatPhoneActivationPriceListForLog(rangeFilteredPrices)}]。`,
+            'info'
+          );
+        }
+        if (countryPriceFloor !== null && floorFilteredPrices.length !== candidatePrices.length) {
+          await addLog(
+            `步骤 9：HeroSMS ${countryLabel} 回退价格过滤：需高于 ${countryPriceFloor}，过滤前=[${formatPhoneActivationPriceListForLog(candidatePrices)}]，过滤后=[${formatPhoneActivationPriceListForLog(floorFilteredPrices)}]。`,
+            'info'
+          );
+        }
+        const tierText = formatPhoneActivationPriceListForLog(pricesToTry);
+        await addLog(
+          `步骤 9：HeroSMS ${countryLabel} 本轮候选价格：${tierText}${countryPriceFloor !== null ? `（高于 ${countryPriceFloor}）` : ''}。`,
+          'info'
+        );
+        const heroSmsTierDiagnostics = [];
+        if (tierUpgradeLimit <= 0) {
+          heroSmsTierDiagnostics.push('升档已禁用');
+        }
+        if (pricesToTry.length === 0) {
+          heroSmsTierDiagnostics.push('无可尝试候选档位');
+        } else if (pricesToTry.length === 1) {
+          heroSmsTierDiagnostics.push('无后续候选档位');
+        }
+        if (rangeFilteredPrices.length !== orderedPrices.length) {
+          heroSmsTierDiagnostics.push('价格区间已过滤部分档位');
+        }
+        if (countryPriceFloor !== null && floorFilteredPrices.length !== candidatePrices.length) {
+          heroSmsTierDiagnostics.push('回退价格下限已过滤部分档位');
+        }
+        if (heroSmsTierDiagnostics.length) {
+          await addLog(
+            `步骤 9：HeroSMS ${countryLabel} 升档诊断：升档次数=${tierUpgradeLimit}，本轮候选档位数=${pricesToTry.length}；${heroSmsTierDiagnostics.join('；')}。`,
             'info'
           );
         }

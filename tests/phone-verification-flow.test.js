@@ -2239,6 +2239,118 @@ test('phone verification helper climbs price tiers when NO_NUMBERS is returned a
   ]);
 });
 
+test('signup phone helper preserves HeroSMS tier exhaustion details in aggregate no-supply failure', async () => {
+  const requests = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    phoneSmsProvider: 'hero-sms',
+    phoneSmsProviderOrder: ['hero-sms'],
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    heroSmsActivationRetryRounds: 1,
+    phoneActivationTierUpgradeLimit: 1,
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                starter: { cost: 0.08, count: 100 },
+                premium: { cost: 0.12, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ ...currentState }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.prepareSignupPhoneActivation(currentState),
+    (error) => {
+      assert.match(error.message, /所有接码平台候选均未获取到手机号/);
+      assert.match(error.message, /HeroSMS：升档次数已用尽（1 次）/);
+      assert.match(error.message, /已尝试 2 个候选档位/);
+      assert.match(error.message, /价格档位 0\.08/);
+      assert.match(error.message, /价格档位 0\.12/);
+      assert.doesNotMatch(error.message, /HeroSMS：暂无可用号码（NO_NUMBERS）/);
+      return true;
+    }
+  );
+
+  const getNumberPrices = requests
+    .filter((requestUrl) => requestUrl.searchParams.get('action') === 'getNumber')
+    .map((requestUrl) => requestUrl.searchParams.get('maxPrice'));
+  assert.deepStrictEqual(getNumberPrices, ['0.08', '0.08', '0.12', '0.12']);
+});
+
+test('phone verification helper logs when HeroSMS has no next tier to upgrade to', async () => {
+  const logs = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async (message, level = 'info', options = {}) => {
+      logs.push({ message, level, options });
+    },
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload({ country: '52', cost: 0.05, count: 20 }),
+        };
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsActivationRetryRounds: 1,
+      phoneActivationTierUpgradeLimit: 1,
+    }),
+    /HeroSMS 升档次数已用尽（1 次）/
+  );
+
+  assert.equal(logs.some(({ message }) => String(message).includes('本轮候选价格：0.05')), true);
+  assert.equal(
+    logs.some(({ message }) => /升档诊断.*本轮候选档位数=1.*无后续候选档位/.test(String(message))),
+    true
+  );
+  assert.equal(
+    logs.some(({ message }) => String(message).includes('只有 1 个候选档位，无后续候选档位，未触发升档')),
+    true
+  );
+});
+
 test('phone verification helper falls back from preferred HeroSMS tier and consumes one upgrade', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
@@ -2298,8 +2410,11 @@ test('phone verification helper falls back from preferred HeroSMS tier and consu
 
 test('phone verification helper does not leave preferred HeroSMS tier when tier upgrades are disabled', async () => {
   const requests = [];
+  const logs = [];
   const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
+    addLog: async (message, level = 'info', options = {}) => {
+      logs.push({ message, level, options });
+    },
     ensureStep8SignupPageReady: async () => {},
     fetchImpl: async (url) => {
       const parsedUrl = new URL(url);
@@ -2349,12 +2464,17 @@ test('phone verification helper does not leave preferred HeroSMS tier when tier 
     'getNumber:0.12',
     'getNumberV2:0.12',
   ]);
+  assert.equal(logs.some(({ message }) => String(message).includes('升档已禁用')), true);
+  assert.equal(logs.some(({ message }) => String(message).includes('候选档位未尝试')), true);
 });
 
 test('phone verification helper filters HeroSMS tiers by minimum price and ignores out-of-range preferred tier', async () => {
   const requests = [];
+  const logs = [];
   const helpers = api.createPhoneVerificationHelpers({
-    addLog: async () => {},
+    addLog: async (message, level = 'info', options = {}) => {
+      logs.push({ message, level, options });
+    },
     ensureStep8SignupPageReady: async () => {},
     fetchImpl: async (url) => {
       const parsedUrl = new URL(url);
@@ -2401,6 +2521,10 @@ test('phone verification helper filters HeroSMS tiers by minimum price and ignor
     'getPrices:',
     'getNumber:0.09',
   ]);
+  assert.equal(
+    logs.some(({ message }) => /价格区间过滤.*过滤前=\[0\.04, 0\.09\].*过滤后=\[0\.09\]/.test(String(message))),
+    true
+  );
 });
 
 test('phone verification helper rejects HeroSMS WRONG_MAX_PRICE below configured minimum price', async () => {
