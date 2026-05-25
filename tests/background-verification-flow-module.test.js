@@ -5,6 +5,7 @@ const fs = require('node:fs');
 test('background imports verification flow module', () => {
   const source = fs.readFileSync('background.js', 'utf8');
   assert.match(source, /background\/verification-flow\.js/);
+  assert.match(source, /queryTabsInAutomationWindow,\s*[\r\n]+\s*YYDS_MAIL_PROVIDER/);
 });
 
 test('verification flow module exposes a factory', () => {

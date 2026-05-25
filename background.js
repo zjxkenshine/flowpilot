@@ -9084,7 +9084,7 @@ function isLikelyLoggedInChatgptHomeUrl(rawUrl) {
   if (!isSignupEntryHost(String(parsed.hostname || '').toLowerCase())) {
     return false;
   }
-  return !/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(parsed.pathname || '');
+  return !/^\/(?:auth(?:\/|$)|create-account(?:\/|$)|email-verification(?:\/|$)|log-in(?:\/|$)|login(?:\/|$)|add-phone(?:\/|$))/i.test(parsed.pathname || '');
 }
 
 function isSignupPasswordPageUrl(rawUrl) {
@@ -14655,6 +14655,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   isRetryableContentScriptTransportError,
   isStopError,
   LUCKMAIL_PROVIDER,
+  queryTabsInAutomationWindow,
   YYDS_MAIL_PROVIDER,
   MAIL_2925_VERIFICATION_INTERVAL_MS,
   MAIL_2925_VERIFICATION_MAX_ATTEMPTS,

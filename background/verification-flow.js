@@ -24,6 +24,7 @@
       isMail2925LimitReachedError,
       isStopError,
       LUCKMAIL_PROVIDER,
+      queryTabsInAutomationWindow = null,
       YYDS_MAIL_PROVIDER = 'yyds-mail',
       MAIL_2925_VERIFICATION_INTERVAL_MS,
       MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
@@ -152,7 +153,7 @@
           return false;
         }
         const path = String(parsed.pathname || '');
-        if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
+        if (/^\/(?:auth(?:\/|$)|create-account(?:\/|$)|email-verification(?:\/|$)|log-in(?:\/|$)|login(?:\/|$)|add-phone(?:\/|$))/i.test(path)) {
           return false;
         }
         return true;
@@ -175,6 +176,42 @@
       } catch {
         return false;
       }
+    }
+
+    async function queryOpenAiTabsInAutomationWindow() {
+      const queryTabs = typeof queryTabsInAutomationWindow === 'function'
+        ? queryTabsInAutomationWindow
+        : (chrome?.tabs?.query ? (queryInfo) => chrome.tabs.query(queryInfo) : null);
+      if (typeof queryTabs !== 'function') {
+        return [];
+      }
+
+      const tabs = await queryTabs({}).catch(() => []);
+      return Array.isArray(tabs) ? tabs : [];
+    }
+
+    async function detectLoggedInChatGptHomeInAutomationWindow(excludeTabId = null) {
+      const tabs = await queryOpenAiTabsInAutomationWindow();
+      for (const tab of tabs) {
+        if (!tab || !Number.isInteger(tab.id)) {
+          continue;
+        }
+        if (Number.isInteger(excludeTabId) && tab.id === excludeTabId) {
+          continue;
+        }
+        const currentUrl = String(tab.url || '').trim();
+        if (!isLikelyLoggedInChatgptHomeUrl(currentUrl)) {
+          continue;
+        }
+        return {
+          success: true,
+          reason: 'chatgpt_home_other_tab',
+          skipProfileStep: true,
+          url: currentUrl,
+          tabId: tab.id,
+        };
+      }
+      return null;
     }
 
     async function detectStep4PostSubmitFallback(tabId, options = {}) {
@@ -207,10 +244,19 @@
               reason: 'signup_profile',
               skipProfileStep: false,
               url: currentUrl,
+              source: 'signup_tab',
             };
           }
         } catch {
           // Keep polling until timeout; tab may be mid-navigation.
+        }
+
+        const globalSuccess = await detectLoggedInChatGptHomeInAutomationWindow(tabId).catch(() => null);
+        if (globalSuccess?.success) {
+          return {
+            ...globalSuccess,
+            source: 'other_tab',
+          };
         }
 
         await sleepWithStop(pollIntervalMs);
@@ -221,6 +267,7 @@
         reason: 'unknown',
         skipProfileStep: false,
         url: lastUrl,
+        source: 'unknown',
       };
     }
 
@@ -1151,6 +1198,9 @@
             logStep: completionStep,
             logStepKey: step === 4 ? 'fetch-signup-code' : 'fetch-login-code',
           });
+          if (step === 4 && result?.success) {
+            await addLog('步骤 4：认证页已回传验证码提交成功结果。', 'info');
+          }
         } catch (err) {
           if (step === 4 && isRetryableVerificationTransportError(err)) {
             const fallback = await detectStep4PostSubmitFallback(signupTabId, {
@@ -1158,16 +1208,21 @@
               pollIntervalMs: 300,
             });
             if (fallback.success) {
-              const fallbackLabel = fallback.reason === 'chatgpt_home'
-                ? 'ChatGPT 已登录首页'
-                : '注册资料页';
-              await addLog(`步骤 4：验证码提交后页面已切换到${fallbackLabel}，按提交成功继续。`, 'warn');
+              if (fallback.reason === 'chatgpt_home_other_tab') {
+                await addLog('步骤 4：验证码提交后认证页通信中断，但检测到其他 ChatGPT 标签页已进入登录态，按提交成功继续。', 'warn');
+              } else {
+                const fallbackLabel = fallback.reason === 'chatgpt_home'
+                  ? 'ChatGPT 已登录首页'
+                  : '注册资料页';
+                await addLog(`步骤 4：验证码提交后原认证页已切换到${fallbackLabel}，按提交成功继续。`, 'warn');
+              }
               return {
                 success: true,
                 assumed: true,
                 transportRecovered: true,
                 skipProfileStep: Boolean(fallback.skipProfileStep),
                 url: fallback.url,
+                fallbackSource: fallback.source || '',
               };
             }
           }

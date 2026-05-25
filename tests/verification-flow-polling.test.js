@@ -2054,7 +2054,112 @@ test('verification flow treats retryable submit transport failure as success whe
   assert.equal(result.skipProfileStep, true);
   assert.equal(result.assumed, true);
   assert.equal(result.transportRecovered, true);
-  assert.equal(logs.some(({ message }) => /验证码提交后页面已切换到ChatGPT 已登录首页/.test(message)), true);
+  assert.equal(logs.some(({ message }) => /验证码提交后原认证页已切换到ChatGPT 已登录首页/.test(message)), true);
+});
+
+test('verification flow treats retryable submit transport failure as success when another automation tab already reached logged-in home', async () => {
+  const logs = [];
+
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/u/login/email-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: (error) => /message channel is closed/i.test(String(error?.message || error || '')),
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => ([
+      { id: 1, url: 'https://auth.openai.com/u/login/email-verification' },
+      { id: 8, url: 'https://chatgpt.com/' },
+    ]),
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async () => {
+      throw new Error('The page keeping the extension port is moved into back/forward cache, so the message channel is closed.');
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  const result = await helpers.submitVerificationCode(4, '654321');
+
+  assert.equal(result.success, true);
+  assert.equal(result.skipProfileStep, true);
+  assert.equal(result.assumed, true);
+  assert.equal(result.transportRecovered, true);
+  assert.equal(logs.some(({ message }) => /检测到其他 ChatGPT 标签页已进入登录态/.test(message)), true);
+});
+
+test('verification flow preserves retryable submit transport failure when no step 4 success fallback is found', async () => {
+  const helpers = api.createVerificationFlowHelpers({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+        get: async () => ({ url: 'https://auth.openai.com/u/login/email-verification' }),
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypassRequest: async () => ({ confirmed: true }),
+    getHotmailVerificationPollConfig: () => ({}),
+    getHotmailVerificationRequestTimestamp: () => 0,
+    getState: async () => ({}),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isRetryableContentScriptTransportError: (error) => /message channel is closed/i.test(String(error?.message || error || '')),
+    isStopError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    MAIL_2925_VERIFICATION_INTERVAL_MS: 15000,
+    MAIL_2925_VERIFICATION_MAX_ATTEMPTS: 15,
+    pollCloudflareTempEmailVerificationCode: async () => ({}),
+    pollHotmailVerificationCode: async () => ({}),
+    pollLuckmailVerificationCode: async () => ({}),
+    queryTabsInAutomationWindow: async () => ([
+      { id: 1, url: 'https://auth.openai.com/u/login/email-verification' },
+      { id: 8, url: 'https://chatgpt.com/auth/login' },
+    ]),
+    sendToContentScript: async () => {
+      throw new Error('should not use non-resilient channel');
+    },
+    sendToContentScriptResilient: async () => {
+      throw new Error('The page keeping the extension port is moved into back/forward cache, so the message channel is closed.');
+    },
+    sendToMailContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    setStepStatus: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    VERIFICATION_POLL_MAX_ROUNDS: 5,
+  });
+
+  await assert.rejects(
+    () => helpers.submitVerificationCode(4, '654321'),
+    /message channel is closed/i
+  );
 });
 
 test('verification flow avoids resend storms when iCloud polling keeps hitting transport errors', async () => {
