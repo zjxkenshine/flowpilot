@@ -219,6 +219,7 @@
       const pollIntervalMs = Math.max(100, Number(options.pollIntervalMs) || 250);
       const startedAt = Date.now();
       let lastUrl = '';
+      let lastSnapshot = null;
 
       while (Date.now() - startedAt < timeoutMs) {
         throwIfStopped();
@@ -251,6 +252,116 @@
           // Keep polling until timeout; tab may be mid-navigation.
         }
 
+        try {
+          const requestTimeoutMs = Math.max(1200, Math.min(5000, timeoutMs));
+          const probeResult = typeof sendToContentScriptResilient === 'function'
+            ? await sendToContentScriptResilient(
+              'signup-page',
+              {
+                type: 'GET_STEP4_POST_SUBMIT_STATE',
+                source: 'background',
+                payload: {
+                  assumeSignupEmailVerification: true,
+                },
+              },
+              {
+                timeoutMs: requestTimeoutMs,
+                responseTimeoutMs: requestTimeoutMs,
+                retryDelayMs: 400,
+                logMessage: '步骤 4：验证码提交后页面正在切换，等待页面恢复并确认注册状态...',
+              }
+            )
+            : await sendToContentScript('signup-page', {
+              type: 'GET_STEP4_POST_SUBMIT_STATE',
+              source: 'background',
+              payload: {
+                assumeSignupEmailVerification: true,
+              },
+            }, {
+              responseTimeoutMs: requestTimeoutMs,
+            });
+
+          if (probeResult?.error) {
+            throw new Error(probeResult.error);
+          }
+
+          const snapshot = {
+            state: String(probeResult?.state || 'unknown').trim() || 'unknown',
+            url: String(probeResult?.url || lastUrl || '').trim(),
+            invalidCode: Boolean(probeResult?.invalidCode),
+            errorText: String(probeResult?.errorText || '').trim(),
+            emailVerificationRequired: Boolean(probeResult?.emailVerificationRequired),
+            emailVerificationPage: Boolean(probeResult?.emailVerificationPage),
+            skipProfileStep: Boolean(probeResult?.skipProfileStep),
+            userAlreadyExistsBlocked: Boolean(probeResult?.userAlreadyExistsBlocked),
+            retryEnabled: Boolean(probeResult?.retryEnabled),
+            detailText: String(probeResult?.detailText || '').trim(),
+          };
+          lastSnapshot = snapshot;
+
+          if (snapshot.userAlreadyExistsBlocked) {
+            return {
+              success: false,
+              reason: 'user_already_exists',
+              userAlreadyExistsBlocked: true,
+              url: snapshot.url,
+              snapshot,
+            };
+          }
+          if (snapshot.invalidCode) {
+            return {
+              success: false,
+              reason: 'invalid_code',
+              invalidCode: true,
+              errorText: snapshot.errorText || '验证码被拒绝。',
+              url: snapshot.url,
+              snapshot,
+            };
+          }
+          if (snapshot.state === 'profile_page') {
+            return {
+              success: true,
+              reason: 'signup_profile_probe',
+              skipProfileStep: false,
+              url: snapshot.url,
+              source: 'signup_probe',
+            };
+          }
+          if (snapshot.state === 'logged_in_home') {
+            return {
+              success: true,
+              reason: 'chatgpt_home_probe',
+              skipProfileStep: true,
+              url: snapshot.url,
+              source: 'signup_probe',
+            };
+          }
+          if (snapshot.emailVerificationRequired || snapshot.emailVerificationPage) {
+            return {
+              success: true,
+              reason: 'signup_email_verification_probe',
+              skipProfileStep: false,
+              emailVerificationRequired: true,
+              emailVerificationPage: true,
+              url: snapshot.url,
+              source: 'signup_probe',
+            };
+          }
+          if (snapshot.state === 'signup_retry_page' || snapshot.retryEnabled) {
+            return {
+              success: false,
+              reason: 'signup_retry_page',
+              retryPage: true,
+              retryEnabled: snapshot.retryEnabled,
+              detailText: snapshot.detailText,
+              url: snapshot.url,
+              snapshot,
+            };
+          }
+        } catch {
+          // Ignore transient inspect failures and keep polling.
+        }
+
         const globalSuccess = await detectLoggedInChatGptHomeInAutomationWindow(tabId).catch(() => null);
         if (globalSuccess?.success) {
           return {
@@ -268,6 +379,7 @@
         skipProfileStep: false,
         url: lastUrl,
         source: 'unknown',
+        snapshot: lastSnapshot,
       };
     }
 
@@ -1207,11 +1319,24 @@
               timeoutMs: 9000,
               pollIntervalMs: 300,
             });
+            if (fallback.userAlreadyExistsBlocked) {
+              throw new Error('SIGNUP_USER_ALREADY_EXISTS::步骤 4：检测到 user_already_exists，说明当前用户已存在，当前轮将直接停止。');
+            }
+            if (fallback.invalidCode) {
+              await addLog('步骤 4：验证码提交后检测到验证码被拒绝。', 'warn');
+              return {
+                invalidCode: true,
+                errorText: fallback.errorText || '验证码被拒绝。',
+                url: fallback.url || '',
+              };
+            }
             if (fallback.success) {
               if (fallback.reason === 'chatgpt_home_other_tab') {
                 await addLog('步骤 4：验证码提交后认证页通信中断，但检测到其他 ChatGPT 标签页已进入登录态，按提交成功继续。', 'warn');
+              } else if (fallback.reason === 'signup_email_verification_probe') {
+                await addLog('步骤 4：验证码提交后已切换到邮箱验证码页，继续拉取邮箱验证码。', 'warn');
               } else {
-                const fallbackLabel = fallback.reason === 'chatgpt_home'
+                const fallbackLabel = /chatgpt_home/.test(String(fallback.reason || ''))
                   ? 'ChatGPT 已登录首页'
                   : '注册资料页';
                 await addLog(`步骤 4：验证码提交后原认证页已切换到${fallbackLabel}，按提交成功继续。`, 'warn');
@@ -1221,9 +1346,15 @@
                 assumed: true,
                 transportRecovered: true,
                 skipProfileStep: Boolean(fallback.skipProfileStep),
+                emailVerificationRequired: Boolean(fallback.emailVerificationRequired),
+                emailVerificationPage: Boolean(fallback.emailVerificationPage),
                 url: fallback.url,
                 fallbackSource: fallback.source || '',
               };
+            }
+            if (fallback.retryPage) {
+              const detailSuffix = fallback.detailText ? ` 页面提示：${fallback.detailText}` : '';
+              throw new Error(`步骤 4：验证码提交后进入注册重试页，但页面未恢复。${detailSuffix}`.trim());
             }
           }
           if (step === 8 && isRetryableVerificationTransportError(err)) {

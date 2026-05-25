@@ -26,6 +26,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'STEP8_GET_STATE'
       || message.type === 'STEP8_TRIGGER_CONTINUE'
       || message.type === 'GET_LOGIN_AUTH_STATE'
+      || message.type === 'GET_STEP4_POST_SUBMIT_STATE'
       || message.type === 'SUBMIT_ADD_EMAIL'
       || message.type === 'GET_STEP5_SUBMIT_STATE'
       || message.type === 'PREPARE_SIGNUP_VERIFICATION'
@@ -131,6 +132,8 @@ async function handleCommand(message) {
       return await fillVerificationCode(message.step, message.payload);
     case 'GET_LOGIN_AUTH_STATE':
       return serializeLoginAuthState(inspectLoginAuthState());
+    case 'GET_STEP4_POST_SUBMIT_STATE':
+      return serializeStep4PostSubmitState(inspectStep4PostSubmitState(message.payload || {}));
     case 'SUBMIT_ADD_EMAIL':
       return await submitAddEmailAndContinue(message.payload);
     case 'GET_STEP5_SUBMIT_STATE':
@@ -790,6 +793,129 @@ function inspectSignupEntryState() {
   return {
     state: 'unknown',
     url: location.href,
+  };
+}
+
+function inspectStep4PostSubmitState(options = {}) {
+  const { assumeSignupEmailVerification = true } = options;
+  const postVerificationState = getStep4PostVerificationState({ ignoreVerificationVisibility: true });
+  if (postVerificationState?.state === 'step5') {
+    return {
+      state: 'profile_page',
+      url: postVerificationState.url || location.href,
+      skipProfileStep: false,
+      emailVerificationRequired: false,
+      emailVerificationPage: false,
+      invalidCode: false,
+      errorText: '',
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  if (postVerificationState?.state === 'logged_in_home') {
+    return {
+      state: 'logged_in_home',
+      url: postVerificationState.url || location.href,
+      skipProfileStep: true,
+      emailVerificationRequired: false,
+      emailVerificationPage: false,
+      invalidCode: false,
+      errorText: '',
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  const retryState = getCurrentAuthRetryPageState('signup');
+  if (retryState) {
+    return {
+      state: 'signup_retry_page',
+      url: retryState.url || location.href,
+      skipProfileStep: false,
+      emailVerificationRequired: false,
+      emailVerificationPage: false,
+      invalidCode: false,
+      errorText: '',
+      userAlreadyExistsBlocked: Boolean(retryState.userAlreadyExistsBlocked),
+      retryEnabled: Boolean(retryState.retryEnabled),
+      detailText: getPageTextSnapshot(),
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  if (isPhoneVerificationPageReady()) {
+    const errorText = getVerificationErrorText();
+    return {
+      state: 'phone_verification_page',
+      url: location.href,
+      skipProfileStep: false,
+      emailVerificationRequired: false,
+      emailVerificationPage: false,
+      invalidCode: Boolean(errorText),
+      errorText,
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  const errorText = getVerificationErrorText();
+  if (assumeSignupEmailVerification && isEmailVerificationPage()) {
+    return {
+      state: 'verification_page',
+      url: location.href,
+      skipProfileStep: false,
+      emailVerificationRequired: true,
+      emailVerificationPage: true,
+      invalidCode: Boolean(errorText),
+      errorText,
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  if (isVerificationPageStillVisible()) {
+    return {
+      state: 'verification_page',
+      url: location.href,
+      skipProfileStep: false,
+      emailVerificationRequired: false,
+      emailVerificationPage: false,
+      invalidCode: Boolean(errorText),
+      errorText,
+      displayedEmail: getSignupPasswordDisplayedEmail(),
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
+    };
+  }
+
+  return {
+    state: 'unknown',
+    url: location.href,
+    skipProfileStep: false,
+    emailVerificationRequired: false,
+    emailVerificationPage: false,
+    invalidCode: false,
+    errorText: '',
+    displayedEmail: getSignupPasswordDisplayedEmail(),
+    displayedPhone: getPhoneVerificationDisplayedPhone(),
+  };
+}
+
+function serializeStep4PostSubmitState(snapshot = inspectStep4PostSubmitState()) {
+  return {
+    state: snapshot?.state || 'unknown',
+    url: snapshot?.url || location.href,
+    skipProfileStep: Boolean(snapshot?.skipProfileStep),
+    emailVerificationRequired: Boolean(snapshot?.emailVerificationRequired),
+    emailVerificationPage: Boolean(snapshot?.emailVerificationPage),
+    invalidCode: Boolean(snapshot?.invalidCode),
+    errorText: String(snapshot?.errorText || ''),
+    userAlreadyExistsBlocked: Boolean(snapshot?.userAlreadyExistsBlocked),
+    retryEnabled: Boolean(snapshot?.retryEnabled),
+    detailText: String(snapshot?.detailText || ''),
+    displayedEmail: String(snapshot?.displayedEmail || ''),
+    displayedPhone: String(snapshot?.displayedPhone || ''),
   };
 }
 
