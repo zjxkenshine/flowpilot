@@ -342,6 +342,10 @@ test('PayPal hosted checkout create applies conversion proxy before hosted payme
     ensureContentScriptReadyOnTabUntilStopped: async () => {
       events.push({ type: 'ready' });
     },
+    getState: async () => ({
+      hostedCheckoutPhoneNumber: '4155551234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    }),
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });
@@ -755,6 +759,7 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
       events.push({ type: 'get-state' });
       return {
         hostedCheckoutPhoneNumber: '4155551234',
+        hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
       };
     },
     registerTab: async (source, tabId) => {
@@ -862,6 +867,7 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
     },
     getState: async () => ({
       hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
     }),
     registerTab: async (source, tabId) => {
       events.push({ type: 'register', source, tabId });
@@ -896,8 +902,8 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
   });
 
   const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)?.payload || {};
-  assert.equal(profileState.plusHostedCheckoutGuestProfile.phone, '4155551234');
-  assert.equal(profileState.plusHostedCheckoutPhoneDigits, '4155551234');
+  assert.equal(profileState.plusHostedCheckoutGuestProfile.phone, '2125550000');
+  assert.equal(profileState.plusHostedCheckoutPhoneDigits, '2125550000');
   assert.equal(
     events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP')?.message?.payload?.address?.street,
     '1 Main St'
@@ -928,6 +934,7 @@ test('PayPal hosted email node completes when Next navigation drops the content 
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
     getState: async () => ({
       hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
     }),
     registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
     sendTabMessageUntilStopped: async (tabId, source, message) => {
@@ -1891,5 +1898,69 @@ test('hosted checkout pool failure records lastError without incrementing useCou
   assert.match(
     usageUpdate?.payload?.hostedCheckoutSmsPoolUsage?.['4155555678----http://pool-b.test/api/sms']?.lastError || '',
     /6|code|验证码/i
+  );
+});
+
+test('hosted checkout runtime prefers per-run state over stale persisted state when resolving pool config', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          data: {
+            message: "PayPal: 123123 is your security code. Don't share it.",
+          },
+        }),
+      };
+    },
+    getState: async () => ({
+      hostedCheckoutVerificationUrl: 'http://stale.test/api/sms',
+      hostedCheckoutPhoneNumber: '4155550000',
+      hostedCheckoutSmsPoolText: '',
+    }),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+  });
+
+  const result = await executor.fetchHostedCheckoutVerificationCodeManually({
+    hostedCheckoutSmsPoolText: '4155557777----http://fresh.test/api/sms',
+    state: {
+      hostedCheckoutSmsPoolText: '4155557777----http://fresh.test/api/sms',
+    },
+  });
+
+  assert.equal(result.verificationUrl, 'http://fresh.test/api/sms');
+  assert.equal(events.find((event) => event.type === 'fetch')?.url?.startsWith('http://fresh.test/api/sms?t='), true);
+});
+
+test('hosted checkout strict pool mode rejects unparsable non-empty sms pool text', async () => {
+  const executor = api.createPlusCheckoutCreateExecutor({
+    getState: async () => ({
+      hostedCheckoutSmsPoolText: 'not-a-valid-pool-entry',
+      hostedCheckoutPhoneNumber: '4155551234',
+      hostedCheckoutVerificationUrl: 'http://fallback.test/api/sms',
+    }),
+  });
+
+  await assert.rejects(
+    () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
+    /接码池已配置.*未解析出有效号码|接码池已配置.*未解析到可用号码/i
+  );
+});
+
+test('hosted checkout manual mode rejects incomplete manual config when pool is empty', async () => {
+  const executor = api.createPlusCheckoutCreateExecutor({
+    getState: async () => ({
+      hostedCheckoutSmsPoolText: '',
+      hostedCheckoutPhoneNumber: '',
+      hostedCheckoutVerificationUrl: 'http://manual.test/api/sms',
+    }),
+  });
+
+  await assert.rejects(
+    () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
+    /接码配置不完整|手机号和验证码接口/i
   );
 });

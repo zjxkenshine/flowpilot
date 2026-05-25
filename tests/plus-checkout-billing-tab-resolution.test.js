@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -75,6 +75,39 @@ function createSuccessfulBillingResult() {
   };
 }
 
+function createCheckoutConversionProxyManagerHarness(events, options = {}) {
+  let storedSession = options.initialSession || null;
+  return {
+    applySessionFromState: async (state, sessionOptions = {}) => {
+      const payload = {
+        active: true,
+        flowType: sessionOptions.flowType,
+        releaseNodeKey: sessionOptions.releaseNodeKey,
+        appliedStepKey: sessionOptions.appliedStepKey,
+        displayName: String(options.displayName || state?.plusCheckoutConversionProxyUrl || 'http://proxy.example:8080'),
+        snapshot: { applied: true },
+      };
+      storedSession = payload;
+      events.proxy.push({
+        type: 'apply',
+        proxyUrl: state?.plusCheckoutConversionProxyUrl || '',
+        options: sessionOptions,
+      });
+      return payload;
+    },
+    getStoredSession: async () => storedSession,
+    restoreSession: async (session) => {
+      events.proxy.push({
+        type: 'restore',
+        flowType: session?.flowType || '',
+        displayName: session?.displayName || '',
+      });
+      storedSession = null;
+      return true;
+    },
+  };
+}
+
 function createExecutorHarness({
   frames,
   stateByFrame,
@@ -89,6 +122,8 @@ function createExecutorHarness({
   probeIpProxyExit = null,
   onSetState = null,
   sleepWithStop = null,
+  initialState = {},
+  checkoutConversionProxyManager = null,
   submitRedirectUrl = 'https://www.paypal.com/checkoutnow',
 }) {
   const api = loadPlusCheckoutBillingModule();
@@ -98,6 +133,7 @@ function createExecutorHarness({
     injectedAllFrames: false,
     logs: [],
     messages: [],
+    proxy: [],
     sleeps: [],
     states: [],
     waitedUrls: [],
@@ -107,6 +143,11 @@ function createExecutorHarness({
     url: 'https://chatgpt.com/checkout/openai_ie/cs_test',
     status: 'complete',
   };
+  let runtimeState = initialState && typeof initialState === 'object'
+    ? { ...initialState }
+    : {};
+
+  const proxyManager = checkoutConversionProxyManager || null;
 
   const executor = api.createPlusCheckoutBillingExecutor({
     addLog: async (message, level = 'info') => events.logs.push({ message, level }),
@@ -164,16 +205,18 @@ function createExecutorHarness({
     },
     completeNodeFromBackground: async (step, payload) => events.completed.push({ step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId) => events.ensuredTabs.push({ source, tabId }),
+    ...(proxyManager ? { checkoutConversionProxyManager: proxyManager } : {}),
     fetch: fetchImpl,
     generateRandomName: () => ({ firstName: 'Ada', lastName: 'Lovelace' }),
     getAddressSeedForCountry,
-    getState: typeof getState === 'function' ? getState : async () => ({}),
+    getState: typeof getState === 'function' ? getState : async () => runtimeState,
     getTabId: async () => null,
     ...(typeof handlePhonePlusNonFreeTrialFallback === 'function' ? { handlePhonePlusNonFreeTrialFallback } : {}),
     isTabAlive: async () => false,
     markCurrentRegistrationAccountUsed,
     ...(typeof queryTabsInAutomationWindow === 'function' ? { queryTabsInAutomationWindow } : {}),
     setState: async (updates) => {
+      runtimeState = { ...runtimeState, ...(updates || {}) };
       events.states.push(updates);
       if (typeof onSetState === 'function') {
         await onSetState(updates, events);
@@ -189,7 +232,15 @@ function createExecutorHarness({
     ...(typeof probeIpProxyExit === 'function' ? { probeIpProxyExit } : {}),
   });
 
-  return { checkoutTab, events, executor };
+  return {
+    checkoutTab,
+    events,
+    executor,
+    getRuntimeState: () => runtimeState,
+    setRuntimeState: (nextState) => {
+      runtimeState = nextState && typeof nextState === 'object' ? { ...nextState } : {};
+    },
+  };
 }
 
 test('Plus checkout billing stops before PayPal when today due amount is non-zero', async () => {
@@ -377,9 +428,200 @@ test('Plus checkout billing waits on processing subscribe text before clicking a
     const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
     assert.equal(subscribeMessages.length, 2);
     assert.equal(subscribeMessages.some((entry) => entry.message.payload.allowBusySubscribeButton !== undefined), false);
-    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 20, true);
+    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 16, true);
     assert.equal(events.logs.some((entry) => /本轮未点击/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing refills address and retries subscribe after an 8-second redirect timeout', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+        },
+      },
+      onClickSubscribe: async ({ checkoutTab }) => {
+        clickCalls += 1;
+        if (clickCalls === 2) {
+          checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        }
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: '订阅',
+        };
+      },
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({});
+
+    const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    assert.equal(fillMessages.length, 2);
+    assert.equal(subscribeMessages.length, 2);
+    assert.equal(subscribeMessages[1].message.payload.ensurePaymentActive, true);
+    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 16, true);
+    assert.equal(events.logs.some((entry) => /8 秒内未跳转到 PayPal/.test(entry.message)), true);
+    assert.equal(events.logs.some((entry) => /重新填写账单地址并再次点击订阅/.test(entry.message)), true);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing reuses an active checkout conversion proxy session during retries', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  Date.now = () => now;
+  try {
+    const proxyEvents = { proxy: [] };
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+        },
+      },
+      initialState: {
+        plusPaymentMethod: 'paypal',
+        plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+        plusCheckoutConversionProxySession: {
+          active: true,
+          flowType: 'classic-paypal',
+          displayName: 'socks5h://proxy.example:1080',
+          snapshot: { applied: true },
+        },
+      },
+      checkoutConversionProxyManager: createCheckoutConversionProxyManagerHarness(proxyEvents, {
+        initialSession: {
+          active: true,
+          flowType: 'classic-paypal',
+          displayName: 'socks5h://proxy.example:1080',
+          snapshot: { applied: true },
+        },
+      }),
+      onClickSubscribe: async ({ checkoutTab }) => {
+        clickCalls += 1;
+        if (clickCalls === 2) {
+          checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        }
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: '订阅',
+        };
+      },
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({
+      plusPaymentMethod: 'paypal',
+      plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+    });
+
+    assert.deepStrictEqual(proxyEvents.proxy, []);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing applies checkout conversion proxy before the first submit when configured', async () => {
+  const proxyEvents = { proxy: [] };
+  const { events, executor } = createExecutorHarness({
+    frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+    stateByFrame: {
+      0: {
+        hasPayPal: true,
+        paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+        billingFieldsVisible: true,
+        hasSubscribeButton: true,
+      },
+    },
+    initialState: {
+      plusPaymentMethod: 'paypal',
+      plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+    },
+    checkoutConversionProxyManager: createCheckoutConversionProxyManagerHarness(proxyEvents),
+  });
+
+  await executor.executePlusCheckoutBilling({
+    plusPaymentMethod: 'paypal',
+    plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+  });
+
+  assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply']);
+  assert.equal(proxyEvents.proxy[0].options.flowType, 'classic-paypal');
+  assert.equal(events.completed[0].step, 'plus-checkout-billing');
+});
+
+test('Classic PayPal billing releases proxy once after 3 refill retries still fail to redirect', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  Date.now = () => now;
+  try {
+    const proxyEvents = { proxy: [] };
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+        },
+      },
+      initialState: {
+        plusPaymentMethod: 'paypal',
+        plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+      },
+      checkoutConversionProxyManager: createCheckoutConversionProxyManagerHarness(proxyEvents),
+      onClickSubscribe: async () => ({
+        clicked: true,
+        subscribeButtonStatus: 'clicked',
+        subscribeButtonText: '订阅',
+      }),
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await assert.rejects(
+      () => executor.executePlusCheckoutBilling({
+        plusPaymentMethod: 'paypal',
+        plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+      }),
+      /8 秒内未跳转到 PayPal，已重试 3 次/
+    );
+
+    const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+    assert.equal(fillMessages.length, 4);
+    assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply', 'restore']);
+    assert.equal(proxyEvents.proxy[1].flowType, 'classic-paypal');
   } finally {
     Date.now = originalNow;
   }

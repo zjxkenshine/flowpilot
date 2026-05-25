@@ -3,7 +3,6 @@
 console.log('[MultiPage:paypal-flow] Content script loaded on', location.href);
 
 const PAYPAL_FLOW_LISTENER_SENTINEL = 'data-multipage-paypal-flow-listener';
-const PAYPAL_HOSTED_DEFAULT_PHONE = '1234567890';
 const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
 const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
 const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
@@ -509,10 +508,10 @@ function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
   if (!phoneInput || !isVisibleElement(phoneInput)) {
     throw new Error('PayPal hosted checkout 未找到电话输入框。');
   }
-  const expectedDigits = normalizeHostedPhoneDigits(expectedPhone || PAYPAL_HOSTED_DEFAULT_PHONE);
+  const expectedDigits = normalizeHostedPhoneDigits(expectedPhone);
   const renderedDigits = normalizeHostedPhoneDigits(phoneInput.value || '');
   if (!expectedDigits) {
-    throw new Error('PayPal hosted checkout 电话配置为空。');
+    throw new Error('PayPal hosted checkout 未收到后台下发的池中手机号/验证码配置，无法校验资料页手机号。');
   }
   const comparableRenderedDigits = renderedDigits.length > expectedDigits.length
     ? renderedDigits.slice(-expectedDigits.length)
@@ -672,9 +671,13 @@ async function fillHostedGuestCheckout(payload = {}) {
   }
   const generatedCard = buildHostedVisaCard();
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  const configuredPhone = normalizeText(payload.phone || '');
+  if (!normalizeHostedPhoneDigits(configuredPhone)) {
+    throw new Error('PayPal hosted checkout 未收到后台下发的池中手机号/验证码配置，无法继续填写资料页。');
+  }
   const values = {
     email: normalizeText(payload.email || buildHostedRandomEmail()),
-    phone: normalizeText(payload.phone || PAYPAL_HOSTED_DEFAULT_PHONE),
+    phone: configuredPhone,
     cardNumber: String(payload.cardNumber || generatedCard.number).replace(/\s+/g, ''),
     cardExpiry: normalizeText(payload.cardExpiry || generatedCard.expiry),
     cardCvv: normalizeText(payload.cardCvv || generatedCard.cvv),

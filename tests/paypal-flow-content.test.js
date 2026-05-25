@@ -674,6 +674,51 @@ test('PayPal hosted guest checkout blocks submit when rendered phone differs fro
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
 });
 
+test('PayPal hosted guest checkout rejects missing phone payload instead of using default phone', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.match(result.error, /未收到后台下发的池中手机号\/验证码配置|未收到后台下发的池中手机号/);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
+});
+
+test('PayPal hosted guest checkout rejects blank phone payload before verification check', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      phone: '   ',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.match(result.error, /未收到后台下发的池中手机号\/验证码配置|未收到后台下发的池中手机号/);
+});
+
 test('PayPal hosted /pay email page fills email and clicks Next instead of Create Account', async () => {
   const harness = createHostedPayPalHarness();
   harness.showPayEmail();

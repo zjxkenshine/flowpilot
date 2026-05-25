@@ -23,7 +23,6 @@
   const HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX = 'HOSTED_CHECKOUT_GENERIC_ERROR::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
-  const HOSTED_CHECKOUT_DEFAULT_PHONE = '1234567890';
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
   const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
   const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
@@ -268,7 +267,7 @@
     function normalizeHostedPhoneForPayload(phone = '') {
       const digits = String(phone || '').replace(/\D/g, '');
       if (!digits) {
-        return HOSTED_CHECKOUT_DEFAULT_PHONE;
+        return '';
       }
       if (digits.length > 10 && digits.startsWith('1')) {
         return digits.slice(-10);
@@ -384,6 +383,125 @@
       };
     }
 
+    function maskHostedPhoneForLog(phone = '') {
+      const digits = normalizeHostedPhoneForPayload(phone);
+      if (!digits) {
+        return '(empty)';
+      }
+      if (digits.length <= 4) {
+        return digits;
+      }
+      return `***${digits.slice(-4)}`;
+    }
+
+    function buildHostedCheckoutConfigError(message = '', meta = {}) {
+      const error = new Error(String(message || 'PayPal hosted checkout 配置无效。').trim());
+      error.hostedCheckoutConfigMeta = meta && typeof meta === 'object' ? meta : {};
+      return error;
+    }
+
+    async function logHostedCheckoutRuntimeConfig(stepKey, config = {}, options = {}) {
+      if (!stepKey) {
+        return;
+      }
+      const source = String(config?.configSource || 'unknown').trim() || 'unknown';
+      const poolSize = Math.max(0, Number(config?.poolSize) || 0);
+      const selectedEntry = config?.hostedCheckoutCurrentSmsEntry || null;
+      const detail = selectedEntry?.key
+        ? `当前条目 ${maskHostedPhoneForLog(selectedEntry.phone)}`
+        : '当前条目 无';
+      const extra = String(options.extra || '').trim();
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码配置来源 ${source}，池条目 ${poolSize} 个，${detail}${extra ? `，${extra}` : ''}。`,
+        options.level || 'info'
+      );
+    }
+
+    async function resolveHostedCheckoutRuntimeConfig(state = {}, options = {}) {
+      const { ensureCurrentSmsEntry = false } = options || {};
+      const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
+      const mergedState = {
+        ...(latestState && typeof latestState === 'object' ? latestState : {}),
+        ...(state && typeof state === 'object' ? state : {}),
+      };
+      const rawPoolText = String(mergedState?.hostedCheckoutSmsPoolText || '').trim();
+      const poolEntries = parseHostedCheckoutSmsPoolEntries(rawPoolText);
+      const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
+      const manualVerificationUrl = String(mergedState?.hostedCheckoutVerificationUrl || '').trim();
+      const manualPhone = normalizeHostedPhoneForPayload(mergedState?.hostedCheckoutPhoneNumber);
+      let selectedSmsEntry = normalizeHostedCheckoutCurrentSmsEntry(mergedState?.hostedCheckoutCurrentSmsEntry, poolEntries);
+
+      if (!selectedSmsEntry && ensureCurrentSmsEntry && poolEntries.length > 0) {
+        selectedSmsEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, poolUsage);
+        if (selectedSmsEntry) {
+          await applyHostedCheckoutRuntimePatch({
+            hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
+          });
+        }
+      }
+
+      if (rawPoolText && poolEntries.length === 0) {
+        throw buildHostedCheckoutConfigError(
+          'PayPal 接码池已配置，但当前内容未解析出有效号码/验证码链接，请检查接码池保存状态或导入格式。',
+          {
+            configSource: 'sms-pool',
+            poolSize: 0,
+            selectedEntry: null,
+          }
+        );
+      }
+
+      if (poolEntries.length > 0) {
+        if (!selectedSmsEntry?.phone || !selectedSmsEntry?.verificationUrl) {
+          throw buildHostedCheckoutConfigError(
+            'PayPal 接码池已配置，但未解析到可用号码/验证码链接，请检查接码池保存状态或导入格式。',
+            {
+              configSource: 'sms-pool',
+              poolSize: poolEntries.length,
+              selectedEntry: null,
+            }
+          );
+        }
+        return {
+          verificationUrl: String(selectedSmsEntry.verificationUrl || '').trim(),
+          phone: String(selectedSmsEntry.phone || '').trim(),
+          oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
+            mergedState?.plusHostedCheckoutOauthDelaySeconds
+          ),
+          hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
+          hostedCheckoutUsesSmsPool: true,
+          configSource: 'sms-pool',
+          poolSize: poolEntries.length,
+        };
+      }
+
+      if (!manualPhone || !manualVerificationUrl) {
+        throw buildHostedCheckoutConfigError(
+          'PayPal 接码配置不完整：当前接码池为空，请先填写手机号和验证码接口，或导入 PayPal 接码池。',
+          {
+            configSource: 'manual-config',
+            poolSize: 0,
+            selectedEntry: null,
+            missingPhone: !manualPhone,
+            missingVerificationUrl: !manualVerificationUrl,
+          }
+        );
+      }
+
+      return {
+        verificationUrl: manualVerificationUrl,
+        phone: manualPhone,
+        oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
+          mergedState?.plusHostedCheckoutOauthDelaySeconds
+        ),
+        hostedCheckoutCurrentSmsEntry: null,
+        hostedCheckoutUsesSmsPool: false,
+        configSource: 'manual-config',
+        poolSize: 0,
+      };
+    }
+
     function chooseHostedCheckoutSmsPoolEntry(entries = [], usage = {}) {
       if (!Array.isArray(entries) || entries.length === 0) {
         return null;
@@ -467,7 +585,9 @@
     async function ensureHostedGuestProfile(state = {}) {
       const mergedState = await getLatestHostedState(state);
       const existingProfile = getHostedProfileFromState(mergedState) || {};
-      const config = await getHostedCheckoutRuntimeConfig(mergedState);
+      const config = await getHostedCheckoutRuntimeConfig(mergedState, {
+        ensureCurrentSmsEntry: true,
+      });
       const address = existingProfile.address && typeof existingProfile.address === 'object'
         ? existingProfile.address
         : await fetchHostedCheckoutAddress();
@@ -480,6 +600,16 @@
         address,
         phone: normalizeHostedPhoneForPayload(config.phone || existingProfile.phone),
       };
+      if (!nextProfile.phone) {
+        throw buildHostedCheckoutConfigError(
+          'PayPal hosted checkout 未拿到有效手机号配置，无法继续填写 PayPal 资料页。',
+          {
+            configSource: config?.configSource || 'unknown',
+            poolSize: config?.poolSize || 0,
+            selectedEntry: config?.hostedCheckoutCurrentSmsEntry || null,
+          }
+        );
+      }
       await setState({
         plusHostedCheckoutGuestProfile: nextProfile,
         plusHostedCheckoutPhoneDigits: nextProfile.phone,
@@ -590,10 +720,24 @@
       if (!isHostedCheckoutSuccessUrl(currentUrl)) {
         return false;
       }
-      const config = await getHostedCheckoutRuntimeConfig(state, {
-        ensureCurrentSmsEntry: true,
-      });
-      if (config.hostedCheckoutUsesSmsPool && config.hostedCheckoutCurrentSmsEntry) {
+      let config = null;
+      try {
+        config = await getHostedCheckoutRuntimeConfig(state, {
+          ensureCurrentSmsEntry: true,
+        });
+      } catch (error) {
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：已检测到支付成功，但当前未能解析 PayPal 接码配置，跳过接码池次数更新。原因：${error.message}`,
+          'warn'
+        ).catch(() => {});
+      }
+      config = config || {
+        oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(state?.plusHostedCheckoutOauthDelaySeconds),
+        hostedCheckoutUsesSmsPool: false,
+        hostedCheckoutCurrentSmsEntry: null,
+      };
+      if (config?.hostedCheckoutUsesSmsPool && config?.hostedCheckoutCurrentSmsEntry) {
         await updateHostedCheckoutPoolUsage(config.hostedCheckoutCurrentSmsEntry, {
           incrementUseCount: true,
           success: true,
@@ -629,40 +773,18 @@
     }
 
     async function getHostedCheckoutRuntimeConfig(state = {}, options = {}) {
-      const { ensureCurrentSmsEntry = false } = options || {};
-      const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
-      const mergedState = {
-        ...(state && typeof state === 'object' ? state : {}),
-        ...(latestState && typeof latestState === 'object' ? latestState : {}),
-      };
-      const poolEntries = parseHostedCheckoutSmsPoolEntries(mergedState?.hostedCheckoutSmsPoolText || '');
-      const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
-      let selectedSmsEntry = normalizeHostedCheckoutCurrentSmsEntry(mergedState?.hostedCheckoutCurrentSmsEntry, poolEntries);
-      if (!selectedSmsEntry && ensureCurrentSmsEntry && poolEntries.length > 0) {
-        selectedSmsEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, poolUsage);
-        if (selectedSmsEntry) {
-          await applyHostedCheckoutRuntimePatch({
-            hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
-          });
+      try {
+        return await resolveHostedCheckoutRuntimeConfig(state, options);
+      } catch (error) {
+        if (error?.hostedCheckoutConfigMeta) {
+          const meta = error.hostedCheckoutConfigMeta;
+          await addLog(
+            `步骤 6：PayPal 接码配置校验失败。来源：${meta.configSource || 'unknown'}；池条目：${Math.max(0, Number(meta.poolSize) || 0)}；原因：${error.message}`,
+            'error'
+          ).catch(() => {});
         }
+        throw error;
       }
-      return {
-        verificationUrl: String(
-          selectedSmsEntry?.verificationUrl
-          || mergedState?.hostedCheckoutVerificationUrl
-          || ''
-        ).trim(),
-        phone: String(
-          selectedSmsEntry?.phone
-          || mergedState?.hostedCheckoutPhoneNumber
-          || HOSTED_CHECKOUT_DEFAULT_PHONE
-        ).trim(),
-        oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
-          mergedState?.plusHostedCheckoutOauthDelaySeconds
-        ),
-        hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
-        hostedCheckoutUsesSmsPool: Boolean(selectedSmsEntry),
-      };
     }
 
     function normalizeHostedCheckoutDelaySeconds(value) {
@@ -742,7 +864,7 @@
       return {
         email: buildRandomHostedEmail(),
         password: buildRandomHostedPassword(),
-        phone: String(config?.phone || HOSTED_CHECKOUT_DEFAULT_PHONE).trim(),
+        phone: String(config?.phone || '').trim(),
         firstName: 'James',
         lastName: 'Smith',
         cardNumber: card.number,
@@ -1285,6 +1407,9 @@
 
       if (isHostedOpenAiCheckoutUrl(completedUrl)) {
         const { profile, config } = await ensureHostedGuestProfile(state);
+        await logHostedCheckoutRuntimeConfig(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, config, {
+          extra: `OpenAI Checkout 手机号 ${maskHostedPhoneForLog(profile.phone)}`,
+        });
         await addLog(`步骤 6：正在提交 OpenAI Checkout，等待跳转到 PayPal 邮箱页（电话使用本地号码 ${profile.phone}）。`, 'info');
         completedUrl = String(await runHostedOpenAiCheckoutWithProxySession(
           tabId,
@@ -1390,7 +1515,10 @@
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
-      const { profile } = await ensureHostedGuestProfile(state);
+      const { profile, config } = await ensureHostedGuestProfile(state);
+      await logHostedCheckoutRuntimeConfig(stepKey, config, {
+        extra: `PayPal 填写手机号 ${maskHostedPhoneForLog(profile.phone)}`,
+      });
       await waitForHostedUrlAfterAction(
         tabId,
         (url) => isPayPalUrl(url) || isHostedCheckoutSuccessUrl(url),
@@ -1444,6 +1572,14 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      const reviewConfig = await getHostedCheckoutRuntimeConfig(state, {
+        ensureCurrentSmsEntry: true,
+      });
+      await logHostedCheckoutRuntimeConfig(stepKey, reviewConfig, {
+        extra: reviewConfig.hostedCheckoutUsesSmsPool
+          ? `验证码链接已绑定当前池条目 ${maskHostedPhoneForLog(reviewConfig.hostedCheckoutCurrentSmsEntry?.phone)}`
+          : `手动手机号 ${maskHostedPhoneForLog(reviewConfig.phone)}`,
+      });
       if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
         const nextState = await waitForHostedPayPalStage(
           tabId,

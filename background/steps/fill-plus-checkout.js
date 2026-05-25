@@ -7,6 +7,8 @@
   const PLUS_CHECKOUT_FRAME_READY_DELAY_MS = 500;
   const PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS = 5;
   const PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS = 10000;
+  const CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS = 8000;
+  const CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES = 3;
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
@@ -156,6 +158,31 @@
         `步骤 7：支付提交流程未跳转到 PayPal，支付转换代理已释放。${error?.message ? `原因：${error.message}` : ''}`,
         'warn'
       );
+    }
+
+    async function ensureClassicPaypalCheckoutConversionProxySession(state = {}) {
+      if (!proxyManager?.applySessionFromState) {
+        return null;
+      }
+      const latestState = {
+        ...(state && typeof state === 'object' ? state : {}),
+        ...((typeof getState === 'function' ? await getState() : {}) || {}),
+      };
+      const paymentMethod = normalizePlusPaymentMethod(latestState?.plusPaymentMethod);
+      if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+        return null;
+      }
+      const proxyUrl = normalizeText(latestState?.plusCheckoutConversionProxyUrl || '');
+      if (!proxyUrl) {
+        return null;
+      }
+      if (proxyManager?.getStoredSession) {
+        const session = await proxyManager.getStoredSession(latestState);
+        if (session?.active && session.flowType === 'classic-paypal') {
+          return session;
+        }
+      }
+      return applyClassicPaypalCheckoutConversionProxySession(latestState);
     }
 
     function isGpcHelperCheckout(state = {}) {
@@ -1500,10 +1527,15 @@
       });
     }
 
-    async function waitForPaymentRedirectAfterSubmit(tabId, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
+    async function waitForPaymentRedirectAfterSubmit(
+      tabId,
+      paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+      timeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS
+    ) {
       const paymentConfig = getPaymentMethodConfig(paymentMethod);
+      const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS);
       const startedAt = Date.now();
-      while (Date.now() - startedAt < PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) {
+      while (Date.now() - startedAt < effectiveTimeoutMs) {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         if (!tab) {
           throw new Error(`步骤 7：checkout 标签页已关闭，无法继续等待 ${paymentConfig.label} 跳转。`);
@@ -1523,8 +1555,8 @@
       return false;
     }
 
-    async function waitForPayPalRedirectAfterSubmit(tabId) {
-      return waitForPaymentRedirectAfterSubmit(tabId, PLUS_PAYMENT_METHOD_PAYPAL);
+    async function waitForPayPalRedirectAfterSubmit(tabId, timeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) {
+      return waitForPaymentRedirectAfterSubmit(tabId, PLUS_PAYMENT_METHOD_PAYPAL, timeoutMs);
     }
 
     async function inspectCheckoutFrame(tabId, frame) {
@@ -1729,152 +1761,27 @@
       }
     }
 
-    async function getCheckoutTabId(state = {}) {
-      const registeredTabId = await getTabId(PLUS_CHECKOUT_SOURCE);
-      if (registeredTabId && await isTabAlive(PLUS_CHECKOUT_SOURCE)) {
-        const aliveRegisteredTabId = await getAlivePlusCheckoutTabId(registeredTabId);
-        if (aliveRegisteredTabId) {
-          return aliveRegisteredTabId;
+    function buildSubscribeFrameCandidates(paymentFrame = {}, billingFrame = {}) {
+      const candidates = [
+        { frameId: 0, url: '' },
+        { frameId: paymentFrame?.frameId, url: paymentFrame?.frameUrl || '' },
+        { frameId: billingFrame?.frameId, url: billingFrame?.frameUrl || '' },
+      ];
+      const seenFrameIds = new Set();
+      return candidates.filter((candidate) => {
+        const frameId = Number.isInteger(candidate?.frameId) ? candidate.frameId : null;
+        if (frameId === null || seenFrameIds.has(frameId)) {
+          return false;
         }
-      }
-      const storedTabId = Number(state.plusCheckoutTabId) || 0;
-      if (storedTabId) {
-        const aliveStoredTabId = await getAlivePlusCheckoutTabId(storedTabId);
-        if (aliveStoredTabId) {
-          return aliveStoredTabId;
-        }
-      }
-      const currentCheckoutTabId = await getCurrentPlusCheckoutTabId();
-      if (currentCheckoutTabId) {
-        await addLog('步骤 7：检测到当前已在 Plus Checkout 页面，直接接管当前标签页。', 'info');
-        return currentCheckoutTabId;
-      }
-      throw new Error('步骤 7：未找到 Plus Checkout 标签页。请先打开 Plus Checkout 页面，或完成步骤 6。');
+        seenFrameIds.add(frameId);
+        return true;
+      });
     }
 
-    async function executePlusCheckoutBilling(state = {}) {
-      if (isGpcHelperCheckout(state)) {
-        await executeGpcHelperBilling(state);
-        return;
-      }
-      const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
-      const paymentConfig = getPaymentMethodConfig(paymentMethod);
-      const tabId = await getCheckoutTabId(state);
-      await addLog('步骤 7：正在等待 Plus Checkout 页面加载完成...', 'info');
-      await waitForTabCompleteUntilStopped(tabId);
-      await sleepWithStop(1000);
-
-      await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
-        inject: PLUS_CHECKOUT_INJECT_FILES,
-        injectSource: PLUS_CHECKOUT_SOURCE,
-        logMessage: '步骤 7：Checkout 页面仍在加载，等待账单填写脚本就绪...',
-      });
-      const readyFrames = await getReadyCheckoutFrames(tabId);
-      const initialAmountCheck = await ensureFreeTrialAmount(tabId, state, {
-        phaseLabel: 'Checkout 页面加载后',
-      });
-      if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
-        return;
-      }
-      const paymentFrame = await resolvePaymentFrame(tabId, readyFrames, paymentMethod);
-      if (paymentFrame.frameId === null) {
-        const frameSummary = buildFrameSummary(paymentFrame.inspections);
-        throw new Error(`步骤 7：未在主页面或 iframe 中发现 ${paymentConfig.label} DOM，无法自动切换付款方式。frame 摘要：${frameSummary}`);
-      }
-      if (!paymentFrame.ready) {
-        throw new Error(`步骤 7：已定位到 ${paymentConfig.label} 所在 iframe（frameId=${paymentFrame.frameId}），但账单脚本无法注入该 iframe。请提供该 iframe 的控制台结构或截图。`);
-      }
-
-      if (paymentFrame.frameId !== 0) {
-        await addLog(`步骤 7：${paymentConfig.label} 位于 checkout iframe（frameId=${paymentFrame.frameId}），将改为在该 frame 内操作。`, 'info');
-      }
-
-      const randomName = generateRandomName();
-      const fullName = [randomName.firstName, randomName.lastName].filter(Boolean).join(' ');
-
-      await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
-      const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
-        type: paymentConfig.selectMessageType,
-        source: 'background',
-        payload: { paymentMethod },
-      });
-      if (paymentResult?.error) {
-        throw new Error(paymentResult.error);
-      }
-
-      const billingFrame = await waitForBillingFrame(tabId);
-      if (!billingFrame.ready) {
-        throw new Error(`步骤 7：已定位到账单地址 iframe（frameId=${billingFrame.frameId}），但账单脚本无法注入该 iframe。请提供该 iframe 的控制台结构或截图。`);
-      }
-      if (billingFrame.frameId !== paymentFrame.frameId) {
-        await addLog(`步骤 7：账单地址位于 checkout iframe（frameId=${billingFrame.frameId}），将改为在该 frame 内填写。`, 'info');
-      }
-
-      let billingState = state;
-      if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY && typeof probeIpProxyExit === 'function') {
-        const staleExitRegion = normalizeText(
-          state?.ipProxyAppliedExitRegion
-          || state?.ipProxyExitRegion
-          || ''
-        );
-        try {
-          await addLog('步骤 7：GoPay 账单地址准备按代理出口填写，正在重新检测当前出口地区...', 'info');
-          const probeResult = await probeIpProxyExit({
-            state,
-            timeoutMs: 12000,
-            authRebindRetry: true,
-            detectWhenDisabled: true,
-          });
-          const routing = probeResult?.proxyRouting || {};
-          const probedExitRegion = normalizeText(routing.exitRegion || '');
-          const probedExitIp = normalizeText(routing.exitIp || '');
-          const probedExitSource = normalizeText(routing.exitSource || '');
-          const probeEndpoint = normalizeText(routing.endpoint || routing.exitEndpoint || '');
-          const probeReason = normalizeText(routing.reason || '');
-          const probeError = normalizeText(routing.exitError || routing.error || '');
-          if (probedExitRegion) {
-            billingState = {
-              ...(state || {}),
-              ipProxyAppliedExitRegion: probedExitRegion,
-              ipProxyExitRegion: probedExitRegion,
-              ipProxyAppliedExitIp: probedExitIp,
-              ipProxyAppliedExitSource: probedExitSource,
-            };
-            const sourceSuffix = probedExitSource ? `，来源 ${probedExitSource}` : '';
-            const endpointSuffix = probeEndpoint ? `，检测地址 ${probeEndpoint}` : '';
-            await addLog(`步骤 7：当前代理出口复测结果：${probedExitRegion}${probedExitIp ? ` / ${probedExitIp}` : ''}${sourceSuffix}${endpointSuffix}。`, 'info');
-          } else {
-            billingState = {
-              ...(state || {}),
-              ipProxyAppliedExitRegion: '',
-              ipProxyExitRegion: '',
-              ipProxyAppliedExitIp: probedExitIp,
-              ipProxyAppliedExitSource: probedExitSource,
-            };
-            await addLog(
-              `步骤 7：代理出口复测没有返回国家/地区代码，已清空旧出口地区${staleExitRegion ? ` ${staleExitRegion}` : ''}，不会继续沿用旧地区。${probeReason ? `状态：${probeReason}。` : ''}${probeError ? `诊断：${probeError}` : ''}`,
-              'warn'
-            );
-          }
-        } catch (error) {
-          billingState = {
-            ...(state || {}),
-            ipProxyAppliedExitRegion: '',
-            ipProxyExitRegion: '',
-          };
-          await addLog(`步骤 7：代理出口复测失败，已清空旧出口地区${staleExitRegion ? ` ${staleExitRegion}` : ''}，不会继续沿用旧地区：${error?.message || String(error || '未知错误')}`, 'warn');
-        }
-      }
-      if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY
-        && typeof probeIpProxyExit === 'function'
-        && !resolveMeiguodizhiCountryCode(billingState?.ipProxyAppliedExitRegion || billingState?.ipProxyExitRegion || '')) {
-        throw new Error('步骤 7：GoPay 账单地址需要当前代理出口国家/地区，但本次复测没有拿到国家码；已停止填写，避免误用旧的 KR/ID 地区。请先点 IP 代理“检测出口”，确认显示 JP 后再继续。');
-      }
-      const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
+    async function fillBillingAddressForCheckout(tabId, billingFrame = {}, fullName = '', addressSeed = null) {
       if (!addressSeed) {
         throw new Error('步骤 7：未找到可用的本地账单地址种子。');
       }
-
       await addLog(`步骤 7：正在填写账单地址（${addressSeed.countryCode} / ${addressSeed.query}）...`, 'info');
       const autocompleteFrame = await resolveOptionalFrameByUrl(tabId, isAutocompleteFrameUrl);
       let result = null;
@@ -1944,15 +1851,79 @@
         plusBillingCountryText: result?.countryText || '',
         plusBillingAddress: result?.structuredAddress || null,
       });
-      const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
-        phaseLabel: '提交订阅前',
+      return result;
+    }
+
+    async function attemptCheckoutSubscribeAndWaitForRedirect(options = {}) {
+      const {
+        tabId,
+        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+        paymentConfig = getPaymentMethodConfig(paymentMethod),
+        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
+        attempt = 1,
+        totalAttempts = 1,
+        beforeClickDelayMs = 0,
+        redirectTimeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
+        ensurePaymentActive = false,
+      } = options;
+      const timeoutSeconds = Math.round(Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) / 1000);
+
+      await addLog('步骤 7：正在定位订阅按钮...', 'info');
+      const subscribeFrame = await waitForSubscribeFrame(tabId, subscribeFrameCandidates);
+      const subscribeResult = await sendFrameMessage(tabId, subscribeFrame.frameId, {
+        type: 'PLUS_CHECKOUT_CLICK_SUBSCRIBE',
+        source: 'background',
+        payload: {
+          beforeClickDelayMs,
+          paymentMethod,
+          ...(ensurePaymentActive ? { ensurePaymentActive: true } : {}),
+        },
       });
-      if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
-        return;
+      if (subscribeResult?.error) {
+        return {
+          redirectedToPayment: false,
+          subscribeResult,
+          lastSubmitError: subscribeResult.error,
+          timeoutSeconds,
+        };
       }
 
+      const subscribeClicked = subscribeResult?.clicked !== false;
+      const subscribeButtonText = String(subscribeResult?.subscribeButtonText || '').trim();
+      const subscribeButtonStatus = String(subscribeResult?.subscribeButtonStatus || '').trim();
+      if (subscribeClicked) {
+        await addLog(`步骤 7：已点击订阅按钮，正在等待跳转到 ${paymentConfig.label}（${attempt}/${totalAttempts}）...`, 'info');
+      } else {
+        const buttonStateLabel = subscribeButtonText || subscribeButtonStatus || 'unknown';
+        await addLog(`步骤 7：订阅按钮当前为「${buttonStateLabel}」，本轮未点击，正在等待页面是否跳转到 ${paymentConfig.label}（${attempt}/${totalAttempts}）...`, 'warn');
+      }
+
+      const redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, redirectTimeoutMs);
+      const lastSubmitError = subscribeClicked
+        ? `点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`
+        : `订阅按钮当前为「${subscribeButtonText || subscribeButtonStatus || 'unknown'}」，${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`;
+
+      return {
+        redirectedToPayment,
+        subscribeResult,
+        subscribeClicked,
+        subscribeButtonText,
+        subscribeButtonStatus,
+        lastSubmitError,
+        timeoutSeconds,
+      };
+    }
+
+    async function submitStandardCheckoutBilling(options = {}) {
+      const {
+        tabId,
+        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+        paymentConfig = getPaymentMethodConfig(paymentMethod),
+        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
+      } = options;
       let redirectedToPayment = false;
       let lastSubmitError = '';
+
       for (let attempt = 1; attempt <= PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
         await addLog(
           attempt === 1
@@ -1961,52 +1932,275 @@
           attempt === 1 ? 'info' : 'warn'
         );
         await sleepWithStop(3000);
-        await addLog('步骤 7：正在定位订阅按钮...', 'info');
-        const subscribeFrame = await waitForSubscribeFrame(tabId, [
-          { frameId: 0, url: '' },
-          { frameId: paymentFrame.frameId, url: paymentFrame.frameUrl || '' },
-          { frameId: billingFrame.frameId, url: billingFrame.frameUrl || '' },
-        ]);
-        const subscribeResult = await sendFrameMessage(tabId, subscribeFrame.frameId, {
-          type: 'PLUS_CHECKOUT_CLICK_SUBSCRIBE',
-          source: 'background',
-          payload: {
-            beforeClickDelayMs: attempt === 1 ? 700 : 1200,
-            paymentMethod,
-          },
+
+        const submitAttempt = await attemptCheckoutSubscribeAndWaitForRedirect({
+          tabId,
+          paymentMethod,
+          paymentConfig,
+          subscribeFrameCandidates,
+          attempt,
+          totalAttempts: PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS,
+          beforeClickDelayMs: attempt === 1 ? 700 : 1200,
+          redirectTimeoutMs: PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
         });
-        if (subscribeResult?.error) {
-          lastSubmitError = subscribeResult.error;
+        if (submitAttempt.subscribeResult?.error) {
+          lastSubmitError = submitAttempt.lastSubmitError;
           await addLog(`步骤 7：点击订阅失败（${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS}）：${lastSubmitError}`, 'warn');
           continue;
         }
 
-        const subscribeClicked = subscribeResult?.clicked !== false;
-        const subscribeButtonText = String(subscribeResult?.subscribeButtonText || '').trim();
-        const subscribeButtonStatus = String(subscribeResult?.subscribeButtonStatus || '').trim();
-        if (subscribeClicked) {
-          await addLog(`步骤 7：已点击订阅按钮，正在等待跳转到 ${paymentConfig.label}（${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS}）...`, 'info');
-        } else {
-          const buttonStateLabel = subscribeButtonText || subscribeButtonStatus || 'unknown';
-          await addLog(`步骤 7：订阅按钮当前为「${buttonStateLabel}」，本轮未点击，正在等待页面是否跳转到 ${paymentConfig.label}（${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS}）...`, 'warn');
-        }
-        redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod);
+        redirectedToPayment = submitAttempt.redirectedToPayment;
         if (redirectedToPayment) {
-          break;
+          return true;
         }
-        lastSubmitError = subscribeClicked
-          ? `点击订阅后 ${Math.round(PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS / 1000)} 秒内未跳转到 ${paymentConfig.label}`
-          : `订阅按钮当前为「${subscribeButtonText || subscribeButtonStatus || 'unknown'}」，${Math.round(PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS / 1000)} 秒内未跳转到 ${paymentConfig.label}`;
+        lastSubmitError = submitAttempt.lastSubmitError;
         await addLog(`步骤 7：${lastSubmitError}，将重新检测订阅按钮。`, 'warn');
       }
 
-      if (!redirectedToPayment) {
-        throw new Error(`步骤 7：多次检测订阅按钮后仍未跳转到 ${paymentConfig.label}。${lastSubmitError}`);
+      throw new Error(`步骤 7：多次检测订阅按钮后仍未跳转到 ${paymentConfig.label}。${lastSubmitError}`);
+    }
+
+    async function submitClassicPaypalCheckoutBilling(options = {}) {
+      const {
+        state = {},
+        tabId,
+        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+        paymentConfig = getPaymentMethodConfig(paymentMethod),
+        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
+        refillBillingAddress = async () => ({}),
+      } = options;
+      const totalAttempts = CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES + 1;
+      const timeoutSeconds = Math.round(CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS / 1000);
+      let lastSubmitError = '';
+
+      for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+        await ensureClassicPaypalCheckoutConversionProxySession(state);
+        if (attempt === 1) {
+          await addLog('步骤 7：账单地址已填写完成，等待 3 秒让 checkout 完成校验...', 'info');
+        } else {
+          await addLog(
+            `步骤 7：开始第 ${attempt - 1}/${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新填写账单地址并重试订阅...`,
+            'warn'
+          );
+          await refillBillingAddress();
+        }
+        await sleepWithStop(3000);
+
+        const submitAttempt = await attemptCheckoutSubscribeAndWaitForRedirect({
+          tabId,
+          paymentMethod,
+          paymentConfig,
+          subscribeFrameCandidates,
+          attempt,
+          totalAttempts,
+          beforeClickDelayMs: attempt === 1 ? 700 : 1200,
+          redirectTimeoutMs: CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS,
+          ensurePaymentActive: true,
+        });
+        if (submitAttempt.subscribeResult?.error) {
+          lastSubmitError = submitAttempt.lastSubmitError;
+          await addLog(`步骤 7：点击订阅失败（${attempt}/${totalAttempts}）：${lastSubmitError}`, 'warn');
+          continue;
+        }
+
+        if (submitAttempt.redirectedToPayment) {
+          return true;
+        }
+        lastSubmitError = submitAttempt.lastSubmitError;
+        if (attempt < totalAttempts) {
+          await addLog(`步骤 7：${lastSubmitError}，将重新填写账单地址并再次点击订阅。`, 'warn');
+        }
       }
 
-      await completeNodeFromBackground('plus-checkout-billing', {
-        plusBillingCountryText: result?.countryText || '',
-      });
+      throw new Error(
+        `步骤 7：点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}，已重试 ${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新填写地址后仍失败。${lastSubmitError ? `最后一次结果：${lastSubmitError}` : ''}`
+      );
+    }
+
+    async function getCheckoutTabId(state = {}) {
+      const registeredTabId = await getTabId(PLUS_CHECKOUT_SOURCE);
+      if (registeredTabId && await isTabAlive(PLUS_CHECKOUT_SOURCE)) {
+        const aliveRegisteredTabId = await getAlivePlusCheckoutTabId(registeredTabId);
+        if (aliveRegisteredTabId) {
+          return aliveRegisteredTabId;
+        }
+      }
+      const storedTabId = Number(state.plusCheckoutTabId) || 0;
+      if (storedTabId) {
+        const aliveStoredTabId = await getAlivePlusCheckoutTabId(storedTabId);
+        if (aliveStoredTabId) {
+          return aliveStoredTabId;
+        }
+      }
+      const currentCheckoutTabId = await getCurrentPlusCheckoutTabId();
+      if (currentCheckoutTabId) {
+        await addLog('步骤 7：检测到当前已在 Plus Checkout 页面，直接接管当前标签页。', 'info');
+        return currentCheckoutTabId;
+      }
+      throw new Error('步骤 7：未找到 Plus Checkout 标签页。请先打开 Plus Checkout 页面，或完成步骤 6。');
+    }
+
+    async function executePlusCheckoutBilling(state = {}) {
+      if (isGpcHelperCheckout(state)) {
+        await executeGpcHelperBilling(state);
+        return;
+      }
+      const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+      const paymentConfig = getPaymentMethodConfig(paymentMethod);
+      try {
+        const tabId = await getCheckoutTabId(state);
+        await addLog('步骤 7：正在等待 Plus Checkout 页面加载完成...', 'info');
+        await waitForTabCompleteUntilStopped(tabId);
+        await sleepWithStop(1000);
+
+        await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
+          inject: PLUS_CHECKOUT_INJECT_FILES,
+          injectSource: PLUS_CHECKOUT_SOURCE,
+          logMessage: '步骤 7：Checkout 页面仍在加载，等待账单填写脚本就绪...',
+        });
+        const readyFrames = await getReadyCheckoutFrames(tabId);
+        const initialAmountCheck = await ensureFreeTrialAmount(tabId, state, {
+          phaseLabel: 'Checkout 页面加载后',
+        });
+        if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        const paymentFrame = await resolvePaymentFrame(tabId, readyFrames, paymentMethod);
+        if (paymentFrame.frameId === null) {
+          const frameSummary = buildFrameSummary(paymentFrame.inspections);
+          throw new Error(`步骤 7：未在主页面或 iframe 中发现 ${paymentConfig.label} DOM，无法自动切换付款方式。frame 摘要：${frameSummary}`);
+        }
+        if (!paymentFrame.ready) {
+          throw new Error(`步骤 7：已定位到 ${paymentConfig.label} 所在 iframe（frameId=${paymentFrame.frameId}），但账单脚本无法注入该 iframe。请提供该 iframe 的控制台结构或截图。`);
+        }
+
+        if (paymentFrame.frameId !== 0) {
+          await addLog(`步骤 7：${paymentConfig.label} 位于 checkout iframe（frameId=${paymentFrame.frameId}），将改为在该 frame 内操作。`, 'info');
+        }
+
+        const randomName = generateRandomName();
+        const fullName = [randomName.firstName, randomName.lastName].filter(Boolean).join(' ');
+
+        await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
+        const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
+          type: paymentConfig.selectMessageType,
+          source: 'background',
+          payload: { paymentMethod },
+        });
+        if (paymentResult?.error) {
+          throw new Error(paymentResult.error);
+        }
+
+        const billingFrame = await waitForBillingFrame(tabId);
+        if (!billingFrame.ready) {
+          throw new Error(`步骤 7：已定位到账单地址 iframe（frameId=${billingFrame.frameId}），但账单脚本无法注入该 iframe。请提供该 iframe 的控制台结构或截图。`);
+        }
+        if (billingFrame.frameId !== paymentFrame.frameId) {
+          await addLog(`步骤 7：账单地址位于 checkout iframe（frameId=${billingFrame.frameId}），将改为在该 frame 内填写。`, 'info');
+        }
+
+        let billingState = state;
+        if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY && typeof probeIpProxyExit === 'function') {
+          const staleExitRegion = normalizeText(
+            state?.ipProxyAppliedExitRegion
+            || state?.ipProxyExitRegion
+            || ''
+          );
+          try {
+            await addLog('步骤 7：GoPay 账单地址准备按代理出口填写，正在重新检测当前出口地区...', 'info');
+            const probeResult = await probeIpProxyExit({
+              state,
+              timeoutMs: 12000,
+              authRebindRetry: true,
+              detectWhenDisabled: true,
+            });
+            const routing = probeResult?.proxyRouting || {};
+            const probedExitRegion = normalizeText(routing.exitRegion || '');
+            const probedExitIp = normalizeText(routing.exitIp || '');
+            const probedExitSource = normalizeText(routing.exitSource || '');
+            const probeEndpoint = normalizeText(routing.endpoint || routing.exitEndpoint || '');
+            const probeReason = normalizeText(routing.reason || '');
+            const probeError = normalizeText(routing.exitError || routing.error || '');
+            if (probedExitRegion) {
+              billingState = {
+                ...(state || {}),
+                ipProxyAppliedExitRegion: probedExitRegion,
+                ipProxyExitRegion: probedExitRegion,
+                ipProxyAppliedExitIp: probedExitIp,
+                ipProxyAppliedExitSource: probedExitSource,
+              };
+              const sourceSuffix = probedExitSource ? `，来源 ${probedExitSource}` : '';
+              const endpointSuffix = probeEndpoint ? `，检测地址 ${probeEndpoint}` : '';
+              await addLog(`步骤 7：当前代理出口复测结果：${probedExitRegion}${probedExitIp ? ` / ${probedExitIp}` : ''}${sourceSuffix}${endpointSuffix}。`, 'info');
+            } else {
+              billingState = {
+                ...(state || {}),
+                ipProxyAppliedExitRegion: '',
+                ipProxyExitRegion: '',
+                ipProxyAppliedExitIp: probedExitIp,
+                ipProxyAppliedExitSource: probedExitSource,
+              };
+              await addLog(
+                `步骤 7：代理出口复测没有返回国家/地区代码，已清空旧出口地区${staleExitRegion ? ` ${staleExitRegion}` : ''}，不会继续沿用旧地区。${probeReason ? `状态：${probeReason}。` : ''}${probeError ? `诊断：${probeError}` : ''}`,
+                'warn'
+              );
+            }
+          } catch (error) {
+            billingState = {
+              ...(state || {}),
+              ipProxyAppliedExitRegion: '',
+              ipProxyExitRegion: '',
+            };
+            await addLog(`步骤 7：代理出口复测失败，已清空旧出口地区${staleExitRegion ? ` ${staleExitRegion}` : ''}，不会继续沿用旧地区：${error?.message || String(error || '未知错误')}`, 'warn');
+          }
+        }
+        if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY
+          && typeof probeIpProxyExit === 'function'
+          && !resolveMeiguodizhiCountryCode(billingState?.ipProxyAppliedExitRegion || billingState?.ipProxyExitRegion || '')) {
+          throw new Error('步骤 7：GoPay 账单地址需要当前代理出口国家/地区，但本次复测没有拿到国家码；已停止填写，避免误用旧的 KR/ID 地区。请先点 IP 代理“检测出口”，确认显示 JP 后再继续。');
+        }
+
+        const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
+        let billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
+
+        const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
+          phaseLabel: '提交订阅前',
+        });
+        if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+
+        const subscribeFrameCandidates = buildSubscribeFrameCandidates(paymentFrame, billingFrame);
+        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
+          await submitClassicPaypalCheckoutBilling({
+            state,
+            tabId,
+            paymentMethod,
+            paymentConfig,
+            subscribeFrameCandidates,
+            refillBillingAddress: async () => {
+              billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
+              return billingResult;
+            },
+          });
+        } else {
+          await submitStandardCheckoutBilling({
+            tabId,
+            paymentMethod,
+            paymentConfig,
+            subscribeFrameCandidates,
+          });
+        }
+
+        await completeNodeFromBackground('plus-checkout-billing', {
+          plusBillingCountryText: billingResult?.countryText || '',
+        });
+      } catch (error) {
+        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
+          await releaseClassicPaypalCheckoutConversionProxySessionOnFailure(error);
+        }
+        throw error;
+      }
     }
 
     return {
