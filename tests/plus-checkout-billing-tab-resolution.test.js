@@ -436,7 +436,7 @@ test('Plus checkout billing waits on processing subscribe text before clicking a
   }
 });
 
-test('Classic PayPal billing refills address and retries subscribe after an 8-second redirect timeout', async () => {
+test('Classic PayPal billing reruns the checkout half-flow after an 8-second redirect timeout', async () => {
   const originalNow = Date.now;
   let now = 0;
   let clickCalls = 0;
@@ -471,14 +471,16 @@ test('Classic PayPal billing refills address and retries subscribe after an 8-se
 
     await executor.executePlusCheckoutBilling({});
 
+    const selectMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL');
     const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
     const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    assert.equal(selectMessages.length, 2);
     assert.equal(fillMessages.length, 2);
     assert.equal(subscribeMessages.length, 2);
     assert.equal(subscribeMessages[1].message.payload.ensurePaymentActive, true);
     assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 16, true);
     assert.equal(events.logs.some((entry) => /8 秒内未跳转到 PayPal/.test(entry.message)), true);
-    assert.equal(events.logs.some((entry) => /重新填写账单地址并再次点击订阅/.test(entry.message)), true);
+    assert.equal(events.logs.some((entry) => /重新执行 PayPal 付款后半段/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
   } finally {
     Date.now = originalNow;
@@ -542,6 +544,7 @@ test('Classic PayPal billing reuses an active checkout conversion proxy session 
       plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
     });
 
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 2);
     assert.deepStrictEqual(proxyEvents.proxy, []);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
   } finally {
@@ -575,6 +578,7 @@ test('Classic PayPal billing applies checkout conversion proxy before the first 
 
   assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply']);
   assert.equal(proxyEvents.proxy[0].options.flowType, 'classic-paypal');
+  assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 1);
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
@@ -615,10 +619,12 @@ test('Classic PayPal billing releases proxy once after 3 refill retries still fa
         plusPaymentMethod: 'paypal',
         plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
       }),
-      /8 秒内未跳转到 PayPal，已重试 3 次/
+      /8 秒内未跳转到 PayPal，已重试 3 次重新执行 PayPal 付款后半段/
     );
 
+    const selectMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL');
     const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+    assert.equal(selectMessages.length, 4);
     assert.equal(fillMessages.length, 4);
     assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply', 'restore']);
     assert.equal(proxyEvents.proxy[1].flowType, 'classic-paypal');

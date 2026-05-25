@@ -1960,6 +1960,50 @@
       throw new Error(`步骤 7：多次检测订阅按钮后仍未跳转到 ${paymentConfig.label}。${lastSubmitError}`);
     }
 
+    async function runClassicPaypalCheckoutHalfFlow(options = {}) {
+      const {
+        state = {},
+        tabId,
+        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+        paymentConfig = getPaymentMethodConfig(paymentMethod),
+        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
+        paymentFrame = {},
+        billingFrame = {},
+        billingState = {},
+        fullName = '',
+      } = options;
+
+      await ensureClassicPaypalCheckoutConversionProxySession(state);
+      await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
+      const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
+        type: paymentConfig.selectMessageType,
+        source: 'background',
+        payload: { paymentMethod },
+      });
+      if (paymentResult?.error) {
+        throw new Error(paymentResult.error);
+      }
+
+      const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
+      const billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
+      const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
+        phaseLabel: '提交订阅前',
+      });
+      if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
+        return {
+          billingResult,
+          preSubmitAmountCheck,
+          skipped: true,
+        };
+      }
+
+      return {
+        billingResult,
+        preSubmitAmountCheck,
+        skipped: false,
+      };
+    }
+
     async function submitClassicPaypalCheckoutBilling(options = {}) {
       const {
         state = {},
@@ -1967,22 +2011,29 @@
         paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
         paymentConfig = getPaymentMethodConfig(paymentMethod),
         subscribeFrameCandidates = [{ frameId: 0, url: '' }],
-        refillBillingAddress = async () => ({}),
+        runCheckoutHalfFlow = async () => ({ billingResult: null, skipped: false }),
       } = options;
       const totalAttempts = CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES + 1;
       const timeoutSeconds = Math.round(CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS / 1000);
       let lastSubmitError = '';
+      let latestBillingResult = null;
 
       for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
-        await ensureClassicPaypalCheckoutConversionProxySession(state);
         if (attempt === 1) {
-          await addLog('步骤 7：账单地址已填写完成，等待 3 秒让 checkout 完成校验...', 'info');
+          await addLog('步骤 7：开始执行 PayPal 付款后半段，等待 3 秒让 checkout 完成校验...', 'info');
         } else {
           await addLog(
-            `步骤 7：开始第 ${attempt - 1}/${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新填写账单地址并重试订阅...`,
+            `步骤 7：开始第 ${attempt - 1}/${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新执行 PayPal 付款后半段并重试订阅...`,
             'warn'
           );
-          await refillBillingAddress();
+        }
+        const halfFlowResult = await runCheckoutHalfFlow();
+        latestBillingResult = halfFlowResult?.billingResult || latestBillingResult;
+        if (halfFlowResult?.skipped) {
+          return {
+            billingResult: latestBillingResult,
+            skipped: true,
+          };
         }
         await sleepWithStop(3000);
 
@@ -2004,16 +2055,19 @@
         }
 
         if (submitAttempt.redirectedToPayment) {
-          return true;
+          return {
+            billingResult: latestBillingResult,
+            skipped: false,
+          };
         }
         lastSubmitError = submitAttempt.lastSubmitError;
         if (attempt < totalAttempts) {
-          await addLog(`步骤 7：${lastSubmitError}，将重新填写账单地址并再次点击订阅。`, 'warn');
+          await addLog(`步骤 7：${lastSubmitError}，将重新执行 PayPal 付款后半段。`, 'warn');
         }
       }
 
       throw new Error(
-        `步骤 7：点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}，已重试 ${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新填写地址后仍失败。${lastSubmitError ? `最后一次结果：${lastSubmitError}` : ''}`
+        `步骤 7：点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}，已重试 ${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新执行 PayPal 付款后半段后仍失败。${lastSubmitError ? `最后一次结果：${lastSubmitError}` : ''}`
       );
     }
 
@@ -2081,14 +2135,16 @@
         const randomName = generateRandomName();
         const fullName = [randomName.firstName, randomName.lastName].filter(Boolean).join(' ');
 
-        await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
-        const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
-          type: paymentConfig.selectMessageType,
-          source: 'background',
-          payload: { paymentMethod },
-        });
-        if (paymentResult?.error) {
-          throw new Error(paymentResult.error);
+        if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+          await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
+          const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
+            type: paymentConfig.selectMessageType,
+            source: 'background',
+            payload: { paymentMethod },
+          });
+          if (paymentResult?.error) {
+            throw new Error(paymentResult.error);
+          }
         }
 
         const billingFrame = await waitForBillingFrame(tabId);
@@ -2160,41 +2216,53 @@
           throw new Error('步骤 7：GoPay 账单地址需要当前代理出口国家/地区，但本次复测没有拿到国家码；已停止填写，避免误用旧的 KR/ID 地区。请先点 IP 代理“检测出口”，确认显示 JP 后再继续。');
         }
 
-        const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
-        let billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
-
-        const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
-          phaseLabel: '提交订阅前',
-        });
-        if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
-          return;
-        }
-
         const subscribeFrameCandidates = buildSubscribeFrameCandidates(paymentFrame, billingFrame);
         if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
-          await submitClassicPaypalCheckoutBilling({
+          const classicSubmitResult = await submitClassicPaypalCheckoutBilling({
             state,
             tabId,
             paymentMethod,
             paymentConfig,
             subscribeFrameCandidates,
-            refillBillingAddress: async () => {
-              billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
-              return billingResult;
+            runCheckoutHalfFlow: async () => {
+              return runClassicPaypalCheckoutHalfFlow({
+                state,
+                tabId,
+                paymentMethod,
+                paymentConfig,
+                subscribeFrameCandidates,
+                paymentFrame,
+                billingFrame,
+                billingState,
+                fullName,
+              });
             },
           });
+          if (classicSubmitResult?.skipped) {
+            return;
+          }
+          await completeNodeFromBackground('plus-checkout-billing', {
+            plusBillingCountryText: classicSubmitResult?.billingResult?.countryText || '',
+          });
         } else {
+          const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
+          const billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
+          const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
+            phaseLabel: '提交订阅前',
+          });
+          if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
+            return;
+          }
           await submitStandardCheckoutBilling({
             tabId,
             paymentMethod,
             paymentConfig,
             subscribeFrameCandidates,
           });
+          await completeNodeFromBackground('plus-checkout-billing', {
+            plusBillingCountryText: billingResult?.countryText || '',
+          });
         }
-
-        await completeNodeFromBackground('plus-checkout-billing', {
-          plusBillingCountryText: billingResult?.countryText || '',
-        });
       } catch (error) {
         if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
           await releaseClassicPaypalCheckoutConversionProxySessionOnFailure(error);
