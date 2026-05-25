@@ -61,7 +61,11 @@ test('account book helper creates a registration record and upgrades it on flow 
   const createdAt = firstEntry.createdAt;
   const completedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
     email: 'flow@example.com',
-    signupPhoneNumber: '+1 (555) 123-4567',
+    signupPhoneNumber: '',
+    signupPhoneCompletedActivation: {
+      activationId: 'done-1',
+      phoneNumber: '+1 (555) 123-4567',
+    },
     password: 'secret',
     activeFlowId: 'openai',
     panelMode: 'sub2api',
@@ -82,6 +86,47 @@ test('account book helper creates a registration record and upgrades it on flow 
   assert.equal(storedEntries[0].phoneNumber, '+1 (555) 123-4567');
   assert.equal(storedEntries[0].signupIp, '203.0.113.8');
   assert.equal(storedEntries[0].signupRegion, 'JP');
+});
+
+test('account book helper does not prefill auth-completed phone on registration success for email signup', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'prefill@example.com',
+      signupPhoneNumber: '',
+      signupPhoneCompletedActivation: {
+        activationId: 'done-prefill',
+        phoneNumber: '+44 7700 900123',
+      },
+      password: 'secret',
+      activeFlowId: 'openai',
+      panelMode: 'sub2api',
+      ipProxyAppliedExitIp: '203.0.113.9',
+      ipProxyAppliedExitRegion: 'gb',
+    }),
+  });
+
+  const entry = await helpers.upsertAccountBookEntry('registration_success');
+  assert.equal(entry.recordId, 'prefill@example.com');
+  assert.equal(entry.email, 'prefill@example.com');
+  assert.equal(entry.phoneNumber, '');
+  assert.equal(storedEntries.length, 1);
+  assert.equal(storedEntries[0].phoneNumber, '');
 });
 
 test('account book helper supports phone-only records and upgrades them when email appears later', async () => {

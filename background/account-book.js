@@ -56,10 +56,40 @@
       return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
     }
 
-    function resolveStatePhoneNumber(state = {}) {
+    function getActivationPhoneNumber(activation = null) {
+      if (!activation || typeof activation !== 'object' || Array.isArray(activation)) {
+        return '';
+      }
       return normalizeString(
-        state.phoneNumber
+        activation.phoneNumber
+        || activation.number
+        || activation.phone
+        || ''
+      );
+    }
+
+    function resolveStatePhoneNumber(state = {}, captureStage = '') {
+      const stage = normalizeCaptureStage(captureStage);
+      const identifierType = normalizeString(state.accountIdentifierType).toLowerCase();
+      const phoneIdentifier = identifierType === 'phone'
+        ? normalizeString(state.accountIdentifier)
+        : '';
+
+      if (stage === 'registration_success') {
+        return normalizeString(
+          state.signupPhoneNumber
+          || phoneIdentifier
+          || state.phoneNumber
+          || state.phone
+          || ''
+        );
+      }
+
+      return normalizeString(
+        getActivationPhoneNumber(state.signupPhoneCompletedActivation)
         || state.signupPhoneNumber
+        || phoneIdentifier
+        || state.phoneNumber
         || state.phone
         || ''
       );
@@ -72,7 +102,7 @@
       }
 
       const email = normalizeString(state.email).toLowerCase();
-      const phoneNumber = resolveStatePhoneNumber(state);
+      const phoneNumber = resolveStatePhoneNumber(state, stage);
       const recordId = normalizeRecordId(email, phoneNumber);
       if (!recordId) {
         return null;
