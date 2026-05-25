@@ -863,6 +863,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       type: 'setState',
       updates: {
         autoRunSkipFailures: false,
+        autoRunRetryPaypalCallback: false,
       },
     },
     {
@@ -870,6 +871,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       totalRuns: 1,
       options: {
         autoRunSkipFailures: false,
+        autoRunRetryPaypalCallback: false,
         mode: 'restart',
       },
     },
@@ -882,6 +884,123 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       optionActiveFlowId: 'kiro',
     },
   ]);
+});
+
+function createPayPalHostedGenericErrorRouterHarness(overrides = {}) {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const events = [];
+  let state = {
+    plusManualConfirmationPending: true,
+    plusManualConfirmationRequestId: 'paypal-hosted-generic-error-req',
+    plusManualConfirmationStep: 6,
+    plusManualConfirmationMethod: 'paypal-hosted-generic-error',
+    plusManualConfirmationTitle: 'PayPal Checkout 异常',
+    plusManualConfirmationMessage: 'Things do not appear to be working.',
+    currentNodeId: 'plus-checkout-create',
+    nodeStatuses: {
+      'plus-checkout-create': 'failed',
+      'paypal-hosted-email': 'pending',
+    },
+    ...(overrides.state || {}),
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    broadcastDataUpdate: (payload) => events.push({ type: 'broadcast', payload }),
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tabs.create', payload });
+          return { id: 901 };
+        },
+      },
+    },
+    clearStopRequest: () => events.push({ type: 'clearStopRequest' }),
+    executeNode: async (nodeId) => events.push({ type: 'executeNode', nodeId }),
+    getState: async () => ({ ...state, nodeStatuses: { ...(state.nodeStatuses || {}) } }),
+    getStepIdByNodeIdForState: (nodeId) => (nodeId === 'plus-checkout-create' ? 6 : 0),
+    invalidateDownstreamAfterStepRestart: async (step, options = {}) => events.push({ type: 'invalidateDownstreamAfterStepRestart', step, options }),
+    setState: async (updates) => {
+      events.push({ type: 'setState', updates: { ...updates } });
+      state = { ...state, ...updates };
+    },
+  });
+
+  return {
+    events,
+    getState: () => state,
+    router,
+  };
+}
+
+test('RESOLVE_PLUS_MANUAL_CONFIRMATION check handles PayPal hosted genericError', async () => {
+  const harness = createPayPalHostedGenericErrorRouterHarness();
+
+  const response = await harness.router.handleMessage({
+    type: 'RESOLVE_PLUS_MANUAL_CONFIRMATION',
+    payload: {
+      requestId: 'paypal-hosted-generic-error-req',
+      action: 'check',
+      confirmed: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.getState().plusManualConfirmationPending, false);
+  assert.deepStrictEqual(
+    harness.events.find((event) => event.type === 'tabs.create')?.payload,
+    { url: 'https://chatgpt.com/', active: true }
+  );
+  assert.equal(harness.events.some((event) => event.type === 'executeNode'), false);
+  assert.equal(harness.events.some((event) => event.type === 'broadcast' && event.payload.plusManualConfirmationPending === false), true);
+});
+
+test('RESOLVE_PLUS_MANUAL_CONFIRMATION retry restarts Plus checkout after PayPal hosted genericError', async () => {
+  const harness = createPayPalHostedGenericErrorRouterHarness();
+
+  const response = await harness.router.handleMessage({
+    type: 'RESOLVE_PLUS_MANUAL_CONFIRMATION',
+    payload: {
+      requestId: 'paypal-hosted-generic-error-req',
+      action: 'retry',
+      confirmed: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.getState().plusManualConfirmationPending, false);
+  assert.equal(harness.events.some((event) => event.type === 'clearStopRequest'), true);
+  assert.deepStrictEqual(
+    harness.events.find((event) => event.type === 'invalidateDownstreamAfterStepRestart'),
+    {
+      type: 'invalidateDownstreamAfterStepRestart',
+      step: 6,
+      options: { logLabel: 'PayPal genericError 后重试 Plus Checkout' },
+    }
+  );
+  assert.deepStrictEqual(
+    harness.events.find((event) => event.type === 'executeNode'),
+    { type: 'executeNode', nodeId: 'plus-checkout-create' }
+  );
+});
+
+test('RESOLVE_PLUS_MANUAL_CONFIRMATION ignores mismatched PayPal hosted genericError requestId', async () => {
+  const harness = createPayPalHostedGenericErrorRouterHarness();
+
+  const response = await harness.router.handleMessage({
+    type: 'RESOLVE_PLUS_MANUAL_CONFIRMATION',
+    payload: {
+      requestId: 'stale-request',
+      action: 'retry',
+      confirmed: true,
+    },
+  });
+
+  assert.deepStrictEqual(response, { ok: true, ignored: true });
+  assert.equal(harness.getState().plusManualConfirmationPending, true);
+  assert.equal(harness.events.length, 0);
 });
 
 test('SAVE_SETTING re-resolves signup method when panel mode changes', async () => {

@@ -496,6 +496,31 @@
       return 'unbounded';
     }
 
+    function assertPhonePriceCandidateWithinRange(providerLabel, price, minPriceLimit = null, maxPriceLimit = null) {
+      const hasPriceBounds = minPriceLimit !== null || maxPriceLimit !== null;
+      const normalized = normalizeHeroSmsPriceLimit(price);
+      const label = String(providerLabel || 'Phone SMS purchase').trim() || 'Phone SMS purchase';
+      if (normalized === null) {
+        if (hasPriceBounds) {
+          throw new Error(
+            `${label} blocked: price range ${formatPhonePriceRangeText(minPriceLimit, maxPriceLimit)} requires a bounded price tier; refusing unpriced purchase.`
+          );
+        }
+        return null;
+      }
+      if (minPriceLimit !== null && normalized < minPriceLimit) {
+        throw new Error(
+          `${label} blocked: price tier ${normalized} is below configured minimum price ${minPriceLimit}.`
+        );
+      }
+      if (maxPriceLimit !== null && normalized > maxPriceLimit) {
+        throw new Error(
+          `${label} blocked: price tier ${normalized} exceeds configured max price ${maxPriceLimit}.`
+        );
+      }
+      return normalized;
+    }
+
     function isPhoneNumberUsedError(value) {
       const text = String(value || '').trim();
       if (!text) {
@@ -2957,6 +2982,7 @@
       let retriedWithoutPrice = false;
       const userLimit = normalizeHeroSmsPriceLimit(options.userLimit);
       const userMinLimit = normalizeHeroSmsPriceLimit(options.userMinLimit);
+      const hasPriceBounds = userLimit !== null || userMinLimit !== null;
       const operator = String(options.operator || '').trim();
 
       while (true) {
@@ -2994,6 +3020,7 @@
             && nextMaxPrice !== undefined
             && !retriedWithoutPrice
             && isNetworkFetchFailure(error)
+            && !hasPriceBounds
           ) {
             nextMaxPrice = null;
             retriedWithoutPrice = true;
@@ -4223,6 +4250,20 @@
             ...(preferredOperator ? { operator: preferredOperator } : {}),
             ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
           });
+          try {
+            assertPhonePriceCandidateWithinRange(
+              `HeroSMS ${countryLabel}`,
+              tier.price,
+              minPriceLimit,
+              maxPriceLimit
+            );
+          } catch (priceError) {
+            return {
+              retryable: false,
+              failureText: priceError?.message || 'price tier outside configured range',
+              lastError: priceError,
+            };
+          }
           const fixedPrice = !Boolean(pricePlan.syntheticUserLimitProbe);
           let lastFailureText = '';
           let noNumbersObservedInCountry = false;

@@ -2239,6 +2239,62 @@ test('phone verification helper climbs price tiers when NO_NUMBERS is returned a
   ]);
 });
 
+test('phone verification helper does not climb above configured HeroSMS max price', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            52: {
+              dr: {
+                starter: { cost: 0.08, count: 100 },
+                premium: { cost: 0.12, count: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if ((action === 'getNumber' || action === 'getNumberV2') && maxPrice === '0.08') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${maxPrice || 'no-price'}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key', heroSmsMaxPrice: '0.08' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsMaxPrice: '0.08',
+      heroSmsActivationRetryRounds: 1,
+      phoneActivationTierUpgradeLimit: 1,
+    }),
+    /HeroSMS/
+  );
+
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+  ]);
+  assert.equal(actions.some((entry) => entry.endsWith(':0.12')), false);
+});
+
 test('signup phone helper preserves HeroSMS tier exhaustion details in aggregate no-supply failure', async () => {
   const requests = [];
   let currentState = {
@@ -2693,6 +2749,56 @@ test('phone verification helper falls back to plain getNumber when priced reques
   assert.equal(requests[2].searchParams.get('action'), 'getNumber');
   assert.equal(requests[2].searchParams.get('maxPrice'), null);
   assert.equal(requests[2].searchParams.get('fixedPrice'), null);
+});
+
+test('phone verification helper keeps maxPrice when priced request fails under configured HeroSMS max price', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload({ cost: 0.08 }),
+        };
+      }
+      if (action === 'getNumber') {
+        throw new TypeError('Failed to fetch');
+      }
+      if (action === 'getNumberV2') {
+        throw new TypeError('Failed to fetch');
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key', heroSmsMaxPrice: '0.08' }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsMaxPrice: '0.08',
+      heroSmsActivationRetryRounds: 1,
+    }),
+    /HeroSMS/
+  );
+
+  const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+  assert.deepStrictEqual(actions, [
+    'getPrices:',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+    'getNumber:0.08',
+    'getNumberV2:0.08',
+  ]);
+  assert.equal(actions.some((entry) => /^getNumber(?:V2)?:$/.test(entry)), false);
 });
 
 test('phone verification helper acquires a number from 5sim with fallback countries', async () => {

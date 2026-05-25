@@ -114,6 +114,7 @@
               plusHostedCheckoutOauthDelaySeconds: 3,
             },
             autoRun: {
+              autoRunRetryPaypalCallback: false,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -130,6 +131,7 @@
               },
             },
             autoRun: {
+              autoRunRetryPaypalCallback: false,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -352,6 +354,11 @@
               })(),
             },
             autoRun: {
+              autoRunRetryPaypalCallback: Boolean(
+                input?.autoRunRetryPaypalCallback
+                ?? nested?.flows?.openai?.autoRun?.autoRunRetryPaypalCallback
+                ?? defaults.flows.openai.autoRun.autoRunRetryPaypalCallback
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
                   ?? nested?.flows?.openai?.autoRun?.stepExecutionRange
@@ -381,6 +388,11 @@
               },
             },
             autoRun: {
+              autoRunRetryPaypalCallback: Boolean(
+                input?.kiroAutoRunRetryPaypalCallback
+                ?? nested?.flows?.kiro?.autoRun?.autoRunRetryPaypalCallback
+                ?? defaults.flows.kiro.autoRun.autoRunRetryPaypalCallback
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.kiro
                   ?? nested?.flows?.kiro?.autoRun?.stepExecutionRange
@@ -494,6 +506,7 @@
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
+      next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

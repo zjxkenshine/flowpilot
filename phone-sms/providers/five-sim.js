@@ -188,6 +188,66 @@
     return String(Math.round(numeric * 10000) / 10000);
   }
 
+  function resolveFiveSimPriceRange(state = {}) {
+    const minPriceText = normalizeFiveSimMaxPrice(state.fiveSimMinPrice);
+    const maxPriceText = normalizeFiveSimMaxPrice(state.fiveSimMaxPrice);
+    const minPrice = minPriceText ? Number(minPriceText) : null;
+    const maxPrice = maxPriceText ? Number(maxPriceText) : null;
+    return {
+      minPrice,
+      maxPrice,
+      hasMinPrice: minPrice !== null,
+      hasMaxPrice: maxPrice !== null,
+      hasBounds: minPrice !== null || maxPrice !== null,
+      invalidRange: minPrice !== null && maxPrice !== null && minPrice > maxPrice,
+    };
+  }
+
+  function formatFiveSimPriceRange(priceRange = {}) {
+    const minPrice = priceRange.minPrice ?? null;
+    const maxPrice = priceRange.maxPrice ?? null;
+    if (minPrice !== null && maxPrice !== null) {
+      return `${minPrice}~${maxPrice}`;
+    }
+    if (minPrice !== null) {
+      return `${minPrice}~`;
+    }
+    if (maxPrice !== null) {
+      return `~${maxPrice}`;
+    }
+    return 'unbounded';
+  }
+
+  function assertFiveSimPriceCandidateWithinRange(state = {}, price) {
+    const priceRange = resolveFiveSimPriceRange(state);
+    if (priceRange.invalidRange) {
+      throw new Error(
+        `5sim price range is invalid: minimum price ${priceRange.minPrice} exceeds max price ${priceRange.maxPrice}.`
+      );
+    }
+    const normalizedPrice = normalizePrice(price);
+    if (normalizedPrice === null) {
+      if (priceRange.hasBounds) {
+        throw new Error(
+          `5sim purchase blocked: price range ${formatFiveSimPriceRange(priceRange)} requires a bounded maxPrice; refusing unpriced purchase.`
+        );
+      }
+      return null;
+    }
+    const roundedPrice = Math.round(normalizedPrice * 10000) / 10000;
+    if (priceRange.hasMinPrice && roundedPrice < priceRange.minPrice) {
+      throw new Error(
+        `5sim purchase blocked: price tier ${roundedPrice} is below configured minimum price ${priceRange.minPrice}.`
+      );
+    }
+    if (priceRange.hasMaxPrice && roundedPrice > priceRange.maxPrice) {
+      throw new Error(
+        `5sim purchase blocked: price tier ${roundedPrice} exceeds configured max price ${priceRange.maxPrice}.`
+      );
+    }
+    return roundedPrice;
+  }
+
   function normalizeActivationRetryRounds(value) {
     const parsed = Math.floor(Number(value));
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -535,8 +595,13 @@
   }
 
   async function resolvePricePlan(state = {}, countryConfig = resolveCountryConfig(state), deps = {}) {
-    const userLimitText = normalizeFiveSimMaxPrice(state.fiveSimMaxPrice);
-    const userLimit = userLimitText ? Number(userLimitText) : null;
+    const priceRange = resolveFiveSimPriceRange(state);
+    if (priceRange.invalidRange) {
+      throw new Error(
+        `5sim price range is invalid: minimum price ${priceRange.minPrice} exceeds max price ${priceRange.maxPrice}.`
+      );
+    }
+    const userLimit = priceRange.maxPrice;
     let priceCandidates = [];
 
     try {
@@ -567,16 +632,14 @@
     priceCandidates = buildSortedUniquePriceCandidates(priceCandidates);
 
     const minCatalogPrice = priceCandidates.length > 0 ? priceCandidates[0] : null;
-    const minPriceText = normalizeFiveSimMaxPrice(state.fiveSimMinPrice);
-    const minPrice = minPriceText ? Number(minPriceText) : null;
     const preferredText = normalizeFiveSimMaxPrice(state.heroSmsPreferredPrice);
     const preferredPrice = preferredText ? Number(preferredText) : null;
     let filteredPrices = priceCandidates;
-    if (minPrice !== null) {
-      filteredPrices = filteredPrices.filter((price) => price >= minPrice);
+    if (priceRange.hasMinPrice) {
+      filteredPrices = filteredPrices.filter((price) => price >= priceRange.minPrice);
     }
-    if (userLimit !== null) {
-      filteredPrices = filteredPrices.filter((price) => price <= userLimit);
+    if (priceRange.hasMaxPrice) {
+      filteredPrices = filteredPrices.filter((price) => price <= priceRange.maxPrice);
     }
     const orderedPrices = Array.from(new Set(filteredPrices)).sort((left, right) => left - right);
     if (preferredPrice !== null && orderedPrices.includes(preferredPrice)) {
@@ -588,15 +651,18 @@
     }
     if (orderedPrices.length > 0) {
       return {
-        prices: userLimit !== null
-          ? [userLimit, ...orderedPrices.filter((price) => Number(price) !== Number(userLimit))]
+        prices: priceRange.hasMaxPrice
+          ? [priceRange.maxPrice, ...orderedPrices.filter((price) => Number(price) !== Number(priceRange.maxPrice))]
           : orderedPrices,
         userLimit,
         minCatalogPrice,
       };
     }
-    if (userLimit !== null && minPrice === null) {
+    if (priceRange.hasMaxPrice && !priceRange.hasMinPrice) {
       return { prices: [userLimit], userLimit, minCatalogPrice };
+    }
+    if (priceRange.hasBounds) {
+      return { prices: [], userLimit, minCatalogPrice };
     }
     return { prices: [null], userLimit: null, minCatalogPrice: null };
   }
@@ -709,9 +775,10 @@
   async function buyActivationWithPrice(state = {}, countryConfig, maxPrice, deps = {}) {
     const config = resolveConfig(state, deps);
     const operator = normalizeFiveSimOperator(state.fiveSimOperator);
+    const checkedMaxPrice = assertFiveSimPriceCandidateWithinRange(state, maxPrice);
     const query = {};
-    if (maxPrice !== null && maxPrice !== undefined) {
-      query.maxPrice = maxPrice;
+    if (checkedMaxPrice !== null && checkedMaxPrice !== undefined) {
+      query.maxPrice = checkedMaxPrice;
     }
     if (normalizeReuseEnabled(state)) {
       query.reuse = 1;
@@ -739,6 +806,12 @@
 
   async function requestActivation(state = {}, options = {}, deps = {}) {
     assertMaxPriceCompatibleWithOperator(state);
+    const priceRange = resolveFiveSimPriceRange(state);
+    if (priceRange.invalidRange) {
+      throw new Error(
+        `5sim price range is invalid: minimum price ${priceRange.minPrice} exceeds max price ${priceRange.maxPrice}.`
+      );
+    }
 
     const allCountryCandidates = resolveCountryCandidates(state);
     const blockedCountryIds = new Set(

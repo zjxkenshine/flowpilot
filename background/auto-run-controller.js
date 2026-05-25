@@ -25,6 +25,7 @@
       hasSavedNodeProgress,
       isAddPhoneAuthFailure,
       isGpcTaskEndedFailure,
+      isHostedCheckoutGenericErrorFailure,
       isHostedCheckoutVerificationResendLimitFailure,
       isKiroProxyFailure,
       isPhoneSmsPlatformRateLimitFailure,
@@ -139,6 +140,7 @@
         cloudflareDomain: state.cloudflareDomain,
         cloudflareDomains: state.cloudflareDomains,
         reusablePhoneActivation: state.reusablePhoneActivation,
+        autoRunRetryPaypalCallback: state.autoRunRetryPaypalCallback,
       };
     }
 
@@ -382,7 +384,7 @@
     }
 
     async function waitBetweenAutoRunRounds(targetRun, totalRuns, roundSummary, options = {}) {
-      const { autoRunSkipFailures = false, roundSummaries = [] } = options;
+      const { autoRunSkipFailures = false, autoRunRetryPaypalCallback = false, roundSummaries = [] } = options;
       if (totalRuns <= 1 || targetRun >= totalRuns) {
         return false;
       }
@@ -408,11 +410,13 @@
         attemptRun: currentRuntime.autoRunAttemptRun,
         autoRunSessionId: currentRuntime.autoRunSessionId,
         autoRunSkipFailures,
+        autoRunRetryPaypalCallback,
         roundSummaries,
         countdownTitle: '线程间隔中',
         countdownNote: `第 ${Math.min(targetRun + 1, totalRuns)}/${totalRuns} 轮即将开始`,
       }, {
         autoRunSkipFailures,
+        autoRunRetryPaypalCallback,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
       runtime.set({ autoRunActive: false });
@@ -420,7 +424,7 @@
     }
 
     async function waitBeforeAutoRunRetry(targetRun, totalRuns, nextAttemptRun, options = {}) {
-      const { autoRunSkipFailures = false, roundSummaries = [] } = options;
+      const { autoRunSkipFailures = false, autoRunRetryPaypalCallback = false, roundSummaries = [] } = options;
       const fallbackThreadIntervalMinutes = normalizeAutoRunFallbackThreadIntervalMinutes(
         (await getState()).autoRunFallbackThreadIntervalMinutes
       );
@@ -440,11 +444,13 @@
         attemptRun: nextAttemptRun,
         autoRunSessionId: runtime.get().autoRunSessionId,
         autoRunSkipFailures,
+        autoRunRetryPaypalCallback,
         roundSummaries,
         countdownTitle: '线程间隔中',
         countdownNote: `第 ${targetRun}/${totalRuns} 轮第 ${nextAttemptRun} 次尝试即将开始`,
       }, {
         autoRunSkipFailures,
+        autoRunRetryPaypalCallback,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
       runtime.set({ autoRunActive: false });
@@ -505,6 +511,7 @@
       currentRuntime = runtime.get();
 
       const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
+      const autoRunRetryPaypalCallback = Boolean(options.autoRunRetryPaypalCallback);
       const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
       const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
         ? Math.min(totalRuns, options.resumeCurrentRun)
@@ -540,6 +547,7 @@
       await setState({
         autoRunSessionId: sessionId,
         autoRunSkipFailures,
+        autoRunRetryPaypalCallback,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
         ...getAutoRunStatusPayload(initialPhase, {
           currentRun: showResumePosition ? resumeCurrentRun : 0,
@@ -557,7 +565,7 @@
         let reuseExistingProgress = resumingCurrentRound;
         const currentRoundState = await getState();
         const keepSameEmailUntilAddPhone = autoRunSkipFailures && shouldKeepCustomMailProviderPoolEmail(currentRoundState);
-        const maxAttemptsForRound = autoRunSkipFailures
+        const maxAttemptsForRound = autoRunSkipFailures || autoRunRetryPaypalCallback
           ? (keepSameEmailUntilAddPhone ? Number.MAX_SAFE_INTEGER : AUTO_RUN_MAX_RETRIES_PER_ROUND + 1)
           : Math.max(1, attemptRun);
 
@@ -613,6 +621,7 @@
             await setState({
               autoRunSessionId: sessionId,
               autoRunSkipFailures,
+              autoRunRetryPaypalCallback,
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun, sessionId }),
             });
@@ -720,9 +729,15 @@
             const blockedByGpcTaskEnded = typeof isGpcTaskEndedFailure === 'function'
               ? isGpcTaskEndedFailure(err)
               : /GPC_TASK_ENDED::/i.test(err?.message || String(err || ''));
+            const blockedByHostedCheckoutGenericError = typeof isHostedCheckoutGenericErrorFailure === 'function'
+              ? isHostedCheckoutGenericErrorFailure(err)
+              : /HOSTED_CHECKOUT_GENERIC_ERROR::/i.test(err?.message || String(err || ''));
             const blockedByHostedCheckoutVerificationResendLimit = typeof isHostedCheckoutVerificationResendLimitFailure === 'function'
               ? isHostedCheckoutVerificationResendLimitFailure(err)
               : /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::/i.test(err?.message || String(err || ''));
+            const retryableHostedCheckoutGenericError = blockedByHostedCheckoutGenericError
+              && autoRunRetryPaypalCallback
+              && attemptRun < maxAttemptsForRound;
             const blockedBySignupUserAlreadyExists = typeof isSignupUserAlreadyExistsFailure === 'function'
               && !keepSameEmailUntilAddPhone
               && isSignupUserAlreadyExistsFailure(err);
@@ -734,6 +749,7 @@
               && !blockedByPhoneNoSupply
               && !blockedByPlusNonFreeTrial
               && !blockedByGpcTaskEnded
+              && !blockedByHostedCheckoutGenericError
               && !blockedByHostedCheckoutVerificationResendLimit
               && !blockedBySignupUserAlreadyExists
               && !blockedByStep4Route405
@@ -882,6 +898,98 @@
                 'warn'
               );
               forceFreshTabsNextRun = true;
+              break;
+            }
+
+            if (retryableHostedCheckoutGenericError) {
+              const retryIndex = attemptRun;
+              await addLog(`第 ${targetRun}/${totalRuns} 轮第 ${attemptRun} 次尝试遇到 PayPal Checkout 异常：${reason}`, 'warn');
+              cancelPendingCommands('当前尝试因 PayPal Checkout 异常已放弃。');
+              await broadcastStopToContentScripts();
+              await broadcastAutoRunStatus('retrying', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId,
+              });
+              forceFreshTabsNextRun = true;
+              await addLog(
+                `PayPal Checkout 异常自动重试：${Math.round(AUTO_RUN_RETRY_DELAY_MS / 1000)} 秒后换新邮箱，开始第 ${targetRun}/${totalRuns} 轮第 ${attemptRun + 1} 次尝试（第 ${retryIndex}/${AUTO_RUN_MAX_RETRIES_PER_ROUND} 次重试）。`,
+                'warn'
+              );
+              try {
+                await sleepWithStop(AUTO_RUN_RETRY_DELAY_MS);
+              } catch (sleepError) {
+                if (isStopError(sleepError)) {
+                  stoppedEarly = true;
+                  await appendRoundRecordIfNeeded('stopped', getErrorMessage(sleepError), sleepError);
+                  await addLog(`第 ${targetRun}/${totalRuns} 轮已被用户停止`, 'warn');
+                  await broadcastAutoRunStatus('stopped', {
+                    currentRun: targetRun,
+                    totalRuns,
+                    attemptRun,
+                    sessionId: 0,
+                  });
+                  break;
+                }
+                throw sleepError;
+              }
+              try {
+                const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
+                  autoRunSkipFailures,
+                  autoRunRetryPaypalCallback,
+                  roundSummaries,
+                });
+                if (parkedForRetry) {
+                  parkedByTimer = true;
+                  break;
+                }
+              } catch (sleepError) {
+                if (isStopError(sleepError)) {
+                  stoppedEarly = true;
+                  await appendRoundRecordIfNeeded('stopped', getErrorMessage(sleepError), sleepError);
+                  await addLog(`第 ${targetRun}/${totalRuns} 轮已被用户停止`, 'warn');
+                  await broadcastAutoRunStatus('stopped', {
+                    currentRun: targetRun,
+                    totalRuns,
+                    attemptRun,
+                    sessionId: 0,
+                  });
+                  break;
+                }
+                throw sleepError;
+              }
+              attemptRun += 1;
+              reuseExistingProgress = false;
+              continue;
+            }
+
+            if (blockedByHostedCheckoutGenericError) {
+              roundSummary.status = 'failed';
+              roundSummary.finalFailureReason = reason;
+              await setState({
+                autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+              });
+              await appendRoundRecordIfNeeded('failed', reason, err);
+              cancelPendingCommands(
+                autoRunRetryPaypalCallback
+                  ? '当前轮因 PayPal Checkout genericError 已达到自动重试上限。'
+                  : '当前轮因 PayPal Checkout genericError 已终止，等待用户选择检查或重试。'
+              );
+              await broadcastStopToContentScripts();
+              await addLog(
+                autoRunRetryPaypalCallback
+                  ? `第 ${targetRun}/${totalRuns} 轮检测到 PayPal Checkout genericError，已达到 PAYPAL回调自动重试上限，当前自动运行将停止。`
+                  : `第 ${targetRun}/${totalRuns} 轮检测到 PayPal Checkout genericError，当前自动运行已停止，请在弹窗中选择“检查”或“重试”。`,
+                'warn'
+              );
+              stoppedEarly = true;
+              await broadcastAutoRunStatus('stopped', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId: 0,
+              });
               break;
             }
 
@@ -1041,6 +1149,7 @@
               try {
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
+                  autoRunRetryPaypalCallback,
                   roundSummaries,
                 });
                 if (parkedForRetry) {
@@ -1110,6 +1219,7 @@
         try {
           const parkedForNextRound = await waitBetweenAutoRunRounds(targetRun, totalRuns, roundSummary, {
             autoRunSkipFailures,
+            autoRunRetryPaypalCallback,
             roundSummaries,
           });
           if (parkedForNextRound) {

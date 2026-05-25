@@ -465,6 +465,7 @@ const inputCfDomain = document.getElementById('input-cf-domain');
 const btnCfDomainMode = document.getElementById('btn-cf-domain-mode');
 const inputRunCount = document.getElementById('input-run-count');
 const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures');
+const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-retry-paypal-callback');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
 const inputStep6CookieCleanupEnabled = document.getElementById('input-step6-cookie-cleanup-enabled');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
@@ -4993,6 +4994,9 @@ function collectSettingsPayload() {
     yydsMailApiKey: (typeof inputYydsMailApiKey !== 'undefined' && inputYydsMailApiKey) ? inputYydsMailApiKey.value.trim() : '',
     yydsMailBaseUrl: normalizeYydsBaseUrlValue((typeof inputYydsMailBaseUrl !== 'undefined' && inputYydsMailBaseUrl) ? inputYydsMailBaseUrl.value : ''),
     autoRunSkipFailures: inputAutoSkipFailures.checked,
+    autoRunRetryPaypalCallback: typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback
+      ? Boolean(inputAutoRunRetryPaypalCallback.checked)
+      : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
       ? Boolean(inputStep6CookieCleanupEnabled.checked)
@@ -11508,6 +11512,9 @@ function applySettingsState(state) {
   renderCloudflareDomainOptions(state?.cloudflareDomain || '');
   setCloudflareDomainEditMode(false, { clearInput: true });
   inputAutoSkipFailures.checked = Boolean(state?.autoRunSkipFailures);
+  if (typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback) {
+    inputAutoRunRetryPaypalCallback.checked = Boolean(state?.autoRunRetryPaypalCallback);
+  }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
     inputStep6CookieCleanupEnabled.checked = Boolean(state?.step6CookieCleanupEnabled);
@@ -15209,6 +15216,9 @@ async function startAutoRunFromCurrentSettings() {
   }
   let mode = 'restart';
   const autoRunSkipFailures = inputAutoSkipFailures.checked;
+  const autoRunRetryPaypalCallback = typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback
+    ? Boolean(inputAutoRunRetryPaypalCallback.checked)
+    : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
   const contributionQq = String(inputContributionQq?.value || '').trim();
   const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
@@ -15266,6 +15276,7 @@ async function startAutoRunFromCurrentSettings() {
       activeFlowId,
       targetId,
       autoRunSkipFailures,
+      autoRunRetryPaypalCallback,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
       contributionAdapterId: latestState?.contributionAdapterId || '',
       contributionNickname,
@@ -18391,6 +18402,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.autoRunSkipFailures !== undefined) {
         inputAutoSkipFailures.checked = Boolean(message.payload.autoRunSkipFailures);
         updateFallbackThreadIntervalInputState();
+      }
+      if (
+        message.payload.autoRunRetryPaypalCallback !== undefined
+        && typeof inputAutoRunRetryPaypalCallback !== 'undefined'
+        && inputAutoRunRetryPaypalCallback
+      ) {
+        inputAutoRunRetryPaypalCallback.checked = Boolean(message.payload.autoRunRetryPaypalCallback);
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

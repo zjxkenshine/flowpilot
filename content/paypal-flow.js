@@ -11,6 +11,7 @@ const PAYPAL_HOSTED_STAGE_VERIFICATION = 'verification';
 const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
 const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
 const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
+const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
 const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
 const PAYPAL_HOSTED_STEP_KEYS = {
   [PAYPAL_HOSTED_STAGE_LOGIN]: 'paypal-hosted-email',
@@ -269,6 +270,29 @@ function isHostedReviewPage() {
   return /\/webapps\/hermes/i.test(getPayPalPathname());
 }
 
+function getPayPalHostedGenericErrorMessage() {
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  const match = bodyText.match(
+    /Things\s+don[’']?t\s+appear\s+to\s+be\s+working\s+at\s+the\s+moment\.?|Sorry,\s*something\s+went\s+wrong\.?\s*Please\s+try\s+again\.?|Something\s+went\s+wrong(?:\.?\s*Please\s+go\s+back\s+to\s+[^.]+?\s+and\s+choose\s+another\s+way\s+to\s+pay\.?\s*PayPal\s+isn[’']?t\s+available\s+at\s+this\s+time\.?)?/i
+  );
+  return match ? match[0] : '';
+}
+
+function isPayPalHostedGenericErrorPage() {
+  const pathname = getPayPalPathname();
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  return /\/checkoutweb\/genericError/i.test(pathname)
+    || Boolean(getPayPalHostedGenericErrorMessage())
+    || (
+      /(?:sorry,\s*)?something\s+went\s+wrong/i.test(bodyText)
+      && /return\s+to\s+merchant/i.test(bodyText)
+    )
+    || (
+      /paypal\s+isn[’']?t\s+available\s+at\s+this\s+time/i.test(bodyText)
+      && /choose\s+another\s+way\s+to\s+pay/i.test(bodyText)
+    );
+}
+
 function findHostedVerificationInputs() {
   return Array.from({ length: 6 }, (_, index) => document.getElementById(`ci-ciBasic-${index}`))
     .filter((input) => isVisibleElement(input));
@@ -346,6 +370,9 @@ function detectPayPalHostedStage() {
   }
   if (hasHostedVerificationInputs()) {
     return PAYPAL_HOSTED_STAGE_VERIFICATION;
+  }
+  if (isPayPalHostedGenericErrorPage()) {
+    return PAYPAL_HOSTED_STAGE_GENERIC_ERROR;
   }
   if (isHostedGuestCheckoutPage()) {
     return PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
@@ -741,6 +768,14 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
   if (stage === PAYPAL_HOSTED_STAGE_REVIEW) {
     return clickHostedReviewConsent();
   }
+  if (stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR) {
+    return {
+      stage,
+      submitted: false,
+      hostedGenericError: true,
+      hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
+    };
+  }
   return {
     stage,
     submitted: false,
@@ -762,6 +797,8 @@ function inspectPayPalHostedState() {
     hostedVerificationInvalidCode: hasHostedInvalidVerificationCodeError(),
     hostedVerificationErrorText: getHostedVerificationErrorText(),
     hostedVerificationResendReady: Boolean(findHostedVerificationResendButton()),
+    hostedGenericError: stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
+    hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
     reviewConsentReady: Boolean(findHostedReviewConsentButton()),
     approveReady: Boolean(findApproveButton()),
     bodyTextPreview: normalizeText(document.body?.innerText || '').slice(0, 240),

@@ -1439,6 +1439,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   gopayHelperAutoModeEnabled: false,
   gopayHelperApiKeyStatus: '',
   autoRunSkipFailures: false,
+  autoRunRetryPaypalCallback: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
   autoRunDelayEnabled: false,
@@ -1571,6 +1572,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'plusHostedCheckoutOauthDelaySeconds',
+  'autoRunRetryPaypalCallback',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2484,6 +2486,7 @@ function normalizeAutoRunTimerPlan(plan) {
 
   const totalRuns = normalizeRunCount(plan.totalRuns);
   const autoRunSkipFailures = Boolean(plan.autoRunSkipFailures);
+  const autoRunRetryPaypalCallback = Boolean(plan.autoRunRetryPaypalCallback);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -2501,6 +2504,7 @@ function normalizeAutoRunTimerPlan(plan) {
       fireAt,
       totalRuns,
       autoRunSkipFailures,
+      autoRunRetryPaypalCallback,
       mode,
       currentRun: 0,
       attemptRun: 0,
@@ -2519,6 +2523,7 @@ function normalizeAutoRunTimerPlan(plan) {
       fireAt,
       totalRuns,
       autoRunSkipFailures,
+      autoRunRetryPaypalCallback,
       mode: 'restart',
       currentRun: normalizedCurrentRun,
       attemptRun: normalizedAttemptRun,
@@ -2536,6 +2541,7 @@ function normalizeAutoRunTimerPlan(plan) {
     fireAt,
     totalRuns,
     autoRunSkipFailures,
+    autoRunRetryPaypalCallback,
     mode: 'restart',
     currentRun: normalizedCurrentRun,
     attemptRun: normalizedAttemptRun,
@@ -2566,6 +2572,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     fireAt: legacyScheduledAt,
     totalRuns: state.scheduledAutoRunPlan?.totalRuns ?? state.autoRunTotalRuns,
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
+    autoRunRetryPaypalCallback: state.scheduledAutoRunPlan?.autoRunRetryPaypalCallback ?? state.autoRunRetryPaypalCallback,
     autoRunSessionId: state.autoRunSessionId,
     mode: state.scheduledAutoRunPlan?.mode,
   });
@@ -3508,6 +3515,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'gopayHelperRemainingUses':
       return Math.max(0, Number(value) || 0);
     case 'autoRunSkipFailures':
+    case 'autoRunRetryPaypalCallback':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
@@ -9706,6 +9714,11 @@ function isHostedCheckoutVerificationResendLimitFailure(error) {
   return /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::|PayPal 验证码自动 Resend 重试已达到上限|请尝试在页面手动获取验证码并填入/i.test(message);
 }
 
+function isHostedCheckoutGenericErrorFailure(error) {
+  const message = getErrorMessage(error);
+  return /HOSTED_CHECKOUT_GENERIC_ERROR::|Things\s+don[’']?t\s+appear\s+to\s+be\s+working\s+at\s+the\s+moment|Sorry,\s*something\s+went\s+wrong\.?\s*Please\s+try\s+again|PayPal\s+isn[’']?t\s+available\s+at\s+this\s+time|choose\s+another\s+way\s+to\s+pay/i.test(message);
+}
+
 function isGpcTaskEndedFailure(error) {
   const message = String(typeof error === 'string' ? error : error?.message || '');
   return /GPC_TASK_ENDED::/i.test(message);
@@ -10562,6 +10575,7 @@ function getAutoRunTimerResumeOptions(plan) {
       loopOptions: {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+        autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         mode: normalizedPlan.mode,
       },
       statusPayload: {
@@ -10579,6 +10593,7 @@ function getAutoRunTimerResumeOptions(plan) {
       loopOptions: {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+        autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         mode: 'restart',
         resumeCurrentRun: nextRun,
         resumeAttemptRun: 1,
@@ -10597,6 +10612,7 @@ function getAutoRunTimerResumeOptions(plan) {
     loopOptions: {
       autoRunSessionId: normalizedPlan.autoRunSessionId,
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
+      autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
       mode: 'restart',
       resumeCurrentRun: normalizedPlan.currentRun,
       resumeAttemptRun: normalizedPlan.attemptRun,
@@ -10691,6 +10707,7 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
       resumeOptions.statusPayload,
       {
         autoRunSkipFailures: plan.autoRunSkipFailures,
+        autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
         autoRunTimerPlan: null,
         scheduledAutoRunPlan: null,
@@ -10741,6 +10758,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     fireAt: Date.now() + delayMinutes * 60 * 1000,
     totalRuns,
     autoRunSkipFailures: options.autoRunSkipFailures,
+    autoRunRetryPaypalCallback: options.autoRunRetryPaypalCallback,
     autoRunSessionId: sessionId,
     mode: options.mode,
   });
@@ -10752,6 +10770,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
 
   await persistAutoRunTimerPlan(timerPlan, {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
+    autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, []),
   });
   await addLog(
@@ -10823,6 +10842,7 @@ async function restoreAutoRunTimerIfNeeded() {
       autoRunSessionId: restoredSessionId,
     }, {
       autoRunSkipFailures: plan.autoRunSkipFailures,
+      autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
     });
   } else {
@@ -10841,6 +10861,7 @@ async function restoreAutoRunTimerIfNeeded() {
     {
       autoRunSessionId: plan.autoRunSessionId,
       autoRunSkipFailures: plan.autoRunSkipFailures,
+      autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
       autoRunTimerPlan: plan,
       scheduledAutoRunPlan: null,
@@ -11846,6 +11867,7 @@ async function requestStop(options = {}) {
     }, {
       autoRunSessionId: 0,
       autoRunSkipFailures: timerPlan.autoRunSkipFailures,
+      autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, timerPlan.roundSummaries),
       autoRunTimerPlan: null,
       scheduledAutoRunPlan: null,
@@ -13340,6 +13362,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   isPhoneSmsPlatformRateLimitFailure,
   isPlusCheckoutNonFreeTrialFailure,
   isGpcTaskEndedFailure,
+  isHostedCheckoutGenericErrorFailure,
   isHostedCheckoutVerificationResendLimitFailure,
   isKiroProxyFailure,
   isRestartCurrentAttemptError,
@@ -14334,6 +14357,7 @@ async function resumeAutoRun() {
   startAutoRunLoop(totalRuns, {
     autoRunSessionId: normalizeAutoRunSessionId(state.autoRunSessionId),
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
+    autoRunRetryPaypalCallback: Boolean(state.autoRunRetryPaypalCallback),
     mode: 'continue',
     resumeCurrentRun: currentRun,
     resumeAttemptRun: attemptRun,
@@ -14691,6 +14715,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
 });
 const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.createPlusCheckoutCreateExecutor({
   addLog,
+  broadcastDataUpdate,
   chrome,
   completeNodeFromBackground,
   createAutomationTab,
@@ -15045,6 +15070,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   clearLuckmailRuntimeState,
   clearYydsMailRuntimeState,
   clearStopRequest,
+  chrome,
   closeLocalhostCallbackTabs,
   closeTabsByUrlPrefix,
   completeNodeFromBackground,

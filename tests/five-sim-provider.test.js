@@ -385,3 +385,133 @@ test('5sim provider falls back from preferred tier and counts the upgrade', asyn
     .map((entry) => entry.url.searchParams.get('maxPrice'));
   assert.deepStrictEqual(buyPrices, ['0.08', '0.08', '0.05']);
 });
+
+test('5sim provider does not climb above configured max price', async () => {
+  const requests = [];
+  const provider = api.createProvider({
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      requests.push({ url: parsed });
+      if (parsed.pathname === '/v1/guest/products/vietnam/any') {
+        return createTextResponse({});
+      }
+      if (parsed.pathname === '/v1/guest/prices') {
+        return createTextResponse({
+          vietnam: {
+            any: {
+              openai: {
+                low: { cost: 0.08, count: 2 },
+                high: { cost: 0.12, count: 2 },
+              },
+            },
+          },
+        });
+      }
+      if (parsed.pathname === '/v1/user/buy/activation/vietnam/any/openai') {
+        if (parsed.searchParams.get('maxPrice') === '0.08') {
+          return createTextResponse({ message: 'no free phones' }, false);
+        }
+        throw new Error(`unexpected buy maxPrice ${parsed.searchParams.get('maxPrice') || 'none'}`);
+      }
+      throw new Error(`unexpected ${parsed.pathname}`);
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => provider.requestActivation({
+      fiveSimApiKey: 'demo-key',
+      fiveSimCountryId: 'vietnam',
+      fiveSimCountryLabel: '瓒婂崡 (Vietnam)',
+      fiveSimOperator: 'any',
+      fiveSimMaxPrice: '0.08',
+      heroSmsActivationRetryRounds: 1,
+      phoneActivationTierUpgradeLimit: 1,
+    }),
+    /5sim/
+  );
+
+  const buyPrices = requests
+    .filter((entry) => entry.url.pathname.includes('/buy/activation'))
+    .map((entry) => entry.url.searchParams.get('maxPrice'));
+  assert.deepStrictEqual(buyPrices, ['0.08', '0.08']);
+  assert.equal(buyPrices.includes('0.12'), false);
+  assert.equal(buyPrices.includes(null), false);
+});
+
+test('5sim provider rejects reversed price range before fetching', async () => {
+  const requests = [];
+  const provider = api.createProvider({
+    fetchImpl: async (url) => {
+      requests.push(url);
+      throw new Error(`unexpected request ${url}`);
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => provider.requestActivation({
+      fiveSimApiKey: 'demo-key',
+      fiveSimCountryId: 'vietnam',
+      fiveSimCountryLabel: '瓒婂崡 (Vietnam)',
+      fiveSimOperator: 'any',
+      fiveSimMinPrice: '0.2',
+      fiveSimMaxPrice: '0.1',
+    }),
+    /price range is invalid/
+  );
+  assert.deepStrictEqual(requests, []);
+});
+
+test('5sim provider does not fall back to unpriced purchase when bounded range has no candidates', async () => {
+  const requests = [];
+  const provider = api.createProvider({
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      requests.push({ url: parsed });
+      if (parsed.pathname === '/v1/guest/products/vietnam/any') {
+        return createTextResponse({});
+      }
+      if (parsed.pathname === '/v1/guest/prices') {
+        return createTextResponse({
+          vietnam: {
+            any: {
+              openai: {
+                high: { cost: 0.12, count: 2 },
+              },
+            },
+          },
+        });
+      }
+      if (parsed.pathname.includes('/buy/activation')) {
+        throw new Error(`unpriced or out-of-range buy should not run: ${parsed.toString()}`);
+      }
+      throw new Error(`unexpected ${parsed.pathname}`);
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => provider.requestActivation({
+      fiveSimApiKey: 'demo-key',
+      fiveSimCountryId: 'vietnam',
+      fiveSimCountryLabel: '瓒婂崡 (Vietnam)',
+      fiveSimOperator: 'any',
+      fiveSimMinPrice: '0.05',
+      fiveSimMaxPrice: '0.08',
+      heroSmsActivationRetryRounds: 1,
+      phoneActivationTierUpgradeLimit: 1,
+    }),
+    /5sim/
+  );
+
+  assert.deepStrictEqual(
+    requests
+      .filter((entry) => entry.url.pathname.includes('/buy/activation'))
+      .map((entry) => entry.url.searchParams.get('maxPrice')),
+    []
+  );
+});

@@ -159,6 +159,198 @@ test('auto-run controller invokes success hook after a successful round', async 
   });
 });
 
+function createHostedGenericErrorAutoRunHarness(options = {}) {
+  const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAutoRunController;`)(globalScope);
+  const events = [];
+  let runCalls = 0;
+  let currentState = {
+    currentNodeId: 'plus-checkout-create',
+    nodeStatuses: {
+      'plus-checkout-create': 'running',
+    },
+    autoRunFallbackThreadIntervalMinutes: 0,
+    autoRunRoundSummaries: [],
+    tabRegistry: {},
+    sourceLastUrls: {},
+    autoRunRetryPaypalCallback: Boolean(options.autoRunRetryPaypalCallback),
+  };
+  const runtime = {
+    state: {
+      autoRunActive: false,
+      autoRunCurrentRun: 0,
+      autoRunTotalRuns: 0,
+      autoRunAttemptRun: 0,
+      autoRunSessionId: 0,
+    },
+    get() {
+      return { ...this.state };
+    },
+    set(updates = {}) {
+      this.state = { ...this.state, ...updates };
+    },
+  };
+  let sessionSeed = 0;
+
+  const controller = api.createAutoRunController({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    appendAccountRunRecord: async (status, _state, reason) => {
+      events.push({ type: 'accountRecord', status, reason });
+      return { status, reason };
+    },
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 2,
+    AUTO_RUN_RETRY_DELAY_MS: 25,
+    AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
+    AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
+    broadcastAutoRunStatus: async (phase, payload = {}) => events.push({ type: 'status', phase, payload }),
+    broadcastStopToContentScripts: async () => events.push({ type: 'stopContent' }),
+    cancelPendingCommands: (reason) => events.push({ type: 'cancelPendingCommands', reason }),
+    clearStopRequest: () => events.push({ type: 'clearStopRequest' }),
+    createAutoRunSessionId: () => {
+      sessionSeed += 1;
+      return sessionSeed;
+    },
+    getAutoRunStatusPayload: (phase, payload = {}) => ({
+      autoRunning: ['scheduled', 'running', 'waiting_step', 'waiting_email', 'retrying', 'waiting_interval'].includes(phase),
+      autoRunPhase: phase,
+      autoRunCurrentRun: payload.currentRun ?? 0,
+      autoRunTotalRuns: payload.totalRuns ?? 1,
+      autoRunAttemptRun: payload.attemptRun ?? 0,
+      autoRunSessionId: payload.sessionId ?? 0,
+    }),
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getFirstUnfinishedNodeId: () => 'plus-checkout-create',
+    getPendingAutoRunTimerPlan: () => null,
+    getRunningNodeIds: () => [],
+    getState: async () => ({
+      ...currentState,
+      nodeStatuses: { ...(currentState.nodeStatuses || {}) },
+      tabRegistry: { ...(currentState.tabRegistry || {}) },
+      sourceLastUrls: { ...(currentState.sourceLastUrls || {}) },
+    }),
+    getStopRequested: () => false,
+    hasSavedNodeProgress: () => false,
+    isAddPhoneAuthFailure: () => false,
+    isGpcTaskEndedFailure: () => false,
+    isHostedCheckoutGenericErrorFailure: (error) => /HOSTED_CHECKOUT_GENERIC_ERROR::/i.test(error?.message || String(error || '')),
+    isHostedCheckoutVerificationResendLimitFailure: () => false,
+    isKiroProxyFailure: () => false,
+    isPhoneSmsPlatformRateLimitFailure: () => false,
+    isPlusCheckoutNonFreeTrialFailure: () => false,
+    isRestartCurrentAttemptError: () => false,
+    isStep4Route405RecoveryLimitFailure: () => false,
+    isSignupUserAlreadyExistsFailure: () => false,
+    isStopError: () => false,
+    launchAutoRunTimerPlan: async () => false,
+    normalizeAutoRunFallbackThreadIntervalMinutes: (value) => Math.max(0, Math.floor(Number(value) || 0)),
+    persistAutoRunTimerPlan: async () => ({}),
+    resetState: async () => {
+      events.push({ type: 'resetState' });
+      currentState = {
+        ...currentState,
+        currentNodeId: '',
+        nodeStatuses: {},
+        tabRegistry: {},
+        sourceLastUrls: {},
+      };
+    },
+    runAutoSequenceFromNode: async (nodeId, context = {}) => {
+      runCalls += 1;
+      events.push({ type: 'run', nodeId, context });
+      if (runCalls <= (options.failuresBeforeSuccess ?? 1)) {
+        throw new Error('HOSTED_CHECKOUT_GENERIC_ERROR::Things don\'t appear to be working at the moment.');
+      }
+    },
+    runtime,
+    setState: async (updates = {}) => {
+      events.push({ type: 'setState', updates: { ...updates } });
+      currentState = {
+        ...currentState,
+        ...updates,
+        nodeStatuses: updates.nodeStatuses ? { ...updates.nodeStatuses } : currentState.nodeStatuses,
+        tabRegistry: updates.tabRegistry ? { ...updates.tabRegistry } : currentState.tabRegistry,
+        sourceLastUrls: updates.sourceLastUrls ? { ...updates.sourceLastUrls } : currentState.sourceLastUrls,
+      };
+    },
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    throwIfAutoRunSessionStopped: (sessionId) => {
+      if (sessionId && sessionId !== runtime.state.autoRunSessionId) {
+        throw new Error('Flow stopped.');
+      }
+    },
+    waitForRunningNodesToFinish: async () => currentState,
+    chrome: {
+      runtime: {
+        sendMessage(message) {
+          events.push({ type: 'sendMessage', message });
+          return Promise.resolve();
+        },
+      },
+    },
+  });
+
+  return {
+    controller,
+    events,
+    get runCalls() {
+      return runCalls;
+    },
+    get state() {
+      return currentState;
+    },
+  };
+}
+
+test('auto-run retries PayPal hosted genericError with a fresh attempt when enabled', async () => {
+  const harness = createHostedGenericErrorAutoRunHarness({
+    autoRunRetryPaypalCallback: true,
+    failuresBeforeSuccess: 1,
+  });
+
+  await harness.controller.autoRunLoop(1, {
+    autoRunSkipFailures: false,
+    autoRunRetryPaypalCallback: true,
+    mode: 'restart',
+  });
+
+  assert.equal(harness.runCalls, 2);
+  assert.equal(harness.events.some((event) => event.type === 'status' && event.phase === 'retrying'), true);
+  assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 25), true);
+  assert.equal(
+    harness.events.filter((event) => event.type === 'run').map((event) => event.context.attemptRuns).join(','),
+    '1,2'
+  );
+  assert.equal(harness.state.autoRunPhase, 'complete');
+  assert.equal(harness.state.autoRunRetryPaypalCallback, true);
+});
+
+test('auto-run stops on PayPal hosted genericError when automatic retry is disabled', async () => {
+  const harness = createHostedGenericErrorAutoRunHarness({
+    autoRunRetryPaypalCallback: false,
+    failuresBeforeSuccess: 99,
+  });
+
+  await harness.controller.autoRunLoop(1, {
+    autoRunSkipFailures: false,
+    autoRunRetryPaypalCallback: false,
+    mode: 'restart',
+  });
+
+  assert.equal(harness.runCalls, 1);
+  assert.equal(harness.events.some((event) => event.type === 'status' && event.phase === 'retrying'), false);
+  assert.equal(harness.events.some((event) => event.type === 'status' && event.phase === 'stopped'), true);
+  assert.equal(
+    harness.events.some((event) => event.type === 'cancelPendingCommands' && /genericError 已终止/.test(event.reason)),
+    true
+  );
+  assert.equal(
+    harness.events.some((event) => event.type === 'log' && /请在弹窗中选择“检查”或“重试”/.test(event.message)),
+    true
+  );
+  assert.equal(harness.state.autoRunPhase, 'stopped');
+});
+
 function extractFunction(name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
   const start = markers

@@ -764,6 +764,116 @@ test('PayPal hosted email node completes when Next navigation drops the content 
   );
 });
 
+test('PayPal hosted generic_error creates manual confirmation when auto retry is disabled', async () => {
+  const events = [];
+  const broadcasts = [];
+  let state = {
+    autoRunRetryPaypalCallback: false,
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    getState: async () => ({ ...state }),
+    registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return {
+          hostedStage: 'generic_error',
+          hostedGenericError: true,
+          hostedGenericErrorMessage: 'Things don\'t appear to be working at the moment.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      state = { ...state, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 123,
+      plusHostedCheckoutGuestProfile: {
+        email: 'guest@example.com',
+        phone: '4155551234',
+        address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+      },
+    }),
+    /HOSTED_CHECKOUT_GENERIC_ERROR::Things don'?t appear/
+  );
+
+  assert.equal(state.plusManualConfirmationPending, true);
+  assert.equal(state.plusManualConfirmationStep, 6);
+  assert.equal(state.plusManualConfirmationMethod, 'paypal-hosted-generic-error');
+  assert.equal(state.plusManualConfirmationTitle, 'PayPal Checkout 异常');
+  assert.match(state.plusManualConfirmationMessage, /Things don'?t appear/);
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].plusManualConfirmationPending, true);
+  assert.equal(broadcasts[0].plusManualConfirmationMethod, 'paypal-hosted-generic-error');
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
+test('PayPal hosted generic_error throws structured error without manual confirmation when auto retry is enabled', async () => {
+  const events = [];
+  const broadcasts = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    getState: async () => ({
+      autoRunRetryPaypalCallback: true,
+    }),
+    registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return {
+          hostedStage: 'generic_error',
+          hostedGenericError: true,
+          hostedGenericErrorMessage: 'PayPal isn\'t available at this time. Please choose another way to pay.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 123,
+      plusHostedCheckoutGuestProfile: {
+        email: 'guest@example.com',
+        phone: '4155551234',
+        address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+      },
+    }),
+    /HOSTED_CHECKOUT_GENERIC_ERROR::PayPal isn'?t available/
+  );
+
+  assert.equal(events.some((event) => event.type === 'set-state' && event.payload?.plusManualConfirmationPending), false);
+  assert.equal(broadcasts.length, 0);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
 test('Plus checkout content routes billing operations through the operation delay gate', async () => {
   const { checkoutEvents, send } = createCheckoutContentHarness();
 

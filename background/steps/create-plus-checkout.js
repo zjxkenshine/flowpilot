@@ -20,6 +20,7 @@
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS = 12;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_MS = 5000;
   const HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS = 3000;
+  const HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX = 'HOSTED_CHECKOUT_GENERIC_ERROR::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
   const HOSTED_CHECKOUT_DEFAULT_PHONE = '1234567890';
@@ -68,6 +69,7 @@
   const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
   const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
   const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
+  const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
   const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
   const PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT = 'paypal-hosted-openai-checkout';
   const PAYPAL_HOSTED_STEP_EMAIL = 'paypal-hosted-email';
@@ -85,6 +87,7 @@
   function createPlusCheckoutCreateExecutor(deps = {}) {
     const {
       addLog: rawAddLog = async () => {},
+      broadcastDataUpdate = null,
       chrome,
       completeNodeFromBackground,
       createAutomationTab = null,
@@ -1077,7 +1080,11 @@
       if (result?.error) {
         throw new Error(result.error);
       }
-      return result || {};
+      const pageState = result || {};
+      if (isHostedCheckoutGenericErrorState(pageState)) {
+        await requestHostedCheckoutGenericErrorChoice(tabId, pageState);
+      }
+      return pageState;
     }
 
     async function runHostedPayPalStep(tabId, payload = {}) {
@@ -1095,13 +1102,54 @@
       if (result?.error) {
         throw new Error(result.error);
       }
-      return result || {};
+      const stepResult = result || {};
+      if (isHostedCheckoutGenericErrorState(stepResult)) {
+        await requestHostedCheckoutGenericErrorChoice(tabId, stepResult);
+      }
+      return stepResult;
     }
 
     function buildHostedVerificationResendLimitError() {
       return new Error(
         `${HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX}PayPal 验证码自动 Resend 重试已达到上限，请尝试在页面手动获取验证码并填入。`
       );
+    }
+
+    function isHostedCheckoutGenericErrorState(pageState = {}) {
+      return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR
+        || pageState?.hostedGenericError === true;
+    }
+
+    function isHostedCheckoutGenericError(error) {
+      return new RegExp(HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+        .test(String(error?.message || error || ''));
+    }
+
+    async function requestHostedCheckoutGenericErrorChoice(tabId, pageState = {}) {
+      const requestId = `paypal-hosted-generic-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const pageMessage = String(pageState?.hostedGenericErrorMessage || '').trim()
+        || 'Things don\'t appear to be working at the moment.';
+      const latestState = typeof getState === 'function'
+        ? await getState().catch(() => ({}))
+        : {};
+      if (latestState?.autoRunRetryPaypalCallback) {
+        await addLog('步骤 6：PayPal hosted checkout 返回 genericError，PAYPAL回调自动重试已开启，将换新邮箱重走流程。', 'warn');
+        throw new Error(`${HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX}${pageMessage}`);
+      }
+      const patch = {
+        plusManualConfirmationPending: true,
+        plusManualConfirmationRequestId: requestId,
+        plusManualConfirmationStep: 6,
+        plusManualConfirmationMethod: 'paypal-hosted-generic-error',
+        plusManualConfirmationTitle: 'PayPal Checkout 异常',
+        plusManualConfirmationMessage: `${pageMessage} 请检查 PLUS 是否正常开通，或重新创建 Plus Checkout。`,
+      };
+      await setState(patch);
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate(patch);
+      }
+      await addLog('步骤 6：PayPal hosted checkout 返回 genericError，已停止当前支付链路并等待你选择“检查”或“重试”。', 'error');
+      throw new Error(`${HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX}${pageMessage}`);
     }
 
     function createHostedVerificationRetryContext() {
@@ -1230,6 +1278,9 @@
           pageState = await getHostedPayPalState(tabId);
           lastStage = pageState?.hostedStage || lastStage;
         } catch (error) {
+          if (isHostedCheckoutGenericError(error)) {
+            throw error;
+          }
           lastStage = error?.message || lastStage;
           await sleepWithStop(intervalMs);
           continue;

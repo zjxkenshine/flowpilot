@@ -10,6 +10,7 @@
       buildLuckmailSessionSettingsPayload,
       buildPersistentSettingsPayload,
       broadcastDataUpdate,
+      chrome = null,
       applyIpProxySettingsFromState,
       cancelScheduledAutoRun,
       checkIcloudSession,
@@ -1140,7 +1141,9 @@
           const requestId = String(message.payload?.requestId || '').trim();
           const currentRequestId = String(currentState?.plusManualConfirmationRequestId || '').trim();
           const method = String(currentState?.plusManualConfirmationMethod || '').trim().toLowerCase();
+          const action = String(message.payload?.action || '').trim().toLowerCase();
           const isGpcOtp = method === 'gopay-otp';
+          const isPayPalHostedGenericError = method === 'paypal-hosted-generic-error';
           if (!currentState?.plusManualConfirmationPending) {
             return { ok: true, ignored: true };
           }
@@ -1156,6 +1159,37 @@
             plusManualConfirmationTitle: '',
             plusManualConfirmationMessage: '',
           };
+
+          if (isPayPalHostedGenericError) {
+            await setState(clearManualConfirmationState);
+            if (typeof broadcastDataUpdate === 'function') {
+              broadcastDataUpdate(clearManualConfirmationState);
+            }
+
+            if (action === 'check' && confirmed) {
+              const chromeApi = typeof chrome !== 'undefined' ? chrome : globalThis.chrome;
+              if (chromeApi?.tabs?.create) {
+                await chromeApi.tabs.create({ url: 'https://chatgpt.com/', active: true }).catch(() => {});
+              }
+              await addLog('步骤 6：已按你的选择打开 ChatGPT，请检查 PLUS 是否正常开通。', 'info');
+              return { ok: true };
+            }
+
+            if (action === 'retry' && confirmed) {
+              clearStopRequest?.();
+              const retryNodeId = 'plus-checkout-create';
+              const retryStep = findStepByNodeId(retryNodeId, currentState) || 6;
+              await addLog('步骤 6：已按你的选择重新开始创建 Plus Checkout。', 'info');
+              if (typeof invalidateDownstreamAfterStepRestart === 'function') {
+                await invalidateDownstreamAfterStepRestart(retryStep, { logLabel: 'PayPal genericError 后重试 Plus Checkout' });
+              }
+              await executeNode(retryNodeId);
+              return { ok: true };
+            }
+
+            await addLog(`步骤 ${step || 6}：已取消 PayPal Checkout 异常处理。`, 'warn');
+            return { ok: true };
+          }
 
           if (isGpcOtp && confirmed) {
             const otp = String(message.payload?.otp || message.payload?.code || '').trim().replace(/[^\d]/g, '');
@@ -1414,9 +1448,10 @@
           }
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           const autoRunSkipFailures = Boolean(message.payload?.autoRunSkipFailures);
+          const autoRunRetryPaypalCallback = Boolean(message.payload?.autoRunRetryPaypalCallback);
           const mode = message.payload?.mode === 'continue' ? 'continue' : 'restart';
-          await setState({ autoRunSkipFailures });
-          startAutoRunLoop(totalRuns, { autoRunSkipFailures, mode });
+          await setState({ autoRunSkipFailures, autoRunRetryPaypalCallback });
+          startAutoRunLoop(totalRuns, { autoRunSkipFailures, autoRunRetryPaypalCallback, mode });
           return { ok: true };
         }
 
@@ -1456,6 +1491,7 @@
           return await scheduleAutoRun(totalRuns, {
             delayMinutes: message.payload?.delayMinutes,
             autoRunSkipFailures: Boolean(message.payload?.autoRunSkipFailures),
+            autoRunRetryPaypalCallback: Boolean(message.payload?.autoRunRetryPaypalCallback),
             mode: message.payload?.mode,
           });
         }

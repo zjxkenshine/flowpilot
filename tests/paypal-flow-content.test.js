@@ -496,6 +496,15 @@ function createHostedPayPalHarness(options = {}) {
     ]);
   }
 
+  function showGenericError({ url = 'https://www.paypal.com/checkoutweb/genericError?token=EC-test', text = 'Things don\'t appear to be working at the moment.' } = {}) {
+    location.href = url;
+    location.host = 'www.paypal.com';
+    location.pathname = new URL(url).pathname;
+    body.innerText = text;
+    body.textContent = body.innerText;
+    setElements([submitButton]);
+  }
+
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
     location,
@@ -595,6 +604,7 @@ function createHostedPayPalHarness(options = {}) {
     send,
     showPayEmail,
     showCreateAccount,
+    showGenericError,
     showGuestCheckout,
     showVerification,
   };
@@ -775,4 +785,60 @@ test('PayPal hosted verification page fills code digits and clicks Resend', asyn
   assert.equal(resendResult.ok, true);
   assert.equal(resendResult.resendClicked, true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'resendButton'), true);
+});
+
+test('PayPal hosted genericError URL is exposed as generic_error stage', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGenericError();
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'generic_error');
+  assert.equal(state.hostedGenericError, true);
+  assert.match(state.hostedGenericErrorMessage, /Things don'?t appear/);
+});
+
+test('PayPal hosted genericError copy is exposed with message', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGenericError({
+    url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test',
+    text: 'Sorry, something went wrong. Please try again.',
+  });
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'generic_error');
+  assert.equal(state.hostedGenericError, true);
+  assert.match(state.hostedGenericErrorMessage, /Sorry, something went wrong/);
+});
+
+test('PayPal hosted genericError step does not click submit buttons', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGenericError({
+    text: 'Something went wrong. Please go back to ChatGPT and choose another way to pay. PayPal isn\'t available at this time.',
+  });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'generic_error',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'generic_error');
+  assert.equal(result.hostedGenericError, true);
+  assert.equal(result.submitted, false);
+  assert.equal(harness.events.some((event) => event.type === 'click'), false);
 });
