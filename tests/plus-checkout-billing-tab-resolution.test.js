@@ -82,6 +82,7 @@ function createExecutorHarness({
   fetchImpl = null,
   getAddressSeedForCountry = () => createAddressSeed(),
   getState = null,
+  handlePhonePlusNonFreeTrialFallback = null,
   queryTabsInAutomationWindow = null,
   markCurrentRegistrationAccountUsed = async () => {},
   onClickSubscribe = null,
@@ -168,6 +169,7 @@ function createExecutorHarness({
     getAddressSeedForCountry,
     getState: typeof getState === 'function' ? getState : async () => ({}),
     getTabId: async () => null,
+    ...(typeof handlePhonePlusNonFreeTrialFallback === 'function' ? { handlePhonePlusNonFreeTrialFallback } : {}),
     isTabAlive: async () => false,
     markCurrentRegistrationAccountUsed,
     ...(typeof queryTabsInAutomationWindow === 'function' ? { queryTabsInAutomationWindow } : {}),
@@ -224,6 +226,88 @@ test('Plus checkout billing stops before PayPal when today due amount is non-zer
   assert.equal(markCalls.length, 1);
   assert.equal(markCalls[0].state.email, 'paid@example.com');
   assert.equal(events.logs.some((entry) => /今日应付金额不是 0/.test(entry.message)), true);
+});
+
+test('Phone Plus non-free checkout falls back to free auth without marking account used', async () => {
+  const fallbackCalls = [];
+  const markCalls = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+    stateByFrame: {
+      0: {
+        hasPayPal: true,
+        paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+        billingFieldsVisible: true,
+        hasSubscribeButton: true,
+        checkoutAmountSummary: {
+          hasTodayDue: true,
+          amount: 19.33,
+          isZero: false,
+          rawAmount: '€19.33',
+        },
+      },
+    },
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      fallbackCalls.push({ state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'plus-checkout-billing', 'paypal-approve', 'plus-checkout-return'],
+      };
+    },
+    markCurrentRegistrationAccountUsed: async (state, options) => {
+      markCalls.push({ state, options });
+      return { updated: true };
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({
+    email: 'phone-free@example.com',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+  });
+
+  assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE'), false);
+  assert.equal(events.completed.length, 0);
+  assert.equal(markCalls.length, 0);
+  assert.equal(fallbackCalls.length, 1);
+  assert.equal(fallbackCalls[0].state.panelMode, 'cpa');
+  assert.equal(fallbackCalls[0].context.amountLabel, '€19.33');
+  assert.equal(fallbackCalls[0].context.nodeId, 'plus-checkout-billing');
+});
+
+test('Phone Plus zero amount keeps the original checkout flow', async () => {
+  const { events, executor } = createExecutorHarness({
+    frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+    stateByFrame: {
+      0: {
+        hasPayPal: true,
+        paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+        billingFieldsVisible: true,
+        hasSubscribeButton: true,
+        checkoutAmountSummary: {
+          hasTodayDue: true,
+          amount: 0,
+          isZero: true,
+          rawAmount: '€0.00',
+        },
+      },
+    },
+    handlePhonePlusNonFreeTrialFallback: async () => {
+      throw new Error('fallback should not run for zero amount');
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({
+    email: 'phone-zero@example.com',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+  });
+
+  assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE'), true);
+  assert.deepStrictEqual(events.completed, [
+    { step: 'plus-checkout-billing', payload: { plusBillingCountryText: 'Germany' } },
+  ]);
 });
 
 test('Plus checkout billing uses the current checkout tab when step 6 did not register one', async () => {

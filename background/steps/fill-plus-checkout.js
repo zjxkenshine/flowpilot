@@ -86,6 +86,7 @@
       getAddressSeedForCountry,
       getState,
       getTabId,
+      handlePhonePlusNonFreeTrialFallback,
       isTabAlive,
       markCurrentRegistrationAccountUsed,
       queryTabsInAutomationWindow = null,
@@ -116,6 +117,10 @@
       return normalizePlusPaymentMethod(state?.plusPaymentMethod) === PLUS_PAYMENT_METHOD_GPC_HELPER
         || (normalizeText(state?.plusCheckoutSource) === PLUS_PAYMENT_METHOD_GPC_HELPER
           && Boolean(state?.gopayHelperTaskId || state?.gopayHelperReferenceId));
+    }
+
+    function isPhonePlusModeState(state = {}) {
+      return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
     }
 
     function compactCountryText(value = '') {
@@ -1585,6 +1590,24 @@
         Number.isFinite(Number(amountSummary.amount)) ? String(amountSummary.amount) : '未知金额'
       );
       await addLog(`步骤 7：${phaseLabel}检测到今日应付金额不是 0（${amountLabel}），说明当前账号没有免费试用资格，将跳过支付提交。`, 'warn');
+
+      if (isPhonePlusModeState(state) && typeof handlePhonePlusNonFreeTrialFallback === 'function') {
+        const fallbackResult = await handlePhonePlusNonFreeTrialFallback(state, {
+          amountLabel,
+          amountSummary,
+          nodeId: state?.nodeId || 'plus-checkout-billing',
+          phaseLabel,
+          tabId,
+        });
+        if (fallbackResult?.handled) {
+          return {
+            phonePlusFallbackToFreeAuth: true,
+            amountLabel,
+            fallbackResult,
+          };
+        }
+      }
+
       if (typeof markCurrentRegistrationAccountUsed === 'function') {
         await markCurrentRegistrationAccountUsed(state, {
           reason: 'plus-checkout-non-free-trial',
@@ -1702,9 +1725,12 @@
         logMessage: '步骤 7：Checkout 页面仍在加载，等待账单填写脚本就绪...',
       });
       const readyFrames = await getReadyCheckoutFrames(tabId);
-      await ensureFreeTrialAmount(tabId, state, {
+      const initialAmountCheck = await ensureFreeTrialAmount(tabId, state, {
         phaseLabel: 'Checkout 页面加载后',
       });
+      if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
       const paymentFrame = await resolvePaymentFrame(tabId, readyFrames, paymentMethod);
       if (paymentFrame.frameId === null) {
         const frameSummary = buildFrameSummary(paymentFrame.inspections);
@@ -1873,9 +1899,12 @@
         plusBillingCountryText: result?.countryText || '',
         plusBillingAddress: result?.structuredAddress || null,
       });
-      await ensureFreeTrialAmount(tabId, state, {
+      const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
         phaseLabel: '提交订阅前',
       });
+      if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
 
       let redirectedToPayment = false;
       let lastSubmitError = '';

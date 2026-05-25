@@ -9743,6 +9743,158 @@ function isPlusCheckoutRestartRequiredFailure(error) {
   return !isPlusCheckoutNonFreeTrialFailure(error);
 }
 
+function getPhonePlusPaymentSegmentNodeIds(state = {}) {
+  if (!isPhonePlusModeState(state)) {
+    return [];
+  }
+
+  const nodeIds = typeof getNodeIdsForState === 'function'
+    ? getNodeIdsForState(state).map((nodeId) => String(nodeId || '').trim()).filter(Boolean)
+    : [];
+  if (!nodeIds.length) {
+    return [];
+  }
+
+  const registrationEndIndex = nodeIds.indexOf('wait-registration-success');
+  const authStartIndex = nodeIds.indexOf('oauth-login');
+  if (registrationEndIndex < 0 || authStartIndex < 0 || authStartIndex <= registrationEndIndex) {
+    return [];
+  }
+
+  return nodeIds.slice(registrationEndIndex + 1, authStartIndex);
+}
+
+function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '') {
+  return {
+    plusCheckoutTabId: null,
+    plusCheckoutUrl: null,
+    plusCheckoutCountry: 'DE',
+    plusCheckoutCurrency: 'EUR',
+    plusCheckoutSource: '',
+    plusBillingCountryText: '',
+    plusBillingAddress: null,
+    plusPaypalApprovedAt: null,
+    plusGoPayApprovedAt: null,
+    plusReturnUrl: '',
+    plusManualConfirmationPending: false,
+    plusManualConfirmationRequestId: '',
+    plusManualConfirmationStep: 0,
+    plusManualConfirmationMethod: '',
+    plusManualConfirmationTitle: '',
+    plusManualConfirmationMessage: '',
+    gopayHelperReferenceId: '',
+    gopayHelperGoPayGuid: '',
+    gopayHelperRedirectUrl: '',
+    gopayHelperNextAction: '',
+    gopayHelperFlowId: '',
+    gopayHelperChallengeId: '',
+    gopayHelperStartPayload: null,
+    gopayHelperTaskId: '',
+    gopayHelperTaskStatus: '',
+    gopayHelperStatusText: '',
+    gopayHelperRemoteStage: '',
+    gopayHelperApiWaitingFor: '',
+    gopayHelperApiInputDeadlineAt: '',
+    gopayHelperApiInputWaitSeconds: 0,
+    gopayHelperLastInputError: '',
+    gopayHelperOtpInvalidCount: 0,
+    gopayHelperFailureStage: '',
+    gopayHelperFailureDetail: '',
+    gopayHelperTaskPayload: null,
+    gopayHelperOrderCreatedAt: 0,
+    gopayHelperTaskProgressSignature: '',
+    gopayHelperTaskProgressAt: 0,
+    gopayHelperTaskProgressTaskId: '',
+    gopayHelperPinPayload: null,
+    gopayHelperResolvedOtp: '',
+    gopayHelperOtpRequestId: '',
+    gopayHelperOtpReferenceId: '',
+    oauthUrl: null,
+    localhostUrl: null,
+    cpaOAuthState: null,
+    cpaManagementOrigin: null,
+    sub2apiSessionId: null,
+    sub2apiOAuthState: null,
+    sub2apiGroupId: null,
+    sub2apiGroupIds: [],
+    sub2apiDraftName: null,
+    sub2apiProxyId: null,
+    codex2apiSessionId: null,
+    codex2apiOAuthState: null,
+    lastLoginCode: null,
+    loginVerificationRequestedAt: null,
+    oauthFlowDeadlineAt: null,
+    oauthFlowDeadlineSourceUrl: null,
+    pendingPhoneActivationConfirmation: null,
+    currentPhoneVerificationCode: '',
+    currentPhoneVerificationCountdownEndsAt: 0,
+    currentPhoneVerificationCountdownWindowIndex: 0,
+    currentPhoneVerificationCountdownWindowTotal: 0,
+    phonePlusFallbackToFreeAuth: true,
+    phonePlusFallbackReason: 'plus-checkout-non-free-trial',
+    phonePlusFallbackAmountLabel: String(amountLabel || '').trim(),
+    phonePlusFallbackAt: Date.now(),
+  };
+}
+
+async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
+  const latestState = await getState();
+  const currentState = {
+    ...(state && typeof state === 'object' && !Array.isArray(state) ? state : {}),
+    ...(latestState && typeof latestState === 'object' && !Array.isArray(latestState) ? latestState : {}),
+  };
+
+  if (!isPhonePlusModeState(currentState)) {
+    return { handled: false, reason: 'not-phone-plus' };
+  }
+
+  const paymentSegmentNodeIds = getPhonePlusPaymentSegmentNodeIds(currentState);
+  if (!paymentSegmentNodeIds.length) {
+    return { handled: false, reason: 'missing-payment-segment' };
+  }
+
+  const amountLabel = String(context?.amountLabel || '').trim();
+  const currentNodeId = String(context?.nodeId || currentState.currentNodeId || 'plus-checkout-billing').trim();
+  const nodeStatuses = { ...(currentState.nodeStatuses || {}) };
+  for (const nodeId of paymentSegmentNodeIds) {
+    nodeStatuses[nodeId] = 'skipped';
+  }
+
+  const resetPatch = buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel);
+  const stateUpdates = {
+    ...resetPatch,
+    nodeStatuses,
+    currentNodeId,
+  };
+  await setState(stateUpdates);
+  if (typeof broadcastDataUpdate === 'function') {
+    broadcastDataUpdate(stateUpdates);
+  }
+  for (const nodeId of paymentSegmentNodeIds) {
+    chrome.runtime.sendMessage({
+      type: 'NODE_STATUS_CHANGED',
+      payload: { nodeId, status: 'skipped' },
+    }).catch(() => {});
+  }
+
+  const amountSuffix = amountLabel ? `（${amountLabel}）` : '';
+  await addLog(
+    `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`,
+    'warn',
+    { nodeId: currentNodeId }
+  );
+
+  const nextNodeId = getFirstUnfinishedNodeId(nodeStatuses, {
+    ...currentState,
+    nodeStatuses,
+  });
+  return {
+    handled: true,
+    nextNodeId,
+    skippedNodeIds: paymentSegmentNodeIds,
+  };
+}
+
 function isGoPayCheckoutRestartRequiredFailure(error) {
   const message = getErrorMessage(error);
   return /GOPAY_RESTART_FROM_STEP6::|GOPAY_RETRY_REQUIRED::/i.test(message);
@@ -14571,6 +14723,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   getAddressSeedForCountry: self.MultiPageAddressSources?.getAddressSeedForCountry,
   getState,
   getTabId,
+  handlePhonePlusNonFreeTrialFallback,
   isTabAlive,
   markCurrentRegistrationAccountUsed,
   queryTabsInAutomationWindow,
