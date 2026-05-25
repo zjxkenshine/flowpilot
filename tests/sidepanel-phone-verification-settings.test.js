@@ -1300,6 +1300,7 @@ return {
 test('formatPhoneSmsPriceEntriesSummary treats HeroSMS physicalCount=0 as out of stock even when count is positive', () => {
   const api = new Function(`
 ${extractFunction('normalizeHeroSmsPriceForPreview')}
+${extractFunction('getHeroSmsProviderModule')}
 ${extractFunction('collectHeroSmsPriceEntriesForPreview')}
 ${extractFunction('formatPhoneSmsPriceEntriesSummary')}
 return { formatPhoneSmsPriceEntriesSummary };
@@ -1319,6 +1320,34 @@ return { formatPhoneSmsPriceEntriesSummary };
   assert.deepStrictEqual(summary.allPrices, [0.05]);
   assert.equal(summary.entries[0].inStock, false);
   assert.equal(summary.entries[0].stockCount, 0);
+});
+
+test('formatPhoneSmsPriceEntriesSummary merges same-price HeroSMS tiers with shared provider rules', () => {
+  const heroProviderSource = fs.readFileSync('phone-sms/providers/hero-sms.js', 'utf8');
+  const heroProvider = new Function('self', `${heroProviderSource}; return self.PhoneSmsHeroSmsProvider;`)({});
+  const api = new Function('heroProvider', `
+const window = { PhoneSmsHeroSmsProvider: heroProvider };
+${extractFunction('normalizeHeroSmsPriceForPreview')}
+${extractFunction('getHeroSmsProviderModule')}
+${extractFunction('collectHeroSmsPriceEntriesForPreview')}
+${extractFunction('formatPhoneSmsPriceEntriesSummary')}
+return { formatPhoneSmsPriceEntriesSummary };
+`)(heroProvider);
+
+  const summary = api.formatPhoneSmsPriceEntriesSummary({
+    52: {
+      dr: {
+        lowA: { cost: 0.05, count: 3, physicalCount: 3 },
+        lowB: { cost: 0.05, count: 8, physicalCount: 8 },
+        high: { cost: 0.12, count: 4, physicalCount: 4 },
+      },
+    },
+  });
+
+  assert.deepStrictEqual(summary.inStockPrices, [0.05, 0.12]);
+  assert.deepStrictEqual(summary.allPrices, [0.05, 0.12]);
+  const mergedLow = summary.entries.filter((entry) => Number(entry.cost) === 0.05);
+  assert.equal(mergedLow.some((entry) => Number(entry.stockCount) === 8), true);
 });
 
 test('previewHeroSmsPriceTiers prefers 5sim products price for buy-compatible any operator', async () => {

@@ -5236,6 +5236,11 @@ function normalizePhoneSmsMinPriceValue(value = '', provider = getSelectedPhoneS
   return normalizeHeroSmsMaxPriceValue(value);
 }
 
+function getHeroSmsProviderModule() {
+  const rootScope = typeof window !== 'undefined' ? window : globalThis;
+  return rootScope.PhoneSmsHeroSmsProvider || null;
+}
+
 function normalizeFiveSimCountryId(value, fallback = DEFAULT_FIVE_SIM_COUNTRY_ID) {
   const fallbackSource = fallback === undefined || fallback === null ? DEFAULT_FIVE_SIM_COUNTRY_ID : fallback;
   const normalizedFallback = String(fallbackSource).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
@@ -6328,6 +6333,24 @@ function isHeroSmsPreviewEmptyPayload(payload) {
 }
 
 function collectHeroSmsPriceEntriesForPreview(payload, entries = []) {
+  const heroProvider = getHeroSmsProviderModule();
+  if (heroProvider?.collectPriceEntries) {
+    const sharedEntries = heroProvider.collectPriceEntries(payload, { sourceAction: 'preview' }, [])
+      .map((entry) => ({
+        cost: Number(entry.price),
+        price: Number(entry.price),
+        hasStockField: Boolean(entry.hasStockField),
+        stockCount: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+        count: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+        inStock: Boolean(entry.inStock),
+        sourceAction: entry.sourceAction,
+      }));
+    if (Array.isArray(entries)) {
+      entries.push(...sharedEntries);
+      return entries;
+    }
+    return sharedEntries;
+  }
   if (Array.isArray(payload)) {
     payload.forEach((entry) => collectHeroSmsPriceEntriesForPreview(entry, entries));
     return entries;
@@ -6436,6 +6459,28 @@ function collectHeroSmsPriceEntriesForPreview(payload, entries = []) {
 }
 
 function collectHeroSmsPriceEntriesFromTopCountriesPayload(payload, countryId, entries = []) {
+  const heroProvider = getHeroSmsProviderModule();
+  if (heroProvider?.collectTopCountriesPriceEntries) {
+    const sharedEntries = heroProvider.collectTopCountriesPriceEntries(
+      payload,
+      countryId,
+      { sourceAction: 'getTopCountriesByService' },
+      []
+    ).map((entry) => ({
+      cost: Number(entry.price),
+      price: Number(entry.price),
+      hasStockField: Boolean(entry.hasStockField),
+      stockCount: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+      count: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+      inStock: Boolean(entry.inStock),
+      sourceAction: entry.sourceAction,
+    }));
+    if (Array.isArray(entries)) {
+      entries.push(...sharedEntries);
+      return entries;
+    }
+    return sharedEntries;
+  }
   const normalizedCountryId = normalizeHeroSmsCountryId(countryId, 0);
   if (normalizedCountryId <= 0) {
     return entries;
@@ -6460,6 +6505,29 @@ function collectHeroSmsPriceEntriesFromTopCountriesPayload(payload, countryId, e
 }
 
 function collectHeroSmsPriceEntriesFromVerificationPayload(payload, countryId, serviceCode = 'dr', entries = []) {
+  const heroProvider = getHeroSmsProviderModule();
+  if (heroProvider?.collectVerificationPriceEntries) {
+    const sharedEntries = heroProvider.collectVerificationPriceEntries(
+      payload,
+      countryId,
+      serviceCode,
+      { sourceAction: 'getPricesVerification' },
+      []
+    ).map((entry) => ({
+      cost: Number(entry.price),
+      price: Number(entry.price),
+      hasStockField: Boolean(entry.hasStockField),
+      stockCount: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+      count: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+      inStock: Boolean(entry.inStock),
+      sourceAction: entry.sourceAction,
+    }));
+    if (Array.isArray(entries)) {
+      entries.push(...sharedEntries);
+      return entries;
+    }
+    return sharedEntries;
+  }
   const normalizedCountryId = normalizeHeroSmsCountryId(countryId, 0);
   if (normalizedCountryId <= 0) {
     return entries;
@@ -6503,6 +6571,28 @@ function collectHeroSmsPriceCandidatesForPreview(payload, candidates = []) {
 }
 
 function formatPhoneSmsPriceEntriesSummary(payload) {
+  const heroProvider = getHeroSmsProviderModule();
+  if (heroProvider?.summarizePreviewPriceEntries) {
+    const summary = heroProvider.summarizePreviewPriceEntries(
+      collectHeroSmsPriceEntriesForPreview(payload, [])
+        .filter((entry) => Number.isFinite(Number(entry.cost)) && Number(entry.cost) > 0)
+        .map((entry) => ({
+          price: Number(entry.cost),
+          stockCount: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+          hasStockField: Boolean(entry.hasStockField),
+          inStock: Boolean(entry.inStock),
+          sourceAction: entry.sourceAction || 'preview',
+        }))
+    );
+    return {
+      entries: summary.entries.map((entry) => ({
+        ...entry,
+        cost: Number(entry.price),
+      })),
+      inStockPrices: summary.inStockPrices,
+      allPrices: summary.allPrices,
+    };
+  }
   const entries = collectHeroSmsPriceEntriesForPreview(payload, [])
     .filter((entry) => Number.isFinite(Number(entry.cost)) && Number(entry.cost) > 0);
   const inStockPrices = Array.from(new Set(
@@ -8791,22 +8881,32 @@ async function previewHeroSmsPriceTiers() {
             collectHeroSmsPriceEntriesFromVerificationPayload(verificationPayload, countryId, 'dr', [])
           )
           .filter((entry) => Number.isFinite(Number(entry.cost)) && Number(entry.cost) > 0);
-        const tierStockByPrice = new Map();
-        for (const entry of priceEntries) {
-          const cost = Math.round(Number(entry.cost) * 10000) / 10000;
-          if (!Number.isFinite(cost) || cost <= 0) {
-            continue;
-          }
-          const stockCount = Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0;
-          const previous = tierStockByPrice.get(cost);
-          tierStockByPrice.set(cost, Number.isFinite(previous) ? Math.max(previous, stockCount) : stockCount);
-        }
-        const allPrices = Array.from(tierStockByPrice.keys()).sort((left, right) => left - right);
-        const inStockPrices = allPrices.filter((price) => Number(tierStockByPrice.get(price)) > 0);
-        const tierEntries = allPrices.map((price) => ({
-          price,
-          count: Math.max(0, Number(tierStockByPrice.get(price)) || 0),
-        }));
+        const heroProvider = getHeroSmsProviderModule();
+        const previewSummary = heroProvider?.summarizePreviewPriceEntries
+          ? heroProvider.summarizePreviewPriceEntries(
+            priceEntries.map((entry) => ({
+              price: Number(entry.cost),
+              stockCount: Number.isFinite(Number(entry.stockCount)) ? Math.max(0, Number(entry.stockCount)) : 0,
+              hasStockField: Boolean(entry.hasStockField),
+              inStock: Boolean(entry.inStock),
+              sourceAction: entry.sourceAction || 'preview',
+            }))
+          )
+          : null;
+        const allPrices = Array.isArray(previewSummary?.allPrices)
+          ? previewSummary.allPrices
+          : [];
+        const inStockPrices = Array.isArray(previewSummary?.inStockPrices)
+          ? previewSummary.inStockPrices
+          : allPrices.filter((price) => (
+            priceEntries.some((entry) => Number(entry.cost) === Number(price) && entry.inStock)
+          ));
+        const tierEntries = Array.isArray(previewSummary?.mergedTiers)
+          ? previewSummary.mergedTiers.map((tier) => ({
+            price: Number(tier.price),
+            count: Number.isFinite(Number(tier.stockCount)) ? Math.max(0, Number(tier.stockCount)) : 0,
+          }))
+          : [];
         const rangeAllPrices = filterPhoneSmsPriceValuesForPreviewRange(allPrices, priceRange);
         const rangeInStockPrices = filterPhoneSmsPriceValuesForPreviewRange(inStockPrices, priceRange);
         const filteredTierEntries = filterPhoneSmsPriceEntriesForPreviewRange(tierEntries, priceRange);
