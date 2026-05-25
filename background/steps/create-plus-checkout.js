@@ -19,6 +19,9 @@
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS = 12;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_MS = 5000;
+  const HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS = 3000;
+  const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
+  const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
   const HOSTED_CHECKOUT_DEFAULT_PHONE = '1234567890';
   const CHECKOUT_CONVERSION_PROXY_SETTINGS_SCOPE = 'regular';
   const CHECKOUT_CONVERSION_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
@@ -61,6 +64,7 @@
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
   const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
   const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
+  const PAYPAL_HOSTED_STAGE_VERIFICATION = 'verification';
   const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
   const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
   const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
@@ -875,14 +879,66 @@
     }
 
     function extractHostedVerificationCode(payload = '') {
-      const candidates = [payload?.data, payload?.code, payload?.text, payload?.message, payload];
+      const trustedTextKeyPattern = /^(sms|message|msg|text|content|body|code|otp|verification_code|verificationCode)$/i;
+      const metadataKeyPattern = /(^|[_-])(phone|mobile|tel|id|order|time|date|expired|expire|status)([_-]|$)/i;
+      const contextualCodePattern = /(?:security\s*code|verification\s*code|one[-\s]?time\s*(?:passcode|code)|passcode|otp|code|验证码|安全码)[\s\S]{0,50}?(\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d)|(\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d)[\s\S]{0,50}?(?:security\s*code|verification\s*code|one[-\s]?time\s*(?:passcode|code)|passcode|otp|code|验证码|安全码)/i;
+      const exactCodePattern = /^\D*(\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d[\s-]?\d)\D*$/;
+      const seen = new Set();
+
+      function collectCandidates(value, path = '') {
+        if (value === null || value === undefined) {
+          return [];
+        }
+        if (typeof value === 'string' || typeof value === 'number') {
+          const text = String(value).trim();
+          return text ? [{
+            key: String(path).split('.').pop() || '',
+            path,
+            text,
+          }] : [];
+        }
+        if (typeof value !== 'object') {
+          return [];
+        }
+        if (seen.has(value)) {
+          return [];
+        }
+        seen.add(value);
+        if (Array.isArray(value)) {
+          return value.flatMap((item, index) => collectCandidates(item, `${path}[${index}]`));
+        }
+        return Object.entries(value).flatMap(([key, child]) => (
+          collectCandidates(child, path ? `${path}.${key}` : key)
+        ));
+      }
+
+      function extractContextualCode(text) {
+        const match = String(text || '').match(contextualCodePattern);
+        return match ? (match[1] || match[2]).replace(/\D+/g, '') : '';
+      }
+
+      const candidates = collectCandidates(payload);
+
       for (const candidate of candidates) {
-        const text = typeof candidate === 'object' ? JSON.stringify(candidate) : String(candidate || '');
-        const match = text.match(/\d{6}/);
-        if (match) {
-          return match[0];
+        const code = extractContextualCode(candidate.text);
+        if (code) {
+          return code;
         }
       }
+
+      for (const candidate of candidates) {
+        const key = String(candidate.key || '');
+        const path = String(candidate.path || '');
+        const isRootText = !path;
+        if (!isRootText && (!trustedTextKeyPattern.test(key) || metadataKeyPattern.test(key) || metadataKeyPattern.test(path))) {
+          continue;
+        }
+        const match = candidate.text.match(exactCodePattern);
+        if (match) {
+          return match[1].replace(/\D+/g, '');
+        }
+      }
+
       return '';
     }
 
@@ -914,6 +970,21 @@
         throw new Error('验证码接口暂未返回有效 6 位验证码。');
       }
       return code;
+    }
+
+    async function fetchHostedCheckoutVerificationCodeManually(options = {}) {
+      const manualVerificationUrl = String(options?.verificationUrl || '').trim();
+      if (manualVerificationUrl) {
+        return {
+          code: await fetchHostedVerificationCode(manualVerificationUrl),
+          verificationUrl: manualVerificationUrl,
+        };
+      }
+      const runtimeConfig = await getHostedCheckoutRuntimeConfig(options?.state || {});
+      return {
+        code: await fetchHostedVerificationCode(runtimeConfig.verificationUrl),
+        verificationUrl: String(runtimeConfig.verificationUrl || '').trim(),
+      };
     }
 
     async function pollHostedVerificationCode(verificationUrl = '') {
@@ -1027,18 +1098,103 @@
       return result || {};
     }
 
+    function buildHostedVerificationResendLimitError() {
+      return new Error(
+        `${HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX}PayPal 验证码自动 Resend 重试已达到上限，请尝试在页面手动获取验证码并填入。`
+      );
+    }
+
+    function createHostedVerificationRetryContext() {
+      return {
+        resendAttempts: 0,
+        verificationSubmitted: false,
+      };
+    }
+
+    async function refillHostedPayPalVerificationCode(tabId, guestProfile = {}, verificationUrl = '') {
+      const verificationCode = await pollHostedVerificationCode(verificationUrl);
+      const result = await runHostedPayPalStep(tabId, {
+        ...guestProfile,
+        verificationCode,
+      });
+      return {
+        result,
+        verificationCode,
+      };
+    }
+
+    async function resendHostedPayPalVerificationCodeAndRefill(tabId, guestProfile = {}, verificationUrl = '', context = createHostedVerificationRetryContext(), stepKey = PAYPAL_HOSTED_STEP_CARD) {
+      const stepNumber = getHostedStepNumber(stepKey);
+      context.resendAttempts += 1;
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${stepNumber}：PayPal 提示验证码错误，${Math.round(HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS / 1000)} 秒后自动点击 Resend 重新发送验证码（${context.resendAttempts}/${HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS}）。`,
+        'warn'
+      );
+      await sleepWithStop(HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS);
+      await runHostedPayPalStep(tabId, {
+        resendVerificationCode: true,
+      });
+      await addHostedStepLog(stepKey, `步骤 ${stepNumber}：已点击 PayPal 验证码 Resend，正在重新获取并填写验证码。`, 'info');
+      await refillHostedPayPalVerificationCode(tabId, guestProfile, verificationUrl);
+      context.verificationSubmitted = true;
+      return context;
+    }
+
+    async function handleHostedPayPalVerificationState(tabId, pageState = {}, state = {}, context = createHostedVerificationRetryContext(), stepKey = PAYPAL_HOSTED_STEP_CARD) {
+      if (pageState?.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION && !pageState?.verificationInputsVisible) {
+        return {
+          handled: false,
+          context,
+        };
+      }
+
+      const stepNumber = getHostedStepNumber(stepKey);
+      const { profile, config } = await ensureHostedGuestProfile(state);
+      if (pageState?.hostedVerificationInvalidCode) {
+        if (context.resendAttempts >= HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS) {
+          const error = buildHostedVerificationResendLimitError();
+          await addHostedStepLog(stepKey, error.message.replace(HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX, ''), 'error');
+          throw error;
+        }
+        await resendHostedPayPalVerificationCodeAndRefill(tabId, profile, config.verificationUrl, context, stepKey);
+        return {
+          handled: true,
+          context,
+        };
+      }
+
+      if (context.verificationSubmitted) {
+        await addHostedStepLog(stepKey, `步骤 ${stepNumber}：PayPal 验证码已提交，继续等待校验结果或后续页面。`, 'info');
+        return {
+          handled: true,
+          context,
+        };
+      }
+
+      await addHostedStepLog(stepKey, `步骤 ${stepNumber}：检测到 PayPal hosted checkout 验证码页，正在获取并填写验证码。`, 'info');
+      await refillHostedPayPalVerificationCode(tabId, profile, config.verificationUrl);
+      context.verificationSubmitted = true;
+      return {
+        handled: true,
+        context,
+      };
+    }
+
     function getHostedStageOrder(stage = '') {
       switch (stage) {
         case PAYPAL_HOSTED_STAGE_LOGIN:
           return 1;
         case PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT:
           return 2;
-        case PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT:
+        case PAYPAL_HOSTED_STAGE_VERIFICATION:
           return 3;
-        case PAYPAL_HOSTED_STAGE_REVIEW:
+        case PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT:
           return 4;
-        case PAYPAL_HOSTED_STAGE_OUTSIDE:
+        case PAYPAL_HOSTED_STAGE_REVIEW:
           return 5;
+        case PAYPAL_HOSTED_STAGE_OUTSIDE:
+          return 6;
         default:
           return 0;
       }
@@ -1069,14 +1225,17 @@
           await sleepWithStop(intervalMs);
           continue;
         }
+        let pageState = null;
         try {
-          const pageState = await getHostedPayPalState(tabId);
+          pageState = await getHostedPayPalState(tabId);
           lastStage = pageState?.hostedStage || lastStage;
-          if (predicate(pageState)) {
-            return pageState;
-          }
         } catch (error) {
           lastStage = error?.message || lastStage;
+          await sleepWithStop(intervalMs);
+          continue;
+        }
+        if (await predicate(pageState)) {
+          return pageState;
         }
         await sleepWithStop(intervalMs);
       }
@@ -1306,6 +1465,7 @@
       const stepKey = PAYPAL_HOSTED_STEP_CARD;
       const stepNumber = getHostedStepNumber(stepKey);
       const tabId = await resolveHostedCheckoutTabId(state, stepKey);
+      const verificationContext = createHostedVerificationRetryContext();
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
@@ -1319,6 +1479,22 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+        const nextState = await waitForHostedPayPalStage(
+          tabId,
+          async (stateInfo) => {
+            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+              return false;
+            }
+            return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
+          },
+          { label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
+        );
+        await completeHostedStep(stepKey, tabId, {
+          plusHostedCheckoutLastStage: nextState.hostedStage || '',
+        });
+        return;
+      }
       if (isHostedStageAtOrAfter(pageState.hostedStage, PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT)
         && pageState.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT) {
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：当前 PayPal 已进入后续页面（${pageState.hostedStage}），资料节点直接完成。`, 'info');
@@ -1347,7 +1523,12 @@
       }
       const nextState = await waitForHostedPayPalStage(
         tabId,
-        (stateInfo) => stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+        async (stateInfo) => {
+          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+            return false;
+          }
+          return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
+        },
         { label: `步骤 ${stepNumber}：等待 PayPal 资料页跳转` }
       );
       await completeHostedStep(stepKey, tabId, {
@@ -1359,6 +1540,7 @@
       const stepKey = PAYPAL_HOSTED_STEP_CREATE_ACCOUNT;
       const stepNumber = getHostedStepNumber(stepKey);
       const tabId = await resolveHostedCheckoutTabId(state, stepKey);
+      const verificationContext = createHostedVerificationRetryContext();
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
@@ -1372,6 +1554,22 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+        const nextState = await waitForHostedPayPalStage(
+          tabId,
+          async (stateInfo) => {
+            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+              return false;
+            }
+            return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
+          },
+          { label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
+        );
+        await completeHostedStep(stepKey, tabId, {
+          plusHostedCheckoutLastStage: nextState.hostedStage || '',
+        });
+        return;
+      }
       if (isHostedStageAtOrAfter(pageState.hostedStage, PAYPAL_HOSTED_STAGE_REVIEW)
         && pageState.hostedStage !== PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT) {
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：当前 PayPal 已进入后续页面（${pageState.hostedStage}），创建确认节点直接完成。`, 'info');
@@ -1390,7 +1588,12 @@
       });
       const nextState = await waitForHostedPayPalStage(
         tabId,
-        (stateInfo) => stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+        async (stateInfo) => {
+          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+            return false;
+          }
+          return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
+        },
         { label: `步骤 ${stepNumber}：等待 PayPal 创建确认页跳转` }
       );
       await completeHostedStep(stepKey, tabId, {
@@ -1402,6 +1605,7 @@
       const stepKey = PAYPAL_HOSTED_STEP_REVIEW;
       const stepNumber = getHostedStepNumber(stepKey);
       const tabId = await resolveHostedCheckoutTabId(state, stepKey);
+      const verificationContext = createHostedVerificationRetryContext();
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
         return;
       }
@@ -1415,6 +1619,17 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+        await waitForHostedUrlAfterAction(
+          tabId,
+          (url) => isHostedCheckoutSuccessUrl(url),
+          { label: `步骤 ${stepNumber}：等待 PayPal 验证码后回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
+        );
+        if (!await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
+          throw new Error(`步骤 ${stepNumber}：PayPal 验证码提交后未检测到 ChatGPT 支付成功页。`);
+        }
+        return;
+      }
       if (pageState.hostedStage !== PAYPAL_HOSTED_STAGE_REVIEW) {
         throw new Error(`步骤 ${stepNumber}：当前不是 PayPal 授权复核页（当前状态：${pageState.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN}）。`);
       }
@@ -1423,9 +1638,14 @@
       await runHostedPayPalStep(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_REVIEW,
       });
-      await waitForHostedUrlAfterAction(
+      await waitForHostedPayPalStage(
         tabId,
-        (url) => isHostedCheckoutSuccessUrl(url),
+        async (stateInfo) => {
+          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+            return false;
+          }
+          return Boolean(stateInfo?.successUrl || stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_OUTSIDE);
+        },
         { label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
       );
       if (!await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
@@ -1904,6 +2124,7 @@
       executePayPalHostedCard,
       executePayPalHostedCreateAccount,
       executePayPalHostedReview,
+      fetchHostedCheckoutVerificationCodeManually,
       testCheckoutConversionProxy,
     };
   }

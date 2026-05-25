@@ -7,6 +7,7 @@ const PAYPAL_HOSTED_DEFAULT_PHONE = '1234567890';
 const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
 const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
 const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
+const PAYPAL_HOSTED_STAGE_VERIFICATION = 'verification';
 const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
 const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
 const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
@@ -268,6 +269,37 @@ function isHostedReviewPage() {
   return /\/webapps\/hermes/i.test(getPayPalPathname());
 }
 
+function findHostedVerificationInputs() {
+  return Array.from({ length: 6 }, (_, index) => document.getElementById(`ci-ciBasic-${index}`))
+    .filter((input) => isVisibleElement(input));
+}
+
+function hasHostedVerificationInputs() {
+  return findHostedVerificationInputs().length >= 6;
+}
+
+function getHostedVerificationErrorText() {
+  const errorPattern = /check\s+the\s+code\s+and\s+try\s+again|(?:sorry,\s*)?something\s+went\s+wrong\.?\s*get\s+a\s+new\s+code|get\s+a\s+new\s+code|验证码.*(?:错误|无效|重新)|重新.*验证码/i;
+  const alert = document.getElementById('message_ciBasic')
+    || getVisibleControls('[role="alert"]').find((node) => errorPattern.test(normalizeText(node.textContent || node.innerText || '')));
+  return alert && isVisibleElement(alert) ? normalizeText(alert.textContent || alert.innerText || '') : '';
+}
+
+function hasHostedInvalidVerificationCodeError() {
+  return /check\s+the\s+code\s+and\s+try\s+again|(?:sorry,\s*)?something\s+went\s+wrong\.?\s*get\s+a\s+new\s+code|get\s+a\s+new\s+code|验证码.*(?:错误|无效|重新)|重新.*验证码/i.test(getHostedVerificationErrorText());
+}
+
+function findHostedVerificationResendButton() {
+  const direct = document.querySelector('button[data-testid="resend-link"]');
+  if (direct && isVisibleElement(direct) && isEnabledControl(direct)) {
+    return direct;
+  }
+  return findClickableByText([
+    /resend/i,
+    /重新发送|重发/i,
+  ]);
+}
+
 function findHostedCreateAccountButton() {
   return document.getElementById('createAccount')
     || document.getElementById('createAccountButton')
@@ -311,6 +343,9 @@ function findHostedReviewConsentButton() {
 function detectPayPalHostedStage() {
   if (!/paypal\./i.test(String(location?.host || ''))) {
     return PAYPAL_HOSTED_STAGE_OUTSIDE;
+  }
+  if (hasHostedVerificationInputs()) {
+    return PAYPAL_HOSTED_STAGE_VERIFICATION;
   }
   if (isHostedGuestCheckoutPage()) {
     return PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
@@ -462,6 +497,56 @@ function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
     payloadPhoneDigits: expectedDigits,
     renderedPhoneDigits: renderedDigits,
     phoneMatched: true,
+  };
+}
+
+function normalizeHostedVerificationCode(value = '') {
+  return String(value || '').replace(/\D/g, '').slice(0, 6);
+}
+
+async function fillHostedVerificationCode(payload = {}) {
+  await waitForDocumentComplete();
+  const code = normalizeHostedVerificationCode(payload.verificationCode || payload.code || '');
+  if (code.length !== 6) {
+    throw new Error('PayPal hosted checkout 验证码无效。');
+  }
+  const inputs = findHostedVerificationInputs();
+  if (inputs.length < 6) {
+    throw new Error('PayPal hosted checkout 当前页面未显示验证码输入框。');
+  }
+  await performPayPalOperationWithDelay({
+    stepKey: 'plus-checkout-create',
+    kind: 'fill',
+    label: 'hosted-paypal-verification-code',
+  }, async () => {
+    inputs.forEach((input, index) => {
+      fillInput(input, code[index] || '');
+    });
+  });
+  return {
+    stage: PAYPAL_HOSTED_STAGE_VERIFICATION,
+    codeSubmitted: true,
+  };
+}
+
+async function clickHostedVerificationResend() {
+  await waitForDocumentComplete();
+  const button = await waitUntil(() => findHostedVerificationResendButton(), {
+    intervalMs: 250,
+    timeoutMs: 10000,
+    timeoutMessage: 'PayPal hosted checkout 当前验证码页未找到可用的 Resend 按钮。',
+  });
+  await performPayPalOperationWithDelay({
+    stepKey: 'plus-checkout-create',
+    kind: 'click',
+    label: 'hosted-paypal-verification-resend',
+  }, async () => {
+    simulateClick(button);
+  });
+  return {
+    stage: PAYPAL_HOSTED_STAGE_VERIFICATION,
+    resendClicked: true,
+    invalidCodeVisibleAfterClick: hasHostedInvalidVerificationCodeError(),
   };
 }
 
@@ -627,9 +712,22 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
       stage,
       expectedStage,
       submitted: false,
+      requiresVerificationCode: stage === PAYPAL_HOSTED_STAGE_VERIFICATION,
       skipped: true,
       approveReady: Boolean(findApproveButton()),
     };
+  }
+  if (stage === PAYPAL_HOSTED_STAGE_VERIFICATION) {
+    if (payload.resendVerificationCode) {
+      return clickHostedVerificationResend();
+    }
+    if (!payload.verificationCode && !payload.code) {
+      return {
+        stage,
+        requiresVerificationCode: true,
+      };
+    }
+    return fillHostedVerificationCode(payload);
   }
   if (stage === PAYPAL_HOSTED_STAGE_LOGIN) {
     return submitHostedLogin(payload);
@@ -660,6 +758,10 @@ function inspectPayPalHostedState() {
     hasGuestCardFields: Boolean(document.getElementById('cardNumber')),
     hasHostedEmailInput: Boolean(document.getElementById('email') || findEmailInput()),
     createAccountReady: Boolean(createAccountButton && isVisibleElement(createAccountButton) && isEnabledControl(createAccountButton)),
+    verificationInputsVisible: hasHostedVerificationInputs(),
+    hostedVerificationInvalidCode: hasHostedInvalidVerificationCodeError(),
+    hostedVerificationErrorText: getHostedVerificationErrorText(),
+    hostedVerificationResendReady: Boolean(findHostedVerificationResendButton()),
     reviewConsentReady: Boolean(findHostedReviewConsentButton()),
     approveReady: Boolean(findApproveButton()),
     bodyTextPreview: normalizeText(document.body?.innerText || '').slice(0, 240),

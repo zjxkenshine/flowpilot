@@ -1323,3 +1323,149 @@ test('GPC checkout rejects missing API Key before calling helper API', async () 
     /缺少 API Key/
   );
 });
+
+test('PayPal hosted card node resends and refills after invalid verification code', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let codeFetchCount = 0;
+  let verificationPollCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      codeFetchCount += 1;
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          data: {
+            message: `PayPal: ${codeFetchCount === 1 ? '111111' : '222222'} is your security code. Don't share it.`,
+          },
+        }),
+      };
+    },
+    getState: async () => ({
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      hostedCheckoutPhoneNumber: '4155551234',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        if (message.payload?.expectedStage === 'guest_checkout') {
+          currentUrl = 'https://www.paypal.com/checkoutweb/verification';
+          return { submitted: true, phoneMatched: true };
+        }
+        if (message.payload?.verificationCode === '111111') {
+          return { codeSubmitted: true };
+        }
+        if (message.payload?.resendVerificationCode) {
+          return { resendClicked: true };
+        }
+        if (message.payload?.verificationCode === '222222') {
+          currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+          return { codeSubmitted: true };
+        }
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        verificationPollCount += 1;
+        if (currentUrl.includes('/create-account')) {
+          return { hostedStage: 'create_account' };
+        }
+        return {
+          hostedStage: verificationPollCount <= 1 ? 'verification' : (verificationPollCount <= 3 ? 'verification' : 'create_account'),
+          verificationInputsVisible: verificationPollCount <= 3,
+          hostedVerificationInvalidCode: verificationPollCount === 2,
+          hostedVerificationResendReady: verificationPollCount === 2,
+          hostedVerificationErrorText: verificationPollCount === 2 ? 'Check the code and try again. Get a new code.' : '',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => events.push({ type: 'tab-complete' }),
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '111111'), true);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.resendVerificationCode), true);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '222222'), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
+});
+
+test('PayPal hosted card node throws resend-limit error after repeated invalid verification code', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/verification', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        data: {
+          message: "PayPal: 333333 is your security code. Don't share it.",
+        },
+      }),
+    }),
+    getState: async () => ({
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      hostedCheckoutPhoneNumber: '4155551234',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        if (message.payload?.verificationCode) return { codeSubmitted: true };
+        if (message.payload?.resendVerificationCode) return { resendClicked: true };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return {
+          hostedStage: 'verification',
+          verificationInputsVisible: true,
+          hostedVerificationInvalidCode: true,
+          hostedVerificationResendReady: true,
+          hostedVerificationErrorText: 'Check the code and try again. Get a new code.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 123,
+      plusHostedCheckoutGuestProfile: {
+        email: 'guest@example.com',
+        phone: '4155551234',
+        address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+      },
+    }),
+    /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::/
+  );
+
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.resendVerificationCode), true);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});

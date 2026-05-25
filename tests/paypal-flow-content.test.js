@@ -402,6 +402,23 @@ function createHostedPayPalHarness(options = {}) {
     text: 'Agree & Create Account',
     attrs: { 'data-testid': 'submit-button' },
   });
+  const verificationInputs = Array.from({ length: 6 }, (_, index) => createDomElement({
+    tagName: 'INPUT',
+    id: `ci-ciBasic-${index}`,
+    type: 'text',
+  }));
+  const verificationAlert = createDomElement({
+    tagName: 'DIV',
+    id: 'message_ciBasic',
+    text: 'Check the code and try again. Get a new code.',
+    attrs: { role: 'alert' },
+  });
+  const verificationResendButton = createDomElement({
+    tagName: 'BUTTON',
+    id: 'resendButton',
+    text: 'Resend',
+    attrs: { 'data-testid': 'resend-link' },
+  });
   const createAccountButton = createDomElement({
     tagName: 'BUTTON',
     id: 'createAccountButton',
@@ -464,6 +481,21 @@ function createHostedPayPalHarness(options = {}) {
     setElements([emailInput, nextButton, createAccountButton]);
   }
 
+  function showVerification({ invalid = false } = {}) {
+    location.href = 'https://www.paypal.com/checkoutweb/verification';
+    location.host = 'www.paypal.com';
+    location.pathname = '/checkoutweb/verification';
+    body.innerText = invalid
+      ? 'Enter your security code. Check the code and try again. Get a new code.'
+      : 'Enter your security code.';
+    body.textContent = body.innerText;
+    setElements([
+      ...verificationInputs,
+      ...(invalid ? [verificationAlert] : []),
+      verificationResendButton,
+    ]);
+  }
+
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
     location,
@@ -487,6 +519,9 @@ function createHostedPayPalHarness(options = {}) {
       },
       querySelector(selector) {
         const text = String(selector || '');
+        if (text.includes('resend-link')) {
+          return elements.includes(verificationResendButton) ? verificationResendButton : null;
+        }
         if (text.includes('createAccountButton') || text.includes('create-account-button')) {
           return elements.includes(createAccountButton) ? createAccountButton : null;
         }
@@ -502,6 +537,9 @@ function createHostedPayPalHarness(options = {}) {
         if (text === 'input[type="password"]') return elements.filter((element) => element.type === 'password');
         if (text.includes('button') || text.includes('[role="button"]')) {
           return elements.filter((element) => element.tagName === 'BUTTON');
+        }
+        if (text.includes('[role="alert"]')) {
+          return elements.filter((element) => element.getAttribute('role') === 'alert');
         }
         return [];
       },
@@ -558,6 +596,7 @@ function createHostedPayPalHarness(options = {}) {
     showPayEmail,
     showCreateAccount,
     showGuestCheckout,
+    showVerification,
   };
 }
 
@@ -686,4 +725,54 @@ test('PayPal hosted create account page is detected and handled as its own step'
     JSON.parse(JSON.stringify(harness.events.filter((event) => event.type === 'operation').map((event) => event.metadata))),
     [{ stepKey: 'paypal-hosted-create-account', kind: 'click', label: 'hosted-paypal-create-account' }]
   );
+});
+
+test('PayPal hosted verification page exposes invalid-code and resend state', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showVerification({ invalid: true });
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'verification');
+  assert.equal(state.verificationInputsVisible, true);
+  assert.equal(state.hostedVerificationInvalidCode, true);
+  assert.match(state.hostedVerificationErrorText, /Check the code/);
+  assert.equal(state.hostedVerificationResendReady, true);
+});
+
+test('PayPal hosted verification page fills code digits and clicks Resend', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showVerification({ invalid: true });
+
+  const fillResult = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      verificationCode: '123456',
+    },
+  });
+
+  assert.equal(fillResult.ok, true);
+  assert.equal(fillResult.codeSubmitted, true);
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === 'fill').slice(-6).map((event) => event.value),
+    ['1', '2', '3', '4', '5', '6']
+  );
+
+  const resendResult = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      resendVerificationCode: true,
+    },
+  });
+
+  assert.equal(resendResult.ok, true);
+  assert.equal(resendResult.resendClicked, true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'resendButton'), true);
 });

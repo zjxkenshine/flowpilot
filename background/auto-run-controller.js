@@ -25,6 +25,7 @@
       hasSavedNodeProgress,
       isAddPhoneAuthFailure,
       isGpcTaskEndedFailure,
+      isHostedCheckoutVerificationResendLimitFailure,
       isKiroProxyFailure,
       isPhoneSmsPlatformRateLimitFailure,
       isPlusCheckoutNonFreeTrialFailure,
@@ -719,6 +720,9 @@
             const blockedByGpcTaskEnded = typeof isGpcTaskEndedFailure === 'function'
               ? isGpcTaskEndedFailure(err)
               : /GPC_TASK_ENDED::/i.test(err?.message || String(err || ''));
+            const blockedByHostedCheckoutVerificationResendLimit = typeof isHostedCheckoutVerificationResendLimitFailure === 'function'
+              ? isHostedCheckoutVerificationResendLimitFailure(err)
+              : /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::/i.test(err?.message || String(err || ''));
             const blockedBySignupUserAlreadyExists = typeof isSignupUserAlreadyExistsFailure === 'function'
               && !keepSameEmailUntilAddPhone
               && isSignupUserAlreadyExistsFailure(err);
@@ -730,6 +734,7 @@
               && !blockedByPhoneNoSupply
               && !blockedByPlusNonFreeTrial
               && !blockedByGpcTaskEnded
+              && !blockedByHostedCheckoutVerificationResendLimit
               && !blockedBySignupUserAlreadyExists
               && !blockedByStep4Route405
               && !blockedByKiroProxy
@@ -877,6 +882,29 @@
                 'warn'
               );
               forceFreshTabsNextRun = true;
+              break;
+            }
+
+            if (blockedByHostedCheckoutVerificationResendLimit) {
+              roundSummary.status = 'failed';
+              roundSummary.finalFailureReason = reason;
+              await setState({
+                autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+              });
+              await appendRoundRecordIfNeeded('failed', reason, err);
+              cancelPendingCommands('当前轮因 PayPal 验证码自动 Resend 达到上限已终止。');
+              await broadcastStopToContentScripts();
+              await addLog(
+                `第 ${targetRun}/${totalRuns} 轮 PayPal 验证码自动 Resend 已达到上限，当前自动运行已停止；请尝试在页面手动获取验证码并填入。`,
+                'warn'
+              );
+              stoppedEarly = true;
+              await broadcastAutoRunStatus('stopped', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId: 0,
+              });
               break;
             }
 

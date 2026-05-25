@@ -9701,6 +9701,11 @@ function isPlusCheckoutNonFreeTrialFailure(error) {
   return /PLUS_CHECKOUT_NON_FREE_TRIAL::|今日应付金额不是\s*0|没有免费试用资格|该账号已经开通过\s*ChatGPT\s*订阅套餐，不能重复订阅(?:。)?(?:（\s*checkout_order\s*）|\(\s*checkout_order\s*\))?/i.test(message);
 }
 
+function isHostedCheckoutVerificationResendLimitFailure(error) {
+  const message = getErrorMessage(error);
+  return /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::|PayPal 验证码自动 Resend 重试已达到上限|请尝试在页面手动获取验证码并填入/i.test(message);
+}
+
 function isGpcTaskEndedFailure(error) {
   const message = String(typeof error === 'string' ? error : error?.message || '');
   return /GPC_TASK_ENDED::/i.test(message);
@@ -13335,6 +13340,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   isPhoneSmsPlatformRateLimitFailure,
   isPlusCheckoutNonFreeTrialFailure,
   isGpcTaskEndedFailure,
+  isHostedCheckoutVerificationResendLimitFailure,
   isKiroProxyFailure,
   isRestartCurrentAttemptError,
   isStep4Route405RecoveryLimitFailure,
