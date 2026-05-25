@@ -15,6 +15,11 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   });
   const plusSteps = api.getSteps({ plusModeEnabled: true });
   const hostedSteps = api.getSteps({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' });
+  const legacyPaypalSteps = api.getSteps({
+    plusModeEnabled: true,
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+  });
   const plusPhoneSteps = api.getSteps({ plusModeEnabled: true, signupMethod: 'phone' });
   const plusPhoneReloginSteps = api.getSteps({
     plusModeEnabled: true,
@@ -101,23 +106,22 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fetch-signup-code',
       'fill-profile',
       'plus-checkout-create',
-      'plus-checkout-billing',
-      'paypal-approve',
-      'plus-checkout-return',
+      'paypal-hosted-email',
+      'paypal-hosted-card',
+      'paypal-hosted-create-account',
+      'paypal-hosted-review',
       'oauth-login',
       'fetch-login-code',
-      'post-login-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
   );
   assert.equal(plusSteps.some((step) => step.key === 'wait-registration-success'), false);
   assert.equal(plusSteps.some((step) => step.key === 'fetch-login-code'), true);
-  assert.equal(plusSteps.find((step) => step.key === 'paypal-approve')?.title, 'PayPal 登录与授权');
-  assert.equal(plusPhoneSteps[1].title, '注册并输入手机号');
-  assert.equal(plusPhoneSteps[3].title, '获取手机验证码');
+  assert.equal(plusSteps.some((step) => step.key === 'paypal-approve'), false);
+  assert.equal(plusSteps.find((step) => step.key === 'paypal-hosted-review')?.title, '无卡直绑完成 PayPal 授权');
   assert.deepStrictEqual(
-    plusPhoneSteps.map((step) => step.key),
+    legacyPaypalSteps.map((step) => step.key),
     [
       'open-chatgpt',
       'submit-signup-email',
@@ -130,6 +134,28 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'plus-checkout-return',
       'oauth-login',
       'fetch-login-code',
+      'post-login-phone-verification',
+      'confirm-oauth',
+      'platform-verify',
+    ]
+  );
+  assert.equal(plusPhoneSteps[1].title, '注册并输入手机号');
+  assert.equal(plusPhoneSteps[3].title, '获取手机验证码');
+  assert.deepStrictEqual(
+    plusPhoneSteps.map((step) => step.key),
+    [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'plus-checkout-create',
+      'paypal-hosted-email',
+      'paypal-hosted-card',
+      'paypal-hosted-create-account',
+      'paypal-hosted-review',
+      'oauth-login',
+      'fetch-login-code',
       'bind-email',
       'fetch-bind-email-code',
       'confirm-oauth',
@@ -139,13 +165,13 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.deepStrictEqual(
     plusPhoneReloginSteps.map((step) => step.key).slice(-9),
     [
+      'paypal-hosted-review',
       'oauth-login',
       'fetch-login-code',
       'bind-email',
       'fetch-bind-email-code',
       'relogin-bound-email',
       'fetch-bound-email-login-code',
-      'post-bound-email-phone-verification',
       'confirm-oauth',
       'platform-verify',
     ]
@@ -155,8 +181,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(api.getPlusPaymentStepTitle({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), '');
   assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true }), 14);
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 15);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 16);
   assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
   assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 18);
   assert.equal(api.hasFlow('openai'), true);
@@ -210,7 +236,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
     ]
   );
   assert.equal(plusSteps[5].title, '创建 Plus Checkout');
-  assert.equal(plusSteps[7].title, 'PayPal 登录与授权');
+  assert.equal(plusSteps[7].title, '无卡直绑填写 PayPal 资料');
 
   assert.deepStrictEqual(
     hostedSteps.map((step) => step.key),
@@ -305,8 +331,8 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
         plusPaymentMethod: 'paypal',
         plusAccountAccessStrategy: 'sub2api_codex_session',
       },
-      previousNodeId: 'plus-checkout-return',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      previousNodeId: 'paypal-hosted-review',
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     },
     {
       label: 'paypal-hosted',
@@ -392,9 +418,10 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
         'fill-profile',
         'wait-registration-success',
         'plus-checkout-create',
-        'plus-checkout-billing',
-        'paypal-approve',
-        'plus-checkout-return',
+        'paypal-hosted-email',
+        'paypal-hosted-card',
+        'paypal-hosted-create-account',
+        'paypal-hosted-review',
         'oauth-login',
         'fetch-login-code',
         'bind-email',
@@ -526,8 +553,8 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
         plusPaymentMethod: 'paypal',
         plusAccountAccessStrategy: 'cpa_codex_session',
       },
-      previousNodeId: 'plus-checkout-return',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      previousNodeId: 'paypal-hosted-review',
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     },
     {
       label: 'paypal-hosted',

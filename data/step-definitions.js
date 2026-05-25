@@ -426,6 +426,20 @@
     return Boolean(options?.plusModeEnabled || options?.plusMode || isPhonePlusModeEnabled(options));
   }
 
+  function shouldTreatHostedCheckoutAsFinalStep(options = {}) {
+    if (!isPlusModeEnabled(options)) {
+      return false;
+    }
+    const paymentMethod = normalizePlusPaymentMethod(options?.plusPaymentMethod || options?.paymentMethod);
+    if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      return true;
+    }
+    if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+      return false;
+    }
+    return options?.plusHostedCheckoutIsFinalStep !== false;
+  }
+
   function normalizePlusPaymentMethod(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
     if (normalized === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
@@ -464,8 +478,12 @@
     const reloginAfterBindEmail = signupMethod === SIGNUP_METHOD_PHONE
       && isPhoneSignupReloginAfterBindEmailEnabled(options);
     const paymentMethod = normalizePlusPaymentMethod(options?.plusPaymentMethod || options?.paymentMethod);
+    const useHostedCheckoutFinalStep = shouldTreatHostedCheckoutAsFinalStep({
+      ...options,
+      plusPaymentMethod: paymentMethod,
+    });
     if (isPhonePlusModeEnabled(options)) {
-      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      if (useHostedCheckoutFinalStep) {
         return reloginAfterBindEmail
           ? PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
           : PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
@@ -493,7 +511,7 @@
       return NORMAL_STEP_DEFINITIONS;
     }
     const plusAccountAccessStrategy = normalizePlusAccountAccessStrategy(options?.plusAccountAccessStrategy);
-    if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    if (useHostedCheckoutFinalStep) {
       if (signupMethod === SIGNUP_METHOD_PHONE) {
         return reloginAfterBindEmail
           ? PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS

@@ -617,7 +617,7 @@ const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
 const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
-const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL_HOSTED;
+const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
@@ -1140,11 +1140,17 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
+  const hostedCheckoutIsFinalStep = typeof options === 'string'
+    ? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
+    : (options.plusHostedCheckoutIsFinalStep
+      ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
+      ?? true);
   return (window.MultiPageStepDefinitions?.getSteps?.({
     activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
     plusModeEnabled: normalizedPlusModeEnabled,
     phonePlusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
+    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(rawPlusAccountAccessStrategy),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
     phoneSignupReloginAfterBindEmailEnabled,
@@ -1187,11 +1193,17 @@ function getWorkflowNodesForMode(plusModeEnabled = false, options = {}) {
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
+  const hostedCheckoutIsFinalStep = typeof options === 'string'
+    ? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
+    : (options.plusHostedCheckoutIsFinalStep
+      ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
+      ?? true);
   const nodes = window.MultiPageStepDefinitions?.getNodes?.({
     activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
     plusModeEnabled: normalizedPlusModeEnabled,
     phonePlusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
+    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(rawPlusAccountAccessStrategy),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
     phoneSignupReloginAfterBindEmailEnabled,
@@ -1274,6 +1286,9 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
     options.accountContributionEnabled
     ?? (typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false)
   );
+  const hostedCheckoutIsFinalStep = options.plusHostedCheckoutIsFinalStep
+    ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
+    ?? true;
   currentPlusPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
   currentPlusAccountAccessStrategy = normalizePlusAccountAccessStrategy(rawPlusAccountAccessStrategy);
   currentSignupMethod = normalizeSignupMethod(rawSignupMethod);
@@ -1290,6 +1305,7 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
     activeFlowId: nextActiveFlowId,
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
     plusPaymentMethod: currentPlusPaymentMethod,
+    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: currentPlusAccountAccessStrategy,
     signupMethod: currentSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
@@ -1300,6 +1316,7 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
       activeFlowId: nextActiveFlowId,
       phonePlusModeEnabled: nextPhonePlusModeEnabled,
       plusPaymentMethod: currentPlusPaymentMethod,
+      plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
       plusAccountAccessStrategy: currentPlusAccountAccessStrategy,
       signupMethod: currentSignupMethod,
       phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
@@ -3359,6 +3376,37 @@ function getSelectedPlusPaymentMethod(state = latestState) {
   return normalizePlusPaymentMethod(state?.plusPaymentMethod || currentPlusPaymentMethod || defaultMethod);
 }
 
+function isHostedCheckoutFinalStepEnabled(state = latestState, options = {}) {
+  const paymentMethod = normalizePlusPaymentMethod(
+    options.plusPaymentMethod
+    ?? state?.plusPaymentMethod
+    ?? currentPlusPaymentMethod
+    ?? DEFAULT_PLUS_PAYMENT_METHOD
+  );
+  if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    return true;
+  }
+  if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+    return false;
+  }
+  const plusModeEnabled = Boolean(
+    options.plusModeEnabled
+    ?? state?.plusModeEnabled
+    ?? currentPlusModeEnabled
+    ?? false
+  );
+  const phonePlusModeEnabled = Boolean(
+    options.phonePlusModeEnabled
+    ?? state?.phonePlusModeEnabled
+    ?? currentPhonePlusModeEnabled
+    ?? false
+  );
+  if (!plusModeEnabled && !phonePlusModeEnabled) {
+    return false;
+  }
+  return (options.plusHostedCheckoutIsFinalStep ?? state?.plusHostedCheckoutIsFinalStep) !== false;
+}
+
 function getRequestedPlusAccountAccessStrategy(state = latestState) {
   const defaultStrategy = typeof DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY !== 'undefined'
     ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
@@ -4869,6 +4917,7 @@ function collectSettingsPayload() {
     plusModeEnabled: effectivePlusModeEnabled,
     phonePlusModeEnabled: effectivePhonePlusModeEnabled,
     plusPaymentMethod,
+    plusHostedCheckoutIsFinalStep: latestState?.plusHostedCheckoutIsFinalStep !== false,
     plusAccountAccessStrategy: effectivePhonePlusModeEnabled
       ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
       : requestedPlusAccountAccessStrategy,
@@ -9886,7 +9935,21 @@ function updatePlusModeUI() {
   const selectedMethod = typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod?.value
     ? normalizePlusPaymentMethod(selectPlusPaymentMethod.value)
     : method;
-  const hostedRowsVisible = enabled && selectedMethod === paypalHostedValue;
+  const hostedCheckoutFinalStepEnabled = typeof isHostedCheckoutFinalStepEnabled === 'function'
+    ? isHostedCheckoutFinalStepEnabled(typeof latestState !== 'undefined' ? latestState : null, {
+      plusModeEnabled: effectivePlusModeEnabled,
+      phonePlusModeEnabled: effectivePhonePlusModeEnabled,
+      plusPaymentMethod: selectedMethod,
+    })
+    : (
+      selectedMethod === paypalHostedValue
+      || (
+        selectedMethod === paypalValue
+        && enabled
+        && ((typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true) !== false)
+      )
+    );
+  const hostedRowsVisible = enabled && hostedCheckoutFinalStepEnabled;
   const gpcRowsVisible = enabled && selectedMethod === gpcValue;
   const canShowGpcModeSelector = gpcRowsVisible;
   const localSmsControlsVisible = gpcRowsVisible && !isGpcAutoMode;
@@ -9914,9 +9977,11 @@ function updatePlusModeUI() {
       ? `GPC ${isGpcAutoMode ? '自动' : '手动'}订阅链路`
       : method === gopayValue
       ? 'GoPay 印尼订阅链路'
-      : method === paypalHostedValue
-      ? 'PayPal 无卡直绑链路'
-      : 'PayPal 订阅链路';
+      : selectedMethod === paypalHostedValue
+      ? 'PayPal 无卡直绑链路（兼容旧配置）'
+      : hostedCheckoutFinalStepEnabled
+      ? 'PayPal Hosted 自动闭环链路'
+      : 'PayPal 传统订阅链路（隐藏兼容）';
   }
   if (typeof plusPaymentMethodCaption !== 'undefined' && plusPaymentMethodCaption && method === gpcValue && gpcAutoModeBlocked) {
     plusPaymentMethodCaption.textContent = 'GPC 自动订阅链路（需手动切换）';
@@ -10025,7 +10090,7 @@ function updatePlusModeUI() {
     if (!row) {
       return;
     }
-    row.style.display = enabled && selectedMethod === paypalValue ? '' : 'none';
+    row.style.display = enabled && selectedMethod === paypalValue && !hostedCheckoutFinalStepEnabled ? '' : 'none';
   });
   [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
@@ -11139,6 +11204,9 @@ function applySettingsState(state) {
   }
   if (typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod) {
     selectPlusPaymentMethod.value = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+  }
+  if (latestState) {
+    latestState.plusHostedCheckoutIsFinalStep = state?.plusHostedCheckoutIsFinalStep !== false;
   }
   currentPlusAccountAccessStrategy = normalizePlusAccountAccessStrategy(
     state?.plusAccountAccessStrategy || DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY

@@ -114,7 +114,7 @@ return {
   assert.deepEqual(api.getStepIds(), [7]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, phonePlusModeEnabled: false, plusPaymentMethod: 'gopay', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, phonePlusModeEnabled: false, plusPaymentMethod: 'gopay', plusHostedCheckoutIsFinalStep: true, plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
   });
   assert.deepEqual(api.calls[1], { type: 'render', stepIds: [7] });
 });
@@ -186,7 +186,7 @@ return { updatePlusModeUI, selectPlusPaymentMethod, rowPayPalAccount };
 
   api.selectPlusPaymentMethod.value = 'paypal';
   api.updatePlusModeUI();
-  assert.equal(api.rowPayPalAccount.style.display, '');
+  assert.equal(api.rowPayPalAccount.style.display, 'none');
 });
 
 test('sidepanel Plus UI separates PayPal account mode from PayPal no-card binding mode', () => {
@@ -244,10 +244,65 @@ return {
   api.selectPlusPaymentMethod.value = 'paypal';
   api.updatePlusModeUI();
 
+  assert.equal(api.rowPayPalAccount.style.display, 'none');
+  assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, '');
+  assert.equal(api.rows.rowHostedCheckoutPhone.style.display, '');
+  assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, '');
+  assert.match(api.plusPaymentMethodCaption.textContent, /自动闭环|Hosted/);
+});
+
+test('sidepanel Plus UI restores traditional PayPal account mode when hosted final step is disabled', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('getRequestedPlusAccountAccessStrategy'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = { plusPaymentMethod: 'paypal', plusHostedCheckoutIsFinalStep: false };
+let currentPlusPaymentMethod = 'paypal';
+let currentPlusAccountAccessStrategy = 'oauth';
+const inputPlusModeEnabled = { checked: true };
+const selectPlusPaymentMethod = { value: 'paypal', style: { display: 'none' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
+const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const plusPaymentMethodCaption = { textContent: '' };
+const rowPayPalAccount = { style: { display: 'none' } };
+const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
+const rowHostedCheckoutPhone = { style: { display: 'none' } };
+const rowPlusHostedCheckoutOauthDelay = { style: { display: 'none' } };
+${bundle}
+return {
+  updatePlusModeUI,
+  rowPayPalAccount,
+  plusPaymentMethodCaption,
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutPhone, rowPlusHostedCheckoutOauthDelay },
+};
+`)();
+
+  api.updatePlusModeUI();
+
   assert.equal(api.rowPayPalAccount.style.display, '');
   assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, 'none');
   assert.equal(api.rows.rowHostedCheckoutPhone.style.display, 'none');
   assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, 'none');
+  assert.match(api.plusPaymentMethodCaption.textContent, /传统/);
 });
 
 test('sidepanel Plus UI shows checkout conversion proxy in Plus and Phone Plus modes', () => {
@@ -425,7 +480,7 @@ return {
   assert.deepEqual(api.getStepIds(), [13]);
   assert.deepEqual(api.calls[0], {
     type: 'getSteps',
-    options: { activeFlowId: 'openai', plusModeEnabled: true, phonePlusModeEnabled: false, plusPaymentMethod: 'gpc-helper', plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
+    options: { activeFlowId: 'openai', plusModeEnabled: true, phonePlusModeEnabled: false, plusPaymentMethod: 'gpc-helper', plusHostedCheckoutIsFinalStep: true, plusAccountAccessStrategy: 'oauth', signupMethod: 'email', phoneSignupReloginAfterBindEmailEnabled: false, accountContributionEnabled: false },
   });
 });
 

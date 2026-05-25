@@ -247,7 +247,7 @@ test('Plus checkout create does not wait 20 seconds after opening checkout page'
   assert.deepStrictEqual(sleepEvents.map((event) => event.ms), [1000, 1000]);
   assert.deepStrictEqual(
     events.find((event) => event.type === 'tab-message')?.message?.payload,
-    { paymentMethod: 'paypal' }
+    { paymentMethod: 'paypal', hostedCheckoutFinalStep: false }
   );
 
   const completeIndex = events.findIndex((event) => event.type === 'complete');
@@ -285,7 +285,7 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
 
   await executor.executePlusCheckoutCreate({ plusPaymentMethod: 'gopay' });
 
-  assert.deepStrictEqual(events[0]?.payload, { paymentMethod: 'gopay' });
+  assert.deepStrictEqual(events[0]?.payload, { paymentMethod: 'gopay', hostedCheckoutFinalStep: false });
 });
 
 test('Plus checkout create applies and restores conversion proxy around payment conversion', async () => {
@@ -585,7 +585,7 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
 
   assert.deepStrictEqual(
     events.find((event) => event.type === 'tab-message' && event.message.type === 'CREATE_PLUS_CHECKOUT')?.message?.payload,
-    { paymentMethod: 'paypal-hosted' }
+    { paymentMethod: 'paypal-hosted', hostedCheckoutFinalStep: true }
   );
   assert.equal(
     events.find((event) => event.type === 'tab-update')?.payload?.url,

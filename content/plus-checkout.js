@@ -608,8 +608,26 @@ function normalizePlusPaymentMethod(value = '') {
     : PLUS_PAYMENT_METHOD_PAYPAL;
 }
 
+function shouldUseHostedCheckoutFinalStep(options = {}) {
+  const paymentMethod = normalizePlusPaymentMethod(options?.paymentMethod || options?.plusPaymentMethod);
+  if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    return true;
+  }
+  if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+    return false;
+  }
+  if (options?.hostedCheckoutFinalStep === false || options?.plusHostedCheckoutIsFinalStep === false) {
+    return false;
+  }
+  return true;
+}
+
 function getPaymentMethodConfig(method = PLUS_PAYMENT_METHOD_PAYPAL) {
-  return PAYMENT_METHOD_CONFIGS[normalizePlusPaymentMethod(method)] || PAYMENT_METHOD_CONFIGS[PLUS_PAYMENT_METHOD_PAYPAL];
+  const normalizedMethod = normalizePlusPaymentMethod(method);
+  if (normalizedMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
+    return PAYMENT_METHOD_CONFIGS[PLUS_PAYMENT_METHOD_PAYPAL];
+  }
+  return PAYMENT_METHOD_CONFIGS[normalizedMethod] || PAYMENT_METHOD_CONFIGS[PLUS_PAYMENT_METHOD_PAYPAL];
 }
 
 function getAncestorChainSummary(el, limit = 6) {
@@ -796,11 +814,14 @@ function writeGoPayDiagnostics(reason, level = 'info') {
   return writePaymentMethodDiagnostics(PLUS_PAYMENT_METHOD_GOPAY, reason, level);
 }
 
-function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
+function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
   const config = getPaymentMethodConfig(paymentMethod);
   return {
     ...JSON.parse(JSON.stringify(PLUS_CHECKOUT_PAYLOAD_BASE)),
-    checkout_ui_mode: config.id === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED ? 'hosted' : 'custom',
+    checkout_ui_mode: shouldUseHostedCheckoutFinalStep({
+      ...options,
+      paymentMethod,
+    }) ? 'hosted' : 'custom',
     billing_details: {
       ...config.billingDetails,
     },
@@ -854,7 +875,15 @@ async function createPlusCheckoutSession(options = {}) {
 
   log('Plus：正在创建 checkout 会话...');
   const paymentMethod = normalizePlusPaymentMethod(options.paymentMethod);
-  const checkoutPayload = buildPlusCheckoutPayload(paymentMethod);
+  const useHostedCheckoutFinalStep = shouldUseHostedCheckoutFinalStep({
+    ...options,
+    paymentMethod,
+  });
+  const checkoutPayload = buildPlusCheckoutPayload(paymentMethod, {
+    ...options,
+    paymentMethod,
+    hostedCheckoutFinalStep: useHostedCheckoutFinalStep,
+  });
   const response = await fetch('https://chatgpt.com/backend-api/payments/checkout', {
     method: 'POST',
     credentials: 'include',
@@ -873,7 +902,7 @@ async function createPlusCheckoutSession(options = {}) {
 
   const checkoutUrl = buildPlusCheckoutUrl(data.checkout_session_id, paymentMethod);
   const hostedCheckoutUrl = findHostedCheckoutUrl(data);
-  const preferredCheckoutUrl = paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+  const preferredCheckoutUrl = useHostedCheckoutFinalStep
     ? (hostedCheckoutUrl || checkoutUrl)
     : checkoutUrl;
 

@@ -106,7 +106,8 @@
             plus: {
               plusModeEnabled: false,
               phonePlusModeEnabled: false,
-              plusPaymentMethod: 'paypal-hosted',
+              plusPaymentMethod: 'paypal',
+              plusHostedCheckoutIsFinalStep: true,
               plusAccountAccessStrategy: 'oauth',
               plusCheckoutConversionProxyUrl: '',
               hostedCheckoutVerificationUrl: '',
@@ -324,6 +325,11 @@
                 ?? nested?.flows?.openai?.plus?.plusPaymentMethod
                 ?? defaults.flows.openai.plus.plusPaymentMethod
               ).trim() || defaults.flows.openai.plus.plusPaymentMethod,
+              plusHostedCheckoutIsFinalStep: Boolean(
+                input?.plusHostedCheckoutIsFinalStep
+                ?? nested?.flows?.openai?.plus?.plusHostedCheckoutIsFinalStep
+                ?? defaults.flows.openai.plus.plusHostedCheckoutIsFinalStep
+              ),
               plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(
                 input?.plusAccountAccessStrategy
                 ?? nested?.flows?.openai?.plus?.plusAccountAccessStrategy
@@ -501,6 +507,7 @@
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
+      next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;

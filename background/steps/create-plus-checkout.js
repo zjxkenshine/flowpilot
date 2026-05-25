@@ -149,12 +149,27 @@
       return normalized === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_PAYMENT_METHOD_GOPAY : PLUS_PAYMENT_METHOD_PAYPAL;
     }
 
+    function isHostedCheckoutFinalStepEnabled(state = {}) {
+      const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+        return true;
+      }
+      if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
+        return false;
+      }
+      const plusModeEnabled = Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
+      if (!plusModeEnabled) {
+        return false;
+      }
+      return state?.plusHostedCheckoutIsFinalStep !== false;
+    }
+
     function getCheckoutModeLabel(state = {}) {
       const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
       if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
         return 'GPC 订阅页';
       }
-      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      if (isHostedCheckoutFinalStepEnabled(state)) {
         return 'PayPal 无卡直绑';
       }
       return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? 'GoPay 订阅页' : 'Plus Checkout';
@@ -1356,8 +1371,10 @@
       throw stageOutcome.error;
     }
 
-    function resolveCheckoutTargetUrl(result = {}, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
-      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    function resolveCheckoutTargetUrl(result = {}, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
+      const useHostedCheckoutFinalStep = Boolean(options.useHostedCheckoutFinalStep)
+        || paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED;
+      if (useHostedCheckoutFinalStep) {
         return String(
           result?.preferredCheckoutUrl
           || result?.hostedCheckoutUrl
@@ -1369,7 +1386,9 @@
     }
 
     async function executeHostedCheckoutCreate(tabId, state = {}, result = {}) {
-      const targetCheckoutUrl = resolveCheckoutTargetUrl(result, PLUS_PAYMENT_METHOD_PAYPAL_HOSTED);
+      const targetCheckoutUrl = resolveCheckoutTargetUrl(result, PLUS_PAYMENT_METHOD_PAYPAL_HOSTED, {
+        useHostedCheckoutFinalStep: true,
+      });
       if (!targetCheckoutUrl) {
         throw new Error('步骤 6：PayPal 无卡直绑未返回可用的订阅链接。');
       }
@@ -2093,6 +2112,7 @@
 
     async function executePlusCheckoutCreate(state = {}) {
       const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
+      const useHostedCheckoutFinalStep = isHostedCheckoutFinalStepEnabled(state);
       let checkoutScopedProxySnapshot = null;
       try {
         checkoutScopedProxySnapshot = await maybeApplyCheckoutConversionProxy(state);
@@ -2117,18 +2137,23 @@
         const result = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
           type: 'CREATE_PLUS_CHECKOUT',
           source: 'background',
-          payload: { paymentMethod },
+          payload: {
+            paymentMethod,
+            hostedCheckoutFinalStep: useHostedCheckoutFinalStep,
+          },
         });
 
         if (result?.error) {
           throw new Error(result.error);
         }
-        const targetCheckoutUrl = resolveCheckoutTargetUrl(result, paymentMethod);
+        const targetCheckoutUrl = resolveCheckoutTargetUrl(result, paymentMethod, {
+          useHostedCheckoutFinalStep,
+        });
         if (!targetCheckoutUrl) {
           throw new Error(`步骤 6：${checkoutModeLabel}未返回可用的订阅链接。`);
         }
 
-        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+        if (useHostedCheckoutFinalStep) {
           await executeHostedCheckoutCreate(tabId, state, result);
           return;
         }
