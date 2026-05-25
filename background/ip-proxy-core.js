@@ -3006,6 +3006,25 @@ function installIpProxyAuthListener() {
   ipProxyAuthListenerInstalled = true;
 }
 
+function getCurrentIpProxyAuthEntry() {
+  return currentIpProxyAuthEntry ? { ...currentIpProxyAuthEntry } : null;
+}
+
+function setCurrentIpProxyAuthEntry(entry = null) {
+  const host = String(entry?.host || '').trim();
+  const port = normalizeIpProxyPort(entry?.port);
+  const username = String(entry?.username || '').trim();
+  currentIpProxyAuthEntry = host && port && username
+    ? {
+        host,
+        port,
+        username,
+        password: String(entry?.password || ''),
+      }
+    : null;
+  return getCurrentIpProxyAuthEntry();
+}
+
 function installIpProxyErrorListener() {
   if (ipProxyErrorListenerInstalled) {
     return;

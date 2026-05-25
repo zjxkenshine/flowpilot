@@ -288,6 +288,216 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
   assert.deepStrictEqual(events[0]?.payload, { paymentMethod: 'gopay' });
 });
 
+test('Plus checkout create applies and restores conversion proxy around payment conversion', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    applyCheckoutScopedProxyFromUrl: async (proxyUrl, options = {}) => {
+      events.push({ type: 'proxy-apply', proxyUrl, options });
+      return { applied: true, displayName: 'socks5://proxy.example:1080' };
+    },
+    restoreCheckoutScopedProxySnapshot: async (snapshot) => {
+      events.push({ type: 'proxy-restore', snapshot });
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tab-create', payload });
+          return { id: 42 };
+        },
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      events.push({ type: 'complete', step, payload });
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async () => {
+      events.push({ type: 'ready' });
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      return {
+        checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
+        country: 'US',
+        currency: 'USD',
+      };
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusPaymentMethod: 'paypal',
+    plusCheckoutConversionProxyUrl: 'socks5h://user:pass@proxy.example:1080',
+  });
+
+  const applyIndex = events.findIndex((event) => event.type === 'proxy-apply');
+  const messageIndex = events.findIndex((event) => event.type === 'tab-message');
+  const completeIndex = events.findIndex((event) => event.type === 'complete');
+  const restoreIndex = events.findIndex((event) => event.type === 'proxy-restore');
+  assert.ok(applyIndex > -1);
+  assert.ok(messageIndex > applyIndex);
+  assert.ok(restoreIndex > completeIndex);
+  assert.equal(events[applyIndex].proxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.ok(events[applyIndex].options.targetHostPatterns.includes('chatgpt.com'));
+  assert.equal(events.some((event) => event.type === 'log' && /已启用支付转换代理/.test(event.message)), true);
+  assert.equal(events.some((event) => event.type === 'log' && /支付转换代理已释放/.test(event.message)), true);
+});
+
+test('GPC checkout restores conversion proxy when task creation fails early', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    applyCheckoutScopedProxyFromUrl: async (proxyUrl) => {
+      events.push({ type: 'proxy-apply', proxyUrl });
+      return { applied: true, displayName: 'http://proxy.example:8080' };
+    },
+    restoreCheckoutScopedProxySnapshot: async () => {
+      events.push({ type: 'proxy-restore' });
+    },
+    chrome: {
+      tabs: {
+        create: async () => {
+          throw new Error('should not open token tab when direct access token exists');
+        },
+        remove: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => {
+      throw new Error('should not call helper API without API Key');
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePlusCheckoutCreate({
+      plusPaymentMethod: 'gpc-helper',
+      plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+      chatgptAccessToken: 'state-access-token',
+      gopayHelperPhoneNumber: '+8613800138000',
+      gopayHelperCountryCode: '+86',
+      gopayHelperPin: '123456',
+      gopayHelperApiKey: '',
+    }),
+    /缺少 API Key/
+  );
+
+  assert.deepStrictEqual(
+    events.filter((event) => event.type === 'proxy-apply' || event.type === 'proxy-restore').map((event) => event.type),
+    ['proxy-apply', 'proxy-restore']
+  );
+});
+
+test('checkout conversion proxy test applies fixed server proxy and restores previous auth state', async () => {
+  const proxySettingsCalls = [];
+  let authEntry = {
+    host: 'old.proxy.example',
+    port: 7890,
+    username: 'old-user',
+    password: 'old-pass',
+  };
+  let currentProxyValue = {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (details, callback) => {
+            proxySettingsCalls.push({ type: 'get', details });
+            callback({
+              levelOfControl: 'controlled_by_this_extension',
+              value: currentProxyValue,
+            });
+          },
+          set: (details, callback) => {
+            proxySettingsCalls.push({ type: 'set', details });
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (details, callback) => {
+            proxySettingsCalls.push({ type: 'clear', details });
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '203.0.113.9',
+      region: 'US',
+      source: 'page_context',
+      endpoint: 'https://ipinfo.io/json',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'target_page_context',
+    }),
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+  });
+
+  const result = await executor.testCheckoutConversionProxy({
+    proxyUrl: 'socks5h://user:p%40ss@proxy.example:1080',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exitIp, '203.0.113.9');
+  assert.equal(result.exitRegion, 'US');
+  assert.deepStrictEqual(proxySettingsCalls.find((call) => call.type === 'set')?.details, {
+    value: {
+      mode: 'fixed_servers',
+      rules: {
+        singleProxy: {
+          scheme: 'socks5',
+          host: 'proxy.example',
+          port: 1080,
+        },
+        bypassList: ['<local>', 'localhost', '127.0.0.1'],
+      },
+    },
+    scope: 'regular',
+  });
+  assert.deepStrictEqual(proxySettingsCalls.at(-1), {
+    type: 'set',
+    details: {
+      value: {
+        mode: 'pac_script',
+        pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+      },
+      scope: 'regular',
+    },
+  });
+  assert.deepStrictEqual(authEntry, {
+    host: 'old.proxy.example',
+    port: 7890,
+    username: 'old-user',
+    password: 'old-pass',
+  });
+});
+
 test('PayPal no-card binding create opens and submits hosted OpenAI checkout before completing', async () => {
   const events = [];
   let currentUrl = 'https://chatgpt.com/';

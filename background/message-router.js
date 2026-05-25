@@ -188,6 +188,7 @@
       deleteMail2925Accounts,
       syncHotmailAccounts,
       syncPayPalAccounts,
+      testPlusCheckoutConversionProxy,
       testHotmailAccountMailAccess,
       upsertPayPalAccount,
       upsertMail2925Account,
@@ -1795,6 +1796,21 @@
             throw new Error('IP 代理自动同步能力尚未接入。');
           }
           const result = await runIpProxyAutoSync('manual');
+          return { ok: true, ...result };
+        }
+
+        case 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY': {
+          if (typeof testPlusCheckoutConversionProxy !== 'function') {
+            throw new Error('支付转换代理测试能力尚未接入。');
+          }
+          const state = await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能测试支付转换代理。');
+          }
+          const result = await testPlusCheckoutConversionProxy({
+            state,
+            proxyUrl: message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl,
+          });
           return { ok: true, ...result };
         }
 

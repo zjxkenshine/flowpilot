@@ -351,6 +351,19 @@
           <span class="setting-caption" id="plus-payment-method-caption">PayPal 订阅链路</span>
         </div>
       </div>
+      <div class="data-row" id="row-plus-checkout-conversion-proxy" style="display:none;">
+        <span class="data-label">支付转换代理</span>
+        <input type="text" id="input-plus-checkout-conversion-proxy" class="data-input mono"
+          placeholder="http://127.0.0.1:7890 或 socks5h://user:pass@host:port"
+          title="仅在第 6 步创建/打开支付页时临时生效；留空则沿用当前网络环境" autocomplete="off" />
+      </div>
+      <div class="data-row" id="row-plus-checkout-conversion-proxy-test" style="display:none;">
+        <span class="data-label" aria-hidden="true"></span>
+        <div class="data-inline data-value-actions plus-checkout-conversion-proxy-test-inline">
+          <button id="btn-plus-checkout-conversion-proxy-test" class="btn btn-outline btn-sm data-inline-btn" type="button">测试代理</button>
+          <span id="display-plus-checkout-conversion-proxy-test-result" class="data-value mono plus-checkout-conversion-proxy-test-result">未测试</span>
+        </div>
+      </div>
       <div class="data-row" id="row-paypal-account" style="display:none;">
         <span class="data-label">PayPal 账号</span>
         <div class="data-inline">

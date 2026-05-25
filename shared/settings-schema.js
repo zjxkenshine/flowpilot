@@ -108,6 +108,7 @@
               phonePlusModeEnabled: false,
               plusPaymentMethod: 'paypal-hosted',
               plusAccountAccessStrategy: 'oauth',
+              plusCheckoutConversionProxyUrl: '',
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               plusHostedCheckoutOauthDelaySeconds: 3,
@@ -326,6 +327,11 @@
                 ?? nested?.flows?.openai?.plus?.plusAccountAccessStrategy
                 ?? defaults.flows.openai.plus.plusAccountAccessStrategy
               ),
+              plusCheckoutConversionProxyUrl: String(
+                input?.plusCheckoutConversionProxyUrl
+                ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl
+                ?? defaults.flows.openai.plus.plusCheckoutConversionProxyUrl
+              ).trim(),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -484,6 +490,7 @@
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
+      next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;

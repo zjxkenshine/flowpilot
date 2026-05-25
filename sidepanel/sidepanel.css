@@ -1379,6 +1379,18 @@ header {
   justify-content: space-between;
 }
 
+.plus-checkout-conversion-proxy-test-result.status-running {
+  color: var(--amber);
+}
+
+.plus-checkout-conversion-proxy-test-result.status-success {
+  color: var(--green);
+}
+
+.plus-checkout-conversion-proxy-test-result.status-error {
+  color: var(--red);
+}
+
 .input-with-icon {
   position: relative;
   flex: 1;

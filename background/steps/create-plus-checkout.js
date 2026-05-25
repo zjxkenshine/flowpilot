@@ -20,6 +20,44 @@
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS = 12;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_MS = 5000;
   const HOSTED_CHECKOUT_DEFAULT_PHONE = '1234567890';
+  const CHECKOUT_CONVERSION_PROXY_SETTINGS_SCOPE = 'regular';
+  const CHECKOUT_CONVERSION_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
+  const CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS = [
+    'chatgpt.com',
+    '*.chatgpt.com',
+    'openai.com',
+    '*.openai.com',
+    'oaistatic.com',
+    '*.oaistatic.com',
+    'stripe.com',
+    '*.stripe.com',
+    'paypal.com',
+    '*.paypal.com',
+    'gopayapi.com',
+    '*.gopayapi.com',
+    'gojek.com',
+    '*.gojek.com',
+    'midtrans.com',
+    '*.midtrans.com',
+    'xendit.co',
+    '*.xendit.co',
+    'gpc.qlhazycoder.top',
+  ];
+  const CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS = [
+    'http://ip-api.com/json?lang=en',
+    'https://ipinfo.io/json',
+    'https://chatgpt.com/cdn-cgi/trace',
+  ];
+  const CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS = [
+    'https://chatgpt.com/',
+  ];
+  const CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS = [
+    ...CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS,
+    'ip-api.com',
+    '*.ip-api.com',
+    'ipinfo.io',
+    '*.ipinfo.io',
+  ];
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
   const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
   const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
@@ -59,6 +97,17 @@
       waitForTabCompleteUntilStopped,
       waitForTabUrlMatchUntilStopped = null,
       throwIfStopped = () => {},
+      applyCheckoutScopedProxyFromUrl = null,
+      restoreCheckoutScopedProxySnapshot = null,
+      detectProxyExitInfoByPageContext = null,
+      detectProxyExitInfoByBackgroundFetch = null,
+      detectIpProxyTargetReachabilityByPageContext = null,
+      buildProbeDiagnosticsSummary = null,
+      buildTargetReachabilityFailureMessage = null,
+      installIpProxyAuthListener = null,
+      installIpProxyErrorListener = null,
+      getCurrentIpProxyAuthEntry = null,
+      setCurrentIpProxyAuthEntry = null,
     } = deps;
 
     function addLog(message, level = 'info', options = {}) {
@@ -113,6 +162,395 @@
         return 'PayPal 无卡直绑';
       }
       return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? 'GoPay' : 'PayPal';
+    }
+
+    function normalizeCheckoutConversionProxyUrl(value = '') {
+      return String(value || '').trim();
+    }
+
+    function normalizeCheckoutConversionProxyProtocol(value = '') {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'socks5h') {
+        return 'socks5';
+      }
+      return ['http', 'https', 'socks4', 'socks5'].includes(normalized) ? normalized : '';
+    }
+
+    function normalizeCheckoutConversionProxyPort(value = '') {
+      const numeric = Number.parseInt(String(value || '').trim(), 10);
+      if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 65535) {
+        return 0;
+      }
+      return numeric;
+    }
+
+    function parseCheckoutConversionProxyUrl(value = '') {
+      const rawValue = normalizeCheckoutConversionProxyUrl(value);
+      if (!rawValue) {
+        return null;
+      }
+
+      let parsed = null;
+      try {
+        parsed = new URL(rawValue);
+      } catch {
+        throw new Error('支付转换代理不是有效 URL，请填写 http://host:port 或 socks5h://user:pass@host:port。');
+      }
+
+      const protocol = normalizeCheckoutConversionProxyProtocol(String(parsed.protocol || '').replace(/:$/g, ''));
+      if (!protocol) {
+        throw new Error('支付转换代理仅支持 http / https / socks4 / socks5 / socks5h。');
+      }
+
+      const host = String(parsed.hostname || '').trim();
+      if (!host) {
+        throw new Error('支付转换代理缺少主机名。');
+      }
+
+      const port = normalizeCheckoutConversionProxyPort(parsed.port);
+      if (!port) {
+        throw new Error('支付转换代理缺少有效端口。');
+      }
+
+      return {
+        protocol,
+        host,
+        port,
+        username: parsed.username ? decodeURIComponent(parsed.username) : '',
+        password: parsed.password ? decodeURIComponent(parsed.password) : '',
+      };
+    }
+
+    function describeCheckoutConversionProxyEntry(entry = null) {
+      if (!entry || typeof entry !== 'object') {
+        return '';
+      }
+      return `${String(entry.protocol || '').toLowerCase()}://${String(entry.host || '').trim()}:${Number(entry.port) || 0}`;
+    }
+
+    function buildCheckoutConversionFixedProxyConfig(entry = null) {
+      if (!entry?.host || !entry?.port) {
+        return null;
+      }
+      const scheme = String(entry.protocol || '').trim().toLowerCase();
+      return {
+        mode: 'fixed_servers',
+        rules: {
+          singleProxy: {
+            scheme: scheme === 'socks5h' ? 'socks5' : scheme,
+            host: entry.host,
+            port: entry.port,
+          },
+          bypassList: CHECKOUT_CONVERSION_PROXY_BYPASS_LIST.slice(),
+        },
+      };
+    }
+
+    function validateCheckoutProxyControlAfterApply(details = {}, entry = null) {
+      const level = String(details?.levelOfControl || '').trim();
+      if (level && level !== 'controlled_by_this_extension') {
+        return {
+          ok: false,
+          message: `代理控制权不在当前扩展（levelOfControl=${level || 'unknown'}）`,
+        };
+      }
+
+      const mode = String(details?.value?.mode || '').trim().toLowerCase();
+      if (mode !== 'fixed_servers') {
+        return {
+          ok: false,
+          message: `代理模式不是 fixed_servers（当前为 ${mode || 'unknown'}）`,
+        };
+      }
+
+      const singleProxy = details?.value?.rules?.singleProxy || null;
+      const appliedHost = String(singleProxy?.host || '').trim().toLowerCase();
+      const appliedPort = Number.parseInt(String(singleProxy?.port || ''), 10) || 0;
+      const expectedHost = String(entry?.host || '').trim().toLowerCase();
+      const expectedPort = Number.parseInt(String(entry?.port || ''), 10) || 0;
+      if (!appliedHost || !appliedPort || appliedHost !== expectedHost || appliedPort !== expectedPort) {
+        return {
+          ok: false,
+          message: `fixed_servers 未绑定到当前代理节点 ${expectedHost}:${expectedPort}，疑似被其他代理配置覆盖`,
+        };
+      }
+
+      return { ok: true };
+    }
+
+    function getCheckoutProxySettings(details = { incognito: false }) {
+      const proxySettings = chrome?.proxy?.settings;
+      if (!proxySettings || typeof proxySettings.get !== 'function') {
+        return Promise.reject(new Error('当前浏览器不支持扩展代理 API。'));
+      }
+      return new Promise((resolve, reject) => {
+        proxySettings.get(details, (value) => {
+          const runtimeError = chrome?.runtime?.lastError;
+          if (runtimeError) {
+            reject(new Error(runtimeError.message || '读取浏览器代理配置失败。'));
+            return;
+          }
+          resolve(value || {});
+        });
+      });
+    }
+
+    function setCheckoutProxySettings(value) {
+      const proxySettings = chrome?.proxy?.settings;
+      if (!proxySettings || typeof proxySettings.set !== 'function') {
+        return Promise.reject(new Error('当前浏览器不支持扩展代理 API。'));
+      }
+      return new Promise((resolve, reject) => {
+        proxySettings.set({
+          value,
+          scope: CHECKOUT_CONVERSION_PROXY_SETTINGS_SCOPE,
+        }, () => {
+          const runtimeError = chrome?.runtime?.lastError;
+          if (runtimeError) {
+            reject(new Error(runtimeError.message || '写入浏览器代理配置失败。'));
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+
+    function clearCheckoutProxySettings() {
+      const proxySettings = chrome?.proxy?.settings;
+      if (!proxySettings || typeof proxySettings.clear !== 'function') {
+        return Promise.reject(new Error('当前浏览器不支持扩展代理 API。'));
+      }
+      return new Promise((resolve, reject) => {
+        proxySettings.clear({
+          scope: CHECKOUT_CONVERSION_PROXY_SETTINGS_SCOPE,
+        }, () => {
+          const runtimeError = chrome?.runtime?.lastError;
+          if (runtimeError) {
+            reject(new Error(runtimeError.message || '清理浏览器代理配置失败。'));
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+
+    async function defaultApplyCheckoutScopedProxyFromUrl(proxyUrl) {
+      const entry = parseCheckoutConversionProxyUrl(proxyUrl);
+      if (!entry) {
+        return null;
+      }
+
+      const previousProxySettings = await getCheckoutProxySettings({ incognito: false }).catch(() => ({}));
+      const previousAuthEntry = typeof getCurrentIpProxyAuthEntry === 'function'
+        ? (getCurrentIpProxyAuthEntry() || null)
+        : null;
+      const fixedProxyConfig = buildCheckoutConversionFixedProxyConfig(entry);
+      if (!fixedProxyConfig) {
+        throw new Error('支付转换代理配置不完整，无法生成 fixed_servers 规则。');
+      }
+
+      try {
+        if (typeof installIpProxyAuthListener === 'function') {
+          installIpProxyAuthListener();
+        }
+        if (typeof installIpProxyErrorListener === 'function') {
+          installIpProxyErrorListener();
+        }
+        if (typeof setCurrentIpProxyAuthEntry === 'function') {
+          setCurrentIpProxyAuthEntry(entry.username
+            ? {
+                host: entry.host,
+                port: entry.port,
+                username: entry.username,
+                password: String(entry.password || ''),
+              }
+            : null);
+        }
+        await setCheckoutProxySettings(fixedProxyConfig);
+        const appliedSettings = await getCheckoutProxySettings({ incognito: false }).catch(() => null);
+        const takeoverCheck = validateCheckoutProxyControlAfterApply(appliedSettings || {}, entry);
+        if (!takeoverCheck?.ok) {
+          throw new Error(takeoverCheck.message || '支付转换代理接管校验失败。');
+        }
+      } catch (error) {
+        if (typeof setCurrentIpProxyAuthEntry === 'function') {
+          setCurrentIpProxyAuthEntry(previousAuthEntry ? { ...previousAuthEntry } : null);
+        }
+        try {
+          const restoreValue = previousProxySettings?.value;
+          if (restoreValue && restoreValue.mode) {
+            await setCheckoutProxySettings(restoreValue);
+          } else {
+            await clearCheckoutProxySettings();
+          }
+        } catch {
+          // Ignore restore failures here and surface the original apply error.
+        }
+        throw error;
+      }
+
+      return {
+        applied: true,
+        entry,
+        displayName: describeCheckoutConversionProxyEntry(entry),
+        previousProxySettings,
+        previousAuthEntry,
+      };
+    }
+
+    async function defaultRestoreCheckoutScopedProxySnapshot(snapshot = null) {
+      if (!snapshot?.applied) {
+        return;
+      }
+      if (typeof setCurrentIpProxyAuthEntry === 'function') {
+        setCurrentIpProxyAuthEntry(snapshot.previousAuthEntry ? { ...snapshot.previousAuthEntry } : null);
+      }
+      const restoreValue = snapshot?.previousProxySettings?.value;
+      if (restoreValue && restoreValue.mode) {
+        await setCheckoutProxySettings(restoreValue);
+        return;
+      }
+      await clearCheckoutProxySettings();
+    }
+
+    function summarizeCheckoutConversionProxyDiagnostics(items = [], maxItems = 3) {
+      const normalizedItems = Array.isArray(items)
+        ? Array.from(new Set(items.map((item) => String(item || '').trim()).filter(Boolean)))
+        : [];
+      if (!normalizedItems.length) {
+        return '';
+      }
+      if (typeof buildProbeDiagnosticsSummary === 'function') {
+        return buildProbeDiagnosticsSummary(normalizedItems, maxItems);
+      }
+      return normalizedItems.slice(0, Math.max(1, Number(maxItems) || 3)).join(' | ');
+    }
+
+    async function testCheckoutConversionProxy(options = {}) {
+      const proxyUrl = normalizeCheckoutConversionProxyUrl(options?.proxyUrl);
+      if (!proxyUrl) {
+        throw new Error('请先填写支付转换代理地址。');
+      }
+
+      const parsedEntry = parseCheckoutConversionProxyUrl(proxyUrl);
+      const applyProxy = typeof applyCheckoutScopedProxyFromUrl === 'function'
+        ? applyCheckoutScopedProxyFromUrl
+        : defaultApplyCheckoutScopedProxyFromUrl;
+      const restoreProxy = typeof restoreCheckoutScopedProxySnapshot === 'function'
+        ? restoreCheckoutScopedProxySnapshot
+        : defaultRestoreCheckoutScopedProxySnapshot;
+      const probeDiagnostics = [];
+      const targetDiagnostics = [];
+      let snapshot = null;
+
+      try {
+        snapshot = await applyProxy(proxyUrl, {
+          targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+        });
+
+        let exit = null;
+        if (typeof detectProxyExitInfoByPageContext === 'function') {
+          exit = await detectProxyExitInfoByPageContext({
+            timeoutMs: 12000,
+            errors: probeDiagnostics,
+            probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+          }).catch((error) => {
+            probeDiagnostics.push(`probe:page_context:${error?.message || error}`);
+            return { ip: '', region: '', source: 'page_context_unavailable', endpoint: '' };
+          });
+        }
+        if (!exit?.ip && typeof detectProxyExitInfoByBackgroundFetch === 'function') {
+          exit = await detectProxyExitInfoByBackgroundFetch({
+            timeoutMs: 12000,
+            errors: probeDiagnostics,
+            probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+          }).catch((error) => {
+            probeDiagnostics.push(`probe:background:${error?.message || error}`);
+            return exit || { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
+          });
+        }
+
+        const exitIp = String(exit?.ip || '').trim();
+        const exitRegion = String(exit?.region || '').trim();
+        if (!exitIp) {
+          const diagnostics = summarizeCheckoutConversionProxyDiagnostics(probeDiagnostics, 4);
+          throw new Error(diagnostics
+            ? `未检测到代理出口 IP。诊断：${diagnostics}`
+            : '未检测到代理出口 IP。');
+        }
+
+        let reachability = { reachable: true, skipped: true, endpoint: '', source: '' };
+        if (typeof detectIpProxyTargetReachabilityByPageContext === 'function') {
+          reachability = await detectIpProxyTargetReachabilityByPageContext({
+            timeoutMs: 12000,
+            errors: targetDiagnostics,
+            targetReachabilityEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS,
+          }).catch((error) => {
+            targetDiagnostics.push(`target:${error?.message || error}`);
+            return {
+              reachable: false,
+              endpoint: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0],
+              source: 'target_page_context',
+              error: error?.message || String(error || '目标站点连通性检测失败'),
+            };
+          });
+        }
+
+        if (reachability?.reachable === false && reachability?.skipped !== true) {
+          const failureMessage = typeof buildTargetReachabilityFailureMessage === 'function'
+            ? buildTargetReachabilityFailureMessage({
+              exitIp,
+              exitRegion,
+            }, reachability)
+            : `已检测到出口 IP ${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}，但 chatgpt.com 不可达。`;
+          throw new Error(failureMessage);
+        }
+
+        return {
+          ok: true,
+          proxyDisplayName: describeCheckoutConversionProxyEntry(parsedEntry),
+          exitIp,
+          exitRegion,
+          exitSource: String(exit?.source || '').trim(),
+          exitEndpoint: String(exit?.endpoint || '').trim(),
+          targetEndpoint: String(reachability?.endpoint || CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0] || '').trim(),
+          diagnostics: summarizeCheckoutConversionProxyDiagnostics([
+            ...probeDiagnostics,
+            ...targetDiagnostics,
+          ], 4),
+        };
+      } finally {
+        if (snapshot?.applied) {
+          await restoreProxy(snapshot).catch(() => {});
+        }
+      }
+    }
+
+    async function maybeApplyCheckoutConversionProxy(state = {}) {
+      const proxyUrl = normalizeCheckoutConversionProxyUrl(state?.plusCheckoutConversionProxyUrl);
+      if (!proxyUrl) {
+        return null;
+      }
+      const applyProxy = typeof applyCheckoutScopedProxyFromUrl === 'function'
+        ? applyCheckoutScopedProxyFromUrl
+        : defaultApplyCheckoutScopedProxyFromUrl;
+      const snapshot = await applyProxy(proxyUrl, {
+        targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS,
+      });
+      const displayName = String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim();
+      await addLog(`步骤 6：已启用支付转换代理 ${displayName}，仅临时接管支付创建/转换链路。`, 'info');
+      return snapshot;
+    }
+
+    async function maybeRestoreCheckoutConversionProxy(snapshot = null) {
+      if (!snapshot?.applied) {
+        return;
+      }
+      const restoreProxy = typeof restoreCheckoutScopedProxySnapshot === 'function'
+        ? restoreCheckoutScopedProxySnapshot
+        : defaultRestoreCheckoutScopedProxySnapshot;
+      await restoreProxy(snapshot);
+      await addLog('步骤 6：支付转换代理已释放，后续步骤恢复原网络/原代理环境。', 'info');
     }
 
     async function openFreshChatGptTabForCheckoutCreate() {
@@ -1384,67 +1822,79 @@
 
     async function executePlusCheckoutCreate(state = {}) {
       const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
-      if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
-        await executeGpcCheckoutCreate(state);
-        return;
+      let checkoutScopedProxySnapshot = null;
+      try {
+        checkoutScopedProxySnapshot = await maybeApplyCheckoutConversionProxy(state);
+        if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+          await executeGpcCheckoutCreate(state);
+          return;
+        }
+
+        const paymentMethodLabel = getPlusPaymentMethodLabel(paymentMethod);
+        const checkoutModeLabel = getCheckoutModeLabel(state);
+        await addLog(`步骤 6：正在打开新的 ChatGPT 会话，准备创建${checkoutModeLabel}...`, 'info');
+        const tabId = await openFreshChatGptTabForCheckoutCreate();
+
+        await waitForTabCompleteUntilStopped(tabId);
+        await sleepWithStop(1000);
+        await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
+          inject: PLUS_CHECKOUT_INJECT_FILES,
+          injectSource: PLUS_CHECKOUT_SOURCE,
+          logMessage: '步骤 6：正在等待 ChatGPT 页面完成加载，再继续创建订阅页...',
+        });
+
+        const result = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
+          type: 'CREATE_PLUS_CHECKOUT',
+          source: 'background',
+          payload: { paymentMethod },
+        });
+
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        const targetCheckoutUrl = resolveCheckoutTargetUrl(result, paymentMethod);
+        if (!targetCheckoutUrl) {
+          throw new Error(`步骤 6：${checkoutModeLabel}未返回可用的订阅链接。`);
+        }
+
+        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+          await executeHostedCheckoutCreate(tabId, state, result);
+          return;
+        }
+
+        await addLog(`步骤 6：${checkoutModeLabel}已创建，正在打开订阅页面...`, 'ok');
+        await chrome.tabs.update(tabId, { url: targetCheckoutUrl, active: true });
+        await waitForTabCompleteUntilStopped(tabId);
+        await sleepWithStop(1000);
+        await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
+          inject: PLUS_CHECKOUT_INJECT_FILES,
+          injectSource: PLUS_CHECKOUT_SOURCE,
+          logMessage: '步骤 6：正在等待订阅页面完成加载...',
+        });
+
+        await setState({
+          plusCheckoutTabId: tabId,
+          plusCheckoutUrl: targetCheckoutUrl,
+          plusCheckoutCountry: result.country || 'DE',
+          plusCheckoutCurrency: result.currency || 'EUR',
+          plusCheckoutSource: '',
+        });
+
+        await addLog(`步骤 6：Plus Checkout 页面已就绪（${paymentMethodLabel} / ${result.country || 'DE'} ${result.currency || 'EUR'}），准备继续下一步。`, 'info');
+
+        await completeNodeFromBackground('plus-checkout-create', {
+          plusCheckoutCountry: result.country || 'DE',
+          plusCheckoutCurrency: result.currency || 'EUR',
+        });
+      } finally {
+        if (checkoutScopedProxySnapshot?.applied) {
+          try {
+            await maybeRestoreCheckoutConversionProxy(checkoutScopedProxySnapshot);
+          } catch (restoreError) {
+            await addLog(`步骤 6：支付转换代理释放失败：${restoreError?.message || String(restoreError || '未知错误')}`, 'warn');
+          }
+        }
       }
-
-      const paymentMethodLabel = getPlusPaymentMethodLabel(paymentMethod);
-      const checkoutModeLabel = getCheckoutModeLabel(state);
-      await addLog(`步骤 6：正在打开新的 ChatGPT 会话，准备创建${checkoutModeLabel}...`, 'info');
-      const tabId = await openFreshChatGptTabForCheckoutCreate();
-
-      await waitForTabCompleteUntilStopped(tabId);
-      await sleepWithStop(1000);
-      await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
-        inject: PLUS_CHECKOUT_INJECT_FILES,
-        injectSource: PLUS_CHECKOUT_SOURCE,
-        logMessage: '步骤 6：正在等待 ChatGPT 页面完成加载，再继续创建订阅页...',
-      });
-
-      const result = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
-        type: 'CREATE_PLUS_CHECKOUT',
-        source: 'background',
-        payload: { paymentMethod },
-      });
-
-      if (result?.error) {
-        throw new Error(result.error);
-      }
-      const targetCheckoutUrl = resolveCheckoutTargetUrl(result, paymentMethod);
-      if (!targetCheckoutUrl) {
-        throw new Error(`步骤 6：${checkoutModeLabel}未返回可用的订阅链接。`);
-      }
-
-      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
-        await executeHostedCheckoutCreate(tabId, state, result);
-        return;
-      }
-
-      await addLog(`步骤 6：${checkoutModeLabel}已创建，正在打开订阅页面...`, 'ok');
-      await chrome.tabs.update(tabId, { url: targetCheckoutUrl, active: true });
-      await waitForTabCompleteUntilStopped(tabId);
-      await sleepWithStop(1000);
-      await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
-        inject: PLUS_CHECKOUT_INJECT_FILES,
-        injectSource: PLUS_CHECKOUT_SOURCE,
-        logMessage: '步骤 6：正在等待订阅页面完成加载...',
-      });
-
-      await setState({
-        plusCheckoutTabId: tabId,
-        plusCheckoutUrl: targetCheckoutUrl,
-        plusCheckoutCountry: result.country || 'DE',
-        plusCheckoutCurrency: result.currency || 'EUR',
-        plusCheckoutSource: '',
-      });
-
-      await addLog(`步骤 6：Plus Checkout 页面已就绪（${paymentMethodLabel} / ${result.country || 'DE'} ${result.currency || 'EUR'}），准备继续下一步。`, 'info');
-
-      await completeNodeFromBackground('plus-checkout-create', {
-        plusCheckoutCountry: result.country || 'DE',
-        plusCheckoutCurrency: result.currency || 'EUR',
-      });
     }
 
     return {
@@ -1454,6 +1904,7 @@
       executePayPalHostedCard,
       executePayPalHostedCreateAccount,
       executePayPalHostedReview,
+      testCheckoutConversionProxy,
     };
   }
 

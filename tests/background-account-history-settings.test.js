@@ -238,6 +238,14 @@ return {
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'paypal-hosted'), 'paypal-hosted');
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'paypal'), 'paypal');
   assert.equal(api.normalizePersistentSettingValue('plusPaymentMethod', 'unknown'), 'paypal');
+  assert.equal(
+    api.normalizePersistentSettingValue('plusCheckoutConversionProxyUrl', ' socks5h://user:p%40ss@proxy.example:1080/path '),
+    'socks5h://user:p%40ss@proxy.example:1080'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('plusCheckoutConversionProxyUrl', ' ftp://proxy.example:21 '),
+    'ftp://proxy.example:21'
+  );
   assert.equal(api.normalizePersistentSettingValue('plusAccountAccessStrategy', 'sub2api_codex_session'), 'sub2api_codex_session');
   assert.equal(api.normalizePersistentSettingValue('plusAccountAccessStrategy', 'cpa_codex_session'), 'cpa_codex_session');
   assert.equal(api.normalizePersistentSettingValue('plusAccountAccessStrategy', 'unknown'), 'oauth');

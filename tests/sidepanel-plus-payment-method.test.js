@@ -250,6 +250,65 @@ return {
   assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, 'none');
 });
 
+test('sidepanel Plus UI shows checkout conversion proxy in Plus and Phone Plus modes', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('getRequestedPlusAccountAccessStrategy'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = { plusPaymentMethod: 'paypal' };
+let currentPlusPaymentMethod = 'paypal';
+let currentPlusAccountAccessStrategy = 'oauth';
+const inputPlusModeEnabled = { checked: true };
+const inputPhonePlusModeEnabled = { checked: false };
+const selectPlusPaymentMethod = { value: 'paypal', style: { display: 'none' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const rowPlusPaymentMethod = { style: { display: 'none' } };
+const rowPlusCheckoutConversionProxy = { style: { display: 'none' } };
+const rowPlusCheckoutConversionProxyTest = { style: { display: 'none' } };
+const rowPayPalAccount = { style: { display: 'none' } };
+${bundle}
+return {
+  updatePlusModeUI,
+  inputPlusModeEnabled,
+  inputPhonePlusModeEnabled,
+  rows: { rowPlusCheckoutConversionProxy, rowPlusCheckoutConversionProxyTest },
+};
+`)();
+
+  api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
+
+  api.inputPlusModeEnabled.checked = false;
+  api.inputPhonePlusModeEnabled.checked = true;
+  api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
+
+  api.inputPhonePlusModeEnabled.checked = false;
+  api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, 'none');
+  assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, 'none');
+});
+
 test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),

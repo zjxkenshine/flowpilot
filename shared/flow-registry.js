@@ -356,7 +356,13 @@
     'openai-plus': {
       id: 'openai-plus',
       label: 'Plus',
-      rowIds: ['row-plus-mode', 'row-plus-account-access-strategy', 'row-plus-payment-method'],
+      rowIds: [
+        'row-plus-mode',
+        'row-plus-account-access-strategy',
+        'row-plus-payment-method',
+        'row-plus-checkout-conversion-proxy',
+        'row-plus-checkout-conversion-proxy-test',
+      ],
     },
     'openai-phone': {
       id: 'openai-phone',

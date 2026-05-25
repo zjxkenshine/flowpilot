@@ -82,6 +82,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
+  'plusCheckoutConversionProxyUrl',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -99,6 +100,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutConversionProxyUrl: '',
   phoneVerificationEnabled: false,
   mailProvider: '163',
   ipProxyEnabled: false,
@@ -282,6 +284,20 @@ test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh
   assert.equal(payload.ipProxyPoolTargetCount, '25');
   assert.equal(payload.ipProxySwitchIpRoundCount, '3');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload persists Plus checkout conversion proxy into settings schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    plusCheckoutConversionProxyUrl: ' socks5h://user:pass@proxy.example:1080 ',
+  }, { fillDefaults: true });
+
+  assert.equal(payload.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(
+    payload.settingsState.flows.openai.plus.plusCheckoutConversionProxyUrl,
+    'socks5h://user:pass@proxy.example:1080'
+  );
 });
 
 test('buildPersistentSettingsPayload derives switch-IP round count from active service profile', () => {

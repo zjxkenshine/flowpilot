@@ -1386,6 +1386,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutConversionProxyUrl: '',
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
@@ -1566,6 +1567,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
+  'plusCheckoutConversionProxyUrl',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'plusHostedCheckoutOauthDelaySeconds',
@@ -3360,6 +3362,32 @@ function normalizePersistentSettingValue(key, value) {
       return normalizePlusPaymentMethod(value);
     case 'plusAccountAccessStrategy':
       return normalizePlusAccountAccessStrategy(value);
+    case 'plusCheckoutConversionProxyUrl': {
+      const rawValue = String(value || '').trim();
+      if (!rawValue) {
+        return '';
+      }
+      try {
+        const parsed = new URL(rawValue);
+        const protocol = String(parsed.protocol || '').replace(/:$/g, '').trim().toLowerCase();
+        if (!['http', 'https', 'socks4', 'socks5', 'socks5h'].includes(protocol)) {
+          return rawValue;
+        }
+        const host = String(parsed.hostname || '').trim();
+        const port = String(parsed.port || '').trim();
+        if (!host || !port) {
+          return rawValue;
+        }
+        const username = parsed.username ? decodeURIComponent(parsed.username) : '';
+        const password = parsed.password ? decodeURIComponent(parsed.password) : '';
+        const auth = username || password
+          ? `${encodeURIComponent(username)}${parsed.password || password ? `:${encodeURIComponent(password)}` : ''}@`
+          : '';
+        return `${protocol}://${auth}${host}:${port}`;
+      } catch {
+        return rawValue;
+      }
+    }
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
@@ -4020,6 +4048,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
+  assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -14521,6 +14550,15 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   throwIfStopped,
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
+  detectProxyExitInfoByPageContext,
+  detectProxyExitInfoByBackgroundFetch,
+  detectIpProxyTargetReachabilityByPageContext,
+  buildProbeDiagnosticsSummary,
+  buildTargetReachabilityFailureMessage,
+  installIpProxyAuthListener,
+  installIpProxyErrorListener,
+  getCurrentIpProxyAuthEntry,
+  setCurrentIpProxyAuthEntry,
 });
 const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?.createPlusCheckoutBillingExecutor({
   addLog,
@@ -14978,6 +15016,12 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   submitFlowContribution: (...args) => contributionOAuthManager?.submitContributionCallback?.(...args),
   syncHotmailAccounts,
   syncPayPalAccounts,
+  testPlusCheckoutConversionProxy: (...args) => {
+    if (typeof plusCheckoutCreateExecutor?.testCheckoutConversionProxy !== 'function') {
+      throw new Error('支付转换代理测试能力尚未接入。');
+    }
+    return plusCheckoutCreateExecutor.testCheckoutConversionProxy(...args);
+  },
   deleteMail2925Account,
   deleteMail2925Accounts,
   testHotmailAccountMailAccess,

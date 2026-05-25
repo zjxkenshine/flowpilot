@@ -1494,3 +1494,64 @@ test('CLEAR_ACCOUNT_BOOK delegates to background clear helper and returns cleare
   assert.equal(response.clearedCount, 3);
   assert.equal(calls.length, 1);
 });
+
+test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates proxy test when auto-run is idle', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const calls = [];
+
+  const router = api.createMessageRouter({
+    getState: async () => ({
+      autoRunning: false,
+      plusCheckoutConversionProxyUrl: 'http://saved.proxy:8080',
+    }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+    testPlusCheckoutConversionProxy: async (options) => {
+      calls.push(options);
+      return {
+        ok: true,
+        exitIp: '203.0.113.55',
+        exitRegion: 'US',
+      };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
+    source: 'sidepanel',
+    payload: { proxyUrl: 'socks5h://proxy.example:1080' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.exitIp, '203.0.113.55');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].proxyUrl, 'socks5h://proxy.example:1080');
+  assert.equal(calls[0].state.plusCheckoutConversionProxyUrl, 'http://saved.proxy:8080');
+});
+
+test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY is rejected while auto-run is locked', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let called = false;
+
+  const router = api.createMessageRouter({
+    getState: async () => ({ autoRunning: true }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+    testPlusCheckoutConversionProxy: async () => {
+      called = true;
+      return { ok: true };
+    },
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
+      source: 'sidepanel',
+      payload: { proxyUrl: 'http://proxy.example:8080' },
+    }, {}),
+    /自动流程运行中/
+  );
+  assert.equal(called, false);
+});

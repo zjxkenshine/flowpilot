@@ -36,7 +36,13 @@ test('flow registry exposes canonical flow and target metadata', () => {
   );
   assert.deepEqual(
     flowRegistry.getSettingsGroupDefinition('openai-plus')?.rowIds,
-    ['row-plus-mode', 'row-plus-account-access-strategy', 'row-plus-payment-method']
+    [
+      'row-plus-mode',
+      'row-plus-account-access-strategy',
+      'row-plus-payment-method',
+      'row-plus-checkout-conversion-proxy',
+      'row-plus-checkout-conversion-proxy-test',
+    ]
   );
   assert.equal(flowRegistry.getPublicationTargetDefinition('kiro', 'kiro-rs')?.label, 'kiro.rs');
   assert.equal(flowRegistry.getFlowCapabilities('openai').supportsAccountContribution, true);
@@ -144,4 +150,16 @@ test('settings schema preserves CPA session strategy in canonical state and read
 
   assert.equal(normalized.flows.openai.plus.plusAccountAccessStrategy, 'cpa_codex_session');
   assert.equal(view.plusAccountAccessStrategy, 'cpa_codex_session');
+});
+
+test('settings schema preserves Plus checkout conversion proxy in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const normalized = schema.normalizeSettingsState({
+    plusCheckoutConversionProxyUrl: ' socks5h://user:pass@proxy.example:1080 ',
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.flows.openai.plus.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(view.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
 });
