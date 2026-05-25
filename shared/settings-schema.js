@@ -109,6 +109,8 @@
               plusPaymentMethod: 'paypal',
               plusHostedCheckoutIsFinalStep: true,
               plusAccountAccessStrategy: 'oauth',
+              plusCheckoutCreatePreWaitSeconds: 10,
+              plusCheckoutOpenStableWaitSeconds: 20,
               plusCheckoutConversionProxyUrl: '',
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
@@ -335,6 +337,22 @@
                 ?? nested?.flows?.openai?.plus?.plusAccountAccessStrategy
                 ?? defaults.flows.openai.plus.plusAccountAccessStrategy
               ),
+              plusCheckoutCreatePreWaitSeconds: (() => {
+                const numeric = Number(
+                  input?.plusCheckoutCreatePreWaitSeconds
+                  ?? nested?.flows?.openai?.plus?.plusCheckoutCreatePreWaitSeconds
+                  ?? defaults.flows.openai.plus.plusCheckoutCreatePreWaitSeconds
+                );
+                return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusCheckoutCreatePreWaitSeconds)));
+              })(),
+              plusCheckoutOpenStableWaitSeconds: (() => {
+                const numeric = Number(
+                  input?.plusCheckoutOpenStableWaitSeconds
+                  ?? nested?.flows?.openai?.plus?.plusCheckoutOpenStableWaitSeconds
+                  ?? defaults.flows.openai.plus.plusCheckoutOpenStableWaitSeconds
+                );
+                return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusCheckoutOpenStableWaitSeconds)));
+              })(),
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl
@@ -509,6 +527,8 @@
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
+      next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
+      next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;

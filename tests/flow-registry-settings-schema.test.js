@@ -40,6 +40,8 @@ test('flow registry exposes canonical flow and target metadata', () => {
       'row-plus-mode',
       'row-plus-account-access-strategy',
       'row-plus-payment-method',
+      'row-plus-checkout-create-pre-wait',
+      'row-plus-checkout-open-stable-wait',
       'row-plus-checkout-conversion-proxy',
       'row-plus-checkout-conversion-proxy-test',
     ]
@@ -162,4 +164,19 @@ test('settings schema preserves Plus checkout conversion proxy in canonical stat
 
   assert.equal(normalized.flows.openai.plus.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
   assert.equal(view.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+});
+
+test('settings schema preserves Plus checkout wait settings in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const normalized = schema.normalizeSettingsState({
+    plusCheckoutCreatePreWaitSeconds: ' 15.9 ',
+    plusCheckoutOpenStableWaitSeconds: ' 28.4 ',
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 15);
+  assert.equal(normalized.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 28);
+  assert.equal(view.plusCheckoutCreatePreWaitSeconds, 15);
+  assert.equal(view.plusCheckoutOpenStableWaitSeconds, 28);
 });

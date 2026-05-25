@@ -82,6 +82,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
+  'plusCheckoutCreatePreWaitSeconds',
+  'plusCheckoutOpenStableWaitSeconds',
   'plusCheckoutConversionProxyUrl',
   'mailProvider',
   'ipProxyEnabled',
@@ -100,6 +102,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutCreatePreWaitSeconds: 10,
+  plusCheckoutOpenStableWaitSeconds: 20,
   plusCheckoutConversionProxyUrl: '',
   phoneVerificationEnabled: false,
   mailProvider: '163',
@@ -298,6 +302,20 @@ test('buildPersistentSettingsPayload persists Plus checkout conversion proxy int
     payload.settingsState.flows.openai.plus.plusCheckoutConversionProxyUrl,
     'socks5h://user:pass@proxy.example:1080'
   );
+});
+
+test('buildPersistentSettingsPayload persists Plus checkout wait settings into settings schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    plusCheckoutCreatePreWaitSeconds: ' 16.8 ',
+    plusCheckoutOpenStableWaitSeconds: ' 29.2 ',
+  }, { fillDefaults: true });
+
+  assert.equal(payload.plusCheckoutCreatePreWaitSeconds, 16);
+  assert.equal(payload.plusCheckoutOpenStableWaitSeconds, 29);
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 16);
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 29);
 });
 
 test('buildPersistentSettingsPayload derives switch-IP round count from active service profile', () => {

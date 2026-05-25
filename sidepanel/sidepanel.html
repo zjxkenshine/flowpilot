@@ -351,6 +351,22 @@
           <span class="setting-caption" id="plus-payment-method-caption">PayPal 订阅链路</span>
         </div>
       </div>
+      <div class="data-row" id="row-plus-checkout-create-pre-wait" style="display:none;">
+        <span class="data-label">创建前稳定</span>
+        <div class="data-inline">
+          <input type="number" id="input-plus-checkout-create-pre-wait-seconds" class="data-input auto-delay-input"
+            value="10" min="0" max="120" step="1" />
+          <span class="setting-caption">自动运行第 6 步前固定等待；默认 10 秒</span>
+        </div>
+      </div>
+      <div class="data-row" id="row-plus-checkout-open-stable-wait" style="display:none;">
+        <span class="data-label">打开后稳定</span>
+        <div class="data-inline">
+          <input type="number" id="input-plus-checkout-open-stable-wait-seconds" class="data-input auto-delay-input"
+            value="20" min="0" max="120" step="1" />
+          <span class="setting-caption">打开传统 Plus / GoPay 订阅页后再等待页面稳定；默认 20 秒</span>
+        </div>
+      </div>
       <div class="data-row" id="row-plus-checkout-conversion-proxy" style="display:none;">
         <span class="data-label">支付转换代理</span>
         <input type="text" id="input-plus-checkout-conversion-proxy" class="data-input mono"

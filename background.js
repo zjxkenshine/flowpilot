@@ -789,6 +789,8 @@ const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
+const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
+const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 const PERSISTENT_ALIAS_STATE_KEYS = [
@@ -1415,6 +1417,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusHostedCheckoutIsFinalStep: true,
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutCreatePreWaitSeconds: DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
+  plusCheckoutOpenStableWaitSeconds: DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
   plusCheckoutConversionProxyUrl: '',
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutVerificationUrl: '',
@@ -1602,6 +1606,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusPaymentMethod',
   'plusHostedCheckoutIsFinalStep',
   'plusAccountAccessStrategy',
+  'plusCheckoutCreatePreWaitSeconds',
+  'plusCheckoutOpenStableWaitSeconds',
   'plusCheckoutConversionProxyUrl',
   'hostedCheckoutVerificationPopupDelaySeconds',
   'hostedCheckoutVerificationUrl',
@@ -3409,6 +3415,14 @@ function normalizePersistentSettingValue(key, value) {
       return Boolean(value);
     case 'plusAccountAccessStrategy':
       return normalizePlusAccountAccessStrategy(value);
+    case 'plusCheckoutCreatePreWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS)));
+    }
+    case 'plusCheckoutOpenStableWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS)));
+    }
     case 'plusCheckoutConversionProxyUrl': {
       const rawValue = String(value || '').trim();
       if (!rawValue) {
@@ -3949,6 +3963,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
         };
       })
       .filter(Boolean);
+    payload.hostedCheckoutSmsPoolText = poolEntries
+      .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+      .join('\n');
     const allowedKeys = new Set(poolEntries.map((entry) => entry.key));
     if (Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutSmsPoolUsage')) {
       payload.hostedCheckoutSmsPoolUsage = Object.fromEntries(
@@ -4218,7 +4235,13 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusHostedCheckoutIsFinalStep', ['flows', 'openai', 'plus', 'plusHostedCheckoutIsFinalStep']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
+  assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
+  assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
+  assignIfUpdated('hostedCheckoutVerificationPopupDelaySeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPopupDelaySeconds']);
+  assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
+  assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
+  assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -11480,7 +11503,7 @@ const STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY = new Map([
   ['gopay-subscription-confirm', 1800000],
 ]);
 const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([
-  ['plus-checkout-create', 20000],
+  ['plus-checkout-create', DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS * 1000],
 ]);
 
 function waitForNodeComplete(nodeId, timeoutMs = 120000) {
@@ -11572,6 +11595,13 @@ function doesStepUseCompletionSignal(step, state = {}) {
 
 function getAutoRunPreExecutionDelayMsForNode(nodeId, state = {}) {
   const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  if ((executionKey || nodeId) === 'plus-checkout-create') {
+    const numeric = Number(state?.plusCheckoutCreatePreWaitSeconds);
+    const waitSeconds = Number.isFinite(numeric)
+      ? Math.min(120, Math.max(0, Math.floor(numeric)))
+      : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS;
+    return waitSeconds * 1000;
+  }
   return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(executionKey || nodeId) || 0;
 }
 

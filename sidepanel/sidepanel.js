@@ -245,6 +245,10 @@ const rowPhonePlusMode = document.getElementById('row-phone-plus-mode');
 const inputPhonePlusModeEnabled = document.getElementById('input-phone-plus-mode-enabled');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
+const rowPlusCheckoutCreatePreWait = document.getElementById('row-plus-checkout-create-pre-wait');
+const inputPlusCheckoutCreatePreWaitSeconds = document.getElementById('input-plus-checkout-create-pre-wait-seconds');
+const rowPlusCheckoutOpenStableWait = document.getElementById('row-plus-checkout-open-stable-wait');
+const inputPlusCheckoutOpenStableWaitSeconds = document.getElementById('input-plus-checkout-open-stable-wait-seconds');
 const btnGpcCardKeyPurchase = document.getElementById('btn-gpc-card-key-purchase');
 const plusPaymentMethodCaption = document.getElementById('plus-payment-method-caption');
 const rowPlusAccountAccessStrategy = document.getElementById('row-plus-account-access-strategy');
@@ -642,6 +646,8 @@ const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
 const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
+const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
+const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
@@ -3339,6 +3345,22 @@ function normalizePlusHostedCheckoutOauthDelaySeconds(value) {
   return Math.min(120, Math.max(0, Math.floor(numeric)));
 }
 
+function normalizePlusCheckoutCreatePreWaitSeconds(value) {
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS;
+  }
+  return Math.min(120, Math.max(0, Math.floor(numeric)));
+}
+
+function normalizePlusCheckoutOpenStableWaitSeconds(value) {
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS;
+  }
+  return Math.min(120, Math.max(0, Math.floor(numeric)));
+}
+
 function normalizeHostedCheckoutVerificationPopupDelaySeconds(value) {
   const numeric = Number(String(value ?? '').trim());
   if (!Number.isFinite(numeric)) {
@@ -5081,6 +5103,12 @@ function collectSettingsPayload() {
     plusAccountAccessStrategy: effectivePhonePlusModeEnabled
       ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
       : requestedPlusAccountAccessStrategy,
+    plusCheckoutCreatePreWaitSeconds: typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds
+      ? normalizePlusCheckoutCreatePreWaitSeconds(inputPlusCheckoutCreatePreWaitSeconds.value)
+      : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
+    plusCheckoutOpenStableWaitSeconds: typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds
+      ? normalizePlusCheckoutOpenStableWaitSeconds(inputPlusCheckoutOpenStableWaitSeconds.value)
+      : DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
     hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
       ? normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
       : DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS,
@@ -10272,6 +10300,8 @@ function updatePlusModeUI() {
     row.style.display = enabled ? '' : 'none';
   });
   [
+    typeof rowPlusCheckoutCreatePreWait !== 'undefined' ? rowPlusCheckoutCreatePreWait : null,
+    typeof rowPlusCheckoutOpenStableWait !== 'undefined' ? rowPlusCheckoutOpenStableWait : null,
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
     typeof rowPlusCheckoutConversionProxyRuntime !== 'undefined' ? rowPlusCheckoutConversionProxyRuntime : null,
@@ -11606,6 +11636,16 @@ function applySettingsState(state) {
   if (typeof inputPlusHostedCheckoutOauthDelaySeconds !== 'undefined' && inputPlusHostedCheckoutOauthDelaySeconds) {
     inputPlusHostedCheckoutOauthDelaySeconds.value = String(
       normalizePlusHostedCheckoutOauthDelaySeconds(state?.plusHostedCheckoutOauthDelaySeconds)
+    );
+  }
+  if (typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds) {
+    inputPlusCheckoutCreatePreWaitSeconds.value = String(
+      normalizePlusCheckoutCreatePreWaitSeconds(state?.plusCheckoutCreatePreWaitSeconds)
+    );
+  }
+  if (typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds) {
+    inputPlusCheckoutOpenStableWaitSeconds.value = String(
+      normalizePlusCheckoutOpenStableWaitSeconds(state?.plusCheckoutOpenStableWaitSeconds)
     );
   }
   validateHostedCheckoutContactConfig();
@@ -15265,7 +15305,9 @@ async function exportSettingsFile() {
       throw new Error('\u672a\u751f\u6210\u53ef\u4e0b\u8f7d\u7684\u914d\u7f6e\u6587\u4ef6\u3002');
     }
 
-    downloadTextFile(response.fileContent, response.fileName);
+    downloadTextFile(response.fileContent, response.fileName, 'application/json;charset=utf-8', {
+      prependUtf8Bom: true,
+    });
     showToast('\u914d\u7f6e\u5df2\u5bfc\u51fa\uff1a' + response.fileName, 'success', 2200);
   } catch (err) {
     showToast('\u5bfc\u51fa\u914d\u7f6e\u5931\u8d25\uff1a' + err.message, 'error');
@@ -15285,10 +15327,11 @@ async function importSettingsFromFile(file) {
   try {
     await settlePendingSettingsBeforeImport();
     const rawText = await file.text();
+    const normalizedText = String(rawText || '').replace(/^\uFEFF/, '');
 
     let parsedConfig = null;
     try {
-      parsedConfig = JSON.parse(rawText);
+      parsedConfig = JSON.parse(normalizedText);
     } catch {
       throw new Error('\u914d\u7f6e\u6587\u4ef6\u4e0d\u662f\u6709\u6548\u7684 JSON\u3002');
     }
@@ -16060,6 +16103,21 @@ inputVpsPassword.addEventListener('blur', () => {
   input?.addEventListener('blur', () => {
     if (input === inputPlusHostedCheckoutOauthDelaySeconds) {
       input.value = String(normalizePlusHostedCheckoutOauthDelaySeconds(input.value));
+    }
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
+[inputPlusCheckoutCreatePreWaitSeconds, inputPlusCheckoutOpenStableWaitSeconds].forEach((input) => {
+  input?.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('blur', () => {
+    if (input === inputPlusCheckoutCreatePreWaitSeconds) {
+      input.value = String(normalizePlusCheckoutCreatePreWaitSeconds(input.value));
+    } else if (input === inputPlusCheckoutOpenStableWaitSeconds) {
+      input.value = String(normalizePlusCheckoutOpenStableWaitSeconds(input.value));
     }
     saveSettings({ silent: true }).catch(() => { });
   });
@@ -18738,6 +18796,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizeHostedCheckoutVerificationPopupDelaySeconds(message.payload.hostedCheckoutVerificationPopupDelaySeconds)
         );
       }
+      if (message.payload.plusCheckoutCreatePreWaitSeconds !== undefined && inputPlusCheckoutCreatePreWaitSeconds) {
+        inputPlusCheckoutCreatePreWaitSeconds.value = String(
+          normalizePlusCheckoutCreatePreWaitSeconds(message.payload.plusCheckoutCreatePreWaitSeconds)
+        );
+      }
+      if (message.payload.plusCheckoutOpenStableWaitSeconds !== undefined && inputPlusCheckoutOpenStableWaitSeconds) {
+        inputPlusCheckoutOpenStableWaitSeconds.value = String(
+          normalizePlusCheckoutOpenStableWaitSeconds(message.payload.plusCheckoutOpenStableWaitSeconds)
+        );
+      }
       if (message.payload.hostedCheckoutVerificationUrl !== undefined && inputHostedCheckoutVerificationUrl) {
         inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
         setHostedCheckoutManualCodeDisplay('未获取');
@@ -19033,6 +19101,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           selectPlusAccountAccessStrategy.value = normalizePlusAccountAccessStrategyUiValue(currentPlusAccountAccessStrategy);
         }
       }
+      if (message.payload.plusCheckoutCreatePreWaitSeconds !== undefined && inputPlusCheckoutCreatePreWaitSeconds) {
+        inputPlusCheckoutCreatePreWaitSeconds.value = String(
+          normalizePlusCheckoutCreatePreWaitSeconds(message.payload.plusCheckoutCreatePreWaitSeconds)
+        );
+      }
+      if (message.payload.plusCheckoutOpenStableWaitSeconds !== undefined && inputPlusCheckoutOpenStableWaitSeconds) {
+        inputPlusCheckoutOpenStableWaitSeconds.value = String(
+          normalizePlusCheckoutOpenStableWaitSeconds(message.payload.plusCheckoutOpenStableWaitSeconds)
+        );
+      }
       if (message.payload.plusCheckoutConversionProxyUrl !== undefined && inputPlusCheckoutConversionProxy) {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
@@ -19069,6 +19147,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.phonePlusModeEnabled !== undefined
         || message.payload.plusPaymentMethod !== undefined
         || message.payload.plusAccountAccessStrategy !== undefined
+        || message.payload.plusCheckoutCreatePreWaitSeconds !== undefined
+        || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
         || message.payload.gopayHelperPhoneMode !== undefined
         || message.payload.gopayHelperAutoModeEnabled !== undefined

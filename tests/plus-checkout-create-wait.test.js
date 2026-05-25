@@ -189,7 +189,7 @@ function createGpcTaskResponse(overrides = {}) {
   };
 }
 
-test('Plus checkout create does not wait 20 seconds after opening checkout page', async () => {
+test('Plus checkout create waits 20 seconds after opening checkout page by default', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info') => {
@@ -246,17 +246,64 @@ test('Plus checkout create does not wait 20 seconds after opening checkout page'
   );
 
   const sleepEvents = events.filter((event) => event.type === 'sleep');
-  assert.deepStrictEqual(sleepEvents.map((event) => event.ms), [1000, 1000]);
+  assert.deepStrictEqual(sleepEvents.map((event) => event.ms), [1000, 20000]);
   assert.deepStrictEqual(
     events.find((event) => event.type === 'tab-message')?.message?.payload,
     { paymentMethod: 'paypal', hostedCheckoutFinalStep: false }
+  );
+  assert.equal(
+    events.some((event) => event.type === 'log' && /订阅页面已打开，固定等待 20 秒让页面稳定/.test(event.message)),
+    true
   );
 
   const completeIndex = events.findIndex((event) => event.type === 'complete');
   const readyLogIndex = events.findIndex((event) => event.type === 'log' && /已就绪/.test(event.message));
   assert.ok(readyLogIndex > -1);
   assert.ok(completeIndex > readyLogIndex);
-  assert.equal(events.some((event) => event.type === 'sleep' && event.ms === 20000), false);
+  assert.equal(events.some((event) => event.type === 'sleep' && event.ms === 20000), true);
+});
+
+test('Plus checkout create uses configured checkout open stable wait seconds', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 88 }),
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {
+      events.push({ type: 'ready' });
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
+      country: 'US',
+      currency: 'USD',
+    }),
+    setState: async () => {},
+    sleepWithStop: async (ms) => {
+      events.push({ type: 'sleep', ms });
+    },
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusCheckoutOpenStableWaitSeconds: 12.8,
+  });
+
+  assert.deepStrictEqual(
+    events.filter((event) => event.type === 'sleep').map((event) => event.ms),
+    [1000, 12000]
+  );
+  assert.equal(
+    events.some((event) => event.type === 'log' && /订阅页面已打开，固定等待 12 秒让页面稳定/.test(event.message)),
+    true
+  );
 });
 
 test('GoPay plus checkout create forwards gopay payment method to the checkout content script', async () => {

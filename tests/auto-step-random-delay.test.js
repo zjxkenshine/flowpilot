@@ -44,8 +44,9 @@ function extractFunction(name) {
 const bundle = [
   'const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;',
   'const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;',
+  'const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;',
   'const PERSISTED_SETTING_DEFAULTS = { autoStepDelaySeconds: null };',
-  "const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([['plus-checkout-create', 20000]]);",
+  "const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([['plus-checkout-create', DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS * 1000]]);",
   'function getStepDefinitionForState(step, state = {}) { return state.definitions?.[step] || null; }',
   'function getNodeIdByStepForState(step, state = {}) { return String(getStepDefinitionForState(step, state)?.key || step || "").trim(); }',
   'function getNodeDefinitionForState(nodeId, state = {}) { return Object.values(state.definitions || {}).find((definition) => String(definition?.key || "").trim() === String(nodeId || "").trim()) || { executeKey: String(nodeId || "").trim() }; }',
@@ -137,8 +138,19 @@ assert.strictEqual(
       6: { key: 'plus-checkout-create' },
     },
   }),
-  20000,
+  10000,
   'Plus checkout create should wait before step execution'
+);
+
+assert.strictEqual(
+  api.getAutoRunPreExecutionDelayMs(6, {
+    plusCheckoutCreatePreWaitSeconds: 17.8,
+    definitions: {
+      6: { key: 'plus-checkout-create' },
+    },
+  }),
+  17000,
+  'custom Plus checkout create pre-wait should override the default auto-run delay'
 );
 
 assert.strictEqual(

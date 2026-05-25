@@ -347,6 +347,8 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_sessio
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const rowPlusPaymentMethod = { style: { display: 'none' } };
+const rowPlusCheckoutCreatePreWait = { style: { display: 'none' } };
+const rowPlusCheckoutOpenStableWait = { style: { display: 'none' } };
 const rowPlusCheckoutConversionProxy = { style: { display: 'none' } };
 const rowPlusCheckoutConversionProxyTest = { style: { display: 'none' } };
 const rowPlusCheckoutConversionProxyRuntime = { style: { display: 'none' } };
@@ -357,11 +359,13 @@ return {
   updatePlusModeUI,
   inputPlusModeEnabled,
   inputPhonePlusModeEnabled,
-  rows: { rowPlusCheckoutConversionProxy, rowPlusCheckoutConversionProxyTest, rowPlusCheckoutConversionProxyRuntime },
+  rows: { rowPlusCheckoutCreatePreWait, rowPlusCheckoutOpenStableWait, rowPlusCheckoutConversionProxy, rowPlusCheckoutConversionProxyTest, rowPlusCheckoutConversionProxyRuntime },
 };
 `)();
 
   api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutCreatePreWait.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutOpenStableWait.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, '');
@@ -369,12 +373,16 @@ return {
   api.inputPlusModeEnabled.checked = false;
   api.inputPhonePlusModeEnabled.checked = true;
   api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutCreatePreWait.style.display, '');
+  assert.equal(api.rows.rowPlusCheckoutOpenStableWait.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, '');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, '');
 
   api.inputPhonePlusModeEnabled.checked = false;
   api.updatePlusModeUI();
+  assert.equal(api.rows.rowPlusCheckoutCreatePreWait.style.display, 'none');
+  assert.equal(api.rows.rowPlusCheckoutOpenStableWait.style.display, 'none');
   assert.equal(api.rows.rowPlusCheckoutConversionProxy.style.display, 'none');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyTest.style.display, 'none');
   assert.equal(api.rows.rowPlusCheckoutConversionProxyRuntime.style.display, 'none');
@@ -433,6 +441,29 @@ return {
   api.renderPlusCheckoutConversionProxyRuntimeStatus();
   assert.equal(api.getText(), '当前生效：http://proxy-a.example:8080；待切换：socks5h://proxy-b.example:1080');
   assert.equal(api.hasClass('state-pending'), true);
+});
+
+test('sidepanel normalizes Plus checkout wait settings to bounded integer seconds', () => {
+  const bundle = [
+    extractFunction('normalizePlusCheckoutCreatePreWaitSeconds'),
+    extractFunction('normalizePlusCheckoutOpenStableWaitSeconds'),
+  ].join('\n');
+
+  const api = new Function(`
+const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
+const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
+${bundle}
+return {
+  normalizePlusCheckoutCreatePreWaitSeconds,
+  normalizePlusCheckoutOpenStableWaitSeconds,
+};
+`)();
+
+  assert.equal(api.normalizePlusCheckoutCreatePreWaitSeconds(' 15.9 '), 15);
+  assert.equal(api.normalizePlusCheckoutCreatePreWaitSeconds('abc'), 10);
+  assert.equal(api.normalizePlusCheckoutCreatePreWaitSeconds(''), 0);
+  assert.equal(api.normalizePlusCheckoutOpenStableWaitSeconds(' 28.7 '), 28);
+  assert.equal(api.normalizePlusCheckoutOpenStableWaitSeconds('-5'), 0);
 });
 
 test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {

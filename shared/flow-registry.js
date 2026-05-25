@@ -360,6 +360,8 @@
         'row-plus-mode',
         'row-plus-account-access-strategy',
         'row-plus-payment-method',
+        'row-plus-checkout-create-pre-wait',
+        'row-plus-checkout-open-stable-wait',
         'row-plus-checkout-conversion-proxy',
         'row-plus-checkout-conversion-proxy-test',
       ],

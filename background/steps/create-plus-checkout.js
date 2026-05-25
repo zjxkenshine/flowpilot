@@ -2189,7 +2189,17 @@
       await addLog(`步骤 6：${checkoutModeLabel} 已创建，正在打开订阅页面...`, 'ok');
       await chrome.tabs.update(tabId, { url: targetCheckoutUrl, active: true });
       await waitForTabCompleteUntilStopped(tabId);
-      await sleepWithStop(1000);
+      const openStableWaitSeconds = (() => {
+        const numeric = Number(state?.plusCheckoutOpenStableWaitSeconds);
+        if (!Number.isFinite(numeric)) {
+          return 20;
+        }
+        return Math.min(120, Math.max(0, Math.floor(numeric)));
+      })();
+      if (openStableWaitSeconds > 0) {
+        await addLog(`步骤 6：订阅页面已打开，固定等待 ${openStableWaitSeconds} 秒让页面稳定...`, 'info');
+        await sleepWithStop(openStableWaitSeconds * 1000);
+      }
       await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
         inject: PLUS_CHECKOUT_INJECT_FILES,
         injectSource: PLUS_CHECKOUT_SOURCE,
