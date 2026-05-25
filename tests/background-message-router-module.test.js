@@ -899,6 +899,16 @@ function createPayPalHostedGenericErrorRouterHarness(overrides = {}) {
     plusManualConfirmationTitle: 'PayPal Checkout 异常',
     plusManualConfirmationMessage: 'Things do not appear to be working.',
     currentNodeId: 'plus-checkout-create',
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutConversionProxySession: {
+      active: true,
+      flowType: 'paypal-hosted',
+      releaseNodeKey: 'paypal-hosted-review',
+      appliedStepKey: 'paypal-hosted-openai-checkout',
+      displayName: 'socks5://proxy.example:1080',
+      snapshot: { applied: true },
+      appliedAt: 1,
+    },
     nodeStatuses: {
       'plus-checkout-create': 'failed',
       'paypal-hosted-email': 'pending',
@@ -909,6 +919,14 @@ function createPayPalHostedGenericErrorRouterHarness(overrides = {}) {
   const router = api.createMessageRouter({
     addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
     broadcastDataUpdate: (payload) => events.push({ type: 'broadcast', payload }),
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => state.plusCheckoutConversionProxySession || null,
+      restoreSession: async (session) => {
+        events.push({ type: 'restoreHostedCheckoutProxySession', session });
+        state = { ...state, plusCheckoutConversionProxySession: null };
+        return true;
+      },
+    },
     chrome: {
       tabs: {
         create: async (payload) => {
@@ -973,6 +991,10 @@ test('RESOLVE_PLUS_MANUAL_CONFIRMATION retry restarts Plus checkout after PayPal
   assert.equal(harness.getState().plusManualConfirmationPending, false);
   assert.equal(harness.events.some((event) => event.type === 'clearStopRequest'), true);
   assert.deepStrictEqual(
+    harness.events.find((event) => event.type === 'restoreHostedCheckoutProxySession')?.session?.flowType,
+    'paypal-hosted'
+  );
+  assert.deepStrictEqual(
     harness.events.find((event) => event.type === 'invalidateDownstreamAfterStepRestart'),
     {
       type: 'invalidateDownstreamAfterStepRestart',
@@ -980,6 +1002,30 @@ test('RESOLVE_PLUS_MANUAL_CONFIRMATION retry restarts Plus checkout after PayPal
       options: { logLabel: 'PayPal genericError 后重试 Plus Checkout' },
     }
   );
+  assert.deepStrictEqual(
+    harness.events.find((event) => event.type === 'executeNode'),
+    { type: 'executeNode', nodeId: 'plus-checkout-create' }
+  );
+});
+
+test('RESOLVE_PLUS_MANUAL_CONFIRMATION retry skips hosted proxy cleanup when session is absent', async () => {
+  const harness = createPayPalHostedGenericErrorRouterHarness({
+    state: {
+      plusCheckoutConversionProxySession: null,
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'RESOLVE_PLUS_MANUAL_CONFIRMATION',
+    payload: {
+      requestId: 'paypal-hosted-generic-error-req',
+      action: 'retry',
+      confirmed: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.events.some((event) => event.type === 'restoreHostedCheckoutProxySession'), false);
   assert.deepStrictEqual(
     harness.events.find((event) => event.type === 'executeNode'),
     { type: 'executeNode', nodeId: 'plus-checkout-create' }

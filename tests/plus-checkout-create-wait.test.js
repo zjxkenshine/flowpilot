@@ -4,11 +4,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('background/steps/create-plus-checkout.js', 'utf8');
+const checkoutConversionProxySource = fs.readFileSync('background/checkout-conversion-proxy.js', 'utf8');
 const plusCheckoutSource = fs.readFileSync('content/plus-checkout.js', 'utf8');
 const gopayUtilsSource = fs.readFileSync('gopay-utils.js', 'utf8');
 const globalScope = {};
 new Function('self', `${gopayUtilsSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
+const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 
 function createCheckoutContentHarness() {
   const checkoutEvents = [];
@@ -288,28 +290,50 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
   assert.deepStrictEqual(events[0]?.payload, { paymentMethod: 'gopay', hostedCheckoutFinalStep: false });
 });
 
-test('Plus checkout create applies and restores conversion proxy around payment conversion', async () => {
+test('PayPal hosted checkout create applies conversion proxy before hosted payment conversion', async () => {
   const events = [];
+  let currentUrl = 'https://chatgpt.com/';
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info') => {
       events.push({ type: 'log', message, level });
     },
-    applyCheckoutScopedProxyFromUrl: async (proxyUrl, options = {}) => {
-      events.push({ type: 'proxy-apply', proxyUrl, options });
-      return { applied: true, displayName: 'socks5://proxy.example:1080' };
-    },
-    restoreCheckoutScopedProxySnapshot: async (snapshot) => {
-      events.push({ type: 'proxy-restore', snapshot });
+    checkoutConversionProxyManager: {
+      applySessionFromState: async (state, options = {}) => {
+        events.push({ type: 'proxy-apply', proxyUrl: state.plusCheckoutConversionProxyUrl, options });
+        return {
+          active: true,
+          flowType: options.flowType,
+          releaseNodeKey: options.releaseNodeKey,
+          appliedStepKey: options.appliedStepKey,
+          displayName: 'socks5://proxy.example:1080',
+          snapshot: { applied: true },
+        };
+      },
+      getStoredSession: async () => ({
+        active: true,
+        flowType: 'paypal-hosted',
+        releaseNodeKey: 'paypal-hosted-review',
+        appliedStepKey: 'paypal-hosted-openai-checkout',
+        displayName: 'socks5://proxy.example:1080',
+        snapshot: { applied: true },
+      }),
+      restoreSession: async (session) => {
+        events.push({ type: 'proxy-restore', snapshot: session?.snapshot || null });
+        return true;
+      },
     },
     chrome: {
       tabs: {
         create: async (payload) => {
           events.push({ type: 'tab-create', payload });
-          return { id: 42 };
+          return { id: 42, url: payload.url, status: 'complete' };
         },
         update: async (tabId, payload) => {
+          currentUrl = payload.url;
           events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: currentUrl, status: 'complete' };
         },
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
       },
     },
     completeNodeFromBackground: async (step, payload) => {
@@ -321,47 +345,72 @@ test('Plus checkout create applies and restores conversion proxy around payment 
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });
-      return {
-        checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-        country: 'US',
-        currency: 'USD',
-      };
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          preferredCheckoutUrl: 'https://pay.openai.com/c/pay/session',
+          hostedCheckoutUrl: 'https://pay.openai.com/c/pay/session',
+          checkoutUrl: 'https://pay.openai.com/c/pay/session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
+        return { clicked: true };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
     },
     setState: async (payload) => {
       events.push({ type: 'set-state', payload });
     },
     sleepWithStop: async () => {},
     waitForTabCompleteUntilStopped: async () => {},
+    waitForTabUrlMatchUntilStopped: async () => ({ url: currentUrl }),
   });
 
   await executor.executePlusCheckoutCreate({
-    plusPaymentMethod: 'paypal',
+    plusPaymentMethod: 'paypal-hosted',
     plusCheckoutConversionProxyUrl: 'socks5h://user:pass@proxy.example:1080',
   });
 
   const applyIndex = events.findIndex((event) => event.type === 'proxy-apply');
-  const messageIndex = events.findIndex((event) => event.type === 'tab-message');
-  const completeIndex = events.findIndex((event) => event.type === 'complete');
-  const restoreIndex = events.findIndex((event) => event.type === 'proxy-restore');
+  const messageIndex = events.findIndex((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
   assert.ok(applyIndex > -1);
   assert.ok(messageIndex > applyIndex);
-  assert.ok(restoreIndex > completeIndex);
   assert.equal(events[applyIndex].proxyUrl, 'socks5h://user:pass@proxy.example:1080');
-  assert.ok(events[applyIndex].options.targetHostPatterns.includes('chatgpt.com'));
-  assert.equal(events.some((event) => event.type === 'log' && /已启用支付转换代理/.test(event.message)), true);
-  assert.equal(events.some((event) => event.type === 'log' && /支付转换代理已释放/.test(event.message)), true);
+  assert.equal(events[applyIndex].options.flowType, 'paypal-hosted');
+  assert.equal(events.some((event) => event.type === 'proxy-restore'), false);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'), true);
 });
 
-test('GPC checkout restores conversion proxy when task creation fails early', async () => {
+test('GPC checkout create does not apply checkout conversion proxy', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
-    applyCheckoutScopedProxyFromUrl: async (proxyUrl) => {
-      events.push({ type: 'proxy-apply', proxyUrl });
-      return { applied: true, displayName: 'http://proxy.example:8080' };
-    },
-    restoreCheckoutScopedProxySnapshot: async () => {
-      events.push({ type: 'proxy-restore' });
+    checkoutConversionProxyManager: {
+      applySessionFromState: async (state, options = {}) => {
+        events.push({ type: 'proxy-apply', proxyUrl: state.plusCheckoutConversionProxyUrl, options });
+        return {
+          active: true,
+          flowType: options.flowType,
+          releaseNodeKey: options.releaseNodeKey,
+          appliedStepKey: options.appliedStepKey,
+          displayName: 'http://proxy.example:8080',
+          snapshot: { applied: true },
+        };
+      },
+      getStoredSession: async () => ({
+        active: true,
+        flowType: 'classic-paypal',
+        releaseNodeKey: 'paypal-approve',
+        appliedStepKey: 'plus-checkout-billing',
+        displayName: 'http://proxy.example:8080',
+        snapshot: { applied: true },
+      }),
+      restoreSession: async () => {
+        events.push({ type: 'proxy-restore' });
+        return true;
+      },
     },
     chrome: {
       tabs: {
@@ -398,7 +447,7 @@ test('GPC checkout restores conversion proxy when task creation fails early', as
 
   assert.deepStrictEqual(
     events.filter((event) => event.type === 'proxy-apply' || event.type === 'proxy-restore').map((event) => event.type),
-    ['proxy-apply', 'proxy-restore']
+    []
   );
 });
 
@@ -414,8 +463,7 @@ test('checkout conversion proxy test applies fixed server proxy and restores pre
     mode: 'pac_script',
     pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
   };
-  const executor = api.createPlusCheckoutCreateExecutor({
-    addLog: async () => {},
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
     chrome: {
       runtime: {},
       proxy: {
@@ -459,7 +507,7 @@ test('checkout conversion proxy test applies fixed server proxy and restores pre
     },
   });
 
-  const result = await executor.testCheckoutConversionProxy({
+  const result = await manager.testCheckoutConversionProxy({
     proxyUrl: 'socks5h://user:p%40ss@proxy.example:1080',
   });
 
@@ -496,6 +544,20 @@ test('checkout conversion proxy test applies fixed server proxy and restores pre
     username: 'old-user',
     password: 'old-pass',
   });
+});
+
+test('checkout conversion proxy getStoredSession tolerates null runtime session', async () => {
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: { runtime: {} },
+    getState: async () => ({ plusCheckoutConversionProxySession: null }),
+    setState: async () => {},
+  });
+
+  const session = await manager.getStoredSession({
+    plusCheckoutConversionProxySession: null,
+  });
+
+  assert.equal(session, null);
 });
 
 test('PayPal no-card binding create opens and submits hosted OpenAI checkout before completing', async () => {

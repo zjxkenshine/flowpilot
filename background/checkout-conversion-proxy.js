@@ -343,11 +343,14 @@
     }
 
     function buildSessionPayload(session = {}) {
-      const flowType = String(session.flowType || '').trim();
-      const releaseNodeKey = String(session.releaseNodeKey || '').trim();
-      const appliedStepKey = String(session.appliedStepKey || '').trim();
-      const displayName = String(session.displayName || '').trim();
-      const snapshot = sanitizeSnapshot(session.snapshot);
+      const normalizedSession = session && typeof session === 'object' && !Array.isArray(session)
+        ? session
+        : {};
+      const flowType = String(normalizedSession.flowType || '').trim();
+      const releaseNodeKey = String(normalizedSession.releaseNodeKey || '').trim();
+      const appliedStepKey = String(normalizedSession.appliedStepKey || '').trim();
+      const displayName = String(normalizedSession.displayName || '').trim();
+      const snapshot = sanitizeSnapshot(normalizedSession.snapshot);
       if (!flowType || !releaseNodeKey || !appliedStepKey || !displayName || !snapshot?.applied) {
         return null;
       }
@@ -358,7 +361,7 @@
         appliedStepKey,
         displayName,
         snapshot,
-        appliedAt: Math.max(0, Number(session.appliedAt) || Date.now()),
+        appliedAt: Math.max(0, Number(normalizedSession.appliedAt) || Date.now()),
       };
     }
 

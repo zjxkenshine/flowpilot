@@ -131,6 +131,20 @@
       isLocalhostOAuthCallbackUrl,
       isLuckmailProvider,
       isYydsMailProvider = () => false,
+      isHostedCheckoutFinalStepEnabled = (state = {}) => {
+        const normalized = String(state?.plusPaymentMethod || '').trim().toLowerCase();
+        if (normalized === 'paypal-hosted' || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+          return true;
+        }
+        if (normalized !== 'paypal') {
+          return false;
+        }
+        const plusModeEnabled = Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
+        if (!plusModeEnabled) {
+          return false;
+        }
+        return state?.plusHostedCheckoutIsFinalStep !== false;
+      },
       isStopError,
       isTabAlive,
       launchAutoRunTimerPlan,
@@ -196,7 +210,26 @@
       upsertHotmailAccount,
       upsertAccountBookEntry,
       verifyHotmailAccount,
+      checkoutConversionProxyManager = null,
     } = deps;
+
+    async function releaseHostedCheckoutConversionProxySessionBeforeRetry(state = {}, options = {}) {
+      if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
+        return false;
+      }
+      if (!isHostedCheckoutFinalStepEnabled(state)) {
+        return false;
+      }
+      const session = await checkoutConversionProxyManager.getStoredSession(state);
+      if (!session?.active || session.flowType !== 'paypal-hosted') {
+        return false;
+      }
+      await checkoutConversionProxyManager.restoreSession(session);
+      if (options.logMessage) {
+        await addLog(options.logMessage, options.logLevel || 'info');
+      }
+      return true;
+    }
 
     function normalizeMessageFlowId(value = '', fallback = 'openai') {
       const rootScope = typeof self !== 'undefined' ? self : globalThis;
@@ -1179,6 +1212,9 @@
               clearStopRequest?.();
               const retryNodeId = 'plus-checkout-create';
               const retryStep = findStepByNodeId(retryNodeId, currentState) || 6;
+              await releaseHostedCheckoutConversionProxySessionBeforeRetry(currentState, {
+                logMessage: 'PayPal hosted retry cleanup: released previous checkout conversion proxy session before restarting step 6.',
+              });
               await addLog('步骤 6：已按你的选择重新开始创建 Plus Checkout。', 'info');
               if (typeof invalidateDownstreamAfterStepRestart === 'function') {
                 await invalidateDownstreamAfterStepRestart(retryStep, { logLabel: 'PayPal genericError 后重试 Plus Checkout' });

@@ -1421,6 +1421,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
   hostedCheckoutSmsPoolUsage: {},
+  hostedCheckoutCurrentSmsEntry: null,
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
   paypalEmail: '',
   paypalPassword: '',
@@ -1607,6 +1608,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
   'hostedCheckoutSmsPoolUsage',
+  'hostedCheckoutCurrentSmsEntry',
   'plusHostedCheckoutOauthDelaySeconds',
   'autoRunRetryPaypalCallback',
   'mailProvider',
@@ -3458,6 +3460,37 @@ function normalizePersistentSettingValue(key, value) {
           lastError: String(usage.lastError || '').trim(),
         }];
       }).filter(([entryKey]) => Boolean(entryKey)));
+    case 'hostedCheckoutCurrentSmsEntry': {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+      }
+      const normalizedPhone = String(value.phone || '').trim().replace(/\D+/g, '');
+      const phone = normalizedPhone.length === 11 && normalizedPhone.startsWith('1')
+        ? normalizedPhone.slice(1)
+        : normalizedPhone;
+      const rawUrl = String(value.verificationUrl || '').trim();
+      let verificationUrl = rawUrl;
+      if (rawUrl) {
+        try {
+          const parsed = new URL(rawUrl);
+          parsed.searchParams.delete('t');
+          verificationUrl = parsed.toString();
+        } catch {
+          verificationUrl = rawUrl
+            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+            .replace(/[?&]$/g, '');
+        }
+      }
+      const key = String(value.key || (phone && verificationUrl ? `${phone}----${verificationUrl}` : '')).trim();
+      if (!phone || !verificationUrl || !key) {
+        return null;
+      }
+      return {
+        key,
+        phone,
+        verificationUrl,
+      };
+    }
     case 'plusHostedCheckoutOauthDelaySeconds': {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS)));
@@ -3872,6 +3905,75 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       domains.unshift(payload.cloudMailDomain);
     }
     payload.cloudMailDomains = domains;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutSmsPoolText')
+    || Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutCurrentSmsEntry')
+    || Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutSmsPoolUsage')
+  ) {
+    const poolEntries = String(payload.hostedCheckoutSmsPoolText || '')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => String(line || '').trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separatorIndex = line.indexOf('----');
+        if (separatorIndex <= 0) {
+          return null;
+        }
+        const phoneDigits = String(line.slice(0, separatorIndex) || '').trim().replace(/\D+/g, '');
+        const phone = phoneDigits.length === 11 && phoneDigits.startsWith('1')
+          ? phoneDigits.slice(1)
+          : phoneDigits;
+        const rawUrl = String(line.slice(separatorIndex + 4) || '').trim();
+        if (!phone || !rawUrl) {
+          return null;
+        }
+        let verificationUrl = rawUrl;
+        try {
+          const parsed = new URL(rawUrl);
+          parsed.searchParams.delete('t');
+          verificationUrl = parsed.toString();
+        } catch {
+          verificationUrl = rawUrl
+            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+            .replace(/[?&]$/g, '');
+        }
+        if (!verificationUrl) {
+          return null;
+        }
+        return {
+          key: `${phone}----${verificationUrl}`,
+          phone,
+          verificationUrl,
+        };
+      })
+      .filter(Boolean);
+    const allowedKeys = new Set(poolEntries.map((entry) => entry.key));
+    if (Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutSmsPoolUsage')) {
+      payload.hostedCheckoutSmsPoolUsage = Object.fromEntries(
+        Object.entries(payload.hostedCheckoutSmsPoolUsage || {}).filter(([key]) => allowedKeys.has(String(key || '').trim()))
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutCurrentSmsEntry')) {
+      const currentEntry = payload.hostedCheckoutCurrentSmsEntry;
+      const currentKey = String(
+        currentEntry?.key
+        || (
+          currentEntry?.phone && currentEntry?.verificationUrl
+            ? `${currentEntry.phone}----${currentEntry.verificationUrl}`
+            : ''
+        )
+      ).trim();
+      const matchedEntry = poolEntries.find((entry) => entry.key === currentKey) || null;
+      payload.hostedCheckoutCurrentSmsEntry = matchedEntry
+        ? {
+            key: matchedEntry.key,
+            phone: matchedEntry.phone,
+            verificationUrl: matchedEntry.verificationUrl,
+          }
+        : null;
+    }
   }
   if (
     Object.prototype.hasOwnProperty.call(payload, 'sub2apiGroupName')
@@ -13955,6 +14057,23 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     }
     return undefined;
   };
+  const releaseHostedCheckoutConversionProxySessionBeforeRetry = async (state = {}, options = {}) => {
+    if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
+      return false;
+    }
+    if (!isHostedCheckoutFinalStepEnabled(state)) {
+      return false;
+    }
+    const session = await checkoutConversionProxyManager.getStoredSession(state);
+    if (!session?.active || session.flowType !== PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+      return false;
+    }
+    await checkoutConversionProxyManager.restoreSession(session);
+    if (options.logMessage) {
+      await addLog(options.logMessage, options.logLevel || 'info');
+    }
+    return true;
+  };
   const restartCurrentNodeAfterIdle = async (nodeId, error) => {
     if (!isAutoRunStepIdleRestartError(error)) {
       return false;
@@ -14227,6 +14346,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           'warn'
         );
         const checkoutResetAnchorNodeId = getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile';
+        await releaseHostedCheckoutConversionProxySessionBeforeRetry(latestState, {
+          logMessage: 'PayPal hosted retry cleanup: released previous checkout conversion proxy session before restarting step 6.',
+        });
         await invalidateDownstreamAfterAutoRunNodeRestart(checkoutResetAnchorNodeId, {
           logLabel: `节点 ${nodeId} ${checkoutLabel}失败后准备回到 plus-checkout-create 重试（第 ${checkoutRestartCount} 次）`,
         });
@@ -15228,6 +15350,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   handleAutoRunLoopUnhandledError,
   importSettingsBundle,
   invalidateDownstreamAfterStepRestart,
+  isHostedCheckoutFinalStepEnabled,
   isCloudflareSecurityBlockedError: isTerminalSecurityBlockedError,
   isAutoRunLockedState,
   isHotmailProvider,
@@ -15304,6 +15427,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   upsertHotmailAccount,
   upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
   verifyHotmailAccount,
+  checkoutConversionProxyManager,
 });
 
 function buildNodeRegistry(definitions = []) {

@@ -1,5 +1,8 @@
 (function attachSidepanelHostedSmsPoolManager(globalScope) {
   const SEPARATOR = '----';
+  const EXPORT_SCHEMA_VERSION = 1;
+  const EXPORT_HEADER = 'FlowPilot PayPal SMS Pool Export';
+  const EXPORT_ENCODING = 'UTF-8';
 
   function createHostedSmsPoolManager(context = {}) {
     const {
@@ -28,6 +31,12 @@
         .map((line) => line.trim())
         .filter(Boolean)
         .join('\n');
+    }
+
+    function normalizePoolFileText(value = '') {
+      return String(value || '')
+        .replace(/^\uFEFF/, '')
+        .replace(/\r\n?/g, '\n');
     }
 
     function normalizeUsHostedPhoneDigits(value = '') {
@@ -124,6 +133,116 @@
       }).filter(([key]) => Boolean(key)));
     }
 
+    function normalizeExportUsage(value = {}, allowedKeys = null) {
+      const normalizedUsage = normalizeUsage(value);
+      const allowedKeySet = allowedKeys instanceof Set ? allowedKeys : null;
+      return Object.fromEntries(
+        Object.entries(normalizedUsage).filter(([key]) => !allowedKeySet || allowedKeySet.has(key))
+      );
+    }
+
+    function normalizeCurrentEntry(entry = null, entries = []) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const key = normalizeText(entry.key || buildKey(entry.phone, entry.verificationUrl));
+      if (!key) {
+        return null;
+      }
+      const matchedEntry = Array.isArray(entries)
+        ? entries.find((candidate) => candidate.key === key)
+        : null;
+      if (matchedEntry) {
+        return {
+          key: matchedEntry.key,
+          phone: matchedEntry.phone,
+          verificationUrl: matchedEntry.verificationUrl,
+        };
+      }
+      const phone = normalizePoolPhone(entry.phone);
+      const verificationUrl = normalizePoolUrl(entry.verificationUrl);
+      if (!phone || !verificationUrl) {
+        return null;
+      }
+      return {
+        key,
+        phone,
+        verificationUrl,
+      };
+    }
+
+    function buildExportFileName(date = new Date()) {
+      const pad = (value) => String(value).padStart(2, '0');
+      return `flowpilot-paypal-sms-pool-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.txt`;
+    }
+
+    function buildExportPayload(entries = renderedEntries) {
+      const normalizedEntries = parseEntries(entriesToText(entries));
+      const allowedKeys = new Set(normalizedEntries.map((entry) => entry.key));
+      const currentEntry = normalizeCurrentEntry(state.getCurrentEntry?.(), normalizedEntries);
+      const meta = {
+        currentKey: currentEntry?.key || '',
+        usage: normalizeExportUsage(state.getUsage?.(), allowedKeys),
+      };
+      return [
+        `# ${EXPORT_HEADER}`,
+        `# schemaVersion=${EXPORT_SCHEMA_VERSION}`,
+        `# encoding=${EXPORT_ENCODING}`,
+        `# exportedAt=${new Date().toISOString()}`,
+        `# meta=${JSON.stringify(meta)}`,
+        '',
+        ...normalizedEntries.map((entry) => `${entry.phone}${SEPARATOR}${entry.verificationUrl}`),
+      ].join('\r\n');
+    }
+
+    function parsePoolImportFileContent(content = '') {
+      const lines = normalizePoolFileText(content).split('\n');
+      const bodyLines = [];
+      let metaSeen = false;
+      let parsedMeta = null;
+
+      for (const rawLine of lines) {
+        const line = String(rawLine || '').trim();
+        if (!line) {
+          continue;
+        }
+        if (line.startsWith('#')) {
+          if (line.startsWith('# meta=')) {
+            const metaText = line.slice('# meta='.length).trim();
+            try {
+              parsedMeta = metaText ? JSON.parse(metaText) : {};
+              metaSeen = true;
+            } catch {
+              throw new Error('接码池文件中的 meta JSON 无效。');
+            }
+          }
+          continue;
+        }
+        bodyLines.push(line);
+      }
+
+      const entries = parseEntries(bodyLines.join('\n'));
+      const allowedKeys = new Set(entries.map((entry) => entry.key));
+      if (!metaSeen) {
+        return {
+          entries,
+          usage: {},
+          currentEntry: null,
+        };
+      }
+
+      const meta = parsedMeta && typeof parsedMeta === 'object' && !Array.isArray(parsedMeta)
+        ? parsedMeta
+        : {};
+      const usage = normalizeExportUsage(meta.usage || {}, allowedKeys);
+      const currentKey = normalizeText(meta.currentKey);
+      return {
+        entries,
+        usage,
+        currentEntry: currentKey ? normalizeCurrentEntry({ key: currentKey }, entries) : null,
+      };
+    }
+
     function getCurrentKey() {
       const current = state.getCurrentEntry?.() || null;
       return normalizeText(current?.key || buildKey(current?.phone, current?.verificationUrl));
@@ -179,12 +298,17 @@
         dom.btnHostedSmsPoolRefresh,
         dom.btnHostedSmsPoolClearUsed,
         dom.btnHostedSmsPoolDeleteAll,
+        dom.btnHostedSmsPoolExport,
         dom.btnHostedSmsPoolImport,
+        dom.btnHostedSmsPoolImportFile,
       ].forEach((button) => {
         if (button) button.disabled = loading;
       });
       if (dom.inputHostedSmsPoolImport) {
         dom.inputHostedSmsPoolImport.disabled = loading;
+      }
+      if (dom.inputHostedSmsPoolImportFile) {
+        dom.inputHostedSmsPoolImportFile.disabled = loading;
       }
       if (summary && dom.hostedSmsPoolSummary) {
         dom.hostedSmsPoolSummary.textContent = summary;
@@ -199,6 +323,9 @@
       }
       if (dom.btnHostedSmsPoolDeleteAll) {
         dom.btnHostedSmsPoolDeleteAll.disabled = loading || entriesWithState.length === 0;
+      }
+      if (dom.btnHostedSmsPoolExport) {
+        dom.btnHostedSmsPoolExport.disabled = loading || entriesWithState.length === 0;
       }
     }
 
@@ -309,7 +436,7 @@
             return {
               entries: entriesList.filter((candidate) => candidate.key !== entry.key),
               usage: nextUsage,
-              removedCurrent: entry.current,
+              currentEntry: entry.current ? null : undefined,
             };
           });
         });
@@ -324,21 +451,29 @@
       const previousText = normalizePoolText(state.getText?.());
       const previousUsage = normalizeUsage(state.getUsage?.());
       const previousEntries = parseEntries(previousText);
+      const previousCurrentEntry = normalizeCurrentEntry(state.getCurrentEntry?.(), previousEntries);
       const result = mutator({
         entries: previousEntries.map((entry) => ({ ...entry })),
         usage: { ...previousUsage },
+        currentEntry: previousCurrentEntry ? { ...previousCurrentEntry } : null,
       }) || {};
       const nextEntries = parseEntries(entriesToText(result.entries || previousEntries));
-      const nextUsage = normalizeUsage(result.usage || previousUsage);
+      const nextUsage = normalizeExportUsage(
+        result.usage || previousUsage,
+        new Set(nextEntries.map((entry) => entry.key))
+      );
       const nextText = entriesToText(nextEntries);
-      const removedCurrent = Boolean(result.removedCurrent);
+      const nextCurrentEntry = normalizeCurrentEntry(
+        Object.prototype.hasOwnProperty.call(result, 'currentEntry')
+          ? result.currentEntry
+          : previousCurrentEntry,
+        nextEntries
+      );
 
       setLoading(true, '正在更新 PayPal 接码池...');
       state.setText?.(nextText);
       state.setUsage?.(nextUsage);
-      if (removedCurrent) {
-        actions.clearCurrentEntry?.();
-      }
+      state.setCurrentEntry?.(nextCurrentEntry);
       render(nextEntries);
       try {
         await actions.persistPool?.();
@@ -346,9 +481,7 @@
       } catch (error) {
         state.setText?.(previousText);
         state.setUsage?.(previousUsage);
-        if (removedCurrent) {
-          actions.restoreCurrentEntry?.();
-        }
+        state.setCurrentEntry?.(previousCurrentEntry);
         render(previousEntries);
         helpers.showToast?.(`更新 PayPal 接码池失败：${error.message}`, 'error');
         return false;
@@ -423,7 +556,74 @@
         confirmVariant: 'btn-danger',
       });
       if (!confirmed) return;
-      await patchPool(() => ({ entries: [], usage: {}, removedCurrent: true }));
+      await patchPool(() => ({ entries: [], usage: {}, currentEntry: null }));
+    }
+
+    function triggerImportFilePicker() {
+      if (loading || !dom.inputHostedSmsPoolImportFile) {
+        return;
+      }
+      dom.inputHostedSmsPoolImportFile.value = '';
+      dom.inputHostedSmsPoolImportFile.click();
+    }
+
+    async function exportPool() {
+      const entries = parseEntries(state.getText?.());
+      if (!entries.length) {
+        helpers.showToast?.('当前没有可导出的 PayPal 接码号码。', 'warn');
+        return;
+      }
+      helpers.downloadTextFile?.(
+        buildExportPayload(entries),
+        buildExportFileName(),
+        'text/plain;charset=utf-8',
+        { prependUtf8Bom: true }
+      );
+      helpers.showToast?.(`已导出 ${entries.length} 个号码。`, 'success', 2200);
+    }
+
+    async function importPoolFile(file) {
+      if (!file) {
+        return;
+      }
+      const confirmed = await helpers.openConfirmModal?.({
+        title: '导入 PayPal 接码池文件',
+        message: `确认导入文件 "${file.name}" 吗？导入后会覆盖当前 PayPal 接码池，并恢复文件中的状态。`,
+        confirmLabel: '确认覆盖导入',
+        confirmVariant: 'btn-danger',
+      });
+      if (!confirmed) {
+        if (dom.inputHostedSmsPoolImportFile) {
+          dom.inputHostedSmsPoolImportFile.value = '';
+        }
+        return;
+      }
+
+      const previousText = normalizePoolText(state.getText?.());
+      const previousUsage = normalizeUsage(state.getUsage?.());
+      const previousCurrentEntry = normalizeCurrentEntry(state.getCurrentEntry?.(), parseEntries(previousText));
+
+      setLoading(true, '正在导入 PayPal 接码池文件...');
+      try {
+        const parsed = parsePoolImportFileContent(await file.text());
+        state.setText?.(entriesToText(parsed.entries));
+        state.setUsage?.(parsed.usage);
+        state.setCurrentEntry?.(parsed.currentEntry);
+        render(parsed.entries);
+        await actions.persistPool?.();
+        helpers.showToast?.(`已导入 ${parsed.entries.length} 个号码。`, 'success', 2200);
+      } catch (error) {
+        state.setText?.(previousText);
+        state.setUsage?.(previousUsage);
+        state.setCurrentEntry?.(previousCurrentEntry);
+        render(parseEntries(previousText));
+        helpers.showToast?.(`导入 PayPal 接码池失败：${error.message}`, 'error');
+      } finally {
+        if (dom.inputHostedSmsPoolImportFile) {
+          dom.inputHostedSmsPoolImportFile.value = '';
+        }
+        setLoading(false);
+      }
     }
 
     function refresh(options = {}) {
@@ -447,8 +647,18 @@
 
     function bindEvents() {
       dom.btnHostedSmsPoolRefresh?.addEventListener('click', () => refresh());
+      dom.btnHostedSmsPoolExport?.addEventListener('click', () => {
+        void exportPool();
+      });
+      dom.btnHostedSmsPoolImportFile?.addEventListener('click', () => {
+        triggerImportFilePicker();
+      });
       dom.btnHostedSmsPoolImport?.addEventListener('click', () => {
         void importEntries();
+      });
+      dom.inputHostedSmsPoolImportFile?.addEventListener('change', () => {
+        const file = dom.inputHostedSmsPoolImportFile.files?.[0] || null;
+        void importPoolFile(file);
       });
       dom.inputHostedSmsPoolImport?.addEventListener('keydown', (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -477,6 +687,8 @@
       filterMode = 'all';
       if (dom.inputHostedSmsPoolSearch) dom.inputHostedSmsPoolSearch.value = '';
       if (dom.selectHostedSmsPoolFilter) dom.selectHostedSmsPoolFilter.value = 'all';
+      if (dom.inputHostedSmsPoolImport) dom.inputHostedSmsPoolImport.value = '';
+      if (dom.inputHostedSmsPoolImportFile) dom.inputHostedSmsPoolImportFile.value = '';
       if (dom.hostedSmsPoolList) dom.hostedSmsPoolList.innerHTML = '';
       if (dom.hostedSmsPoolSummary) {
         dom.hostedSmsPoolSummary.textContent = '导入 PayPal 接码号码，每行一个号码和验证码接口。';

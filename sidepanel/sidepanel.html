@@ -422,14 +422,17 @@
           <div id="hosted-sms-pool-shell" class="hosted-sms-pool-shell is-collapsed" hidden>
             <div class="section-mini-actions hosted-sms-pool-toolbar">
               <button id="btn-hosted-sms-pool-refresh" class="btn btn-ghost btn-xs" type="button">刷新</button>
+              <button id="btn-hosted-sms-pool-export" class="btn btn-ghost btn-xs" type="button">导出号码</button>
               <button id="btn-hosted-sms-pool-clear-used" class="btn btn-ghost btn-xs" type="button">清空次数</button>
               <button id="btn-hosted-sms-pool-delete-all" class="btn btn-ghost btn-xs" type="button">全部删除</button>
             </div>
             <textarea id="input-hosted-sms-pool-import" class="data-textarea mono" rows="4"
               placeholder="1234567890&#10;&#10;https://mail.test.com/api/text-relay/eca_tr_xxxxxxxxx"></textarea>
             <div class="data-inline">
+              <button id="btn-hosted-sms-pool-import-file" class="btn btn-outline btn-sm" type="button">导入文件</button>
               <button id="btn-hosted-sms-pool-import" class="btn btn-primary btn-sm" type="button">导入号码</button>
             </div>
+            <input id="input-hosted-sms-pool-import-file" type="file" accept=".txt,text/plain" hidden />
             <div class="icloud-card">
               <div id="hosted-sms-pool-summary" class="icloud-summary">导入 PayPal 接码号码，每行一个号码和验证码接口。</div>
               <div class="icloud-toolbar">

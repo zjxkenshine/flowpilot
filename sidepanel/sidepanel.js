@@ -271,9 +271,12 @@ const btnToggleHostedSmsPool = document.getElementById('btn-toggle-hosted-sms-po
 const hostedSmsPoolShell = document.getElementById('hosted-sms-pool-shell');
 const inputHostedCheckoutSmsPool = document.getElementById('input-hosted-checkout-sms-pool');
 const btnHostedSmsPoolRefresh = document.getElementById('btn-hosted-sms-pool-refresh');
+const btnHostedSmsPoolExport = document.getElementById('btn-hosted-sms-pool-export');
 const btnHostedSmsPoolClearUsed = document.getElementById('btn-hosted-sms-pool-clear-used');
 const btnHostedSmsPoolDeleteAll = document.getElementById('btn-hosted-sms-pool-delete-all');
 const inputHostedSmsPoolImport = document.getElementById('input-hosted-sms-pool-import');
+const btnHostedSmsPoolImportFile = document.getElementById('btn-hosted-sms-pool-import-file');
+const inputHostedSmsPoolImportFile = document.getElementById('input-hosted-sms-pool-import-file');
 const btnHostedSmsPoolImport = document.getElementById('btn-hosted-sms-pool-import');
 const hostedSmsPoolSummary = document.getElementById('hosted-sms-pool-summary');
 const inputHostedSmsPoolSearch = document.getElementById('input-hosted-sms-pool-search');
@@ -2795,8 +2798,13 @@ async function settlePendingSettingsBeforeImport() {
   await waitForSettingsSaveIdle();
 }
 
-function downloadTextFile(content, fileName, mimeType = 'application/json;charset=utf-8') {
-  const blob = new Blob([content], { type: mimeType });
+function downloadTextFile(content, fileName, mimeType = 'application/json;charset=utf-8', options = {}) {
+  const parts = [];
+  if (options?.prependUtf8Bom) {
+    parts.push('\uFEFF');
+  }
+  parts.push(content);
+  const blob = new Blob(parts, { type: mimeType });
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
@@ -3433,6 +3441,45 @@ function normalizeHostedCheckoutSmsPoolTextValue(value = '') {
   return parseHostedCheckoutSmsPoolEntries(value)
     .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
     .join('\n');
+}
+
+function normalizeHostedCheckoutCurrentSmsEntryValue(entry = null, entries = null) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return null;
+  }
+  const normalizedEntries = Array.isArray(entries)
+    ? parseHostedCheckoutSmsPoolEntries(
+      entries.map((item) => `${item.phone}----${item.verificationUrl}`).join('\n')
+    )
+    : parseHostedCheckoutSmsPoolEntries(latestState?.hostedCheckoutSmsPoolText || '');
+  const normalizedPhone = normalizeHostedCheckoutPhoneValue(entry.phone || '');
+  const normalizedUrl = normalizeHostedCheckoutPoolUrlValue(entry.verificationUrl || '');
+  const normalizedKey = String(
+    entry.key
+    || (normalizedPhone && normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : '')
+  ).trim();
+  if (!normalizedKey) {
+    return null;
+  }
+  const matchedEntry = normalizedEntries.find((candidate) => {
+    const candidateKey = `${candidate.phone}----${candidate.verificationUrl}`;
+    return candidateKey === normalizedKey;
+  });
+  if (matchedEntry) {
+    return {
+      key: `${matchedEntry.phone}----${matchedEntry.verificationUrl}`,
+      phone: matchedEntry.phone,
+      verificationUrl: matchedEntry.verificationUrl,
+    };
+  }
+  if (!normalizedPhone || !normalizedUrl) {
+    return null;
+  }
+  return {
+    key: normalizedKey,
+    phone: normalizedPhone,
+    verificationUrl: normalizedUrl,
+  };
 }
 
 function normalizePlusAccountAccessStrategy(value = '') {
@@ -5045,6 +5092,14 @@ function collectSettingsPayload() {
     hostedCheckoutSmsPoolUsage: latestState?.hostedCheckoutSmsPoolUsage && typeof latestState.hostedCheckoutSmsPoolUsage === 'object'
       ? latestState.hostedCheckoutSmsPoolUsage
       : {},
+    hostedCheckoutCurrentSmsEntry: normalizeHostedCheckoutCurrentSmsEntryValue(
+      latestState?.hostedCheckoutCurrentSmsEntry || null,
+      parseHostedCheckoutSmsPoolEntries(
+        typeof inputHostedCheckoutSmsPool !== 'undefined' && inputHostedCheckoutSmsPool
+          ? inputHostedCheckoutSmsPool.value
+          : latestState?.hostedCheckoutSmsPoolText || ''
+      )
+    ),
     plusHostedCheckoutOauthDelaySeconds: normalizeHostedCheckoutDelaySecondsSafe(
       typeof inputPlusHostedCheckoutOauthDelaySeconds !== 'undefined' && inputPlusHostedCheckoutOauthDelaySeconds
         ? inputPlusHostedCheckoutOauthDelaySeconds.value
@@ -11532,6 +11587,14 @@ function applySettingsState(state) {
   if (typeof inputHostedCheckoutSmsPool !== 'undefined' && inputHostedCheckoutSmsPool) {
     inputHostedCheckoutSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(state?.hostedCheckoutSmsPoolText || '');
   }
+  latestState = {
+    ...(latestState && typeof latestState === 'object' ? latestState : {}),
+    ...(state && typeof state === 'object' ? state : {}),
+    hostedCheckoutCurrentSmsEntry: normalizeHostedCheckoutCurrentSmsEntryValue(
+      state?.hostedCheckoutCurrentSmsEntry || null,
+      parseHostedCheckoutSmsPoolEntries(state?.hostedCheckoutSmsPoolText || '')
+    ),
+  };
   if (typeof inputPlusHostedCheckoutOauthDelaySeconds !== 'undefined' && inputPlusHostedCheckoutOauthDelaySeconds) {
     inputPlusHostedCheckoutOauthDelaySeconds.value = String(
       normalizePlusHostedCheckoutOauthDelaySeconds(state?.plusHostedCheckoutOauthDelaySeconds)
@@ -13268,9 +13331,12 @@ function updateIpProxyServiceLoginButtonState(options = {}) {
 const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedSmsPoolManager({
   dom: {
     btnHostedSmsPoolRefresh,
+    btnHostedSmsPoolExport,
     btnHostedSmsPoolClearUsed,
     btnHostedSmsPoolDeleteAll,
     inputHostedSmsPoolImport,
+    btnHostedSmsPoolImportFile,
+    inputHostedSmsPoolImportFile,
     btnHostedSmsPoolImport,
     hostedSmsPoolSummary,
     inputHostedSmsPoolSearch,
@@ -13279,6 +13345,7 @@ const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedS
   },
   helpers: {
     copyTextToClipboard,
+    downloadTextFile,
     escapeHtml,
     openConfirmModal,
     showToast,
@@ -13298,6 +13365,14 @@ const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedS
       syncLatestState({ hostedCheckoutSmsPoolUsage: usage && typeof usage === 'object' ? usage : {} });
     },
     getCurrentEntry: () => latestState?.hostedCheckoutCurrentSmsEntry || null,
+    setCurrentEntry: (entry) => {
+      syncLatestState({
+        hostedCheckoutCurrentSmsEntry: normalizeHostedCheckoutCurrentSmsEntryValue(
+          entry,
+          parseHostedCheckoutSmsPoolEntries(inputHostedCheckoutSmsPool?.value || latestState?.hostedCheckoutSmsPoolText || '')
+        ),
+      });
+    },
     isVisible: () => Boolean(rowHostedCheckoutSmsPool) && rowHostedCheckoutSmsPool.style.display !== 'none',
   },
   actions: {
@@ -13305,10 +13380,6 @@ const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedS
       markSettingsDirty(true);
       await saveSettings({ silent: true });
     },
-    clearCurrentEntry: () => {
-      syncLatestState({ hostedCheckoutCurrentSmsEntry: null });
-    },
-    restoreCurrentEntry: () => {},
   },
   constants: {
     copyIcon: COPY_ICON,

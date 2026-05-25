@@ -262,6 +262,7 @@ const LAST_STEP_ID = ${JSON.stringify(lastStepId)};
 const FINAL_OAUTH_CHAIN_START_STEP = ${JSON.stringify(finalOAuthChainStartStep)};
 const SIGNUP_METHOD_PHONE = 'phone';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
+const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const AUTO_RUN_STEP_IDLE_LOG_TIMEOUT_MS = ${JSON.stringify(idleLogTimeoutMs)};
 const AUTO_RUN_STEP_IDLE_LOG_CHECK_INTERVAL_MS = ${JSON.stringify(idleLogCheckIntervalMs)};
 const AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS = 3;
@@ -281,6 +282,7 @@ const events = {
   invalidations: [],
   cancellations: [],
   stopBroadcasts: 0,
+  proxyRestores: [],
 };
 
 async function addLog(message, level = 'info') {
@@ -297,6 +299,44 @@ async function getState() {
     logs: events.logs,
     ...${JSON.stringify(customState)},
   };
+}
+const checkoutConversionProxyManager = {
+  getStoredSession: async (state = {}) => state.plusCheckoutConversionProxySession || null,
+  restoreSession: async (session) => {
+    events.proxyRestores.push({ flowType: session?.flowType || '', displayName: session?.displayName || '' });
+    return true;
+  },
+};
+function isHostedCheckoutFinalStepEnabled(state = {}) {
+  const normalized = String(state?.plusPaymentMethod || '').trim().toLowerCase();
+  if (normalized === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+    return true;
+  }
+  if (normalized !== 'paypal') {
+    return false;
+  }
+  const plusModeEnabled = Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
+  if (!plusModeEnabled) {
+    return false;
+  }
+  return state?.plusHostedCheckoutIsFinalStep !== false;
+}
+async function releaseHostedCheckoutConversionProxySessionBeforeRetry(state = {}, options = {}) {
+  if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
+    return false;
+  }
+  if (!isHostedCheckoutFinalStepEnabled(state)) {
+    return false;
+  }
+  const session = await checkoutConversionProxyManager.getStoredSession(state);
+  if (!session?.active || session.flowType !== PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+    return false;
+  }
+  await checkoutConversionProxyManager.restoreSession(session);
+  if (options.logMessage) {
+    await addLog(options.logMessage, options.logLevel || 'info');
+  }
+  return true;
 }
 function getStepIdsForState() {
   return ${JSON.stringify(stepIds)};
@@ -718,6 +758,52 @@ test('auto-run restarts Plus checkout from step 6 when checkout creation fails',
   assert.deepStrictEqual(events.steps, [6, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
   assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 Plus Checkout/.test(message)));
+});
+
+test('auto-run hosted PayPal retry releases hosted checkout conversion proxy before invalidation', async () => {
+  const plusHostedSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'paypal-hosted-email' },
+    8: { key: 'paypal-hosted-card' },
+    9: { key: 'paypal-hosted-create-account' },
+    10: { key: 'paypal-hosted-review' },
+    11: { key: 'oauth-login' },
+    12: { key: 'fetch-login-code' },
+    13: { key: 'confirm-oauth' },
+    14: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：PayPal hosted email 页面加载失败，请重新创建 Plus Checkout。',
+    stepDefinitions: plusHostedSteps,
+    stepIds: [6, 7, 8, 9, 10, 11, 12, 13, 14],
+    lastStepId: 14,
+    finalOAuthChainStartStep: 11,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      plusCheckoutSource: 'paypal-hosted',
+      plusCheckoutConversionProxySession: {
+        active: true,
+        flowType: 'paypal-hosted',
+        releaseNodeKey: 'paypal-hosted-review',
+        appliedStepKey: 'paypal-hosted-openai-checkout',
+        displayName: 'socks5://proxy.example:1080',
+        snapshot: { applied: true },
+        appliedAt: 1,
+      },
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.proxyRestores, [
+    { flowType: 'paypal-hosted', displayName: 'socks5://proxy.example:1080' },
+  ]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
 });
 
 test('auto-run restarts Plus checkout from step 6 when billing fails for non-free-trial reasons', async () => {

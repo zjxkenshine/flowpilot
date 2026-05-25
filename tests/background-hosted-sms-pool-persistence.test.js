@@ -1,0 +1,154 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+const source = fs.readFileSync('background.js', 'utf8');
+
+function extractFunction(name) {
+  const markers = [`async function ${name}(`, `function ${name}(`];
+  const start = markers
+    .map((marker) => source.indexOf(marker))
+    .find((index) => index >= 0);
+  if (start < 0) {
+    throw new Error(`missing function ${name}`);
+  }
+
+  let parenDepth = 0;
+  let signatureEnded = false;
+  let braceStart = -1;
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === '(') parenDepth += 1;
+    if (ch === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) signatureEnded = true;
+    }
+    if (ch === '{' && signatureEnded) {
+      braceStart = i;
+      break;
+    }
+  }
+  if (braceStart < 0) {
+    throw new Error(`missing body for function ${name}`);
+  }
+
+  let depth = 0;
+  let end = braceStart;
+  for (; end < source.length; end += 1) {
+    const ch = source[end];
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end += 1;
+        break;
+      }
+    }
+  }
+  return source.slice(start, end);
+}
+
+test('buildPersistentSettingsPayload keeps hosted current sms entry only when it belongs to the pool', () => {
+  const api = new Function(`
+const PERSISTED_SETTING_DEFAULTS = {
+  hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolUsage: {},
+  hostedCheckoutCurrentSmsEntry: null,
+};
+const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
+const DEFAULT_SUB2API_GROUP_NAMES = ['codex'];
+const SIGNUP_METHOD_PHONE = 'phone';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+function normalizePersistentSettingValue(key, value) {
+  switch (key) {
+    case 'hostedCheckoutSmsPoolText':
+      return String(value || '').replace(/\\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolUsage':
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+      return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
+        const usage = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+        const legacyUsedCount = Number(usage.usedAt) > 0 ? 1 : 0;
+        const useCount = Math.max(0, Math.floor(Number(usage.useCount ?? usage.usageCount ?? legacyUsedCount) || 0));
+        return [String(entryKey || '').trim(), {
+          useCount,
+          usedAt: Math.max(0, Number(usage.usedAt) || 0),
+          lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+          lastError: String(usage.lastError || '').trim(),
+        }];
+      }).filter(([entryKey]) => Boolean(entryKey)));
+    case 'hostedCheckoutCurrentSmsEntry': {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      const normalizedPhone = String(value.phone || '').trim().replace(/\\D+/g, '');
+      const phone = normalizedPhone.length === 11 && normalizedPhone.startsWith('1')
+        ? normalizedPhone.slice(1)
+        : normalizedPhone;
+      const rawUrl = String(value.verificationUrl || '').trim();
+      let verificationUrl = rawUrl;
+      if (rawUrl) {
+        try {
+          const parsed = new URL(rawUrl);
+          parsed.searchParams.delete('t');
+          verificationUrl = parsed.toString();
+        } catch {
+          verificationUrl = rawUrl.replace(/([?&])t=\\d+(?=(&|$))/i, '$1').replace(/[?&]$/g, '');
+        }
+      }
+      const key = String(value.key || (phone && verificationUrl ? \`\${phone}----\${verificationUrl}\` : '')).trim();
+      if (!phone || !verificationUrl || !key) return null;
+      return { key, phone, verificationUrl };
+    }
+    default:
+      return value;
+  }
+}
+function resolveLegacyAutoStepDelaySeconds() {}
+function normalizeCloudflareDomains(value) { return value; }
+function normalizeCloudflareTempEmailDomains(value) { return value; }
+function normalizeCloudMailDomains(value) { return value; }
+function normalizeSub2ApiGroupNames(value) { return Array.isArray(value) ? value.filter(Boolean) : []; }
+function validateModeSwitchState() { return { ok: true, normalizedUpdates: {} }; }
+function resolveSignupMethod(state = {}) { return state.signupMethod || 'email'; }
+function isPlainObjectValue(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function mergeSettingsStatePatch(base, patch) { return { ...(base || {}), ...(patch || {}) }; }
+${extractFunction('buildPersistentSettingsPayload')}
+return { buildPersistentSettingsPayload };
+`)();
+
+  const kept = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify?t=1',
+    hostedCheckoutSmsPoolUsage: {
+      '1234567890----https://example.com/verify': { useCount: 2, lastError: 'timeout' },
+      stale: { useCount: 9, lastError: 'stale' },
+    },
+    hostedCheckoutCurrentSmsEntry: {
+      key: '1234567890----https://example.com/verify',
+      phone: '1234567890',
+      verificationUrl: 'https://example.com/verify?t=9',
+    },
+  });
+
+  assert.deepEqual(kept.hostedCheckoutCurrentSmsEntry, {
+    key: '1234567890----https://example.com/verify',
+    phone: '1234567890',
+    verificationUrl: 'https://example.com/verify',
+  });
+  assert.deepEqual(kept.hostedCheckoutSmsPoolUsage, {
+    '1234567890----https://example.com/verify': {
+      useCount: 2,
+      usedAt: 0,
+      lastAttemptAt: 0,
+      lastError: 'timeout',
+    },
+  });
+
+  const cleared = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify',
+    hostedCheckoutCurrentSmsEntry: {
+      key: '0000000000----https://example.com/missing',
+      phone: '0000000000',
+      verificationUrl: 'https://example.com/missing',
+    },
+  });
+
+  assert.equal(cleared.hostedCheckoutCurrentSmsEntry, null);
+});
