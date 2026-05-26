@@ -593,11 +593,13 @@ async function waitForElementByText() { return submitBtn; }
 function isStep5AllConsentText() { return false; }
 function findStep5AllConsentCheckbox() { return null; }
 function isStep5CheckboxChecked() { return false; }
+function getStep5DirectAdoptableSuccessState() { return null; }
 async function waitForVerificationSubmitOutcome() {
   return { success: true, skipProfileStep: true };
 }
 
 ${extractFunction('getStep5DirectCompletionPayload')}
+${extractFunction('normalizeStep5SignupContext')}
 ${extractFunction('isVerificationPageStillVisible')}
 ${extractFunction('isSignupProfilePageUrl')}
 ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
@@ -788,11 +790,13 @@ async function waitForElementByText() { return submitBtn; }
 function isStep5AllConsentText() { return false; }
 function findStep5AllConsentCheckbox() { return null; }
 function isStep5CheckboxChecked() { return false; }
+function getStep5DirectAdoptableSuccessState() { return null; }
 async function waitForVerificationSubmitOutcome() {
   return { success: true, skipProfileStep: true };
 }
 
 ${extractFunction('getStep5DirectCompletionPayload')}
+${extractFunction('normalizeStep5SignupContext')}
 ${extractFunction('isVerificationPageStillVisible')}
 ${extractFunction('isCombinedSignupVerificationProfilePage')}
 ${extractFunction('waitForCombinedSignupVerificationProfilePage')}

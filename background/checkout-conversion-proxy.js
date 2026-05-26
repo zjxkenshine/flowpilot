@@ -609,6 +609,24 @@ function FindProxyForURL(url, host) {
       };
     }
 
+    function sanitizeCheckoutConversionProxyPool(pool = []) {
+      return Array.isArray(pool)
+        ? pool.map((entry) => sanitizeCheckoutConversionProxyEntry(entry)).filter(Boolean)
+        : [];
+    }
+
+    function normalizeCheckoutConversionProxyPoolIndex(value = 0, poolLength = 0) {
+      const length = Math.max(0, Number(poolLength) || 0);
+      if (!length) {
+        return -1;
+      }
+      const numeric = Number.parseInt(String(value ?? ''), 10);
+      if (!Number.isInteger(numeric)) {
+        return 0;
+      }
+      return Math.max(0, Math.min(length - 1, numeric));
+    }
+
     function getCheckoutConversionProxySourceFromState(state = {}, options = {}) {
       return normalizeCheckoutConversionProxySource(
         options?.source
@@ -744,6 +762,23 @@ function FindProxyForURL(url, host) {
         resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
         selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
         entry: isDirectSource ? null : entry,
+        pool: source === '711proxy_pool'
+          ? sanitizeCheckoutConversionProxyPool(normalizedSession.pool || [])
+          : [],
+        candidateIndex: source === '711proxy_pool'
+          ? normalizeCheckoutConversionProxyPoolIndex(
+            normalizedSession.candidateIndex,
+            Array.isArray(normalizedSession.pool) ? normalizedSession.pool.length : normalizedSession.poolSize
+          )
+          : -1,
+        poolSize: source === '711proxy_pool'
+          ? Math.max(
+            sanitizeCheckoutConversionProxyPool(normalizedSession.pool || []).length,
+            Number(normalizedSession.poolSize) || 0
+          )
+          : 0,
+        exitIp: source === '711proxy_pool' ? String(normalizedSession.exitIp || '').trim() : '',
+        exitRegion: source === '711proxy_pool' ? String(normalizedSession.exitRegion || '').trim() : '',
         baseSnapshot,
         appliedAt,
         lastSwitchedAt,
@@ -757,9 +792,10 @@ function FindProxyForURL(url, host) {
       return typeof getState === 'function' ? await getState() : {};
     }
 
-    async function validateCheckoutProxyCandidateWithSnapshot(snapshot = null, diagnostics = {}) {
+    async function validateCheckoutProxyCandidateWithSnapshot(snapshot = null, diagnostics = {}, options = {}) {
       const probeDiagnostics = Array.isArray(diagnostics?.probeDiagnostics) ? diagnostics.probeDiagnostics : [];
       const targetDiagnostics = Array.isArray(diagnostics?.targetDiagnostics) ? diagnostics.targetDiagnostics : [];
+      const allowMissingExit = Boolean(options?.allowMissingExit);
       let exit = null;
       if (typeof detectProxyExitInfoByPageContext === 'function') {
         exit = await detectProxyExitInfoByPageContext({
@@ -783,7 +819,7 @@ function FindProxyForURL(url, host) {
       }
       const exitIp = String(exit?.ip || '').trim();
       const exitRegion = String(exit?.region || '').trim();
-      if (!exitIp) {
+      if (!exitIp && !allowMissingExit) {
         const diagnosticsSummary = summarizeCheckoutConversionProxyDiagnostics(probeDiagnostics, 4);
         throw new Error(diagnosticsSummary
           ? `未检测到代理出口 IP。诊断：${diagnosticsSummary}`
@@ -877,6 +913,7 @@ function FindProxyForURL(url, host) {
             selectedEntryDisplayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry || entry) || proxyUrl).trim(),
             requestedRegion: temporaryPoolState.requestedRegion,
             resolvedRegion: temporaryPoolState.resolvedRegion,
+            pool: sanitizeCheckoutConversionProxyPool(pool),
             poolSize: pool.length,
             candidateIndex: index,
           };
@@ -1023,6 +1060,11 @@ function FindProxyForURL(url, host) {
         resolvedRegion: source === '711proxy_pool' ? resolved?.resolvedRegion || '' : '',
         selectedEntryDisplayName: source === '711proxy_pool' ? resolved?.selectedEntryDisplayName || displayName : '',
         entry: source === 'direct' ? null : snapshot?.entry,
+        pool: source === '711proxy_pool' ? resolved?.pool || [] : [],
+        candidateIndex: source === '711proxy_pool' ? resolved?.candidateIndex ?? -1 : -1,
+        poolSize: source === '711proxy_pool' ? resolved?.poolSize || 0 : 0,
+        exitIp: source === '711proxy_pool' ? resolved?.exitIp || '' : '',
+        exitRegion: source === '711proxy_pool' ? resolved?.exitRegion || '' : '',
         baseSnapshot: existingSession?.baseSnapshot || snapshot,
         appliedAt: existingSession?.appliedAt || Date.now(),
         lastSwitchedAt: Date.now(),
@@ -1032,6 +1074,230 @@ function FindProxyForURL(url, host) {
         alreadyActive: false,
         session: payload,
         displayName: payload.displayName,
+      };
+    }
+
+    async function switchManualSessionToNext711Proxy(options = {}) {
+      if (typeof pullIpProxyPoolFromApi !== 'function') {
+        throw new Error('711 临时池能力尚未接入。');
+      }
+      const sourceState = await loadState(options?.state);
+      const source = getCheckoutConversionProxySourceFromState(sourceState, {
+        ...options,
+        source: options?.source ?? '711proxy_pool',
+      });
+      if (source !== '711proxy_pool') {
+        throw new Error('“下一个”仅支持 711 临时池支付转换代理。');
+      }
+      const proxy711Region = getCheckoutConversionProxy711RegionFromState(sourceState, options);
+      const existingSession = await getStoredManualSession(sourceState);
+      const existing711Session = existingSession?.active && existingSession.source === '711proxy_pool'
+        ? existingSession
+        : null;
+      const previousExitIp = String(existing711Session?.exitIp || '').trim();
+      const allowRefreshOnExhausted = options?.allowRefreshOnExhausted === undefined
+        ? Boolean(sourceState?.ipProxyAutoRefreshPoolOnExhausted)
+        : Boolean(options.allowRefreshOnExhausted);
+      const attemptErrors = [];
+      let skippedReason = '';
+      let lastAccepted = null;
+
+      const applyCandidate = async (entry = null, context = {}) => {
+        const sanitizedEntry = sanitizeCheckoutConversionProxyEntry(entry);
+        const proxyUrl = buildCheckoutConversionProxyUrlFromEntry(sanitizedEntry);
+        if (!sanitizedEntry || !proxyUrl) {
+          return null;
+        }
+        let snapshot = null;
+        try {
+          snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
+          const checked = await validateCheckoutProxyCandidateWithSnapshot(snapshot, {
+            probeDiagnostics: [],
+            targetDiagnostics: [],
+          }, {
+            allowMissingExit: true,
+          });
+          const displayName = String(
+            snapshot?.displayName
+            || describeCheckoutConversionProxyEntry(snapshot?.entry || sanitizedEntry)
+            || proxyUrl
+          ).trim();
+          return {
+            ...checked,
+            snapshot,
+            proxyUrl,
+            source: '711proxy_pool',
+            provider: '711proxy',
+            entry: snapshot?.entry || sanitizedEntry,
+            displayName,
+            selectedEntryDisplayName: displayName,
+            requestedRegion: context.requestedRegion || proxy711Region,
+            resolvedRegion: context.resolvedRegion || '',
+            pool: sanitizeCheckoutConversionProxyPool(context.pool || []),
+            poolSize: Number(context.poolSize) || sanitizeCheckoutConversionProxyPool(context.pool || []).length,
+            candidateIndex: Number(context.candidateIndex) || 0,
+          };
+        } catch (error) {
+          attemptErrors.push(`candidate_${Number(context.candidateIndex) + 1 || '?'}:${error?.message || error}`);
+          if (snapshot?.applied) {
+            await defaultRestoreCheckoutScopedProxySnapshot(snapshot).catch(() => {});
+          }
+          return null;
+        }
+      };
+
+      const tryPoolFromIndex = async (pool = [], startIndex = 0, context = {}) => {
+        const sanitizedPool = sanitizeCheckoutConversionProxyPool(pool);
+        if (!sanitizedPool.length) {
+          return null;
+        }
+        const firstIndex = Math.max(0, Math.min(sanitizedPool.length, Number(startIndex) || 0));
+        let firstReachable = null;
+        for (let index = firstIndex; index < sanitizedPool.length; index += 1) {
+          const result = await applyCandidate(sanitizedPool[index], {
+            ...context,
+            pool: sanitizedPool,
+            poolSize: sanitizedPool.length,
+            candidateIndex: index,
+          });
+          if (!result) {
+            continue;
+          }
+          const exitIp = String(result.exitIp || '').trim();
+          if (!previousExitIp || !exitIp || exitIp !== previousExitIp) {
+            return {
+              result,
+              exitChanged: Boolean(previousExitIp && exitIp && exitIp !== previousExitIp),
+              fallbackSameExit: false,
+            };
+          }
+          if (!firstReachable) {
+            firstReachable = result;
+          } else if (result.snapshot?.applied) {
+            await defaultRestoreCheckoutScopedProxySnapshot(result.snapshot).catch(() => {});
+          }
+        }
+        if (firstReachable) {
+          skippedReason = '当前 711 临时池没有检测到不同出口，已切换到下一条可用节点。';
+          return {
+            result: firstReachable,
+            exitChanged: false,
+            fallbackSameExit: true,
+          };
+        }
+        return null;
+      };
+
+      const pullFreshPool = async () => {
+        const temporaryPoolState = build711TemporaryPoolState(sourceState, {
+          ...options,
+          proxy711Region,
+        });
+        const poolState = {
+          ...(sourceState || {}),
+          ipProxyService: '711proxy',
+          ipProxyMode: 'api',
+          ipProxyApiUrl: temporaryPoolState.apiUrl,
+        };
+        const pool = await pullIpProxyPoolFromApi(poolState, {
+          maxItems: Number(options?.maxItems) || 100,
+          timeoutMs: options?.timeoutMs,
+        });
+        return {
+          pool: sanitizeCheckoutConversionProxyPool(pool),
+          requestedRegion: temporaryPoolState.requestedRegion,
+          resolvedRegion: temporaryPoolState.resolvedRegion,
+        };
+      };
+
+      const storedPool = sanitizeCheckoutConversionProxyPool(existing711Session?.pool || []);
+      let fallbackAccepted = null;
+      if (existing711Session && storedPool.length) {
+        const currentIndex = normalizeCheckoutConversionProxyPoolIndex(existing711Session.candidateIndex, storedPool.length);
+        const nextFromStored = await tryPoolFromIndex(storedPool, currentIndex + 1, {
+          requestedRegion: existing711Session.requestedRegion || proxy711Region,
+          resolvedRegion: existing711Session.resolvedRegion || '',
+        });
+        if (nextFromStored?.result && (!nextFromStored.fallbackSameExit || !allowRefreshOnExhausted)) {
+          lastAccepted = nextFromStored;
+        } else if (nextFromStored?.result) {
+          fallbackAccepted = nextFromStored;
+        } else if (!allowRefreshOnExhausted) {
+          skippedReason = attemptErrors.length
+            ? `当前 711 临时池已到末尾，未找到不同出口。${summarizeCheckoutConversionProxyDiagnostics(attemptErrors, 4)}`
+            : '当前 711 临时池已到末尾，未找到不同出口。';
+        }
+      }
+
+      if (!lastAccepted && (!existing711Session || !storedPool.length || allowRefreshOnExhausted)) {
+        try {
+          const fresh = await pullFreshPool();
+          if (!fresh.pool.length) {
+            throw new Error('711 临时池为空，请检查 API 返回。');
+          }
+          const nextFromFresh = await tryPoolFromIndex(fresh.pool, 0, fresh);
+          if (nextFromFresh?.result) {
+            lastAccepted = nextFromFresh;
+          } else if (!skippedReason) {
+            skippedReason = attemptErrors.length
+              ? `711 临时池所有候选节点均不可用。${summarizeCheckoutConversionProxyDiagnostics(attemptErrors, 4)}`
+              : '711 临时池所有候选节点均不可用。';
+          }
+        } catch (error) {
+          if (!fallbackAccepted?.result) {
+            throw error;
+          }
+          skippedReason = String(error?.message || error || skippedReason || '').trim() || skippedReason;
+        }
+      }
+
+      if (!lastAccepted && fallbackAccepted?.result) {
+        lastAccepted = fallbackAccepted;
+      }
+
+      if (!lastAccepted?.result) {
+        return {
+          switched: false,
+          skipped: true,
+          skippedReason,
+          reason: skippedReason,
+          exitChanged: false,
+          session: existing711Session,
+          displayName: String(existing711Session?.displayName || '').trim(),
+        };
+      }
+
+      const resolved = lastAccepted.result;
+      const finalSkippedReason = lastAccepted.fallbackSameExit
+        ? String(skippedReason || '').trim()
+        : '';
+      const payload = await persistManualSession({
+        source: '711proxy_pool',
+        provider: '711proxy',
+        proxyUrl: resolved.proxyUrl || buildCheckoutConversionProxyUrlFromEntry(resolved.snapshot?.entry) || '',
+        displayName: resolved.displayName || resolved.selectedEntryDisplayName || '711 临时池',
+        requestedRegion: resolved.requestedRegion || proxy711Region,
+        resolvedRegion: resolved.resolvedRegion || '',
+        selectedEntryDisplayName: resolved.selectedEntryDisplayName || resolved.displayName || '',
+        entry: resolved.snapshot?.entry || resolved.entry,
+        pool: resolved.pool || [],
+        candidateIndex: resolved.candidateIndex ?? -1,
+        poolSize: resolved.poolSize || 0,
+        exitIp: resolved.exitIp || '',
+        exitRegion: resolved.exitRegion || '',
+        baseSnapshot: existing711Session?.baseSnapshot || existingSession?.baseSnapshot || resolved.snapshot,
+        appliedAt: existing711Session?.appliedAt || existingSession?.appliedAt || Date.now(),
+        lastSwitchedAt: Date.now(),
+      });
+      return {
+        switched: true,
+        skipped: false,
+        exitChanged: Boolean(lastAccepted.exitChanged),
+        previousExitIp,
+        session: payload,
+        displayName: payload.displayName,
+        skippedReason: finalSkippedReason,
+        reason: finalSkippedReason,
       };
     }
 
@@ -1210,6 +1476,7 @@ function FindProxyForURL(url, host) {
       persistManualSession,
       clearStoredManualSession,
       switchManualSession,
+      switchManualSessionToNext711Proxy,
       cancelManualSession,
       cleanupResidualSession,
       applySessionFromState,

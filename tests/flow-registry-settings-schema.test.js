@@ -202,3 +202,47 @@ test('settings schema preserves Plus checkout wait settings in canonical state a
   assert.equal(view.plusCheckoutCreatePreWaitSeconds, 15);
   assert.equal(view.plusCheckoutOpenStableWaitSeconds, 28);
 });
+
+test('settings schema preserves normalized PayPal generated profile in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const normalized = schema.normalizeSettingsState({
+    paypalGeneratedProfile: {
+      email: ' user@example.com ',
+      phone: ' +1 555 0100 ',
+      password: ' Secret123! ',
+      firstName: ' Ada ',
+      lastName: ' Lovelace ',
+      birthday: ' 2001-02-03 ',
+      countryCode: ' jp ',
+      address1: ' 1 Marunouchi ',
+      city: ' Chiyoda ',
+      region: ' Tokyo ',
+      postalCode: ' 100-0005 ',
+      generatedFromCountry: ' de ',
+      generatedAt: '12345',
+      extra: 'ignored',
+    },
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  const expected = {
+    email: 'user@example.com',
+    phone: '+1 555 0100',
+    password: 'Secret123!',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    birthday: '2001-02-03',
+    countryCode: 'JP',
+    address1: '1 Marunouchi',
+    city: 'Chiyoda',
+    region: 'Tokyo',
+    postalCode: '100-0005',
+    generatedFromCountry: 'DE',
+    generatedAt: 12345,
+  };
+
+  assert.deepEqual(normalized.flows.openai.plus.paypalGeneratedProfile, expected);
+  assert.deepEqual(view.paypalGeneratedProfile, expected);
+  assert.deepEqual(view.settingsState.flows.openai.plus.paypalGeneratedProfile, expected);
+});

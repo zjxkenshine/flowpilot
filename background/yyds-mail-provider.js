@@ -150,6 +150,7 @@
       await persistResolvedEmailState(latestState, inbox.address, {
         source: `generated:${YYDS_MAIL_PROVIDER}`,
         preserveAccountIdentity: Boolean(options?.preserveAccountIdentity),
+        ...(options?.stateTarget !== undefined ? { stateTarget: options.stateTarget } : {}),
       });
       await addLog(`YYDS Mail：已创建邮箱 ${inbox.address}`, 'ok');
       return inbox.address;

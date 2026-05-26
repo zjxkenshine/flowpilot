@@ -277,6 +277,65 @@ test('generated email helper preserves phone identity through the shared persist
   assert.equal(persistCalls[0].state.signupPhoneNumber, '+447780579093');
 });
 
+test('generated email helper forwards payment state target through shared persistence helper', async () => {
+  const api = loadGeneratedEmailHelpersApi();
+  const persistCalls = [];
+  const setEmailCalls = [];
+
+  const helpers = api.createGeneratedEmailHelpers({
+    addLog: async () => {},
+    buildGeneratedAliasEmail: () => {
+      throw new Error('should not build alias');
+    },
+    buildCloudflareTempEmailHeaders: () => ({}),
+    CLOUDFLARE_TEMP_EMAIL_GENERATOR: 'cloudflare-temp-email',
+    DUCK_AUTOFILL_URL: 'https://duckduckgo.com/email',
+    fetch: async () => ({ ok: true, text: async () => '{}' }),
+    fetchIcloudHideMyEmail: async () => {
+      throw new Error('should not use icloud generator');
+    },
+    getCloudflareTempEmailAddressFromResponse: () => '',
+    getCloudflareTempEmailConfig: () => ({ baseUrl: '', adminAuth: '', domain: '' }),
+    getRegistrationEmailBaseline: () => '',
+    getState: async () => ({
+      emailGenerator: 'duck',
+      mailProvider: 'gmail',
+    }),
+    ensureMail2925AccountForFlow: async () => {
+      throw new Error('should not allocate 2925 account');
+    },
+    joinCloudflareTempEmailUrl: () => '',
+    normalizeCloudflareDomain: () => '',
+    normalizeCloudflareTempEmailAddress: () => '',
+    normalizeEmailGenerator: (value) => String(value || '').trim().toLowerCase(),
+    isGeneratedAliasProvider: () => false,
+    persistRegistrationEmailState: async (state, email, options) => {
+      persistCalls.push({ state, email, options });
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScript: async () => ({ email: 'payment-duck@example.com', generated: true }),
+    setEmailState: async (email, options = {}) => {
+      setEmailCalls.push({ email, options });
+    },
+    throwIfStopped: () => {},
+  });
+
+  const email = await helpers.fetchGeneratedEmail({
+    emailGenerator: 'duck',
+    mailProvider: 'gmail',
+  }, {
+    generator: 'duck',
+    stateTarget: 'payment',
+  });
+
+  assert.equal(email, 'payment-duck@example.com');
+  assert.equal(persistCalls.length, 1);
+  assert.equal(persistCalls[0].email, 'payment-duck@example.com');
+  assert.equal(persistCalls[0].options.source, 'generated:duck');
+  assert.equal(persistCalls[0].options.stateTarget, 'payment');
+  assert.deepStrictEqual(setEmailCalls, []);
+});
+
 test('generated email helper can read the requested address from custom email pool', async () => {
   const api = loadGeneratedEmailHelpersApi();
   const events = [];

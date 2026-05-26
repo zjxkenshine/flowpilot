@@ -12,11 +12,14 @@ new Function('self', `${gopayUtilsSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 
-function createCheckoutContentHarness() {
+function createCheckoutContentHarness(options = {}) {
   const checkoutEvents = [];
   const attrs = new Map();
   let listener = null;
   const elements = [];
+  const includeHostedEmailInput = options.includeHostedEmailInput !== false;
+  const locationHref = options.locationHref || 'https://chatgpt.com/checkout/openai_ie/cs_test';
+  const locationUrl = new URL(locationHref);
 
   function createElement({ tagName = 'DIV', text = '', attrs: initialAttrs = {}, id = '', type = '', value = '' } = {}) {
     const attrMap = new Map(Object.entries(initialAttrs));
@@ -66,19 +69,53 @@ function createCheckoutContentHarness() {
     return element;
   }
 
-  const paymentButton = createElement({ tagName: 'BUTTON', text: 'PayPal', attrs: { role: 'tab', 'aria-selected': '' } });
+  const paymentButton = createElement({ tagName: 'BUTTON', text: 'PayPal', attrs: { role: 'tab', 'aria-selected': '', 'data-testid': 'paypal-accordion-item-button' } });
+  const hostedEmailInput = createElement({ tagName: 'INPUT', id: 'email', type: 'text', attrs: { name: 'email', placeholder: 'email@example.com' } });
+  const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
+  const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
+  const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
+  const termsCheckbox = createElement({ tagName: 'INPUT', id: 'termsOfServiceConsentCheckbox', type: 'checkbox', attrs: { type: 'checkbox' } });
   const fullNameInput = createElement({ tagName: 'INPUT', id: 'name', type: 'text', attrs: { name: 'billingName', placeholder: 'Full name' } });
   const addressInput = createElement({ tagName: 'INPUT', id: 'address', type: 'text', attrs: { name: 'addressLine1', placeholder: 'Address line 1' } });
   const cityInput = createElement({ tagName: 'INPUT', id: 'city', type: 'text', attrs: { name: 'locality', placeholder: 'City' } });
   const postalInput = createElement({ tagName: 'INPUT', id: 'postal', type: 'text', attrs: { name: 'postalCode', placeholder: 'Postal code' } });
+  const hostedStateSelect = {
+    ...createElement({ tagName: 'SELECT', id: 'billingAdministrativeArea' }),
+    options: [
+      { value: 'NY', textContent: 'New York', label: 'New York' },
+      { value: 'TX', textContent: 'Texas', label: 'Texas' },
+    ],
+    value: '',
+  };
   const suggestionOption = createElement({ tagName: 'LI', text: 'Unter den Linden 1, Berlin', attrs: { role: 'option', class: 'pac-item' } });
-  const subscribeButton = createElement({ tagName: 'BUTTON', text: 'Subscribe', attrs: { type: 'submit', 'aria-label': 'Subscribe' } });
+  const subscribeButton = createElement({ tagName: 'BUTTON', text: 'Subscribe', attrs: { type: 'submit', 'aria-label': 'Subscribe', 'data-testid': 'submit-button' } });
   subscribeButton.type = 'submit';
-  elements.push(paymentButton, fullNameInput, addressInput, cityInput, postalInput, suggestionOption, subscribeButton);
+  elements.push(
+    paymentButton,
+    hostedAddressInput,
+    hostedCityInput,
+    hostedPostalInput,
+    termsCheckbox,
+    hostedStateSelect,
+    fullNameInput,
+    addressInput,
+    cityInput,
+    postalInput,
+    suggestionOption,
+    subscribeButton
+  );
+  if (includeHostedEmailInput) {
+    elements.push(hostedEmailInput);
+  }
 
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
-    location: { href: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+    location: {
+      href: locationHref,
+      host: locationUrl.host,
+      hostname: locationUrl.hostname,
+      pathname: locationUrl.pathname,
+    },
     window: {},
     CSS: { escape: (value) => String(value) },
     Event: class TestEvent { constructor(type) { this.type = type; } },
@@ -95,7 +132,21 @@ function createCheckoutContentHarness() {
           attrs.set(name, String(nextValue));
         },
       },
-      getElementById() {
+      getElementById(id) {
+        return elements.find((element) => element.id === id) || null;
+      },
+      querySelector(selector) {
+        const text = String(selector || '');
+        if (text === '[data-testid="paypal-accordion-item-button"]') return paymentButton;
+        if (text === '#email' || text === 'input[type="email"]' || text === 'input[name="email"]') {
+          return includeHostedEmailInput ? hostedEmailInput : null;
+        }
+        if (text === '#billingAddressLine1') return hostedAddressInput;
+        if (text === '#billingLocality') return hostedCityInput;
+        if (text === '#billingPostalCode') return hostedPostalInput;
+        if (text === '#billingAdministrativeArea') return hostedStateSelect;
+        if (text === '#termsOfServiceConsentCheckbox') return termsCheckbox;
+        if (text === 'button[data-testid="submit-button"]') return subscribeButton;
         return null;
       },
       querySelectorAll(selector) {
@@ -135,15 +186,27 @@ function createCheckoutContentHarness() {
     log() {},
     fillInput(element, nextValue) {
       element.value = nextValue;
+      checkoutEvents.push({ type: 'fill', id: element.id || '', value: nextValue });
     },
     simulateClick(element) {
       if (element === paymentButton) {
         paymentButton.setAttribute('aria-selected', 'true');
+        checkoutEvents.push({ type: 'click', target: 'paypal' });
+        return;
+      }
+      if (element === subscribeButton) {
+        checkoutEvents.push({ type: 'click', target: 'subscribe' });
+        return;
+      }
+      if (element === termsCheckbox) {
+        termsCheckbox.checked = true;
+        checkoutEvents.push({ type: 'click', target: 'terms' });
       }
     },
   };
   context.window = context;
   context.window.getComputedStyle = (element) => element?.style || { display: 'block', visibility: 'visible' };
+  context.window.__PAYPAL_HOSTED_EMAIL_INPUT_TIMEOUT_MS__ = options.hostedEmailInputTimeoutMs || 15000;
 
   vm.createContext(context);
   vm.runInContext(plusCheckoutSource, context);
@@ -241,11 +304,24 @@ test('Plus checkout create waits 20 seconds after opening checkout page by defau
     },
     sendTabMessageUntilStopped: async (tabId, source, message) => {
       events.push({ type: 'tab-message', tabId, source, message });
-      return {
-        checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-        country: 'US',
-        currency: 'USD',
-      };
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '€0.00',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
     },
     setState: async (payload) => {
       events.push({ type: 'set-state', payload });
@@ -304,11 +380,26 @@ test('Plus checkout create uses configured checkout open stable wait seconds', a
       events.push({ type: 'ready' });
     },
     registerTab: async () => {},
-    sendTabMessageUntilStopped: async () => ({
-      checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-      country: 'US',
-      currency: 'USD',
-    }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '€0.00',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
     setState: async () => {},
     sleepWithStop: async (ms) => {
       events.push({ type: 'sleep', ms });
@@ -345,11 +436,24 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push(message);
-      return {
-        checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-        country: 'ID',
-        currency: 'IDR',
-      };
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'ID',
+          currency: 'IDR',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '€0.00',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
     },
     setState: async () => {},
     sleepWithStop: async () => {},
@@ -850,6 +954,12 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
         port: 8001,
         username: 'user-711',
         password: 'pass-711',
+      }, {
+        protocol: 'http',
+        host: 'proxy-711-b.example',
+        port: 8002,
+        username: 'user-711-b',
+        password: 'pass-711-b',
       }];
     },
     detectProxyExitInfoByPageContext: async () => ({
@@ -872,6 +982,11 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
   assert.equal(switched.session.requestedRegion, 'US');
   assert.equal(switched.session.resolvedRegion, 'US');
   assert.equal(switched.session.proxyUrl, 'http://user-711:pass-711@proxy-711.example:8001');
+  assert.equal(switched.session.poolSize, 2);
+  assert.equal(switched.session.candidateIndex, 0);
+  assert.equal(switched.session.exitIp, '203.0.113.88');
+  assert.equal(switched.session.exitRegion, 'US');
+  assert.equal(switched.session.pool[1].host, 'proxy-711-b.example');
   assert.equal(poolCalls.length, 1);
   assert.equal(poolCalls[0].ipProxyService, '711proxy');
   assert.match(poolCalls[0].ipProxyApiUrl, /region=US/);
@@ -889,6 +1004,366 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
     username: 'baseline-user',
     password: 'baseline-pass',
   });
+});
+
+test('checkout conversion proxy 711 next switches stored pool index and preserves base snapshot', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    ipProxyAutoRefreshPoolOnExhausted: false,
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=US&proto=http&stype=text',
+      },
+    },
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      source: '711proxy_pool',
+      provider: '711proxy',
+      proxyUrl: 'http://user-a:pass-a@proxy-a.example:8001',
+      displayName: 'http://proxy-a.example:8001',
+      requestedRegion: 'US',
+      resolvedRegion: 'US',
+      selectedEntryDisplayName: 'http://proxy-a.example:8001',
+      entry: {
+        protocol: 'http',
+        host: 'proxy-a.example',
+        port: 8001,
+        username: 'user-a',
+        password: 'pass-a',
+      },
+      pool: [{
+        protocol: 'http',
+        host: 'proxy-a.example',
+        port: 8001,
+        username: 'user-a',
+        password: 'pass-a',
+      }, {
+        protocol: 'http',
+        host: 'proxy-b.example',
+        port: 8002,
+        username: 'user-b',
+        password: 'pass-b',
+      }],
+      candidateIndex: 0,
+      poolSize: 2,
+      exitIp: '203.0.113.10',
+      exitRegion: 'US',
+      baseSnapshot: {
+        applied: true,
+        entry: {
+          protocol: 'http',
+          host: 'proxy-a.example',
+          port: 8001,
+          username: 'user-a',
+          password: 'pass-a',
+        },
+        previousProxySettings: {
+          value: {
+            mode: 'pac_script',
+            pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+          },
+        },
+        previousAuthEntry: {
+          host: 'baseline.proxy',
+          port: 7890,
+          username: 'baseline-user',
+          password: 'baseline-pass',
+        },
+      },
+      appliedAt: 100,
+      lastSwitchedAt: 100,
+    },
+  };
+  let authEntry = {
+    host: 'user-session.proxy',
+    port: 8001,
+    username: 'user-a',
+    password: 'pass-a',
+  };
+  let currentProxyValue = {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'http',
+        host: 'proxy-a.example',
+        port: 8001,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  };
+  const appliedHosts = [];
+  const exitQueue = [
+    { ip: '203.0.113.20', region: 'US' },
+  ];
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            currentProxyValue = details.value;
+            appliedHosts.push(details.value?.rules?.singleProxy?.host || 'pac');
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async () => {
+      throw new Error('should not refresh pool');
+    },
+    detectProxyExitInfoByPageContext: async () => {
+      const next = exitQueue.shift() || { ip: '', region: '' };
+      return {
+        ...next,
+        source: 'page_context',
+        endpoint: 'https://chatgpt.com/cdn-cgi/trace',
+      };
+    },
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'page_context',
+    }),
+  });
+
+  const switched = await manager.switchManualSessionToNext711Proxy({
+    state,
+    source: '711proxy_pool',
+    proxy711Region: 'US',
+  });
+
+  assert.equal(switched.switched, true);
+  assert.equal(switched.exitChanged, true);
+  assert.equal(switched.session.candidateIndex, 1);
+  assert.equal(switched.session.poolSize, 2);
+  assert.equal(switched.session.proxyUrl, 'http://user-b:pass-b@proxy-b.example:8002');
+  assert.equal(switched.session.exitIp, '203.0.113.20');
+  assert.deepStrictEqual(switched.session.baseSnapshot.previousProxySettings.value, {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  });
+  assert.deepStrictEqual(appliedHosts, ['proxy-b.example']);
+
+  const cancelResult = await manager.cancelManualSession(state);
+  assert.equal(cancelResult.cancelled, true);
+  assert.deepStrictEqual(currentProxyValue, {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  });
+  assert.deepStrictEqual(authEntry, {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  });
+});
+
+test('checkout conversion proxy 711 next starts a manual session when inactive', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    plusCheckoutConversionProxyManualSession: null,
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=US&proto=http&stype=text',
+      },
+    },
+  };
+  let authEntry = null;
+  let currentProxyValue = {
+    mode: 'direct',
+  };
+  const poolCalls = [];
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async (poolState) => {
+      poolCalls.push(poolState);
+      return [{
+        protocol: 'http',
+        host: 'proxy-first.example',
+        port: 8001,
+        username: 'first-user',
+        password: 'first-pass',
+      }];
+    },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '203.0.113.44',
+      region: 'US',
+      source: 'page_context',
+      endpoint: 'https://chatgpt.com/cdn-cgi/trace',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'page_context',
+    }),
+  });
+
+  const switched = await manager.switchManualSessionToNext711Proxy({
+    state,
+    source: '711proxy_pool',
+    proxy711Region: 'US',
+  });
+
+  assert.equal(switched.switched, true);
+  assert.equal(switched.exitChanged, false);
+  assert.equal(switched.session.candidateIndex, 0);
+  assert.equal(switched.session.proxyUrl, 'http://first-user:first-pass@proxy-first.example:8001');
+  assert.equal(switched.session.exitIp, '203.0.113.44');
+  assert.equal(poolCalls.length, 1);
+});
+
+test('checkout conversion proxy 711 next skips at pool end when auto refresh is disabled', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    ipProxyAutoRefreshPoolOnExhausted: false,
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      source: '711proxy_pool',
+      provider: '711proxy',
+      proxyUrl: 'http://user-a:pass-a@proxy-a.example:8001',
+      displayName: 'http://proxy-a.example:8001',
+      requestedRegion: 'US',
+      resolvedRegion: 'US',
+      selectedEntryDisplayName: 'http://proxy-a.example:8001',
+      entry: {
+        protocol: 'http',
+        host: 'proxy-a.example',
+        port: 8001,
+        username: 'user-a',
+        password: 'pass-a',
+      },
+      pool: [{
+        protocol: 'http',
+        host: 'proxy-a.example',
+        port: 8001,
+        username: 'user-a',
+        password: 'pass-a',
+      }],
+      candidateIndex: 0,
+      poolSize: 1,
+      exitIp: '203.0.113.10',
+      exitRegion: 'US',
+      baseSnapshot: {
+        applied: true,
+        entry: {
+          protocol: 'http',
+          host: 'proxy-a.example',
+          port: 8001,
+          username: 'user-a',
+          password: 'pass-a',
+        },
+        previousProxySettings: {
+          value: {
+            mode: 'direct',
+          },
+        },
+        previousAuthEntry: null,
+      },
+      appliedAt: 100,
+      lastSwitchedAt: 100,
+    },
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=US&proto=http&stype=text',
+      },
+    },
+  };
+  let pullCalled = false;
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: { runtime: {} },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async () => {
+      pullCalled = true;
+      return [];
+    },
+  });
+
+  const result = await manager.switchManualSessionToNext711Proxy({
+    state,
+    source: '711proxy_pool',
+    proxy711Region: 'US',
+  });
+
+  assert.equal(result.switched, false);
+  assert.equal(result.skipped, true);
+  assert.match(result.skippedReason, /已到末尾/);
+  assert.equal(pullCalled, false);
+  assert.equal(state.plusCheckoutConversionProxyManualSession.candidateIndex, 0);
 });
 
 test('checkout conversion proxy direct mode test applies pac override and restores previous auth state', async () => {
@@ -1102,6 +1577,16 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
           currency: 'USD',
         };
       }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '€0.00',
+          },
+        };
+      }
       if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
         currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
         return { clicked: true };
@@ -1157,6 +1642,156 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
   });
 });
 
+test('Phone Plus classic checkout falls back at step 6 when checkout amount is non-zero', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 42 }),
+        update: async (tabId, payload) => ({ id: tabId, url: payload.url, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      events.push({ type: 'complete', step, payload });
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async () => {
+      events.push({ type: 'ready' });
+    },
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'plus-checkout-billing', 'paypal-approve', 'plus-checkout-return'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test',
+          country: 'DE',
+          currency: 'EUR',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 19.33,
+            isZero: false,
+            rawAmount: '€19.33',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+    },
+    sleepWithStop: async (ms) => {
+      events.push({ type: 'sleep', ms });
+    },
+    waitForTabCompleteUntilStopped: async () => {
+      events.push({ type: 'tab-complete' });
+    },
+  });
+
+  await executor.executePlusCheckoutCreate({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+  });
+
+  assert.equal(events.some((event) => event.type === 'fallback'), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-checkout-create'), false);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PLUS_CHECKOUT_GET_STATE'), true);
+});
+
+test('Phone Plus hosted checkout falls back at step 6 before submitting OpenAI hosted checkout when amount is non-zero', async () => {
+  const events = [];
+  let currentUrl = 'https://chatgpt.com/';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 55, url: currentUrl, status: 'complete' }),
+        update: async (tabId, payload) => {
+          currentUrl = payload.url;
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      events.push({ type: 'complete', step, payload });
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async () => {
+      events.push({ type: 'ready' });
+    },
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_hosted',
+          preferredCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
+          hostedCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 19.33,
+            isZero: false,
+            rawAmount: '€19.33',
+          },
+        };
+      }
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        throw new Error('hosted submit should not run after phone plus fallback');
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+    },
+    sleepWithStop: async (ms) => {
+      events.push({ type: 'sleep', ms });
+    },
+    waitForTabCompleteUntilStopped: async () => {
+      events.push({ type: 'tab-complete' });
+    },
+  });
+
+  await executor.executePlusCheckoutCreate({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  assert.equal(events.some((event) => event.type === 'fallback'), true);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'), false);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-checkout-create'), false);
+});
+
 test('PayPal no-card binding OpenAI checkout node submits hosted page and completes after success transition', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';
@@ -1205,7 +1840,15 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
         return { clicked: true };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
-        return { hostedVerificationVisible: false };
+        return {
+          hostedVerificationVisible: false,
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '€0.00',
+          },
+        };
       }
       throw new Error(`unexpected message type ${message.type}`);
     },
@@ -1497,7 +2140,7 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.phone, '4155551234');
   assert.equal(profileState.firstName, 'James');
   assert.equal(profileState.lastName, 'Smith');
-  assert.notEqual(profileState.email, cachedProfile.email);
+  assert.equal(profileState.email, cachedProfile.email);
   assert.notEqual(profileState.password, cachedProfile.password);
   assert.notEqual(profileState.cardNumber, cachedProfile.cardNumber);
   assert.equal(submitEvent.message.payload.address.street, '7 Fresh St');
@@ -1561,7 +2204,7 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.address.street, '9 Later Stage Ave');
   assert.equal(profileState.address.city, 'Dallas');
   assert.equal(profileState.phone, '4155551234');
-  assert.notEqual(profileState.email, 'stale@example.com');
+  assert.equal(profileState.email, 'stale@example.com');
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
   assert.ok(events.indexOf(profileEvent) < events.indexOf(completeEvent));
 });
@@ -1611,6 +2254,157 @@ test('PayPal hosted card node fails fresh profile regeneration instead of fallin
   assert.equal(events.some((event) => event.type === 'complete'), false);
   assert.equal(events.some((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile), false);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
+});
+
+test('Phone Plus hosted checkout reuses current provider runtime email as isolated payment email', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/test';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getPlusPaymentEmailState: () => ({ current: '', source: '', updatedAt: 0 }),
+    getState: async () => ({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      hostedCheckoutPhoneNumber: '2125550000',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      mailProvider: 'yyds-mail',
+      currentYydsMailInbox: {
+        address: 'runtime@yyds.example.com',
+        token: 'temp-token',
+      },
+    }),
+    isYydsMailProvider: (state) => state.mailProvider === 'yyds-mail',
+    isLuckmailProvider: () => false,
+    isHotmailProvider: () => false,
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/pay?token=EC-test';
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return { hostedVerificationVisible: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async (email, options = {}) => {
+      events.push({ type: 'set-payment-email', email, options });
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 321,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+  });
+
+  const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
+  assert.ok(submitEvent);
+  assert.equal(submitEvent.message.payload.email, 'runtime@yyds.example.com');
+  assert.equal(
+    events.some((event) => event.type === 'set-payment-email' && event.email === 'runtime@yyds.example.com'),
+    true
+  );
+  assert.equal(
+    events.some((event) => event.type === 'log' && /支付邮箱已复用 runtime@yyds\.example\.com/.test(event.message)),
+    true
+  );
+});
+
+test('Phone Plus hosted card refresh keeps saved payment email while refreshing profile details', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse({
+      Address: '11 Payment Keep Ave',
+      City: 'Austin',
+      State_Full: 'Texas',
+      Zip_Code: '73301',
+    }),
+    getPlusPaymentEmailState: () => ({
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    }),
+    getState: async () => createHostedRuntimeState({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      plusPaymentEmailState: {
+        current: 'saved-payment@example.com',
+        source: 'runtime:test',
+        updatedAt: 100,
+      },
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return {
+          submitted: true,
+          phoneMatched: true,
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return currentUrl.includes('/create-account')
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async (email, options = {}) => events.push({ type: 'set-payment-email', email, options }),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 456,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    plusHostedCheckoutGuestProfile: {
+      email: 'stale-profile@example.com',
+      phone: '9999999999',
+      cardNumber: '4000000000000002',
+      address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+    },
+  });
+
+  const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)
+    ?.payload
+    ?.plusHostedCheckoutGuestProfile;
+  const submitEvent = events.find((event) => event.type === 'tab-message' && event.message?.payload?.expectedStage === 'guest_checkout');
+
+  assert.ok(profileState);
+  assert.ok(submitEvent);
+  assert.equal(profileState.email, 'saved-payment@example.com');
+  assert.equal(profileState.address.street, '11 Payment Keep Ave');
+  assert.notEqual(profileState.cardNumber, '4000000000000002');
+  assert.equal(submitEvent.message.payload.email, 'saved-payment@example.com');
+  assert.equal(
+    events.some((event) => event.type === 'set-payment-email' && event.email === 'saved-payment@example.com'),
+    true
+  );
 });
 
 test('Plus checkout content routes billing operations through the operation delay gate', async () => {
@@ -1679,6 +2473,67 @@ test('Plus checkout content routes same-frame autocomplete query and suggestion 
     'click-subscribe',
   ]);
   assert.equal(checkoutEvents.some((event) => event.type === 'delay' && event.ms !== 2000), false);
+});
+
+test('OpenAI hosted checkout fills email before selecting PayPal and address', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  const paymentButtonIndex = checkoutEvents.findIndex((event) => event.type === 'click' && event.target === 'paypal');
+  const submitIndex = checkoutEvents.findIndex((event) => event.type === 'click' && event.target === 'subscribe');
+  const emailFillIndex = checkoutEvents.findIndex((event) => event.type === 'fill' && event.id === 'email' && event.value === 'payment@example.com');
+  const addressFillIndex = checkoutEvents.findIndex((event) => event.type === 'fill' && event.id === 'billingAddressLine1' && event.value === '1 Main St');
+
+  assert.ok(emailFillIndex > -1);
+  assert.ok(paymentButtonIndex > -1);
+  assert.ok(addressFillIndex > -1);
+  assert.ok(submitIndex > -1);
+  assert.ok(emailFillIndex < paymentButtonIndex);
+  assert.ok(paymentButtonIndex < addressFillIndex);
+  assert.ok(addressFillIndex < submitIndex);
+});
+
+test('OpenAI hosted checkout stops before PayPal selection when email input is missing', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    includeHostedEmailInput: false,
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedEmailInputTimeoutMs: 100,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, undefined);
+  assert.match(result.error, /email|邮箱|郵箱/i);
+  assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'paypal'), false);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingAddressLine1'), false);
 });
 
 test('GPC manual checkout injects Plus script before reading ChatGPT session token and sends X-API-Key', async () => {

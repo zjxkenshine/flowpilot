@@ -1927,6 +1927,42 @@
           };
         }
 
+        case 'NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711': {
+          if (!checkoutConversionProxyManager?.switchManualSessionToNext711Proxy) {
+            throw new Error('支付转换代理 711 下一个能力尚未接入。');
+          }
+          const currentState = await getState();
+          const state = buildResolvedIpProxyState(currentState, message.payload || {});
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能切换支付转换代理。');
+          }
+          const result = await checkoutConversionProxyManager.switchManualSessionToNext711Proxy({
+            state,
+            source: message.payload?.source ?? '711proxy_pool',
+            proxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region,
+          });
+          const patch = {
+            plusCheckoutConversionProxyManualSession: result?.session || state?.plusCheckoutConversionProxyManualSession || null,
+            plusCheckoutConversionProxySource: '711proxy_pool',
+            plusCheckoutConversionProxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region ?? '',
+          };
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(patch);
+          }
+          return {
+            ok: true,
+            switched: Boolean(result?.switched),
+            skipped: Boolean(result?.skipped),
+            skippedReason: String(result?.skippedReason || result?.reason || '').trim(),
+            reason: String(result?.reason || result?.skippedReason || '').trim(),
+            exitChanged: Boolean(result?.exitChanged),
+            plusCheckoutConversionProxyManualSession: patch.plusCheckoutConversionProxyManualSession,
+            plusCheckoutConversionProxySource: patch.plusCheckoutConversionProxySource,
+            plusCheckoutConversionProxy711Region: patch.plusCheckoutConversionProxy711Region,
+            displayName: String(result?.displayName || result?.session?.displayName || '').trim(),
+          };
+        }
+
         case 'CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL': {
           if (!checkoutConversionProxyManager?.cancelManualSession) {
             throw new Error('支付转换代理取消能力尚未接入。');

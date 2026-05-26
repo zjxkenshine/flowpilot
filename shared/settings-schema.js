@@ -57,6 +57,41 @@
       }
       return 'oauth';
     };
+    const defaultPayPalGeneratedProfile = Object.freeze({
+      email: '',
+      phone: '',
+      password: '',
+      firstName: '',
+      lastName: '',
+      birthday: '',
+      countryCode: '',
+      address1: '',
+      city: '',
+      region: '',
+      postalCode: '',
+      generatedFromCountry: '',
+      generatedAt: 0,
+    });
+    const normalizePayPalGeneratedProfileCountryCode = (value = '') => {
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+    };
+    const normalizePayPalGeneratedProfile = (value = {}) => {
+      const source = isPlainObject(value) ? value : {};
+      const next = { ...defaultPayPalGeneratedProfile };
+      Object.keys(defaultPayPalGeneratedProfile).forEach((field) => {
+        if (field === 'generatedAt') {
+          next.generatedAt = Math.max(0, Number(source.generatedAt) || 0);
+          return;
+        }
+        if (field === 'countryCode' || field === 'generatedFromCountry') {
+          next[field] = normalizePayPalGeneratedProfileCountryCode(source[field]);
+          return;
+        }
+        next[field] = String(source[field] || '').trim();
+      });
+      return next;
+    };
 
     function buildDefaultSettingsState() {
       return {
@@ -117,6 +152,7 @@
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               plusHostedCheckoutOauthDelaySeconds: 3,
+              paypalGeneratedProfile: normalizePayPalGeneratedProfile(),
             },
             autoRun: {
               autoRunRetryPaypalCallback: false,
@@ -397,6 +433,11 @@
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutOauthDelaySeconds)));
               })(),
+              paypalGeneratedProfile: normalizePayPalGeneratedProfile(
+                input?.paypalGeneratedProfile
+                ?? nested?.flows?.openai?.plus?.paypalGeneratedProfile
+                ?? defaults.flows.openai.plus.paypalGeneratedProfile
+              ),
             },
             autoRun: {
               autoRunRetryPaypalCallback: Boolean(
@@ -556,6 +597,7 @@
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
+      next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;

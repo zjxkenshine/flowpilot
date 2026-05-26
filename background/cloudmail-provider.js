@@ -197,6 +197,7 @@
       await persistResolvedEmailState(latestState, address, {
         source: 'generated:cloudmail',
         preserveAccountIdentity: Boolean(options?.preserveAccountIdentity),
+        ...(options?.stateTarget !== undefined ? { stateTarget: options.stateTarget } : {}),
       });
       await addLog(`Cloud Mail：已生成 ${address}`, 'ok');
       return address;

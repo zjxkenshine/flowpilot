@@ -316,6 +316,74 @@ return {
   assert.match(api.plusPaymentMethodCaption.textContent, /传统/);
 });
 
+test('sidepanel Plus UI shows PayPal profile generator only for PayPal payment modes', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('getSelectedPlusPaymentMethod'),
+    extractFunction('getRequestedPlusAccountAccessStrategy'),
+    extractFunction('normalizeGpcHelperPhoneModeValue'),
+    extractFunction('getGpcHelperAutoModeEnabled'),
+    extractFunction('normalizeGpcAutoModePermissionValue'),
+    extractFunction('getGpcAutoModePermissionFromPayload'),
+    extractFunction('shouldPreserveSelectedGpcAutoMode'),
+    extractFunction('hasGpcAutoModePermissionField'),
+    extractFunction('isGpcAutoModePermissionDenied'),
+    extractFunction('normalizeGpcOtpChannelValue'),
+    extractFunction('updatePlusModeUI'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = { plusPaymentMethod: 'paypal' };
+let currentPlusPaymentMethod = 'paypal';
+let currentPlusAccountAccessStrategy = 'oauth';
+let hostedSmsPoolExpanded = false;
+let renderPayPalProfileCalls = 0;
+const inputPlusModeEnabled = { checked: true };
+const selectPlusPaymentMethod = { value: 'paypal', style: { display: 'none' } };
+const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
+const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
+const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const rowPayPalAccount = { style: { display: 'none' } };
+const rowPayPalProfileGenerator = { style: { display: 'none' } };
+function renderPlusCheckoutConversionProxyRuntimeStatus() {}
+function renderPayPalProfile() { renderPayPalProfileCalls += 1; }
+${bundle}
+return {
+  updatePlusModeUI,
+  inputPlusModeEnabled,
+  selectPlusPaymentMethod,
+  rowPayPalProfileGenerator,
+  getRenderCalls: () => renderPayPalProfileCalls,
+};
+`)();
+
+  api.updatePlusModeUI();
+  assert.equal(api.rowPayPalProfileGenerator.style.display, '');
+  assert.equal(api.getRenderCalls(), 1);
+
+  api.selectPlusPaymentMethod.value = 'paypal-hosted';
+  api.updatePlusModeUI();
+  assert.equal(api.rowPayPalProfileGenerator.style.display, '');
+  assert.equal(api.getRenderCalls(), 2);
+
+  api.selectPlusPaymentMethod.value = 'gopay';
+  api.updatePlusModeUI();
+  assert.equal(api.rowPayPalProfileGenerator.style.display, 'none');
+  assert.equal(api.getRenderCalls(), 2);
+
+  api.selectPlusPaymentMethod.value = 'paypal';
+  api.inputPlusModeEnabled.checked = false;
+  api.updatePlusModeUI();
+  assert.equal(api.rowPayPalProfileGenerator.style.display, 'none');
+  assert.equal(api.getRenderCalls(), 2);
+});
+
 test('sidepanel Plus UI shows checkout conversion proxy in Plus and Phone Plus modes', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
@@ -496,6 +564,162 @@ return {
   api.renderPlusCheckoutConversionProxyRuntimeStatus();
   assert.equal(api.getText(), '当前生效：无代理模式');
   assert.equal(api.hasClass('state-active'), true);
+});
+
+test('sidepanel shows checkout conversion proxy next button only for 711 pool mode', () => {
+  const bundle = [
+    extractFunction('normalizePlusPaymentMethod'),
+    extractFunction('normalizePlusCheckoutConversionProxySourceValue'),
+    extractFunction('setPlusCheckoutConversionProxyTestResult'),
+    extractFunction('isPlusCheckoutCloudConversionEnabled'),
+    extractFunction('updatePlusCheckoutConversionModeUi'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {
+  plusModeEnabled: true,
+  plusPaymentMethod: 'paypal',
+  plusCheckoutConversionProxySource: 'manual',
+  plusCheckoutCloudConversionEnabled: false,
+};
+const inputPlusModeEnabled = { checked: true };
+const selectPlusPaymentMethod = { value: 'paypal' };
+const inputPlusCheckoutCloudConversionEnabled = { checked: false };
+const inputPlusCheckoutConversionProxy = { style: {}, disabled: false, readOnly: false, setAttribute(name, value) { this[name] = value; } };
+const plusCheckoutConversionProxy711Shell = { style: {} };
+const inputPlusCheckoutConversionProxy711Region = { disabled: false, readOnly: false, setAttribute(name, value) { this[name] = value; } };
+const btnPlusCheckoutConversionProxyTest = { disabled: false, setAttribute(name, value) { this[name] = value; } };
+const btnPlusCheckoutConversionProxyNext = { style: {}, disabled: false, setAttribute(name, value) { this[name] = value; } };
+const rowPlusCheckoutCloudConversionApiUrl = { style: {} };
+const rowPlusCheckoutCloudConversionApiKey = { style: {} };
+const inputPlusCheckoutCloudConversionApiUrl = { disabled: false };
+const inputPlusCheckoutCloudConversionApiKey = { disabled: false };
+const displayPlusCheckoutConversionProxyTestResult = {
+  textContent: '',
+  title: '',
+  classList: { remove() {}, add() {} },
+};
+const plusCheckoutConversionProxySourceButtons = [{
+  dataset: { plusCheckoutConversionProxySource: 'manual' },
+  classList: { toggle() {} },
+  setAttribute() {},
+  disabled: false,
+}, {
+  dataset: { plusCheckoutConversionProxySource: '711proxy_pool' },
+  classList: { toggle() {} },
+  setAttribute() {},
+  disabled: false,
+}];
+function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
+  return normalizePlusCheckoutConversionProxySourceValue(state?.plusCheckoutConversionProxySource || 'manual');
+}
+${bundle}
+return {
+  updatePlusCheckoutConversionModeUi,
+  btnPlusCheckoutConversionProxyNext,
+  setState(nextState) { latestState = { ...latestState, ...nextState }; },
+  setCloud(enabled) { inputPlusCheckoutCloudConversionEnabled.checked = Boolean(enabled); },
+};
+`)();
+
+  api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
+
+  api.setState({ plusCheckoutConversionProxySource: '711proxy_pool' });
+  api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, '');
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.disabled, false);
+
+  api.setCloud(true);
+  api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.disabled, true);
+});
+
+test('sidepanel checkout conversion proxy next button sends 711 message and syncs state', async () => {
+  const bundle = [
+    extractFunction('normalizePlusCheckoutConversionProxySourceValue'),
+    extractFunction('normalizePlusCheckoutConversionProxy711RegionDraftValue'),
+    extractFunction('normalizePlusCheckoutConversionProxy711RegionValue'),
+    extractFunction('getPlusCheckoutConversionProxyManualSession'),
+    extractFunction('getSelectedPlusCheckoutConversionProxySource'),
+    extractFunction('getCurrentPlusCheckoutConversionProxy711Region'),
+    extractFunction('setPlusCheckoutConversionProxyTestResult'),
+    extractFunction('setPlusCheckoutConversionProxyButtonsBusy'),
+    extractFunction('renderPlusCheckoutConversionProxyRuntimeStatus'),
+    extractFunction('handlePlusCheckoutConversionProxyNext711'),
+  ].join('\n');
+
+  const api = new Function(`
+const messages = [];
+const toasts = [];
+let latestState = {
+  plusCheckoutConversionProxySource: '711proxy_pool',
+  plusCheckoutConversionProxy711Region: 'US',
+  plusCheckoutConversionProxyManualSession: null,
+};
+const plusCheckoutConversionProxySourceButtons = [{
+  dataset: { plusCheckoutConversionProxySource: '711proxy_pool' },
+  classList: { contains(name) { return name === 'active'; } },
+}];
+const inputPlusCheckoutConversionProxy711Region = { value: 'US' };
+const inputPlusCheckoutConversionProxy = { value: '' };
+const btnPlusCheckoutConversionProxyTest = { disabled: false, textContent: '测试代理' };
+const btnPlusCheckoutConversionProxySwitch = { disabled: false, textContent: '切换代理' };
+const btnPlusCheckoutConversionProxyNext = { disabled: false, textContent: '下一个' };
+const btnPlusCheckoutConversionProxyCancel = { disabled: false, textContent: '取消代理' };
+const displayPlusCheckoutConversionProxyTestResult = {
+  textContent: '',
+  title: '',
+  classList: { remove() {}, add() {} },
+};
+const displayPlusCheckoutConversionProxyRuntimeStatus = {
+  textContent: '',
+  title: '',
+  classList: { remove() {}, add() {} },
+};
+function normalizePlusCheckoutConversionProxyUrlValue(value = '') { return String(value || '').trim(); }
+function buildCurrentIpProxyActionStateOverride() { return { ipProxyAutoRefreshPoolOnExhausted: true }; }
+function syncLatestState(patch) { latestState = { ...latestState, ...patch }; }
+function showToast(message, type) { toasts.push({ message, type }); }
+async function sendRuntimeMessageWithTimeout(message) {
+  messages.push(message);
+  return {
+    ok: true,
+    switched: true,
+    exitChanged: true,
+    displayName: 'http://proxy-b.example:8002',
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      source: '711proxy_pool',
+      displayName: 'http://proxy-b.example:8002',
+      requestedRegion: 'US',
+    },
+  };
+}
+${bundle}
+return {
+  messages,
+  toasts,
+  handlePlusCheckoutConversionProxyNext711,
+  getState: () => latestState,
+  getResultText: () => displayPlusCheckoutConversionProxyTestResult.textContent,
+  getRuntimeText: () => displayPlusCheckoutConversionProxyRuntimeStatus.textContent,
+};
+`)();
+
+  await api.handlePlusCheckoutConversionProxyNext711();
+
+  assert.equal(api.messages.length, 1);
+  assert.equal(api.messages[0].type, 'NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711');
+  assert.equal(api.messages[0].payload.proxy711Region, 'US');
+  assert.equal(api.messages[0].payload.ipProxyStateOverride.ipProxyAutoRefreshPoolOnExhausted, true);
+  assert.equal(api.getState().plusCheckoutConversionProxyManualSession.displayName, 'http://proxy-b.example:8002');
+  assert.equal(api.getRuntimeText(), '当前生效：http://proxy-b.example:8002');
+  assert.equal(api.getResultText(), '当前代理：http://proxy-b.example:8002');
+  assert.match(api.toasts.at(-1).message, /真实出口已变化/);
 });
 
 test('sidepanel normalizes Plus checkout wait settings to bounded integer seconds', () => {

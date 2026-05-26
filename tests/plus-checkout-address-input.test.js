@@ -343,6 +343,8 @@ test('getCheckoutAmountSummary reads non-zero today due amount', () => {
     extractFunction('normalizeText'),
     extractFunction('parseLocalizedAmount'),
     extractFunction('getTextAfterTodayDueLabel'),
+    extractFunction('buildCheckoutAmountSummaryFromParsedAmount'),
+    extractFunction('getCheckoutAmountSummaryFromProductSummary'),
     extractFunction('getVisibleControls'),
     extractFunction('getCheckoutAmountSummary'),
     'return { getCheckoutAmountSummary };',
@@ -378,6 +380,8 @@ test('getCheckoutAmountSummary accepts zero today due amount', () => {
     extractFunction('normalizeText'),
     extractFunction('parseLocalizedAmount'),
     extractFunction('getTextAfterTodayDueLabel'),
+    extractFunction('buildCheckoutAmountSummaryFromParsedAmount'),
+    extractFunction('getCheckoutAmountSummaryFromProductSummary'),
     extractFunction('getVisibleControls'),
     extractFunction('getCheckoutAmountSummary'),
     'return { getCheckoutAmountSummary };',
@@ -396,6 +400,104 @@ test('getCheckoutAmountSummary accepts zero today due amount', () => {
   assert.equal(summary.hasTodayDue, true);
   assert.equal(summary.isZero, true);
   assert.equal(summary.amount, 0);
+});
+
+test('getCheckoutAmountSummary prefers ProductSummary total amount selector for non-zero values', () => {
+  const currencyAmount = createElement({ tagName: 'SPAN', text: '€19.33', className: 'CurrencyAmount' });
+  const summaryNode = createElement({
+    tagName: 'SPAN',
+    text: '€19.33',
+    attrs: {
+      id: 'ProductSummary-totalAmount',
+      'data-testid': 'product-summary-total-amount',
+    },
+  });
+  currencyAmount.parentElement = summaryNode;
+  summaryNode.children = [currencyAmount];
+  summaryNode.closest = () => summaryNode;
+  currencyAmount.closest = () => summaryNode;
+
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('parseLocalizedAmount'),
+    extractFunction('getTextAfterTodayDueLabel'),
+    extractFunction('buildCheckoutAmountSummaryFromParsedAmount'),
+    extractFunction('getCheckoutAmountSummaryFromProductSummary'),
+    extractFunction('getVisibleControls'),
+    extractFunction('getCheckoutAmountSummary'),
+    'return { getCheckoutAmountSummary };',
+  ].join('\n');
+
+  const api = new Function('window', 'document', bundle)(
+    {
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+    },
+    {
+      querySelectorAll: (selector) => {
+        if (selector === '#ProductSummary-totalAmount .CurrencyAmount') return [currencyAmount];
+        if (selector === '#ProductSummary-totalAmount') return [summaryNode];
+        if (selector === '[data-testid="product-summary-total-amount"] .CurrencyAmount') return [currencyAmount];
+        if (selector === '[data-testid="product-summary-total-amount"]') return [summaryNode];
+        return [];
+      },
+    }
+  );
+
+  const summary = api.getCheckoutAmountSummary();
+  assert.equal(summary.hasTodayDue, true);
+  assert.equal(summary.isZero, false);
+  assert.equal(summary.amount, 19.33);
+  assert.equal(summary.rawAmount, '€19.33');
+});
+
+test('getCheckoutAmountSummary prefers ProductSummary total amount selector for zero values', () => {
+  const currencyAmount = createElement({ tagName: 'SPAN', text: '€0.00', className: 'CurrencyAmount' });
+  const summaryNode = createElement({
+    tagName: 'SPAN',
+    text: '€0.00',
+    attrs: {
+      id: 'ProductSummary-totalAmount',
+      'data-testid': 'product-summary-total-amount',
+    },
+  });
+  currencyAmount.parentElement = summaryNode;
+  summaryNode.children = [currencyAmount];
+  summaryNode.closest = () => summaryNode;
+  currencyAmount.closest = () => summaryNode;
+
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('parseLocalizedAmount'),
+    extractFunction('getTextAfterTodayDueLabel'),
+    extractFunction('buildCheckoutAmountSummaryFromParsedAmount'),
+    extractFunction('getCheckoutAmountSummaryFromProductSummary'),
+    extractFunction('getVisibleControls'),
+    extractFunction('getCheckoutAmountSummary'),
+    'return { getCheckoutAmountSummary };',
+  ].join('\n');
+
+  const api = new Function('window', 'document', bundle)(
+    {
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+    },
+    {
+      querySelectorAll: (selector) => {
+        if (selector === '#ProductSummary-totalAmount .CurrencyAmount') return [currencyAmount];
+        if (selector === '#ProductSummary-totalAmount') return [summaryNode];
+        if (selector === '[data-testid="product-summary-total-amount"] .CurrencyAmount') return [currencyAmount];
+        if (selector === '[data-testid="product-summary-total-amount"]') return [summaryNode];
+        return [];
+      },
+    }
+  );
+
+  const summary = api.getCheckoutAmountSummary();
+  assert.equal(summary.hasTodayDue, true);
+  assert.equal(summary.isZero, true);
+  assert.equal(summary.amount, 0);
+  assert.equal(summary.rawAmount, '€0.00');
 });
 
 test('isPayPalPaymentMethodActive requires a selected PayPal control', () => {

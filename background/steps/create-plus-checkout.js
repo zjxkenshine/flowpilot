@@ -64,14 +64,27 @@
       chrome,
       completeNodeFromBackground,
       createAutomationTab = null,
+      ensureHotmailAccountForFlow = null,
+      ensureLuckmailPurchaseForFlow = null,
+      fetchCloudMailAddress = null,
+      fetchGeneratedEmail = null,
+      fetchYydsMailAddress = null,
       ensureContentScriptReadyOnTabUntilStopped,
       fetch: fetchImpl = null,
+      getCurrentMail2925Account = null,
       getTabId = null,
       getState = null,
+      getPlusPaymentEmailState = null,
       isTabAlive = null,
+      isHotmailProvider = null,
+      isLuckmailProvider = null,
+      isYydsMailProvider = null,
+      normalizeCloudflareTempEmailReceiveMailbox = null,
+      normalizeCloudMailReceiveMailbox = null,
       queryTabsInAutomationWindow = null,
       registerTab,
       sendTabMessageUntilStopped,
+      setPlusPaymentEmailState = null,
       setState,
       sleepWithStop,
       waitForTabCompleteUntilStopped,
@@ -147,6 +160,267 @@
         return 'PayPal 无卡直绑';
       }
       return paymentMethod === PLUS_PAYMENT_METHOD_GOPAY ? 'GoPay' : 'PayPal';
+    }
+
+    function isPhonePlusModeState(state = {}) {
+      return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
+    }
+
+    function normalizePlusPaymentEmailStateLocal(value = {}) {
+      const candidate = value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {};
+      return {
+        current: String(candidate.current || '').trim(),
+        source: String(candidate.source || '').trim(),
+        updatedAt: Math.max(0, Number(candidate.updatedAt) || 0),
+      };
+    }
+
+    function getPlusPaymentEmailStateLocal(state = {}) {
+      if (typeof getPlusPaymentEmailState === 'function') {
+        return normalizePlusPaymentEmailStateLocal(getPlusPaymentEmailState(state));
+      }
+      return normalizePlusPaymentEmailStateLocal(state?.plusPaymentEmailState);
+    }
+
+    async function persistPhonePlusPaymentEmail(email, options = {}) {
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      const normalizedSource = String(options?.source || '').trim();
+      if (typeof setPlusPaymentEmailState === 'function') {
+        await setPlusPaymentEmailState(normalizedEmail, {
+          source: normalizedSource,
+        });
+        return;
+      }
+      await setState({
+        plusPaymentEmailState: normalizedEmail
+          ? {
+              current: normalizedEmail,
+              source: normalizedSource,
+              updatedAt: Date.now(),
+            }
+          : {
+              current: '',
+              source: '',
+              updatedAt: 0,
+            },
+      });
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate({
+          plusPaymentEmailState: normalizedEmail
+            ? {
+                current: normalizedEmail,
+                source: normalizedSource,
+                updatedAt: Date.now(),
+              }
+            : {
+                current: '',
+                source: '',
+                updatedAt: 0,
+              },
+        });
+      }
+    }
+
+    function getPhonePlusExistingPaymentEmailCandidate(state = {}) {
+      const paymentEmailState = getPlusPaymentEmailStateLocal(state);
+      if (paymentEmailState.current) {
+        return {
+          email: paymentEmailState.current,
+          source: paymentEmailState.source || 'payment:cached',
+          reused: true,
+        };
+      }
+
+      if (typeof isYydsMailProvider === 'function' && isYydsMailProvider(state)) {
+        const currentInboxAddress = String(state?.currentYydsMailInbox?.address || '').trim().toLowerCase();
+        if (currentInboxAddress) {
+          return {
+            email: currentInboxAddress,
+            source: 'runtime:yyds-mail',
+            reused: true,
+          };
+        }
+      }
+
+      if (typeof isLuckmailProvider === 'function' && isLuckmailProvider(state)) {
+        const currentPurchaseEmail = String(state?.currentLuckmailPurchase?.email_address || '').trim().toLowerCase();
+        if (currentPurchaseEmail) {
+          return {
+            email: currentPurchaseEmail,
+            source: 'runtime:luckmail',
+            reused: true,
+          };
+        }
+      }
+
+      if (typeof isHotmailProvider === 'function' && isHotmailProvider(state)) {
+        const currentHotmailId = String(state?.currentHotmailAccountId || '').trim();
+        const hotmailAccounts = Array.isArray(state?.hotmailAccounts) ? state.hotmailAccounts : [];
+        const currentHotmailEmail = String(
+          hotmailAccounts.find((account) => String(account?.id || '').trim() === currentHotmailId)?.email || ''
+        ).trim().toLowerCase();
+        if (currentHotmailEmail) {
+          return {
+            email: currentHotmailEmail,
+            source: 'runtime:hotmail',
+            reused: true,
+          };
+        }
+      }
+
+      const provider = String(state?.mailProvider || '').trim().toLowerCase();
+      if (provider === '2925' && state?.mail2925UseAccountPool && typeof getCurrentMail2925Account === 'function') {
+        const currentMail2925Email = String(getCurrentMail2925Account(state)?.email || '').trim().toLowerCase();
+        if (currentMail2925Email) {
+          return {
+            email: currentMail2925Email,
+            source: 'runtime:mail2925-account',
+            reused: true,
+          };
+        }
+      }
+
+      if (provider === 'cloudmail' && typeof normalizeCloudMailReceiveMailbox === 'function') {
+        const cloudMailReceiveMailbox = String(normalizeCloudMailReceiveMailbox(state?.cloudMailReceiveMailbox)).trim().toLowerCase();
+        if (cloudMailReceiveMailbox) {
+          return {
+            email: cloudMailReceiveMailbox,
+            source: 'runtime:cloudmail-receive-mailbox',
+            reused: true,
+          };
+        }
+      }
+
+      if (provider === 'cloudflare-temp-email' && typeof normalizeCloudflareTempEmailReceiveMailbox === 'function') {
+        const cloudflareReceiveMailbox = String(normalizeCloudflareTempEmailReceiveMailbox(state?.cloudflareTempEmailReceiveMailbox)).trim().toLowerCase();
+        if (cloudflareReceiveMailbox) {
+          return {
+            email: cloudflareReceiveMailbox,
+            source: 'runtime:cloudflare-temp-email-receive-mailbox',
+            reused: true,
+          };
+        }
+      }
+
+      return null;
+    }
+
+    async function createPhonePlusPaymentEmail(state = {}) {
+      if (typeof isLuckmailProvider === 'function' && isLuckmailProvider(state)) {
+        if (typeof ensureLuckmailPurchaseForFlow !== 'function') {
+          throw new Error('LuckMail 支付邮箱解析能力未接入。');
+        }
+        const purchase = await ensureLuckmailPurchaseForFlow({
+          allowReuse: true,
+          stateTarget: 'payment',
+        });
+        return {
+          email: String(purchase?.email_address || '').trim().toLowerCase(),
+          source: 'generated:luckmail',
+          reused: false,
+        };
+      }
+
+      if (typeof isHotmailProvider === 'function' && isHotmailProvider(state)) {
+        if (typeof ensureHotmailAccountForFlow !== 'function') {
+          throw new Error('Hotmail 支付邮箱解析能力未接入。');
+        }
+        const account = await ensureHotmailAccountForFlow({
+          allowAllocate: true,
+          preferredAccountId: state?.currentHotmailAccountId || null,
+          stateTarget: 'payment',
+        });
+        return {
+          email: String(account?.email || '').trim().toLowerCase(),
+          source: 'generated:hotmail',
+          reused: false,
+        };
+      }
+
+      if (typeof isYydsMailProvider === 'function' && isYydsMailProvider(state)) {
+        if (typeof fetchYydsMailAddress !== 'function') {
+          throw new Error('YYDS Mail 支付邮箱解析能力未接入。');
+        }
+        const email = await fetchYydsMailAddress(state, {
+          generateNew: true,
+          stateTarget: 'payment',
+        });
+        return {
+          email: String(email || '').trim().toLowerCase(),
+          source: 'generated:yyds-mail',
+          reused: false,
+        };
+      }
+
+      const generator = String(state?.emailGenerator || '').trim().toLowerCase();
+      if (generator === 'cloudmail' && typeof fetchCloudMailAddress === 'function') {
+        const email = await fetchCloudMailAddress(state, {
+          stateTarget: 'payment',
+        });
+        return {
+          email: String(email || '').trim().toLowerCase(),
+          source: 'generated:cloudmail',
+          reused: false,
+        };
+      }
+
+      if (typeof fetchGeneratedEmail !== 'function') {
+        throw new Error('支付邮箱生成能力未接入。');
+      }
+      const email = await fetchGeneratedEmail(state, {
+        stateTarget: 'payment',
+      });
+      return {
+        email: String(email || '').trim().toLowerCase(),
+        source: `generated:${generator || String(state?.mailProvider || '').trim().toLowerCase() || 'email'}`,
+        reused: false,
+      };
+    }
+
+    async function resolvePhonePlusPaymentEmail(state = {}) {
+      if (!isPhonePlusModeState(state)) {
+        const profileEmail = String(getHostedProfileFromState(state)?.email || '').trim().toLowerCase();
+        if (profileEmail) {
+          return {
+            email: profileEmail,
+            source: 'profile:existing',
+            reused: true,
+          };
+        }
+      }
+      const latestState = await getLatestHostedState(state);
+      const existing = getPhonePlusExistingPaymentEmailCandidate(latestState);
+      if (existing?.email) {
+        await persistPhonePlusPaymentEmail(existing.email, { source: existing.source });
+        await addHostedStepLog(
+          PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+          `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已复用 ${existing.email}（来源：${existing.source}）。`,
+          'info'
+        );
+        return {
+          email: existing.email,
+          source: existing.source,
+          reused: true,
+        };
+      }
+
+      const created = await createPhonePlusPaymentEmail(latestState);
+      if (!created?.email) {
+        throw new Error('Phone Plus 支付邮箱解析失败：未获得可用邮箱地址。');
+      }
+      await persistPhonePlusPaymentEmail(created.email, { source: created.source });
+      await addHostedStepLog(
+        PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+        `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已新建 ${created.email}（来源：${created.source}）。`,
+        'info'
+      );
+      return {
+        email: created.email,
+        source: created.source,
+        reused: false,
+      };
     }
 
     const proxyManager = checkoutConversionProxyManager
@@ -917,9 +1191,12 @@
     async function ensureHostedGuestProfile(state = {}, options = {}) {
       const forceRefresh = Boolean(options?.forceRefresh);
       const mergedState = await getLatestHostedState(state);
-      const existingProfile = forceRefresh
-        ? {}
-        : (getHostedProfileFromState(mergedState) || {});
+      const existingStoredProfile = getHostedProfileFromState(mergedState) || {};
+      const existingProfile = forceRefresh ? {} : existingStoredProfile;
+      const phonePlusMode = isPhonePlusModeState(mergedState);
+      const paymentEmailInfo = phonePlusMode
+        ? await resolvePhonePlusPaymentEmail(mergedState)
+        : null;
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
       });
@@ -932,20 +1209,27 @@
           ? existingProfile.address
           : await fetchHostedCheckoutAddress());
       const generatedProfile = buildHostedGuestProfile(address, {
+        email: paymentEmailInfo?.email || existingStoredProfile.email || existingProfile.email,
         phone: nextPhone,
       });
       const nextProfile = forceRefresh
         ? {
           ...generatedProfile,
+          email: paymentEmailInfo?.email || existingStoredProfile.email || generatedProfile.email,
           address,
           phone: nextPhone,
         }
         : {
           ...generatedProfile,
           ...existingProfile,
+          email: paymentEmailInfo?.email || existingProfile.email || generatedProfile.email,
           address,
           phone: nextPhone,
         };
+      nextProfile.email = String(nextProfile.email || paymentEmailInfo?.email || '').trim().toLowerCase();
+      if (!nextProfile.email) {
+        throw new Error('Phone Plus 支付邮箱解析失败：未拿到有效支付邮箱。');
+      }
       if (!nextProfile.phone) {
         throw buildHostedCheckoutConfigError(
           'PayPal hosted checkout 未拿到有效手机号配置，无法继续填写 PayPal 资料页。',
@@ -1118,6 +1402,99 @@
       return null;
     }
 
+    async function inspectPlusCheckoutState(tabId, payload = {}) {
+      await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
+        inject: PLUS_CHECKOUT_INJECT_FILES,
+        injectSource: PLUS_CHECKOUT_SOURCE,
+      });
+      const result = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
+        type: 'PLUS_CHECKOUT_GET_STATE',
+        source: 'background',
+        payload,
+      });
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      return result || {};
+    }
+
+    async function waitForCheckoutAmountSummary(tabId, options = {}) {
+      const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 8000);
+      const retryDelayMs = Math.max(100, Number(options.retryDelayMs) || 500);
+      const phaseLabel = String(options.phaseLabel || '').trim() || 'Checkout URL 打开后';
+      const deadline = Date.now() + timeoutMs;
+      let lastSummary = null;
+
+      while (Date.now() < deadline) {
+        throwIfStopped();
+        try {
+          const pageState = await inspectPlusCheckoutState(tabId);
+          const amountSummary = pageState?.checkoutAmountSummary || null;
+          if (amountSummary?.hasTodayDue) {
+            return amountSummary;
+          }
+          lastSummary = amountSummary;
+        } catch (error) {
+          await addLog(`步骤 6：${phaseLabel}读取价格信息失败，将继续重试：${error?.message || String(error || '未知错误')}`, 'warn');
+        }
+        await sleepWithStop(retryDelayMs);
+      }
+
+      return lastSummary;
+    }
+
+    async function handlePhonePlusAmountGuardAtStep6(tabId, state = {}, options = {}) {
+      const phaseLabel = String(options.phaseLabel || '').trim() || 'Checkout URL 打开后';
+      const amountSummary = await waitForCheckoutAmountSummary(tabId, {
+        timeoutMs: options.timeoutMs,
+        retryDelayMs: options.retryDelayMs,
+        phaseLabel,
+      });
+
+      if (!amountSummary?.hasTodayDue) {
+        await addLog(`步骤 6：${phaseLabel}未能识别 checkout 的金额信息，将继续执行，后续由步骤 7 兜底检查。`, 'warn');
+        return null;
+      }
+
+      if (amountSummary.isZero) {
+        await addLog(`步骤 6：${phaseLabel}已确认金额为 ${amountSummary.rawAmount || '0'}，继续执行支付流程。`, 'ok');
+        return {
+          amountSummary,
+          amountLabel: amountSummary.rawAmount || '0',
+          phonePlusFallbackToFreeAuth: false,
+        };
+      }
+
+      const amountLabel = amountSummary.rawAmount || (
+        Number.isFinite(Number(amountSummary.amount)) ? String(amountSummary.amount) : '未知金额'
+      );
+      await addLog(`步骤 6：${phaseLabel}检测到金额不是 0（${amountLabel}），将停止 Phone Plus 支付链并切回 free auth 尾链。`, 'warn');
+
+      if (isPhonePlusModeState(state) && typeof deps.handlePhonePlusNonFreeTrialFallback === 'function') {
+        const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+          amountLabel,
+          amountSummary,
+          nodeId: String(options.nodeId || 'plus-checkout-create').trim() || 'plus-checkout-create',
+          phaseLabel,
+          tabId,
+        });
+        if (fallbackResult?.handled) {
+          return {
+            amountSummary,
+            amountLabel,
+            phonePlusFallbackToFreeAuth: true,
+            fallbackResult,
+          };
+        }
+      }
+
+      return {
+        amountSummary,
+        amountLabel,
+        phonePlusFallbackToFreeAuth: false,
+      };
+    }
+
     async function getHostedCheckoutRuntimeConfig(state = {}, options = {}) {
       try {
         return await resolveHostedCheckoutRuntimeConfig(state, options);
@@ -1162,15 +1539,6 @@
       };
     }
 
-    function buildRandomHostedEmail() {
-      const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-      let localPart = '';
-      for (let index = 0; index < 16; index += 1) {
-        localPart += alphabet[Math.floor(Math.random() * alphabet.length)];
-      }
-      return `${localPart}@gmail.com`;
-    }
-
     function buildRandomHostedPassword() {
       const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^';
       let value = 'Aa1!';
@@ -1205,10 +1573,15 @@
       };
     }
 
+    function buildRandomHostedEmail() {
+      const localPart = `guest.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      return `${localPart}@gmail.com`;
+    }
+
     function buildHostedGuestProfile(address = {}, config = {}) {
       const card = buildHostedVisaCard();
       return {
-        email: buildRandomHostedEmail(),
+        email: String(config?.email || buildRandomHostedEmail()).trim().toLowerCase(),
         password: buildRandomHostedPassword(),
         phone: String(config?.phone || '').trim(),
         firstName: 'James',
@@ -1815,7 +2188,10 @@
       const firstResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
         type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
         source: 'background',
-        payload: { address: profile.address },
+        payload: {
+          email: profile.email,
+          address: profile.address,
+        },
       });
       if (firstResult?.error) {
         throw new Error(firstResult.error);
@@ -2294,6 +2670,15 @@
       let completedUrl = landedUrl;
 
       if (isHostedOpenAiCheckoutUrl(completedUrl)) {
+        const initialAmountCheck = await handlePhonePlusAmountGuardAtStep6(tabId, state, {
+          nodeId: 'plus-checkout-create',
+          phaseLabel: 'Checkout URL 打开后',
+          timeoutMs: 8000,
+          retryDelayMs: 500,
+        });
+        if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
         const { profile, config } = await ensureHostedGuestProfile(state);
         await logHostedCheckoutRuntimeConfig(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, config, {
           extra: `OpenAI Checkout 手机号 ${maskHostedPhoneForLog(profile.phone)}`,
@@ -2372,6 +2757,16 @@
         await completeHostedStep(stepKey, tabId, {
           plusCheckoutSource: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
         });
+        return;
+      }
+
+      const initialAmountCheck = await handlePhonePlusAmountGuardAtStep6(tabId, state, {
+        nodeId: stepKey,
+        phaseLabel: 'Checkout URL 打开后',
+        timeoutMs: 8000,
+        retryDelayMs: 500,
+      });
+      if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
         return;
       }
 
@@ -3216,6 +3611,16 @@
         injectSource: PLUS_CHECKOUT_SOURCE,
         logMessage: '步骤 6：正在等待订阅页面完成加载...',
       });
+
+      const initialAmountCheck = await handlePhonePlusAmountGuardAtStep6(tabId, state, {
+        nodeId: 'plus-checkout-create',
+        phaseLabel: 'Checkout URL 打开后',
+        timeoutMs: 8000,
+        retryDelayMs: 500,
+      });
+      if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
 
       await setState({
         plusCheckoutTabId: tabId,

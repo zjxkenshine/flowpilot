@@ -1882,6 +1882,104 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts direct mode and pr
   });
 });
 
+test('NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711 broadcasts next manual session when auto-run is idle', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const broadcasts = [];
+  const calls = [];
+  const nextSession = {
+    active: true,
+    mode: 'manual',
+    source: '711proxy_pool',
+    provider: '711proxy',
+    proxyUrl: 'http://user-b:pass-b@proxy-b.example:8002',
+    displayName: 'http://proxy-b.example:8002',
+    requestedRegion: 'US',
+    resolvedRegion: 'US',
+    selectedEntryDisplayName: 'http://proxy-b.example:8002',
+    candidateIndex: 1,
+    poolSize: 2,
+    exitIp: '203.0.113.20',
+    exitRegion: 'US',
+  };
+
+  const router = api.createMessageRouter({
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    buildPersistentSettingsPayload: (value) => value,
+    checkoutConversionProxyManager: {
+      switchManualSessionToNext711Proxy: async (options) => {
+        calls.push(options);
+        return {
+          switched: true,
+          skipped: false,
+          exitChanged: true,
+          displayName: nextSession.displayName,
+          session: nextSession,
+        };
+      },
+    },
+    getState: async () => ({
+      autoRunning: false,
+      plusCheckoutConversionProxySource: '711proxy_pool',
+      plusCheckoutConversionProxy711Region: 'US',
+    }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+  });
+
+  const response = await router.handleMessage({
+    type: 'NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711',
+    source: 'sidepanel',
+    payload: {
+      source: '711proxy_pool',
+      proxy711Region: 'US',
+      ipProxyStateOverride: { ipProxyAutoRefreshPoolOnExhausted: true },
+    },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.switched, true);
+  assert.equal(response.exitChanged, true);
+  assert.equal(response.displayName, 'http://proxy-b.example:8002');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].source, '711proxy_pool');
+  assert.equal(calls[0].proxy711Region, 'US');
+  assert.equal(calls[0].state.ipProxyAutoRefreshPoolOnExhausted, true);
+  assert.deepStrictEqual(broadcasts[0], {
+    plusCheckoutConversionProxyManualSession: nextSession,
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+  });
+});
+
+test('NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711 is rejected while auto-run is locked', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let called = false;
+
+  const router = api.createMessageRouter({
+    checkoutConversionProxyManager: {
+      switchManualSessionToNext711Proxy: async () => {
+        called = true;
+        return { switched: true };
+      },
+    },
+    getState: async () => ({ autoRunning: true }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711',
+      source: 'sidepanel',
+      payload: { source: '711proxy_pool' },
+    }, {}),
+    /自动流程运行中/
+  );
+  assert.equal(called, false);
+});
+
 test('CANCEL_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL is rejected while auto-run is locked', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

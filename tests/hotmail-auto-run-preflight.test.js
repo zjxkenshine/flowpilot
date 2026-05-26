@@ -64,6 +64,7 @@ const ensureHotmailMailboxReadyForAutoRunRoundSource = extractFunction('ensureHo
 function createHotmailPreflightApi(initialState, verifyImpl = async () => ({ account: null, messageCount: 0 })) {
   const factory = new Function('deps', `
 let currentState = JSON.parse(JSON.stringify(deps.initialState));
+const setCurrentHotmailCalls = [];
 const getState = async () => ({
   ...currentState,
   hotmailAccounts: Array.isArray(currentState.hotmailAccounts)
@@ -75,12 +76,13 @@ const normalizeHotmailAccounts = (accounts) => Array.isArray(accounts)
   : [];
 const findHotmailAccount = (accounts, accountId) => normalizeHotmailAccounts(accounts)
   .find((account) => account.id === accountId) || null;
-const setCurrentHotmailAccount = async (accountId) => {
+const setCurrentHotmailAccount = async (accountId, options = {}) => {
   const state = await getState();
   const account = findHotmailAccount(state.hotmailAccounts, accountId);
   if (!account) {
     throw new Error('missing Hotmail account');
   }
+  setCurrentHotmailCalls.push({ accountId, options });
   currentState = {
     ...currentState,
     currentHotmailAccountId: accountId,
@@ -111,6 +113,9 @@ return {
     ? ensureHotmailMailboxReadyForAutoRunRound
     : undefined,
   getState,
+  snapshot() {
+    return { setCurrentHotmailCalls };
+  },
 };
   `);
 
@@ -157,6 +162,38 @@ test('ensureHotmailAccountForFlow skips excluded current hotmail account when al
   });
 
   assert.equal(account.id, 'backup');
+});
+
+test('ensureHotmailAccountForFlow forwards payment state target without changing allocation behavior', async () => {
+  const { api } = createHotmailPreflightApi({
+    mailProvider: 'hotmail-api',
+    currentHotmailAccountId: 'primary',
+    hotmailAccounts: [
+      {
+        id: 'primary',
+        email: 'primary@hotmail.com',
+        status: 'authorized',
+        refreshToken: 'rt-primary',
+        used: false,
+        lastUsedAt: 1,
+      },
+    ],
+  });
+
+  const account = await api.ensureHotmailAccountForFlow({
+    allowAllocate: true,
+    stateTarget: 'payment',
+  });
+
+  assert.equal(account.id, 'primary');
+  assert.deepStrictEqual(api.snapshot().setCurrentHotmailCalls, [{
+    accountId: 'primary',
+    options: {
+      markUsed: false,
+      syncEmail: true,
+      stateTarget: 'payment',
+    },
+  }]);
 });
 
 test('ensureHotmailMailboxReadyForAutoRunRound switches to another hotmail account after a verification failure', async () => {

@@ -87,6 +87,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
+  'paypalGeneratedProfile',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -109,6 +110,21 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
+  paypalGeneratedProfile: {
+    email: '',
+    phone: '',
+    password: '',
+    firstName: '',
+    lastName: '',
+    birthday: '',
+    countryCode: '',
+    address1: '',
+    city: '',
+    region: '',
+    postalCode: '',
+    generatedFromCountry: '',
+    generatedAt: 0,
+  },
   phoneVerificationEnabled: false,
   mailProvider: '163',
   ipProxyEnabled: false,
@@ -137,6 +153,27 @@ const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+function normalizePayPalGeneratedProfileCountryCode(value = '') {
+  const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+}
+function normalizePayPalGeneratedProfile(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const defaults = PERSISTED_SETTING_DEFAULTS.paypalGeneratedProfile;
+  const next = { ...defaults };
+  Object.keys(defaults).forEach((field) => {
+    if (field === 'generatedAt') {
+      next.generatedAt = Math.max(0, Number(source.generatedAt) || 0);
+      return;
+    }
+    if (field === 'countryCode' || field === 'generatedFromCountry') {
+      next[field] = normalizePayPalGeneratedProfileCountryCode(source[field]);
+      return;
+    }
+    next[field] = String(source[field] || '').trim();
+  });
+  return next;
 }
 function normalizePanelMode(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
@@ -343,6 +380,47 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   assert.equal(payload.plusCheckoutOpenStableWaitSeconds, 29);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 29);
+});
+
+test('buildPersistentSettingsPayload persists PayPal generated profile into settings schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    paypalGeneratedProfile: {
+      email: ' user@example.com ',
+      phone: ' +1 555 0100 ',
+      password: ' Secret123! ',
+      firstName: ' Ada ',
+      lastName: ' Lovelace ',
+      birthday: ' 2001-02-03 ',
+      countryCode: ' jp ',
+      address1: ' 1 Marunouchi ',
+      city: ' Chiyoda ',
+      region: ' Tokyo ',
+      postalCode: ' 100-0005 ',
+      generatedFromCountry: ' de ',
+      generatedAt: '12345',
+    },
+  }, { fillDefaults: true });
+
+  const expected = {
+    email: 'user@example.com',
+    phone: '+1 555 0100',
+    password: 'Secret123!',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    birthday: '2001-02-03',
+    countryCode: 'JP',
+    address1: '1 Marunouchi',
+    city: 'Chiyoda',
+    region: 'Tokyo',
+    postalCode: '100-0005',
+    generatedFromCountry: 'DE',
+    generatedAt: 12345,
+  };
+
+  assert.deepEqual(payload.paypalGeneratedProfile, expected);
+  assert.deepEqual(payload.settingsState.flows.openai.plus.paypalGeneratedProfile, expected);
 });
 
 test('buildPersistentSettingsPayload derives switch-IP round count from active service profile', () => {

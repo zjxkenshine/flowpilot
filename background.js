@@ -485,6 +485,26 @@ const DEFAULT_REGISTRATION_EMAIL_STATE = registrationEmailStateHelpers?.DEFAULT_
   source: '',
   updatedAt: 0,
 };
+const DEFAULT_PLUS_PAYMENT_EMAIL_STATE = Object.freeze({
+  current: '',
+  source: '',
+  updatedAt: 0,
+});
+const DEFAULT_PAYPAL_GENERATED_PROFILE = Object.freeze({
+  email: '',
+  phone: '',
+  password: '',
+  firstName: '',
+  lastName: '',
+  birthday: '',
+  countryCode: '',
+  address1: '',
+  city: '',
+  region: '',
+  postalCode: '',
+  generatedFromCountry: '',
+  generatedAt: 0,
+});
 
 function getRegistrationEmailState(state = {}) {
   if (registrationEmailStateHelpers?.getRegistrationEmailState) {
@@ -1468,9 +1488,11 @@ const PERSISTED_SETTING_DEFAULTS = {
   chatGptApiSmsPoolAutoDisableEnabled: false,
   chatGptApiCurrentSmsEntry: null,
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
+  plusPaymentEmailState: { ...DEFAULT_PLUS_PAYMENT_EMAIL_STATE },
   paypalEmail: '',
   paypalPassword: '',
   currentPayPalAccountId: '',
+  paypalGeneratedProfile: { ...DEFAULT_PAYPAL_GENERATED_PROFILE },
   gopayCountryCode: '+86',
   gopayPhone: '',
   gopayOtp: '',
@@ -1699,6 +1721,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
   'plusHostedCheckoutOauthDelaySeconds',
+  'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'mailProvider',
   'ipProxyEnabled',
@@ -1878,6 +1901,44 @@ function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PH
     PHONE_REPLACEMENT_LIMIT_MAX,
     Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.floor(numeric))
   );
+}
+
+function normalizePlusPaymentEmailState(value) {
+  const candidate = value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : null;
+  const current = String(candidate?.current || '').trim();
+  const source = String(candidate?.source || '').trim();
+  const updatedAt = Number(candidate?.updatedAt) || 0;
+  return {
+    current,
+    source,
+    updatedAt: updatedAt > 0 ? updatedAt : 0,
+  };
+}
+
+function getPlusPaymentEmailState(state = {}) {
+  return normalizePlusPaymentEmailState(state?.plusPaymentEmailState);
+}
+
+function buildPlusPaymentEmailStateUpdates(email, options = {}) {
+  const normalizedEmail = String(email || '').trim();
+  return {
+    plusPaymentEmailState: normalizedEmail
+      ? {
+          current: normalizedEmail,
+          source: String(options?.source || '').trim(),
+          updatedAt: Date.now(),
+        }
+      : { ...DEFAULT_PLUS_PAYMENT_EMAIL_STATE },
+  };
+}
+
+async function setPlusPaymentEmailState(email, options = {}) {
+  const updates = buildPlusPaymentEmailStateUpdates(email, options);
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  return updates.plusPaymentEmailState;
 }
 
 function normalizePhoneActivationRetryRounds(value, fallback = DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS) {
@@ -3332,6 +3393,30 @@ function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function normalizePayPalGeneratedProfileCountryCode(value = '') {
+  const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+}
+
+function normalizePayPalGeneratedProfile(value = {}) {
+  const source = isPlainObjectValue(value) ? value : {};
+  const next = { ...DEFAULT_PAYPAL_GENERATED_PROFILE };
+
+  Object.keys(DEFAULT_PAYPAL_GENERATED_PROFILE).forEach((field) => {
+    if (field === 'generatedAt') {
+      next.generatedAt = Math.max(0, Number(source.generatedAt) || 0);
+      return;
+    }
+    if (field === 'countryCode' || field === 'generatedFromCountry') {
+      next[field] = normalizePayPalGeneratedProfileCountryCode(source[field]);
+      return;
+    }
+    next[field] = String(source[field] || '').trim();
+  });
+
+  return next;
+}
+
 function normalizeStepExecutionRangeFlowId(value = '', fallback = DEFAULT_ACTIVE_FLOW_ID) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'codex') {
@@ -3724,6 +3809,8 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '');
     case 'currentPayPalAccountId':
       return String(value || '').trim();
+    case 'paypalGeneratedProfile':
+      return normalizePayPalGeneratedProfile(value);
     case 'gopayCountryCode':
       return self.GoPayUtils?.normalizeGoPayCountryCode
         ? self.GoPayUtils.normalizeGoPayCountryCode(value)
@@ -4630,6 +4717,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
+  assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5118,6 +5206,7 @@ async function importSettingsBundle(configBundle) {
     currentHotmailAccountId: null,
     email: null,
     registrationEmailState: { ...DEFAULT_REGISTRATION_EMAIL_STATE },
+    plusPaymentEmailState: { current: '', source: '', updatedAt: 0 },
   };
 
   await setState(sessionUpdates);
@@ -5126,6 +5215,7 @@ async function importSettingsBundle(configBundle) {
     currentHotmailAccountId: null,
     ...(sessionUpdates.email !== undefined ? { email: sessionUpdates.email } : {}),
     registrationEmailState: sessionUpdates.registrationEmailState,
+    plusPaymentEmailState: sessionUpdates.plusPaymentEmailState,
   });
 
   return getState();
@@ -5176,6 +5266,12 @@ function isPhoneActivationForNumber(activation, phoneNumber) {
 }
 
 async function setEmailStateSilently(email, options = {}) {
+  if (String(options?.stateTarget || '').trim().toLowerCase() === 'payment') {
+    const updates = buildPlusPaymentEmailStateUpdates(email, options);
+    await setState(updates);
+    broadcastDataUpdate(updates);
+    return;
+  }
   const currentState = await getState();
   const preserveAccountIdentity = Boolean(options?.preserveAccountIdentity);
   const updates = preserveAccountIdentity
@@ -5211,6 +5307,10 @@ async function setEmailStateSilently(email, options = {}) {
 }
 
 async function setEmailState(email, options = {}) {
+  if (String(options?.stateTarget || '').trim().toLowerCase() === 'payment') {
+    await setPlusPaymentEmailState(email, options);
+    return;
+  }
   await setEmailStateSilently(email, options);
   if (email) {
     const latestState = await getState();
@@ -5222,6 +5322,10 @@ async function setEmailState(email, options = {}) {
 }
 
 async function persistRegistrationEmailState(state = null, email, options = {}) {
+  if (String(options?.stateTarget || '').trim().toLowerCase() === 'payment') {
+    await setPlusPaymentEmailState(email, options);
+    return;
+  }
   const currentState = state && typeof state === 'object' && !Array.isArray(state)
     ? state
     : await getState();
@@ -5691,6 +5795,7 @@ async function resetState() {
     yydsMailApiKey: normalizeYydsMailApiKey(prev.yydsMailApiKey ?? persistedSettings.yydsMailApiKey),
     yydsMailBaseUrl: normalizeYydsMailBaseUrl(prev.yydsMailBaseUrl ?? persistedSettings.yydsMailBaseUrl),
     currentYydsMailInbox: null,
+    plusPaymentEmailState: { current: '', source: '', updatedAt: 0 },
     // Keep reusable phone activation across round resets so the same number can be reactivated up to maxUses.
     reusablePhoneActivation,
     // Keep free reuse phone activation until the user clears or the flow retires it.
@@ -5959,7 +6064,7 @@ async function patchHotmailAccount(accountId, updates = {}) {
 }
 
 async function setCurrentHotmailAccount(accountId, options = {}) {
-  const { markUsed = false, syncEmail = true } = options;
+  const { markUsed = false, syncEmail = true, stateTarget = 'registration' } = options;
   const state = await getState();
   const accounts = normalizeHotmailAccounts(state.hotmailAccounts);
   const account = findHotmailAccount(accounts, accountId);
@@ -5975,7 +6080,7 @@ async function setCurrentHotmailAccount(accountId, options = {}) {
   await setState({ currentHotmailAccountId: account.id });
   broadcastDataUpdate({ currentHotmailAccountId: account.id });
   if (syncEmail) {
-    await setEmailState(account.email || null);
+    await setEmailState(account.email || null, { stateTarget });
   }
   return account;
 }
@@ -6031,6 +6136,7 @@ async function ensureHotmailAccountForFlow(options = {}) {
     markUsed = false,
     preferredAccountId = null,
     excludeIds = [],
+    stateTarget = 'registration',
   } = options;
   const state = await getState();
   const accounts = normalizeHotmailAccounts(state.hotmailAccounts);
@@ -6055,7 +6161,7 @@ async function ensureHotmailAccountForFlow(options = {}) {
     throw new Error(`Hotmail 账号 ${account.email || account.id} 尚未就绪，无法读取邮件。`);
   }
 
-  return setCurrentHotmailAccount(account.id, { markUsed, syncEmail: true });
+  return setCurrentHotmailAccount(account.id, { markUsed, syncEmail: true, stateTarget });
 }
 
 function buildHotmailLocalEndpoint(baseUrl, path) {
@@ -7240,7 +7346,10 @@ async function activateLuckmailPurchaseForFlow(state, client, purchase, options 
 
   await setLuckmailPurchaseState(normalizedPurchase);
   await setLuckmailMailCursorState(baselineCursor);
-  await setEmailState(normalizedPurchase.email_address);
+  await setEmailState(normalizedPurchase.email_address, {
+    stateTarget: options?.stateTarget || 'registration',
+    source: options?.source || 'generated:luckmail',
+  });
 
   if (options.logMessage) {
     await addLog(options.logMessage, options.logLevel || 'ok');
@@ -7452,12 +7561,18 @@ async function disableUsedLuckmailPurchases() {
 }
 
 async function ensureLuckmailPurchaseForFlow(options = {}) {
-  const { allowReuse = true } = options;
+  const { allowReuse = true, stateTarget = 'registration' } = options;
   const state = await getState();
   const existingPurchase = getCurrentLuckmailPurchase(state);
   if (allowReuse && existingPurchase?.email_address && existingPurchase?.token) {
-    if (state.email !== existingPurchase.email_address) {
-      await setEmailState(existingPurchase.email_address);
+    const currentTargetEmail = stateTarget === 'payment'
+      ? getPlusPaymentEmailState(state).current
+      : state.email;
+    if (currentTargetEmail !== existingPurchase.email_address) {
+      await setEmailState(existingPurchase.email_address, {
+        stateTarget,
+        source: 'generated:luckmail',
+      });
     }
     return existingPurchase;
   }
@@ -7470,6 +7585,8 @@ async function ensureLuckmailPurchaseForFlow(options = {}) {
       return activateLuckmailPurchaseForFlow(state, client, reusablePurchase, {
         initializeCursor: true,
         logMessage: `LuckMail：已复用 openai 邮箱 ${reusablePurchase.email_address}`,
+        stateTarget,
+        source: 'generated:luckmail',
       });
     }
   }
@@ -7487,6 +7604,8 @@ async function ensureLuckmailPurchaseForFlow(options = {}) {
   return activateLuckmailPurchaseForFlow(state, client, purchase, {
     initializeCursor: false,
     logMessage: `LuckMail：已购买邮箱 ${purchase.email_address}（类型：${config.emailType}，项目：${DEFAULT_LUCKMAIL_PROJECT_CODE}）`,
+    stateTarget,
+    source: 'generated:luckmail',
   });
 }
 
@@ -15123,40 +15242,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   readAuthTabSnapshot,
   ensureStep8SignupPageReady,
   upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
-  refreshAuthContactVerificationTab: async (tabId, options = {}) => {
-    const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 4;
-    const requestedTimeoutMs = Number(options.timeoutMs);
-    const timeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
-      ? requestedTimeoutMs
-      : await getOAuthFlowStepTimeoutMs(30000, {
-        step: visibleStep,
-        actionLabel: 'refresh contact-verification',
-      });
-    let currentUrl = '';
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      currentUrl = String(tab?.url || '').trim();
-    } catch {}
-
-    if (/\/contact-verification(?:[/?#]|$)/i.test(currentUrl)) {
-      await chrome.tabs.reload(tabId, { bypassCache: true });
-    } else {
-      await chrome.tabs.update(tabId, {
-        url: 'https://auth.openai.com/contact-verification',
-        active: true,
-      });
-    }
-
-    await ensureStep8SignupPageReady(tabId, {
-      timeoutMs,
-      visibleStep,
-      logStepKey: options.logStepKey || 'fetch-signup-code',
-      logMessage: options.logMessage || '步骤 4：已刷新 contact-verification 页面，等待认证页脚本恢复。',
-    });
-    return {
-      url: 'https://auth.openai.com/contact-verification',
-    };
-  },
+  refreshAuthContactVerificationTab,
   navigateAuthTabToAddPhone: async (tabId, options = {}) => {
     const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 9;
     const requestedTimeoutMs = Number(options.timeoutMs);
@@ -15369,15 +15455,29 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   chrome,
   completeNodeFromBackground,
   createAutomationTab,
+  ensureHotmailAccountForFlow,
+  ensureLuckmailPurchaseForFlow,
+  fetchCloudMailAddress,
+  fetchGeneratedEmail,
+  fetchYydsMailAddress,
   ensureContentScriptReadyOnTabUntilStopped,
   fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
+  getCurrentMail2925Account,
+  getPlusPaymentEmailState,
   getTabId,
   getState,
+  handlePhonePlusNonFreeTrialFallback,
   isTabAlive,
+  isHotmailProvider,
+  isLuckmailProvider,
+  isYydsMailProvider,
   markCurrentRegistrationAccountUsed,
+  normalizeCloudflareTempEmailReceiveMailbox,
+  normalizeCloudMailReceiveMailbox,
   queryTabsInAutomationWindow,
   registerTab,
   sendTabMessageUntilStopped,
+  setPlusPaymentEmailState,
   setState,
   sleepWithStop,
   throwIfStopped,
@@ -16981,6 +17081,32 @@ async function ensureStep8SignupPageReady(tabId, options = {}) {
     logStep: visibleStep > 0 ? visibleStep : null,
     logStepKey: options.logStepKey || '',
   });
+}
+
+async function refreshAuthContactVerificationTab(tabId, options = {}) {
+  const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 4;
+  const requestedTimeoutMs = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
+    ? requestedTimeoutMs
+    : await getOAuthFlowStepTimeoutMs(30000, {
+      step: visibleStep,
+      actionLabel: 'refresh contact-verification',
+    });
+
+  await chrome.tabs.update(tabId, {
+    url: 'https://auth.openai.com/contact-verification',
+    active: true,
+  });
+
+  await ensureStep8SignupPageReady(tabId, {
+    timeoutMs,
+    visibleStep,
+    logStepKey: options.logStepKey || 'fetch-signup-code',
+    logMessage: options.logMessage || '步骤 4：已刷新 contact-verification 页面，等待认证页脚本恢复。',
+  });
+  return {
+    url: 'https://auth.openai.com/contact-verification',
+  };
 }
 
 async function readAuthTabSnapshot(tabId) {

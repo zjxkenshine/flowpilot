@@ -7,14 +7,24 @@ test('sidepanel loads reusable form dialog and paypal manager before sidepanel b
   const formDialogIndex = html.indexOf('<script src="form-dialog.js"></script>');
   const editableListPickerIndex = html.indexOf('<script src="editable-list-picker.js"></script>');
   const managerIndex = html.indexOf('<script src="paypal-manager.js"></script>');
+  const namesIndex = html.indexOf('<script src="../data/names.js"></script>');
+  const addressSourcesIndex = html.indexOf('<script src="../data/address-sources.js"></script>');
+  const profileGeneratorIndex = html.indexOf('<script src="paypal-profile-generator.js"></script>');
   const sidepanelIndex = html.indexOf('<script src="sidepanel.js"></script>');
 
   assert.notEqual(formDialogIndex, -1);
   assert.notEqual(editableListPickerIndex, -1);
   assert.notEqual(managerIndex, -1);
+  assert.notEqual(namesIndex, -1);
+  assert.notEqual(addressSourcesIndex, -1);
+  assert.notEqual(profileGeneratorIndex, -1);
   assert.notEqual(sidepanelIndex, -1);
+  assert.ok(namesIndex < profileGeneratorIndex);
+  assert.ok(addressSourcesIndex < profileGeneratorIndex);
   assert.ok(formDialogIndex < editableListPickerIndex);
   assert.ok(editableListPickerIndex < managerIndex);
+  assert.ok(managerIndex < profileGeneratorIndex);
+  assert.ok(profileGeneratorIndex < sidepanelIndex);
   assert.ok(managerIndex < sidepanelIndex);
 });
 
@@ -35,6 +45,13 @@ test('sidepanel html contains paypal select and GoPay controls', () => {
   assert.match(html, /id="btn-paypal-account-menu"/);
   assert.match(html, /id="paypal-account-menu"/);
   assert.match(html, /id="btn-add-paypal-account"/);
+  assert.match(html, /id="row-paypal-profile-generator"/);
+  assert.match(html, /id="btn-generate-paypal-profile"/);
+  assert.match(html, /id="btn-copy-paypal-profile"/);
+  assert.match(html, /id="paypal-profile-summary"/);
+  assert.match(html, /id="paypal-profile-details"/);
+  assert.ok(html.indexOf('id="row-paypal-account"') < html.indexOf('id="row-paypal-profile-generator"'));
+  assert.ok(html.indexOf('id="row-paypal-profile-generator"') < html.indexOf('id="row-hosted-checkout-verification-url"'));
   assert.match(html, /id="row-gopay-phone"/);
   assert.match(html, /id="input-gopay-phone"/);
   assert.match(html, /id="row-gopay-otp"/);

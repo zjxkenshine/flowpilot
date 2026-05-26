@@ -23,6 +23,26 @@ const PHONE_PLUS_PAYPAL_NODES = [
   'platform-verify',
 ];
 
+const PHONE_PLUS_PAYPAL_HOSTED_NODES = [
+  'open-chatgpt',
+  'submit-signup-email',
+  'fill-password',
+  'fetch-signup-code',
+  'fill-profile',
+  'wait-registration-success',
+  'plus-checkout-create',
+  'paypal-hosted-email',
+  'paypal-hosted-card',
+  'paypal-hosted-create-account',
+  'paypal-hosted-review',
+  'oauth-login',
+  'fetch-login-code',
+  'bind-email',
+  'fetch-bind-email-code',
+  'confirm-oauth',
+  'platform-verify',
+];
+
 function extractFunction(name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
   const start = markers
@@ -204,4 +224,46 @@ test('non Phone Plus state is not handled by the fallback', async () => {
   assert.deepStrictEqual(result, { handled: false, reason: 'not-phone-plus' });
   assert.equal(api.events.stateUpdates.length, 0);
   assert.equal(api.events.messages.length, 0);
+});
+
+test('Phone Plus hosted fallback skips the full hosted payment segment', async () => {
+  const api = createApi({
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'submit-signup-email': 'completed',
+      'fill-password': 'completed',
+      'fetch-signup-code': 'completed',
+      'fill-profile': 'completed',
+      'wait-registration-success': 'completed',
+      'plus-checkout-create': 'running',
+      'paypal-hosted-email': 'pending',
+      'paypal-hosted-card': 'pending',
+      'paypal-hosted-create-account': 'pending',
+      'paypal-hosted-review': 'pending',
+      'oauth-login': 'pending',
+    },
+    currentNodeId: 'plus-checkout-create',
+    plusCheckoutTabId: 99,
+    plusCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
+  }, PHONE_PLUS_PAYPAL_HOSTED_NODES);
+
+  const result = await api.handlePhonePlusNonFreeTrialFallback(api.getState(), {
+    amountLabel: '€19.33',
+    nodeId: 'plus-checkout-create',
+  });
+
+  assert.equal(result.handled, true);
+  assert.deepStrictEqual(result.skippedNodeIds, [
+    'plus-checkout-create',
+    'paypal-hosted-email',
+    'paypal-hosted-card',
+    'paypal-hosted-create-account',
+    'paypal-hosted-review',
+  ]);
+  assert.equal(result.nextNodeId, 'oauth-login');
+  assert.equal(api.getState().nodeStatuses['paypal-hosted-review'], 'skipped');
+  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 5);
 });

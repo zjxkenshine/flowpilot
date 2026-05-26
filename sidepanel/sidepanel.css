@@ -2308,6 +2308,81 @@ header {
   opacity: 0.42;
 }
 
+.paypal-profile-generator-shell {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.paypal-profile-generator-header {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.paypal-profile-generator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.paypal-profile-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.paypal-profile-empty {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.paypal-profile-field {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.paypal-profile-field-label {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.paypal-profile-field-value {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.paypal-profile-copy-btn {
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .paypal-profile-field {
+    grid-template-columns: 1fr auto;
+  }
+
+  .paypal-profile-field-label {
+    grid-column: 1 / -1;
+  }
+}
+
 .data-check {
   display: flex;
   align-items: flex-start;

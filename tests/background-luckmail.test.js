@@ -334,6 +334,64 @@ return {
   assert.equal(snapshot.buildCalls.length, 1);
 });
 
+test('activateLuckmailPurchaseForFlow can target payment email state without overwriting registration email', async () => {
+  const bundle = extractFunction('activateLuckmailPurchaseForFlow');
+
+  const factory = new Function(`
+let currentPurchase = null;
+let currentCursor = null;
+let registrationEmail = 'registration@example.com';
+const setEmailCalls = [];
+
+function normalizeLuckmailPurchase(value) {
+  return value;
+}
+async function setLuckmailPurchaseState(value) {
+  currentPurchase = value;
+}
+async function setLuckmailMailCursorState(value) {
+  currentCursor = value;
+}
+async function setEmailState(value, options = {}) {
+  setEmailCalls.push({ value, options });
+  if (options.stateTarget !== 'payment') {
+    registrationEmail = value;
+  }
+}
+async function addLog() {}
+
+${bundle}
+
+return {
+  activateLuckmailPurchaseForFlow,
+  snapshot() {
+    return { currentPurchase, currentCursor, registrationEmail, setEmailCalls };
+  },
+};
+`);
+
+  const api = factory();
+  await api.activateLuckmailPurchaseForFlow({}, {}, {
+    id: 7,
+    email_address: 'payment@outlook.com',
+    token: 'tok-payment',
+  }, {
+    initializeCursor: false,
+    stateTarget: 'payment',
+  });
+
+  const snapshot = api.snapshot();
+  assert.equal(snapshot.currentPurchase.id, 7);
+  assert.equal(snapshot.registrationEmail, 'registration@example.com');
+  assert.deepStrictEqual(snapshot.setEmailCalls, [{
+    value: 'payment@outlook.com',
+    options: {
+      stateTarget: 'payment',
+      source: 'generated:luckmail',
+    },
+  }]);
+});
+
 test('pollLuckmailVerificationCode snapshots existing mails before accepting new LuckMail code', async () => {
   const bundle = extractFunction('pollLuckmailVerificationCode');
 

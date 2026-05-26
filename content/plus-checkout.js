@@ -203,6 +203,38 @@ function fillHostedInput(selector, value) {
   return true;
 }
 
+async function fillHostedEmailInput(email) {
+  const normalizedEmail = normalizeText(email);
+  if (!normalizedEmail) {
+    throw new Error('OpenAI hosted checkout 未收到可用支付邮箱。');
+  }
+  const waitTimeoutMs = Math.max(
+    100,
+    Math.floor(Number(window.__PAYPAL_HOSTED_EMAIL_INPUT_TIMEOUT_MS__) || 15000)
+  );
+  const emailInput = await waitUntil(() => {
+    const candidate = document.getElementById('email')
+      || document.querySelector('input[type="email"]')
+      || document.querySelector('input[name="email"]');
+    return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
+  }, {
+    label: 'hosted checkout 邮箱输入框',
+    intervalMs: 300,
+    timeoutMs: waitTimeoutMs,
+  });
+  fillInput(emailInput, normalizedEmail);
+  await sleep(250);
+  const renderedEmail = normalizeText(emailInput.value || '');
+  if (renderedEmail.toLowerCase() !== normalizedEmail.toLowerCase()) {
+    throw new Error(`OpenAI hosted checkout 邮箱填写失败：期望 ${normalizedEmail}，实际 ${renderedEmail || '空值'}。`);
+  }
+  log(`Plus Checkout：已填写 OpenAI hosted checkout 支付邮箱 ${normalizedEmail}`);
+  return {
+    emailFilled: true,
+    email: normalizedEmail,
+  };
+}
+
 function selectHostedOptionByText(selector, value) {
   const select = document.querySelector(selector);
   const expected = normalizeText(value).toLowerCase();
@@ -299,6 +331,9 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     return fillHostedOpenAiVerificationCode(payload.verificationCode);
   }
 
+  const normalizedEmail = normalizeText(payload.email || '');
+  await fillHostedEmailInput(normalizedEmail);
+
   hideHostedAddressAutocomplete();
   const payPalButton = findHostedPayPalButton();
   if (payPalButton) {
@@ -371,7 +406,66 @@ function getTextAfterTodayDueLabel(text = '') {
   return normalized.slice((match.index || 0) + match[0].length).trim();
 }
 
+function buildCheckoutAmountSummaryFromParsedAmount(parsed = null, options = {}) {
+  if (!parsed || !Number.isFinite(Number(parsed.amount))) {
+    return null;
+  }
+  return {
+    hasTodayDue: true,
+    amount: parsed.amount,
+    isZero: Math.abs(parsed.amount) < 0.005,
+    rawAmount: parsed.raw,
+    labelText: normalizeText(options.labelText || '').slice(0, 160),
+  };
+}
+
+function getCheckoutAmountSummaryFromProductSummary() {
+  const selectors = [
+    '#ProductSummary-totalAmount .CurrencyAmount',
+    '#ProductSummary-totalAmount',
+    '[data-testid="product-summary-total-amount"] .CurrencyAmount',
+    '[data-testid="product-summary-total-amount"]',
+  ];
+  const seen = new Set();
+  const candidates = [];
+
+  for (const selector of selectors) {
+    const nodes = Array.from(document.querySelectorAll(selector));
+    for (const node of nodes) {
+      if (!node || seen.has(node)) continue;
+      seen.add(node);
+      candidates.push(node);
+    }
+  }
+
+  for (const node of candidates) {
+    const directText = normalizeText(node.innerText || node.textContent || '');
+    const parsed = parseLocalizedAmount(directText);
+    if (parsed) {
+      return buildCheckoutAmountSummaryFromParsedAmount(parsed, {
+        labelText: directText || 'ProductSummary total amount',
+      });
+    }
+
+    const container = node.closest?.('#ProductSummary-totalAmount, [data-testid="product-summary-total-amount"]') || node.parentElement || null;
+    const containerText = normalizeText(container?.innerText || container?.textContent || '');
+    const parsedFromContainer = parseLocalizedAmount(containerText);
+    if (parsedFromContainer) {
+      return buildCheckoutAmountSummaryFromParsedAmount(parsedFromContainer, {
+        labelText: containerText || directText || 'ProductSummary total amount',
+      });
+    }
+  }
+
+  return null;
+}
+
 function getCheckoutAmountSummary() {
+  const productSummaryAmount = getCheckoutAmountSummaryFromProductSummary();
+  if (productSummaryAmount) {
+    return productSummaryAmount;
+  }
+
   const elements = getVisibleControls('div, span, p, strong, b');
   const labelPattern = /今日应付金额|今日应付|今天应付|amount\s*due\s*today|due\s*today|today'?s\s*total|total\s*due\s*today/i;
   const amountPattern = /[$€£¥]\s*[+-]?\d|[+-]?\d+(?:[.,]\d{1,2})?\s*[$€£¥]/;
@@ -406,13 +500,9 @@ function getCheckoutAmountSummary() {
     for (const candidate of candidates) {
       const parsed = parseLocalizedAmount(candidate);
       if (!parsed) continue;
-      return {
-        hasTodayDue: true,
-        amount: parsed.amount,
-        isZero: Math.abs(parsed.amount) < 0.005,
-        rawAmount: parsed.raw,
-        labelText: text.slice(0, 160),
-      };
+      return buildCheckoutAmountSummaryFromParsedAmount(parsed, {
+        labelText: text,
+      });
     }
 
     return {

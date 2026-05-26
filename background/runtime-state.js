@@ -47,6 +47,7 @@
         'plusCheckoutCountry',
         'plusCheckoutCurrency',
         'plusCheckoutSource',
+        'plusPaymentEmailState',
         'plusCheckoutAlreadyPaid',
         'plusCheckoutAlreadyPaidAt',
         'plusCheckoutAlreadyPaidDetail',

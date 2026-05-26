@@ -261,6 +261,11 @@ const btnPayPalAccountMenu = document.getElementById('btn-paypal-account-menu');
 const payPalAccountCurrent = document.getElementById('paypal-account-current');
 const payPalAccountMenu = document.getElementById('paypal-account-menu');
 const btnAddPayPalAccount = document.getElementById('btn-add-paypal-account');
+const rowPayPalProfileGenerator = document.getElementById('row-paypal-profile-generator');
+const btnGeneratePayPalProfile = document.getElementById('btn-generate-paypal-profile');
+const btnCopyPayPalProfile = document.getElementById('btn-copy-paypal-profile');
+const payPalProfileSummary = document.getElementById('paypal-profile-summary');
+const payPalProfileDetails = document.getElementById('paypal-profile-details');
 const rowHostedCheckoutVerificationUrl = document.getElementById('row-hosted-checkout-verification-url');
 const inputHostedCheckoutVerificationUrl = document.getElementById('input-hosted-checkout-verification-url');
 const rowHostedCheckoutManualFetch = document.getElementById('row-hosted-checkout-manual-fetch');
@@ -323,6 +328,7 @@ const inputPlusCheckoutCloudConversionApiUrl = document.getElementById('input-pl
 const rowPlusCheckoutCloudConversionApiKey = document.getElementById('row-plus-checkout-cloud-conversion-api-key');
 const inputPlusCheckoutCloudConversionApiKey = document.getElementById('input-plus-checkout-cloud-conversion-api-key');
 const btnPlusCheckoutConversionProxySwitch = document.getElementById('btn-plus-checkout-conversion-proxy-switch');
+const btnPlusCheckoutConversionProxyNext = document.getElementById('btn-plus-checkout-conversion-proxy-next');
 const btnPlusCheckoutConversionProxyCancel = document.getElementById('btn-plus-checkout-conversion-proxy-cancel');
 const displayPlusCheckoutConversionProxyTestResult = document.getElementById('display-plus-checkout-conversion-proxy-test-result');
 const rowPlusCheckoutConversionProxyRuntime = document.getElementById('row-plus-checkout-conversion-proxy-runtime');
@@ -5407,6 +5413,15 @@ function collectSettingsPayload() {
     paypalPassword: String(currentPayPalAccount?.password || latestState?.paypalPassword || ''),
     currentPayPalAccountId: String(latestState?.currentPayPalAccountId || '').trim(),
     paypalAccounts: payPalAccounts,
+    paypalGeneratedProfile: typeof getPayPalGeneratedProfile === 'function'
+      ? (getPayPalGeneratedProfile(latestState) || {})
+      : (
+        latestState?.paypalGeneratedProfile
+        && typeof latestState.paypalGeneratedProfile === 'object'
+        && !Array.isArray(latestState.paypalGeneratedProfile)
+          ? latestState.paypalGeneratedProfile
+          : {}
+      ),
     gopayCountryCode: window.GoPayUtils?.normalizeGoPayCountryCode
       ? window.GoPayUtils.normalizeGoPayCountryCode(typeof selectGoPayCountryCode !== 'undefined' && selectGoPayCountryCode ? selectGoPayCountryCode.value : latestState?.gopayCountryCode)
       : (typeof selectGoPayCountryCode !== 'undefined' && selectGoPayCountryCode
@@ -10799,6 +10814,14 @@ function updatePlusModeUI() {
     row.style.display = enabled && selectedMethod === paypalValue && !hostedCheckoutFinalStepEnabled ? '' : 'none';
   });
   [
+    typeof rowPayPalProfileGenerator !== 'undefined' ? rowPayPalProfileGenerator : null,
+  ].forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.style.display = enabled && (selectedMethod === paypalValue || selectedMethod === paypalHostedValue) ? '' : 'none';
+  });
+  [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
     typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
     typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
@@ -10820,6 +10843,13 @@ function updatePlusModeUI() {
     } else if (typeof resetHostedSmsPoolManager === 'function') {
       resetHostedSmsPoolManager();
     }
+  }
+  if (
+    enabled
+    && (selectedMethod === paypalValue || selectedMethod === paypalHostedValue)
+    && typeof renderPayPalProfile === 'function'
+  ) {
+    renderPayPalProfile();
   }
   [
     typeof rowGpcHelperApi !== 'undefined' ? rowGpcHelperApi : null,
@@ -12671,6 +12701,9 @@ function applySettingsState(state) {
   if (typeof renderPayPalAccounts === 'function') {
     renderPayPalAccounts();
   }
+  if (typeof renderPayPalProfile === 'function') {
+    renderPayPalProfile();
+  }
   if (typeof updatePlusModeUI === 'function') {
     updatePlusModeUI();
   }
@@ -13716,6 +13749,11 @@ function getPayPalAccounts(state = latestState) {
 function getCurrentPayPalAccount(state = latestState) {
   const currentId = String(state?.currentPayPalAccountId || '').trim();
   return getPayPalAccounts(state).find((account) => account.id === currentId) || null;
+}
+
+function getPayPalGeneratedProfile(state = latestState) {
+  const profile = state?.paypalGeneratedProfile;
+  return profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : null;
 }
 
 function syncMail2925BaseEmailFromCurrentAccount(state = latestState, options = {}) {
@@ -15546,6 +15584,42 @@ const bindPayPalEvents = payPalManager?.bindPayPalEvents
   || (() => { });
 bindPayPalEvents();
 
+const payPalProfileGenerator = window.SidepanelPayPalProfileGenerator?.createPayPalProfileGenerator({
+  state: {
+    getLatestState: () => latestState,
+    syncLatestState,
+  },
+  dom: {
+    btnGenerateProfile: btnGeneratePayPalProfile,
+    btnCopyProfile: btnCopyPayPalProfile,
+    profileSummary: payPalProfileSummary,
+    profileDetails: payPalProfileDetails,
+  },
+  helpers: {
+    copyTextToClipboard,
+    escapeHtml,
+    getCurrentPayPalAccount,
+    getDraftCustomPassword: () => String(inputPassword?.value || latestState?.customPassword || '').trim(),
+    getDraftEmail: () => String(inputEmail?.value || latestState?.email || '').trim(),
+    getDraftHostedCheckoutPhone: () => normalizeHostedCheckoutPhoneValue(inputHostedCheckoutPhone?.value || latestState?.hostedCheckoutPhoneNumber || ''),
+    showToast,
+  },
+  runtime: {
+    sendMessage: (message) => chrome.runtime.sendMessage(message),
+  },
+  data: {
+    generateRandomBirthday: typeof generateRandomBirthday === 'function' ? generateRandomBirthday : null,
+    generateRandomName: typeof generateRandomName === 'function' ? generateRandomName : null,
+    getAddressSeedForCountry: window.MultiPageAddressSources?.getAddressSeedForCountry,
+    normalizeCountryCode: window.MultiPageAddressSources?.normalizeCountryCode,
+  },
+});
+const renderPayPalProfile = payPalProfileGenerator?.renderPayPalProfile
+  || (() => { });
+const bindPayPalProfileEvents = payPalProfileGenerator?.bindPayPalProfileEvents
+  || (() => { });
+bindPayPalProfileEvents();
+
 const mail2925Manager = window.SidepanelMail2925Manager?.createMail2925Manager({
   state: {
     getLatestState: () => latestState,
@@ -16839,6 +16913,14 @@ function setPlusCheckoutConversionProxyButtonsBusy(isBusy = false, labels = {}) 
       btnPlusCheckoutConversionProxySwitch.textContent = '切换代理';
     }
   }
+  if (btnPlusCheckoutConversionProxyNext) {
+    btnPlusCheckoutConversionProxyNext.disabled = busy;
+    if (labels.next) {
+      btnPlusCheckoutConversionProxyNext.textContent = labels.next;
+    } else if (!busy) {
+      btnPlusCheckoutConversionProxyNext.textContent = '下一个';
+    }
+  }
   if (btnPlusCheckoutConversionProxyCancel) {
     btnPlusCheckoutConversionProxyCancel.disabled = busy;
     if (labels.cancel) {
@@ -16911,7 +16993,11 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
       text = `当前生效：${displayName}；待切换：${inputProxyUrl}`;
       title = text;
       nextClass = 'state-pending';
-    } else if (currentSource === '711proxy_pool' && source === '711proxy_pool' && pendingLabel !== String(session.displayName || '').trim()) {
+    } else if (
+      currentSource === '711proxy_pool'
+      && source === '711proxy_pool'
+      && input711Region !== normalizePlusCheckoutConversionProxy711RegionValue(session.requestedRegion || '')
+    ) {
       text = `当前生效：${displayName}；待切换：${pendingLabel}`;
       title = text;
       nextClass = 'state-pending';
@@ -17020,6 +17106,7 @@ function updatePlusCheckoutConversionModeUi() {
   const source = resolveSource(latestState);
   const manualMode = source === 'manual';
   const directMode = source === 'direct';
+  const poolMode = source === '711proxy_pool';
 
   if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
     plusCheckoutConversionProxySourceButtons.forEach((button) => {
@@ -17047,6 +17134,11 @@ function updatePlusCheckoutConversionModeUi() {
   if (typeof btnPlusCheckoutConversionProxyTest !== 'undefined' && btnPlusCheckoutConversionProxyTest) {
     btnPlusCheckoutConversionProxyTest.disabled = cloudEnabled;
     btnPlusCheckoutConversionProxyTest.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof btnPlusCheckoutConversionProxyNext !== 'undefined' && btnPlusCheckoutConversionProxyNext) {
+    btnPlusCheckoutConversionProxyNext.style.display = (!cloudEnabled && poolMode) ? '' : 'none';
+    btnPlusCheckoutConversionProxyNext.disabled = cloudEnabled;
+    btnPlusCheckoutConversionProxyNext.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
   }
   if (typeof rowPlusCheckoutCloudConversionApiUrl !== 'undefined' && rowPlusCheckoutCloudConversionApiUrl) {
     rowPlusCheckoutCloudConversionApiUrl.style.display = cloudRowsVisible ? '' : 'none';
@@ -17205,6 +17297,60 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
       'success',
       2200
     );
+  } finally {
+    setPlusCheckoutConversionProxyButtonsBusy(false);
+  }
+}
+
+async function handlePlusCheckoutConversionProxyNext711() {
+  const source = getSelectedPlusCheckoutConversionProxySource(latestState);
+  if (source !== '711proxy_pool') {
+    showToast('“下一个”仅支持 711 临时池代理。', 'error');
+    return;
+  }
+  const proxy711Region = getCurrentPlusCheckoutConversionProxy711Region(latestState);
+  setPlusCheckoutConversionProxyButtonsBusy(true, { next: '切换中...' });
+  setPlusCheckoutConversionProxyTestResult('切换中...', {
+    status: 'running',
+    detail: '正在切换到 711 临时池的下一个可用出口。',
+  });
+  try {
+    const response = await sendRuntimeMessageWithTimeout({
+      type: 'NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711',
+      source: 'sidepanel',
+      payload: {
+        source,
+        proxy711Region,
+        ipProxyStateOverride: typeof buildCurrentIpProxyActionStateOverride === 'function'
+          ? buildCurrentIpProxyActionStateOverride(latestState)
+          : undefined,
+      },
+    }, 45000, '711 临时池下一个');
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    syncLatestState({
+      plusCheckoutConversionProxyManualSession: response?.plusCheckoutConversionProxyManualSession || latestState?.plusCheckoutConversionProxyManualSession || null,
+      plusCheckoutConversionProxySource: response?.plusCheckoutConversionProxySource ?? source,
+      plusCheckoutConversionProxy711Region: response?.plusCheckoutConversionProxy711Region ?? proxy711Region,
+    });
+    renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
+    if (response?.switched) {
+      const displayName = response?.displayName || '已选节点';
+      const suffix = response?.exitChanged ? '，真实出口已变化' : '';
+      setPlusCheckoutConversionProxyTestResult(`当前代理：${displayName}`, {
+        status: 'success',
+        detail: response?.skippedReason || `已切换到 711 临时池下一个代理${suffix}。`,
+      });
+      showToast(`已切换到 711 临时池下一个代理：${displayName}${suffix}`, 'success', 2400);
+      return;
+    }
+    const reason = response?.skippedReason || response?.reason || '当前 711 临时池已到末尾，未找到不同出口。';
+    setPlusCheckoutConversionProxyTestResult('未切换', {
+      status: 'error',
+      detail: reason,
+    });
+    showToast(reason, 'warn', 3200);
   } finally {
     setPlusCheckoutConversionProxyButtonsBusy(false);
   }
@@ -17396,6 +17542,12 @@ btnPlusCheckoutConversionProxyTest?.addEventListener('click', () => {
 btnPlusCheckoutConversionProxySwitch?.addEventListener('click', () => {
   handlePlusCheckoutConversionProxyManualSwitch().catch((error) => {
     showToast(error?.message || String(error || '支付转换代理切换失败'), 'error');
+  });
+});
+
+btnPlusCheckoutConversionProxyNext?.addEventListener('click', () => {
+  handlePlusCheckoutConversionProxyNext711().catch((error) => {
+    showToast(error?.message || String(error || '711 临时池下一个失败'), 'error');
   });
 });
 
@@ -20327,6 +20479,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.currentPayPalAccountId !== undefined || message.payload.paypalAccounts !== undefined) {
         renderPayPalAccounts();
+        renderPayPalProfile();
+      }
+      if (message.payload.paypalGeneratedProfile !== undefined) {
+        renderPayPalProfile();
       }
       if (message.payload.currentMail2925AccountId !== undefined || message.payload.mail2925Accounts !== undefined) {
         renderMail2925Accounts();
