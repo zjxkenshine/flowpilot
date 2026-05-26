@@ -112,6 +112,12 @@ const DEFAULT_STATE = {
     9: 'pending',
     10: 'pending',
   },
+  phoneNoSupplyFailureStreak: 0,
+  heroSmsLastPriceTiers: [],
+  heroSmsLastPriceCountryId: 0,
+  heroSmsLastPriceCountryLabel: '',
+  heroSmsLastPriceUserLimit: '',
+  heroSmsLastPriceAt: 0,
 };
 DEFAULT_STATE.nodeStatuses = projectStepStatusesToNodeStatuses(DEFAULT_STATE.stepStatuses);
 

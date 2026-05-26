@@ -15813,6 +15813,7 @@ const accountBookManager = window.SidepanelAccountBookManager?.createAccountBook
   helpers: {
     downloadTextFile,
     escapeHtml,
+    openActionModal,
     openConfirmModal,
     showToast,
   },

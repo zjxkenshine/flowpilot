@@ -4622,7 +4622,7 @@
         );
         const heroSmsTierDiagnostics = [];
         if (tierUpgradeLimit <= 0) {
-          heroSmsTierDiagnostics.push('升档已禁用');
+          heroSmsTierDiagnostics.push('单次取号候选档位切换已禁用');
         }
         if (pricesToTry.length === 0) {
           heroSmsTierDiagnostics.push('无可尝试候选档位');
@@ -4643,7 +4643,7 @@
         }
         if (heroSmsTierDiagnostics.length) {
           await addLog(
-            `步骤 9：HeroSMS ${countryLabel} 升档诊断：升档次数=${tierUpgradeLimit}，本轮候选档位数=${pricesToTry.length}；${heroSmsTierDiagnostics.join('；')}。`,
+            `步骤 9：HeroSMS ${countryLabel} 单次取号预算诊断：候选档位切换预算=${tierUpgradeLimit}，本次候选档位数=${pricesToTry.length}；${heroSmsTierDiagnostics.join('；')}。`,
             'info'
           );
         }

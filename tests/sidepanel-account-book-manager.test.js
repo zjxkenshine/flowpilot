@@ -89,8 +89,9 @@ test('sidepanel html contains account book overlay, button order, and manager sc
   assert.match(html, /id="account-book-body"/);
   assert.match(html, /id="btn-export-account-book"/);
   assert.match(html, /id="btn-clear-account-book"/);
+  assert.match(html, /<th>状态<\/th>/);
   assert.match(html, /<th>IP<\/th>/);
-  assert.match(html, /colspan="4"/);
+  assert.match(html, /colspan="5"/);
   assert.ok(accountIndex >= 0 && recordsIndex >= 0 && clearIndex >= 0);
   assert.ok(accountIndex < recordsIndex);
   assert.ok(recordsIndex < clearIndex);
@@ -134,6 +135,8 @@ test('account book manager renders empty signup IP as placeholder', () => {
 
   manager.render();
 
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-registration-success/);
+  assert.match(dom.accountBookBody.innerHTML, />注册成功</);
   assert.match(dom.accountBookBody.innerHTML, /<td class="mono account-book-cell account-book-ip-cell">--<\/td>/);
 });
 
@@ -143,6 +146,7 @@ test('sidepanel source wires account book manager and latest-state rendering', (
   assert.match(source, /const btnOpenAccountBook = document\.getElementById\('btn-open-account-book'\);/);
   assert.match(source, /window\.SidepanelAccountBookManager\?\.createAccountBookManager/);
   assert.match(source, /downloadTextFile,/);
+  assert.match(source, /openActionModal,/);
   assert.match(source, /renderAccountBook\(latestState\);/);
 });
 
@@ -154,6 +158,10 @@ test('sidepanel css keeps confirm modal above account book overlay', () => {
   assert.ok(overlayMatch, 'missing account book overlay z-index');
   assert.ok(modalMatch, 'missing modal overlay z-index');
   assert.ok(Number(modalMatch[1]) > Number(overlayMatch[1]));
+  assert.match(css, /\.account-book-status-chip\.status-phone-verified/);
+  assert.match(css, /\.account-book-status-chip\.status-registration-success/);
+  assert.match(css, /\.account-book-status-chip\.status-flow-completed/);
+  assert.match(css, /\.account-book-status-chip\.status-unknown/);
 });
 
 test('account book manager masks passwords by default, toggles display, exports json, and clears entries', async () => {
@@ -201,8 +209,14 @@ test('account book manager masks passwords by default, toggles display, exports 
     dom,
     helpers: {
       escapeHtml: (value) => String(value || ''),
-      downloadTextFile(content, fileName, mimeType) {
-        downloads.push({ content, fileName, mimeType });
+      downloadTextFile(content, fileName, mimeType, options) {
+        downloads.push({ content, fileName, mimeType, options });
+      },
+      openActionModal: async (options) => {
+        assert.equal(options.title, '导出账号信息');
+        assert.equal(options.message, '请选择账号簿的导出格式。');
+        assert.deepEqual(options.actions.map((action) => action.id), [null, 'json', 'txt']);
+        return 'json';
       },
       openConfirmModal: async () => true,
       showToast(message, tone) {
@@ -225,6 +239,8 @@ test('account book manager masks passwords by default, toggles display, exports 
   assert.match(dom.accountBookCount.textContent, /共 1 条账号信息/);
   assert.match(dom.accountBookBody.innerHTML, /flow@example\.com/);
   assert.match(dom.accountBookBody.innerHTML, /\+15551234567/);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-flow-completed/);
+  assert.match(dom.accountBookBody.innerHTML, />导入成功</);
   assert.match(dom.accountBookBody.innerHTML, /203\.0\.113\.8 \[JP\]/);
   assert.match(dom.accountBookBody.innerHTML, /••••••••/);
   assert.doesNotMatch(dom.accountBookBody.innerHTML, /secret-pass/);
@@ -241,10 +257,13 @@ test('account book manager masks passwords by default, toggles display, exports 
   await dom.btnExportAccountBook.listeners.click();
   assert.equal(downloads.length, 1);
   assert.equal(downloads[0].mimeType, 'application/json;charset=utf-8');
+  assert.deepEqual(downloads[0].options, { prependUtf8Bom: true });
   assert.match(downloads[0].fileName, /^flowpilot-account-book-\d{8}-\d{6}\.json$/);
   const exported = JSON.parse(downloads[0].content);
   assert.equal(exported.count, 1);
   assert.equal(exported.entries[0].password, 'secret-pass');
+  assert.equal(exported.entries[0].captureStage, 'flow_completed');
+  assert.equal(exported.entries[0].statusLabel, '导入成功');
   assert.equal(exported.entries[0].signupIp, '203.0.113.8');
   assert.equal(exported.entries[0].signupRegion, 'JP');
 
@@ -256,4 +275,130 @@ test('account book manager masks passwords by default, toggles display, exports 
     message: '已清空 1 条账号信息。',
     tone: 'success',
   });
+});
+
+test('account book manager exports utf8 bom txt with readable 4-column table', async () => {
+  const source = fs.readFileSync('sidepanel/account-book-manager.js', 'utf8');
+  const windowObject = {};
+  const api = new Function('window', `${source}; return window.SidepanelAccountBookManager;`)(windowObject);
+
+  const downloads = [];
+  const dom = {
+    btnExportAccountBook: createNode(),
+  };
+  const manager = api.createAccountBookManager({
+    state: {
+      getLatestState: () => ({
+        accountBookEntries: [
+          {
+            recordId: 'complete@example.com',
+            email: 'complete@example.com',
+            phoneNumber: '+15551234567',
+            password: 'secret-pass',
+            captureStage: 'flow_completed',
+            createdAt: '2026-05-24T10:00:00.000Z',
+            updatedAt: '2026-05-24T10:05:00.000Z',
+            signupIp: '203.0.113.8',
+            signupRegion: 'us',
+          },
+          {
+            recordId: 'empty@example.com',
+            email: '',
+            phoneNumber: '',
+            password: '',
+            captureStage: 'registration_success',
+            createdAt: '2026-05-23T10:00:00.000Z',
+            updatedAt: '2026-05-23T10:00:00.000Z',
+            signupIp: '',
+            signupRegion: '',
+          },
+        ],
+      }),
+    },
+    dom,
+    helpers: {
+      downloadTextFile(content, fileName, mimeType, options) {
+        downloads.push({ content, fileName, mimeType, options });
+      },
+      openActionModal: async (options) => {
+        assert.deepEqual(options.actions.map((action) => action.label), ['取消', '导出 JSON', '导出 TXT']);
+        return 'txt';
+      },
+      showToast() {},
+    },
+    runtime: {},
+  });
+
+  manager.bindEvents();
+  await dom.btnExportAccountBook.listeners.click();
+
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].mimeType, 'text/plain;charset=utf-8');
+  assert.deepEqual(downloads[0].options, { prependUtf8Bom: true });
+  assert.match(downloads[0].fileName, /^flowpilot-account-book-\d{8}-\d{6}\.txt$/);
+  assert.match(downloads[0].content, /^# FlowPilot Account Book Export\r\n# schemaVersion=1\r\n# encoding=UTF-8\r\n# exportedAt=/);
+  assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\tIP\r\n/);
+  assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t203\.0\.113\.8 \[US\]\r\n/);
+  assert.match(downloads[0].content, /--\t--\t--\t--\r\n$/);
+});
+
+test('account book manager renders all status labels with matching classes', () => {
+  const source = fs.readFileSync('sidepanel/account-book-manager.js', 'utf8');
+  const windowObject = {};
+  const api = new Function('window', `${source}; return window.SidepanelAccountBookManager;`)(windowObject);
+
+  const dom = {
+    accountBookCount: createNode(),
+    accountBookBody: createNode(),
+  };
+
+  const manager = api.createAccountBookManager({
+    state: {
+      getLatestState: () => ({
+        accountBookEntries: [
+          {
+            recordId: 'phone-only',
+            email: '',
+            phoneNumber: '+15550001111',
+            password: '',
+            captureStage: 'phone_verification_passed',
+            createdAt: '2026-05-24T10:03:00.000Z',
+            updatedAt: '2026-05-24T10:03:00.000Z',
+          },
+          {
+            recordId: 'registered@example.com',
+            email: 'registered@example.com',
+            phoneNumber: '+15550002222',
+            password: '',
+            captureStage: 'registration_success',
+            createdAt: '2026-05-24T10:02:00.000Z',
+            updatedAt: '2026-05-24T10:02:00.000Z',
+          },
+          {
+            recordId: 'completed@example.com',
+            email: 'completed@example.com',
+            phoneNumber: '+15550003333',
+            password: '',
+            captureStage: 'flow_completed',
+            createdAt: '2026-05-24T10:01:00.000Z',
+            updatedAt: '2026-05-24T10:01:00.000Z',
+          },
+        ],
+      }),
+    },
+    dom,
+    helpers: {
+      escapeHtml: (value) => String(value || ''),
+    },
+    runtime: {},
+  });
+
+  manager.render();
+
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-phone-verified/);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-registration-success/);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-flow-completed/);
+  assert.match(dom.accountBookBody.innerHTML, />验证成功</);
+  assert.match(dom.accountBookBody.innerHTML, />注册成功</);
+  assert.match(dom.accountBookBody.innerHTML, />导入成功</);
 });

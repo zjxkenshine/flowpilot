@@ -3225,10 +3225,11 @@ header {
   table-layout: fixed;
 }
 
-.account-book-table thead th:nth-child(1) { width: 25%; }
-.account-book-table thead th:nth-child(2) { width: 22%; }
+.account-book-table thead th:nth-child(1) { width: 23%; }
+.account-book-table thead th:nth-child(2) { width: 20%; }
 .account-book-table thead th:nth-child(3) { width: 20%; }
-.account-book-table thead th:nth-child(4) { width: 33%; }
+.account-book-table thead th:nth-child(4) { width: 14%; }
+.account-book-table thead th:nth-child(5) { width: 23%; }
 
 .account-book-table thead th {
   position: sticky;
@@ -3263,6 +3264,42 @@ header {
 
 .account-book-ip-cell {
   white-space: normal;
+}
+
+.account-book-status-cell {
+  white-space: normal;
+}
+
+.account-book-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.account-book-status-chip.status-phone-verified {
+  background: color-mix(in srgb, var(--cyan) 14%, var(--bg-surface));
+  color: var(--cyan);
+}
+
+.account-book-status-chip.status-registration-success {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.account-book-status-chip.status-flow-completed {
+  background: color-mix(in srgb, var(--green) 18%, var(--bg-surface));
+  color: color-mix(in srgb, var(--green) 92%, #0f5132);
+}
+
+.account-book-status-chip.status-unknown {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
 }
 
 .account-book-password-cell {

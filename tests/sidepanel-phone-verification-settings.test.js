@@ -1073,6 +1073,8 @@ const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
 const DEFAULT_FIVE_SIM_COUNTRY_LABEL = '越南 (Vietnam)';
 const DEFAULT_FIVE_SIM_OPERATOR = 'any';
@@ -1141,6 +1143,11 @@ ${extractFunction('normalizePhoneCodePollIntervalSecondsValue')}
 ${extractFunction('normalizePhoneCodePollMaxRoundsValue')}
 ${extractFunction('normalizeHeroSmsReuseEnabledValue')}
 ${extractFunction('normalizeHeroSmsAcquirePriority')}
+${extractFunction('normalizeHostedCheckoutVerificationPopupDelaySeconds')}
+${extractFunction('normalizeHostedCheckoutResendWaitSecondsValue')}
+${extractFunction('normalizeHostedCheckoutVerificationPollAttemptsValue')}
+${extractFunction('normalizeHostedCheckoutVerificationPollIntervalSecondsValue')}
+${extractFunction('normalizeHostedCheckoutVerificationResendMaxAttemptsValue')}
 ${extractFunction('normalizeHeroSmsCountryId')}
 ${extractFunction('normalizeHeroSmsCountryLabel')}
 ${extractFunction('getSelectedHeroSmsCountryOption')}

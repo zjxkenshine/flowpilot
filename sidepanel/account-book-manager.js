@@ -25,6 +25,42 @@
       return Number.isFinite(timestamp) ? timestamp : 0;
     }
 
+    function normalizeCaptureStage(value = '') {
+      const normalized = normalizeString(value).toLowerCase();
+      if (normalized === 'phone_verification_passed') {
+        return normalized;
+      }
+      if (normalized === 'registration_success') {
+        return normalized;
+      }
+      return normalized === 'flow_completed' ? normalized : '';
+    }
+
+    function getStatusMeta(captureStage = '') {
+      switch (normalizeCaptureStage(captureStage)) {
+        case 'phone_verification_passed':
+          return {
+            label: '验证成功',
+            className: 'status-phone-verified',
+          };
+        case 'registration_success':
+          return {
+            label: '注册成功',
+            className: 'status-registration-success',
+          };
+        case 'flow_completed':
+          return {
+            label: '导入成功',
+            className: 'status-flow-completed',
+          };
+        default:
+          return {
+            label: '--',
+            className: 'status-unknown',
+          };
+      }
+    }
+
     function escapeHtml(value) {
       if (typeof helpers.escapeHtml === 'function') {
         return helpers.escapeHtml(String(value || ''));
@@ -44,6 +80,7 @@
         .filter((item) => item && typeof item === 'object')
         .map((item) => ({
           ...item,
+          captureStage: normalizeCaptureStage(item.captureStage),
           signupIp: normalizeString(item.signupIp || ''),
           signupRegion: normalizeSignupRegion(item.signupRegion || ''),
         }))
@@ -92,7 +129,7 @@
       if (!entries.length) {
         dom.accountBookBody.innerHTML = `
           <tr class="account-book-empty-row">
-            <td class="account-book-empty" colspan="4">暂无账号信息</td>
+            <td class="account-book-empty" colspan="5">暂无账号信息</td>
           </tr>
         `;
         return;
@@ -104,6 +141,7 @@
         const passwordValue = normalizeString(entry.password);
         const displayPassword = passwordVisible ? formatDisplayValue(passwordValue) : maskPassword(passwordValue);
         const canTogglePassword = Boolean(passwordValue);
+        const statusMeta = getStatusMeta(entry.captureStage);
 
         return `
           <tr data-account-book-row="${escapeHtml(recordId)}">
@@ -120,6 +158,9 @@
                   >${passwordVisible ? '隐藏' : '显示'}</button>
                 ` : ''}
               </div>
+            </td>
+            <td class="account-book-cell account-book-status-cell">
+              <span class="account-book-status-chip ${statusMeta.className}">${escapeHtml(statusMeta.label)}</span>
             </td>
             <td class="mono account-book-cell account-book-ip-cell">${escapeHtml(formatSignupIp(entry))}</td>
           </tr>
@@ -138,23 +179,80 @@
       render();
     }
 
-    function buildExportFileName() {
-      const now = new Date();
+    function buildExportFileName(format = 'json', date = new Date()) {
       const pad = (value) => String(value).padStart(2, '0');
-      return `flowpilot-account-book-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.json`;
+      const extension = format === 'txt' ? 'txt' : 'json';
+      return `flowpilot-account-book-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.${extension}`;
+    }
+
+    function withExportStatusLabels(entries = []) {
+      return entries.map((entry) => ({
+        ...entry,
+        statusLabel: getStatusMeta(entry.captureStage).label,
+      }));
+    }
+
+    function buildJsonExportContent(entries = [], exportedAt = new Date().toISOString()) {
+      const payload = {
+        exportedAt,
+        count: entries.length,
+        entries: withExportStatusLabels(entries),
+      };
+      return `${JSON.stringify(payload, null, 2)}\n`;
+    }
+
+    function sanitizeTxtCell(value = '') {
+      return formatDisplayValue(value).replace(/\r?\n/g, ' ');
+    }
+
+    function buildTxtExportContent(entries = [], exportedAt = new Date().toISOString()) {
+      const lines = [
+        '# FlowPilot Account Book Export',
+        '# schemaVersion=1',
+        '# encoding=UTF-8',
+        `# exportedAt=${exportedAt}`,
+        `# count=${entries.length}`,
+        '',
+        ['\u90ae\u7bb1', '\u624b\u673a\u53f7', '\u5bc6\u7801', 'IP'].join('\t'),
+        ...entries.map((entry) => [
+          sanitizeTxtCell(entry.email),
+          sanitizeTxtCell(entry.phoneNumber),
+          sanitizeTxtCell(entry.password),
+          sanitizeTxtCell(formatSignupIp(entry)),
+        ].join('\t')),
+      ];
+      return `${lines.join('\r\n')}\r\n`;
+    }
+
+    async function chooseExportFormat() {
+      if (typeof helpers.openActionModal !== 'function') {
+        return 'json';
+      }
+      const choice = await helpers.openActionModal({
+        title: '\u5bfc\u51fa\u8d26\u53f7\u4fe1\u606f',
+        message: '\u8bf7\u9009\u62e9\u8d26\u53f7\u7c3f\u7684\u5bfc\u51fa\u683c\u5f0f\u3002',
+        actions: [
+          { id: null, label: '\u53d6\u6d88', variant: 'btn-ghost' },
+          { id: 'json', label: '\u5bfc\u51fa JSON', variant: 'btn-outline' },
+          { id: 'txt', label: '\u5bfc\u51fa TXT', variant: 'btn-primary' },
+        ],
+      });
+      return choice === 'txt' || choice === 'json' ? choice : '';
     }
 
     async function exportEntries() {
       const entries = getEntries();
-      const payload = {
-        exportedAt: new Date().toISOString(),
-        count: entries.length,
-        entries,
-      };
+      const format = await chooseExportFormat();
+      if (!format) {
+        return;
+      }
+      const exportedAt = new Date().toISOString();
+      const isTxt = format === 'txt';
       helpers.downloadTextFile?.(
-        `${JSON.stringify(payload, null, 2)}\n`,
-        buildExportFileName(),
-        'application/json;charset=utf-8'
+        isTxt ? buildTxtExportContent(entries, exportedAt) : buildJsonExportContent(entries, exportedAt),
+        buildExportFileName(format),
+        isTxt ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8',
+        { prependUtf8Bom: true }
       );
       helpers.showToast?.(`已导出 ${entries.length} 条账号信息。`, 'success', 1800);
     }

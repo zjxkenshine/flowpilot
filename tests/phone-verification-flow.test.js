@@ -2786,6 +2786,9 @@ test('phone verification helper shares one single acquire budget across multiple
   await assert.rejects(
     helpers.requestPhoneActivation({
       heroSmsApiKey: 'demo-key',
+      heroSmsCountryId: 52,
+      heroSmsCountryLabel: 'Thailand',
+      heroSmsCountryFallback: [{ id: 10, label: 'Vietnam' }],
       heroSmsActivationRetryRounds: 1,
       phoneActivationTierUpgradeLimit: 1,
     }),
