@@ -189,6 +189,30 @@ function createGpcTaskResponse(overrides = {}) {
   };
 }
 
+function createHostedRuntimeState(overrides = {}) {
+  return {
+    hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    hostedCheckoutPhoneNumber: '4155551234',
+    ...overrides,
+  };
+}
+
+function createHostedAddressResponse(address = {}) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      address: {
+        Address: '7 Fresh St',
+        City: 'Austin',
+        State_Full: 'Texas',
+        Zip_Code: '73301',
+        ...address,
+      },
+    }),
+  };
+}
+
 test('Plus checkout create waits 20 seconds after opening checkout page by default', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -1044,7 +1068,11 @@ test('PayPal hosted generic_error creates manual confirmation when auto retry is
     },
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
-    getState: async () => ({ ...state }),
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => ({
+      ...createHostedRuntimeState(),
+      ...state,
+    }),
     registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });
@@ -1101,7 +1129,8 @@ test('PayPal hosted generic_error throws structured error without manual confirm
     },
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
-    getState: async () => ({
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState({
       autoRunRetryPaypalCallback: true,
     }),
     registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
@@ -1136,6 +1165,197 @@ test('PayPal hosted generic_error throws structured error without manual confirm
   assert.equal(events.some((event) => event.type === 'set-state' && event.payload?.plusManualConfirmationPending), false);
   assert.equal(broadcasts.length, 0);
   assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
+test('PayPal hosted card node regenerates and persists a fresh guest profile before submitting guest checkout', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  const cachedProfile = {
+    email: 'cached@example.com',
+    password: 'cached-password',
+    cardNumber: '4000000000000002',
+    cardExpiry: '01 / 30',
+    cardCvv: '999',
+    firstName: 'Cached',
+    lastName: 'Profile',
+    phone: '9999999999',
+    address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      return createHostedAddressResponse({
+        Address: '7 Fresh St',
+        City: 'Austin',
+        State_Full: 'Texas',
+        Zip_Code: '73301',
+      });
+    },
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return {
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: '4155551234',
+          renderedPhoneDigits: '14155551234',
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return currentUrl.includes('/create-account')
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: cachedProfile,
+  });
+
+  const profileEvent = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile);
+  const submitEvent = events.find((event) => event.type === 'tab-message' && event.message?.payload?.expectedStage === 'guest_checkout');
+  const profileState = profileEvent?.payload?.plusHostedCheckoutGuestProfile || {};
+
+  assert.ok(profileEvent);
+  assert.ok(submitEvent);
+  assert.equal(profileState.address.street, '7 Fresh St');
+  assert.equal(profileState.address.city, 'Austin');
+  assert.equal(profileState.address.state, 'Texas');
+  assert.equal(profileState.address.zip, '73301');
+  assert.equal(profileState.phone, '4155551234');
+  assert.equal(profileState.firstName, 'James');
+  assert.equal(profileState.lastName, 'Smith');
+  assert.notEqual(profileState.email, cachedProfile.email);
+  assert.notEqual(profileState.password, cachedProfile.password);
+  assert.notEqual(profileState.cardNumber, cachedProfile.cardNumber);
+  assert.equal(submitEvent.message.payload.address.street, '7 Fresh St');
+  assert.equal(submitEvent.message.payload.firstName, 'James');
+  assert.equal(submitEvent.message.payload.lastName, 'Smith');
+  assert.equal(submitEvent.message.payload.phone, '4155551234');
+  assert.equal(submitEvent.message.payload.email, profileState.email);
+  assert.equal(submitEvent.message.payload.cardNumber, profileState.cardNumber);
+  assert.ok(events.indexOf(profileEvent) < events.indexOf(submitEvent));
+});
+
+test('PayPal hosted card node regenerates and persists a fresh guest profile before short-circuiting on later stages', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/create-account', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      return createHostedAddressResponse({
+        Address: '9 Later Stage Ave',
+        City: 'Dallas',
+        State_Full: 'Texas',
+        Zip_Code: '75001',
+      });
+    },
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return { hostedStage: 'create_account' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 456,
+    plusHostedCheckoutGuestProfile: {
+      email: 'stale@example.com',
+      phone: '9999999999',
+      address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+    },
+  });
+
+  const profileEvent = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile);
+  const completeEvent = events.find((event) => event.type === 'complete' && event.step === 'paypal-hosted-card');
+  const profileState = profileEvent?.payload?.plusHostedCheckoutGuestProfile || {};
+
+  assert.ok(profileEvent);
+  assert.ok(completeEvent);
+  assert.equal(profileState.address.street, '9 Later Stage Ave');
+  assert.equal(profileState.address.city, 'Dallas');
+  assert.equal(profileState.phone, '4155551234');
+  assert.notEqual(profileState.email, 'stale@example.com');
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
+  assert.ok(events.indexOf(profileEvent) < events.indexOf(completeEvent));
+});
+
+test('PayPal hosted card node fails fresh profile regeneration instead of falling back to cached data', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      };
+    },
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 789,
+      plusHostedCheckoutGuestProfile: {
+        email: 'cached@example.com',
+        phone: '4155551234',
+        address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+      },
+    }),
+    /获取无卡直绑地址失败/
+  );
+
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+  assert.equal(events.some((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile), false);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
 });
 
 test('Plus checkout content routes billing operations through the operation delay gate', async () => {
@@ -1714,9 +1934,18 @@ test('PayPal hosted card node resends and refills after invalid verification cod
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
     fetch: async (url) => {
       events.push({ type: 'fetch', url });
+      if (/meiguodizhi\.com/i.test(url)) {
+        return createHostedAddressResponse({
+          Address: '11 Verify Ln',
+          City: 'Phoenix',
+          State_Full: 'Arizona',
+          Zip_Code: '85001',
+        });
+      }
       codeFetchCount += 1;
       return {
         ok: true,
+        json: async () => ({}),
         text: async () => JSON.stringify({
           data: {
             message: `PayPal: ${codeFetchCount === 1 ? '111111' : '222222'} is your security code. Don't share it.`,
@@ -1724,10 +1953,7 @@ test('PayPal hosted card node resends and refills after invalid verification cod
         }),
       };
     },
-    getState: async () => ({
-      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
-      hostedCheckoutPhoneNumber: '4155551234',
-    }),
+    getState: async () => createHostedRuntimeState(),
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (tabId, source, message) => {
       events.push({ type: 'tab-message', tabId, source, message });
@@ -1793,18 +2019,26 @@ test('PayPal hosted card node throws resend-limit error after repeated invalid v
     },
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
-    fetch: async () => ({
-      ok: true,
-      text: async () => JSON.stringify({
-        data: {
-          message: "PayPal: 333333 is your security code. Don't share it.",
-        },
-      }),
-    }),
-    getState: async () => ({
-      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
-      hostedCheckoutPhoneNumber: '4155551234',
-    }),
+    fetch: async (url) => {
+      if (/meiguodizhi\.com/i.test(url)) {
+        return createHostedAddressResponse({
+          Address: '12 Retry Rd',
+          City: 'Seattle',
+          State_Full: 'Washington',
+          Zip_Code: '98101',
+        });
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+        text: async () => JSON.stringify({
+          data: {
+            message: "PayPal: 333333 is your security code. Don't share it.",
+          },
+        }),
+      };
+    },
+    getState: async () => createHostedRuntimeState(),
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });

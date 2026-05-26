@@ -582,24 +582,38 @@
       };
     }
 
-    async function ensureHostedGuestProfile(state = {}) {
+    async function ensureHostedGuestProfile(state = {}, options = {}) {
+      const forceRefresh = Boolean(options?.forceRefresh);
       const mergedState = await getLatestHostedState(state);
-      const existingProfile = getHostedProfileFromState(mergedState) || {};
+      const existingProfile = forceRefresh
+        ? {}
+        : (getHostedProfileFromState(mergedState) || {});
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
       });
-      const address = existingProfile.address && typeof existingProfile.address === 'object'
-        ? existingProfile.address
-        : await fetchHostedCheckoutAddress();
+      const nextPhone = normalizeHostedPhoneForPayload(
+        forceRefresh ? config.phone : (config.phone || existingProfile.phone)
+      );
+      const address = forceRefresh
+        ? await fetchHostedCheckoutAddress()
+        : (existingProfile.address && typeof existingProfile.address === 'object'
+          ? existingProfile.address
+          : await fetchHostedCheckoutAddress());
       const generatedProfile = buildHostedGuestProfile(address, {
-        phone: normalizeHostedPhoneForPayload(config.phone),
+        phone: nextPhone,
       });
-      const nextProfile = {
-        ...generatedProfile,
-        ...existingProfile,
-        address,
-        phone: normalizeHostedPhoneForPayload(config.phone || existingProfile.phone),
-      };
+      const nextProfile = forceRefresh
+        ? {
+          ...generatedProfile,
+          address,
+          phone: nextPhone,
+        }
+        : {
+          ...generatedProfile,
+          ...existingProfile,
+          address,
+          phone: nextPhone,
+        };
       if (!nextProfile.phone) {
         throw buildHostedCheckoutConfigError(
           'PayPal hosted checkout 未拿到有效手机号配置，无法继续填写 PayPal 资料页。',
@@ -1559,7 +1573,17 @@
       const stepNumber = getHostedStepNumber(stepKey);
       const tabId = await resolveHostedCheckoutTabId(state, stepKey);
       const verificationContext = createHostedVerificationRetryContext();
-      if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
+      const {
+        profile: refreshedProfile,
+        config: refreshedProfileConfig,
+      } = await ensureHostedGuestProfile(state, { forceRefresh: true });
+      const refreshedState = {
+        ...state,
+        plusHostedCheckoutGuestProfile: refreshedProfile,
+        hostedCheckoutGuestProfile: refreshedProfile,
+        plusHostedCheckoutPhoneDigits: refreshedProfile.phone,
+      };
+      if (await completeHostedStepIfSuccessful(stepKey, tabId, refreshedState)) {
         return;
       }
       await waitForHostedUrlAfterAction(
@@ -1567,12 +1591,12 @@
         (url) => isPayPalUrl(url) || isHostedCheckoutSuccessUrl(url),
         { label: `步骤 ${stepNumber}：等待 PayPal 资料页` }
       );
-      if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
+      if (await completeHostedStepIfSuccessful(stepKey, tabId, refreshedState)) {
         return;
       }
 
       const pageState = await getHostedPayPalState(tabId);
-      const reviewConfig = await getHostedCheckoutRuntimeConfig(state, {
+      const reviewConfig = refreshedProfileConfig || await getHostedCheckoutRuntimeConfig(refreshedState, {
         ensureCurrentSmsEntry: true,
       });
       await logHostedCheckoutRuntimeConfig(stepKey, reviewConfig, {
@@ -1580,11 +1604,11 @@
           ? `验证码链接已绑定当前池条目 ${maskHostedPhoneForLog(reviewConfig.hostedCheckoutCurrentSmsEntry?.phone)}`
           : `手动手机号 ${maskHostedPhoneForLog(reviewConfig.phone)}`,
       });
-      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+      if ((await handleHostedPayPalVerificationState(tabId, pageState, refreshedState, verificationContext, stepKey)).handled) {
         const nextState = await waitForHostedPayPalStage(
           tabId,
           async (stateInfo) => {
-            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
               return false;
             }
             return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
@@ -1608,7 +1632,7 @@
         throw new Error(`步骤 ${stepNumber}：当前不是 PayPal 资料页（当前状态：${pageState.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN}）。`);
       }
 
-      const { profile } = await ensureHostedGuestProfile(state);
+      const profile = refreshedProfile;
       await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在填写 PayPal 无卡直绑资料，提交前会复查电话是否为 ${profile.phone}。`, 'info');
       const cardResult = await runHostedPayPalStep(tabId, {
         ...profile,
@@ -1625,7 +1649,7 @@
       const nextState = await waitForHostedPayPalStage(
         tabId,
         async (stateInfo) => {
-          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
             return false;
           }
           return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
