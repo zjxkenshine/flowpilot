@@ -2323,7 +2323,13 @@ function normalizePlusAccountAccessStrategy(value = '') {
 
 function normalizePlusCheckoutConversionProxySource(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+  if (normalized === '711proxy_pool') {
+    return '711proxy_pool';
+  }
+  if (normalized === 'direct') {
+    return 'direct';
+  }
+  return 'manual';
 }
 
 function normalizePlusCheckoutConversionProxy711Region(value = '') {

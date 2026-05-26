@@ -3478,7 +3478,14 @@ function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
 }
 
 function normalizePlusCheckoutConversionProxySourceValue(value = '') {
-  return String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual';
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === '711proxy_pool') {
+    return '711proxy_pool';
+  }
+  if (normalized === 'direct') {
+    return 'direct';
+  }
+  return 'manual';
 }
 
 function normalizePlusCheckoutConversionProxy711RegionDraftValue(value = '') {
@@ -4621,7 +4628,16 @@ function collectSettingsPayload() {
     : ((value) => String(value || '').trim());
   const normalizePlusCheckoutConversionProxySourceInput = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
     ? normalizePlusCheckoutConversionProxySourceValue
-    : ((value) => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+    : ((value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
+    });
   const normalizePlusCheckoutConversionProxy711RegionInput = typeof normalizePlusCheckoutConversionProxy711RegionValue === 'function'
     ? normalizePlusCheckoutConversionProxy711RegionValue
     : ((value) => {
@@ -10687,7 +10703,9 @@ function updatePlusModeUI() {
     }
     row.style.display = enabled ? '' : 'none';
   });
-  updatePlusCheckoutConversionModeUi();
+  if (typeof updatePlusCheckoutConversionModeUi === 'function') {
+    updatePlusCheckoutConversionModeUi();
+  }
   if (enabled) {
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   }
@@ -12080,7 +12098,16 @@ function applySettingsState(state) {
   if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
     const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
       ? normalizePlusCheckoutConversionProxySourceValue
-      : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+      : ((value = '') => {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (normalized === '711proxy_pool') {
+          return '711proxy_pool';
+        }
+        if (normalized === 'direct') {
+          return 'direct';
+        }
+        return 'manual';
+      });
     plusCheckoutConversionProxySourceButtons.forEach((button) => {
       const active = normalizeSourceValue(button.dataset.plusCheckoutConversionProxySource) === normalizeSourceValue(state?.plusCheckoutConversionProxySource || 'manual');
       button.classList.toggle('active', active);
@@ -16829,7 +16856,13 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
     ? getSelectedPlusCheckoutConversionProxySource
     : ((currentState = latestState) => {
       const normalized = String(currentState?.plusCheckoutConversionProxySource || 'manual').trim().toLowerCase();
-      return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
     });
   const resolve711Region = typeof getCurrentPlusCheckoutConversionProxy711Region === 'function'
     ? getCurrentPlusCheckoutConversionProxy711Region
@@ -16839,7 +16872,16 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
     });
   const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
     ? normalizePlusCheckoutConversionProxySourceValue
-    : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+    : ((value = '') => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
+    });
   const session = getPlusCheckoutConversionProxyManualSession(state);
   const source = resolveSource(state);
   const inputProxyUrl = normalizePlusCheckoutConversionProxyUrlValue(
@@ -16854,19 +16896,30 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
   if (source === '711proxy_pool') {
     text = `711 临时池未开启${input711Region ? `（国家代码：${input711Region}）` : '（国家代码跟随 IP 代理配置）'}`;
     title = text;
+  } else if (source === 'direct') {
+    text = '无代理模式未开启（支付转换相关域名直连）';
+    title = text;
   }
   if (session?.active) {
     const displayName = String(session.displayName || '').trim() || '未知代理';
     const currentSource = normalizeSourceValue(session?.source || source);
     const pendingLabel = currentSource === '711proxy_pool'
       ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}`
-      : inputProxyUrl;
+      : (currentSource === 'direct' ? '无代理模式' : inputProxyUrl);
     if (currentSource === 'manual' && inputProxyUrl && inputProxyUrl !== String(session.proxyUrl || '').trim()) {
       text = `当前生效：${displayName}；待切换：${inputProxyUrl}`;
       title = text;
       nextClass = 'state-pending';
     } else if (currentSource === '711proxy_pool' && source === '711proxy_pool' && pendingLabel !== String(session.displayName || '').trim()) {
       text = `当前生效：${displayName}；待切换：${pendingLabel}`;
+      title = text;
+      nextClass = 'state-pending';
+    } else if (currentSource === 'direct' && source !== 'direct') {
+      text = `当前生效：${displayName}；待切换：${source === '711proxy_pool' ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}` : inputProxyUrl || '手动代理'}`;
+      title = text;
+      nextClass = 'state-pending';
+    } else if (currentSource !== 'direct' && source === 'direct') {
+      text = `当前生效：${displayName}；待切换：无代理模式`;
       title = text;
       nextClass = 'state-pending';
     } else {
@@ -16933,11 +16986,26 @@ function updatePlusCheckoutConversionModeUi() {
     ? getSelectedPlusCheckoutConversionProxySource
     : ((state = latestState) => {
       const normalized = String(state?.plusCheckoutConversionProxySource || 'manual').trim().toLowerCase();
-      return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
     });
   const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
     ? normalizePlusCheckoutConversionProxySourceValue
-    : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+    : ((value = '') => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
+    });
   const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
     ? Boolean(inputPlusModeEnabled.checked)
     : Boolean(latestState?.plusModeEnabled);
@@ -16950,6 +17018,7 @@ function updatePlusCheckoutConversionModeUi() {
   const cloudRowsVisible = plusModeEnabled && paypalMode && cloudEnabled;
   const source = resolveSource(latestState);
   const manualMode = source === 'manual';
+  const directMode = source === 'direct';
 
   if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
     plusCheckoutConversionProxySourceButtons.forEach((button) => {
@@ -16967,7 +17036,7 @@ function updatePlusCheckoutConversionModeUi() {
     inputPlusCheckoutConversionProxy.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
   }
   if (typeof plusCheckoutConversionProxy711Shell !== 'undefined' && plusCheckoutConversionProxy711Shell) {
-    plusCheckoutConversionProxy711Shell.style.display = manualMode ? 'none' : '';
+    plusCheckoutConversionProxy711Shell.style.display = (!manualMode && !directMode) ? '' : 'none';
   }
   if (typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region) {
     inputPlusCheckoutConversionProxy711Region.disabled = cloudEnabled;
@@ -16995,9 +17064,13 @@ function updatePlusCheckoutConversionModeUi() {
     setPlusCheckoutConversionProxyTestResult('云端模式', {
       detail: '已启用云端支付转换，本地支付转换代理与代理测试已自动停用。',
     });
-  } else if (!manualMode) {
+  } else if (source === '711proxy_pool') {
     setPlusCheckoutConversionProxyTestResult('711 临时池', {
       detail: '将从已保存的 711Proxy API 配置临时拉取代理池，并在本次支付转换完成后恢复原网络环境。',
+    });
+  } else if (source === 'direct') {
+    setPlusCheckoutConversionProxyTestResult('无代理模式', {
+      detail: '本次检测会临时绕过当前 IP 代理，仅让支付转换相关域名直连，并在完成后恢复原网络环境。',
     });
   }
 }
@@ -17061,7 +17134,9 @@ async function handlePlusCheckoutConversionProxyTest() {
     showToast(
       source === '711proxy_pool'
         ? `711 临时池测试通过：${exitSummary}`
-        : `支付转换代理测试通过：${exitSummary}`,
+        : (source === 'direct'
+          ? `无代理模式测试通过：${exitSummary}`
+          : `支付转换代理测试通过：${exitSummary}`),
       'success',
       2500
     );
@@ -17114,7 +17189,7 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
     if (response?.alreadyActive) {
       showToast(
-        `当前代理已生效：${response?.displayName || (source === '711proxy_pool' ? '711 临时池' : proxyUrl)}`,
+        `当前代理已生效：${response?.displayName || (source === '711proxy_pool' ? '711 临时池' : (source === 'direct' ? '无代理模式' : proxyUrl))}`,
         'info',
         2200
       );
@@ -17123,7 +17198,9 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
     showToast(
       source === '711proxy_pool'
         ? `已切换到 711 临时池代理：${response?.displayName || '已选节点'}`
-        : `已切换支付转换代理：${response?.displayName || proxyUrl}`,
+        : (source === 'direct'
+          ? `已切换到无代理模式：${response?.displayName || '支付转换相关域名直连'}`
+          : `已切换支付转换代理：${response?.displayName || proxyUrl}`),
       'success',
       2200
     );

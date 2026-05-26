@@ -359,7 +359,13 @@
                 input?.plusCheckoutConversionProxySource
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxySource
                 ?? defaults.flows.openai.plus.plusCheckoutConversionProxySource
-              ).trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual',
+              ).trim().toLowerCase() === '711proxy_pool'
+                ? '711proxy_pool'
+                : (String(
+                  input?.plusCheckoutConversionProxySource
+                  ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxySource
+                  ?? defaults.flows.openai.plus.plusCheckoutConversionProxySource
+                ).trim().toLowerCase() === 'direct' ? 'direct' : 'manual'),
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl

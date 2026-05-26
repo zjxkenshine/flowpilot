@@ -1698,6 +1698,39 @@ test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates proxy test when auto-run is 
   assert.equal(calls[0].state.plusCheckoutConversionProxyUrl, 'http://saved.proxy:8080');
 });
 
+test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates direct mode without requiring proxyUrl', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const calls = [];
+
+  const router = api.createMessageRouter({
+    buildPersistentSettingsPayload: (value) => value,
+    getState: async () => ({
+      autoRunning: false,
+      plusCheckoutConversionProxyUrl: 'http://saved.proxy:8080',
+      plusCheckoutConversionProxySource: 'direct',
+      plusCheckoutConversionProxy711Region: 'US',
+    }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+    testPlusCheckoutConversionProxy: async (options) => {
+      calls.push(options);
+      return { ok: true, exitIp: '198.51.100.10', exitRegion: 'CN' };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
+    source: 'sidepanel',
+    payload: { source: 'direct', proxyUrl: '' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].source, 'direct');
+  assert.equal(calls[0].proxyUrl, '');
+});
+
 test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY is rejected while auto-run is locked', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };
@@ -1783,6 +1816,69 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
     plusCheckoutConversionProxySource: 'manual',
     plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
     plusCheckoutConversionProxy711Region: '',
+  });
+});
+
+test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts direct mode and preserves saved proxy draft', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const broadcasts = [];
+  const calls = [];
+
+  const router = api.createMessageRouter({
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    buildPersistentSettingsPayload: (value) => value,
+    checkoutConversionProxyManager: {
+      switchManualSession: async (options) => {
+        calls.push(options);
+        return {
+          switched: true,
+          alreadyActive: false,
+          displayName: '无代理模式',
+          session: {
+            active: true,
+            mode: 'manual',
+            source: 'direct',
+            proxyUrl: '',
+            displayName: '无代理模式',
+            entry: null,
+            baseSnapshot: { applied: true },
+          },
+        };
+      },
+    },
+    getState: async () => ({
+      autoRunning: false,
+      plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+      plusCheckoutConversionProxySource: 'manual',
+      plusCheckoutConversionProxy711Region: 'US',
+    }),
+    isAutoRunLockedState: (state) => Boolean(state.autoRunning),
+  });
+
+  const response = await router.handleMessage({
+    type: 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
+    source: 'sidepanel',
+    payload: { source: 'direct', proxyUrl: '' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].source, 'direct');
+  assert.deepStrictEqual(broadcasts[0], {
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      source: 'direct',
+      proxyUrl: '',
+      displayName: '无代理模式',
+      entry: null,
+      baseSnapshot: { applied: true },
+    },
+    plusCheckoutConversionProxySource: 'direct',
+    plusCheckoutConversionProxyUrl: '',
+    plusCheckoutConversionProxy711Region: 'US',
   });
 });
 

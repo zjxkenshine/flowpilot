@@ -891,6 +891,153 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
   });
 });
 
+test('checkout conversion proxy direct mode test applies pac override and restores previous auth state', async () => {
+  const proxySettingsCalls = [];
+  let authEntry = {
+    host: 'old.proxy.example',
+    port: 7890,
+    username: 'old-user',
+    password: 'old-pass',
+  };
+  let currentProxyValue = {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(url, host){ return "PROXY baseline.proxy:7890"; }' },
+  };
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            proxySettingsCalls.push(details);
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '198.51.100.20',
+      region: 'CN',
+      source: 'page_context',
+      endpoint: 'https://ipinfo.io/json',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'target_page_context',
+    }),
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+  });
+
+  const result = await manager.testCheckoutConversionProxy({
+    source: 'direct',
+    proxyUrl: '',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.proxyDisplayName, '无代理模式');
+  assert.equal(proxySettingsCalls[0].value.mode, 'pac_script');
+  assert.match(proxySettingsCalls[0].value.pacScript.data, /MULTIPAGE_CHECKOUT_CONVERSION_DIRECT_V1/);
+  assert.equal(currentProxyValue.mode, 'pac_script');
+  assert.match(currentProxyValue.pacScript.data, /PROXY baseline\.proxy:7890/);
+  assert.deepStrictEqual(authEntry, {
+    host: 'old.proxy.example',
+    port: 7890,
+    username: 'old-user',
+    password: 'old-pass',
+  });
+});
+
+test('checkout conversion proxy direct manual switch restores original settings on cancel', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: 'direct',
+    plusCheckoutConversionProxyManualSession: null,
+  };
+  let authEntry = {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  };
+  let currentProxyValue = {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'http',
+        host: 'baseline.proxy',
+        port: 7890,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  };
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+  });
+
+  const switched = await manager.switchManualSession({ state, source: 'direct', proxyUrl: '' });
+  assert.equal(switched.switched, true);
+  assert.equal(switched.session.source, 'direct');
+  assert.equal(switched.session.displayName, '无代理模式');
+  assert.equal(currentProxyValue.mode, 'pac_script');
+
+  const cancelResult = await manager.cancelManualSession(state);
+  assert.equal(cancelResult.cancelled, true);
+  assert.equal(state.plusCheckoutConversionProxyManualSession, null);
+  assert.deepStrictEqual(currentProxyValue, {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'http',
+        host: 'baseline.proxy',
+        port: 7890,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  });
+});
+
 test('PayPal no-card binding create opens and submits hosted OpenAI checkout before completing', async () => {
   const events = [];
   let currentUrl = 'https://chatgpt.com/';

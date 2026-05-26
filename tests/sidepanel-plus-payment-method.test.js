@@ -443,6 +443,61 @@ return {
   assert.equal(api.hasClass('state-pending'), true);
 });
 
+test('sidepanel renders direct checkout conversion proxy runtime status', () => {
+  const bundle = [
+    extractFunction('normalizePlusCheckoutConversionProxyUrlValue'),
+    extractFunction('normalizePlusCheckoutConversionProxySourceValue'),
+    extractFunction('getPlusCheckoutConversionProxyManualSession'),
+    extractFunction('renderPlusCheckoutConversionProxyRuntimeStatus'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {
+  plusCheckoutConversionProxyManualSession: null,
+  plusCheckoutConversionProxyUrl: '',
+  plusCheckoutConversionProxySource: 'direct',
+};
+const inputPlusCheckoutConversionProxy = { value: '' };
+const plusCheckoutConversionProxySourceButtons = [];
+function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
+  return normalizePlusCheckoutConversionProxySourceValue(state?.plusCheckoutConversionProxySource || 'manual');
+}
+function getCurrentPlusCheckoutConversionProxy711Region() { return ''; }
+const displayPlusCheckoutConversionProxyRuntimeStatus = {
+  textContent: '',
+  title: '',
+  classList: {
+    active: new Set(),
+    remove(...names) { names.forEach((name) => this.active.delete(name)); },
+    add(name) { this.active.add(name); },
+    has(name) { return this.active.has(name); },
+  },
+};
+${bundle}
+return {
+  renderPlusCheckoutConversionProxyRuntimeStatus,
+  setState(nextState) { latestState = { ...latestState, ...nextState }; },
+  getText() { return displayPlusCheckoutConversionProxyRuntimeStatus.textContent; },
+  hasClass(name) { return displayPlusCheckoutConversionProxyRuntimeStatus.classList.has(name); },
+};
+`)();
+
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), '无代理模式未开启（支付转换相关域名直连）');
+
+  api.setState({
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      source: 'direct',
+      proxyUrl: '',
+      displayName: '无代理模式',
+    },
+  });
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), '当前生效：无代理模式');
+  assert.equal(api.hasClass('state-active'), true);
+});
+
 test('sidepanel normalizes Plus checkout wait settings to bounded integer seconds', () => {
   const bundle = [
     extractFunction('normalizePlusCheckoutCreatePreWaitSeconds'),

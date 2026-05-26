@@ -39,6 +39,7 @@
     'ipinfo.io',
     '*.ipinfo.io',
   ];
+  const CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL = 'MULTIPAGE_CHECKOUT_CONVERSION_DIRECT_V1';
   const CHECKOUT_CONVERSION_PROXY_SESSION_KEY = 'plusCheckoutConversionProxySession';
   const CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY = 'plusCheckoutConversionProxyManualSession';
 
@@ -71,7 +72,14 @@
     }
 
     function normalizeCheckoutConversionProxySource(value = '') {
-      return String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual';
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === '711proxy_pool') {
+        return '711proxy_pool';
+      }
+      if (normalized === 'direct') {
+        return 'direct';
+      }
+      return 'manual';
     }
 
     function normalizeCheckoutConversionProxy711Region(value = '') {
@@ -160,6 +168,136 @@
       return `${protocol}://${auth}${host}:${port}`;
     }
 
+    function escapePacStringLiteral(value = '') {
+      return String(value || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
+    }
+
+    function buildCheckoutConversionProxyPatternArrayLiteral(patterns = []) {
+      return (Array.isArray(patterns) ? patterns : [])
+        .map((pattern) => `"${escapePacStringLiteral(String(pattern || '').trim())}"`)
+        .join(', ');
+    }
+
+    function buildPacMatchFunctionSource(functionName = 'matchesPatternList') {
+      return `
+function ${functionName}(host, patterns) {
+  if (!host || !patterns || !patterns.length) return false;
+  for (var i = 0; i < patterns.length; i++) {
+    var pattern = patterns[i];
+    if (!pattern) continue;
+    if (pattern.indexOf('*.') === 0) {
+      var suffix = pattern.substring(1);
+      var directHost = pattern.substring(2);
+      if (dnsDomainIs(host, suffix) || host === directHost) {
+        return true;
+      }
+      continue;
+    }
+    if (host === pattern || dnsDomainIs(host, '.' + pattern)) {
+      return true;
+    }
+  }
+  return false;
+}`.trim();
+    }
+
+    function buildCheckoutConversionPacProxyEndpoint(entry = null) {
+      if (!entry?.host || !entry?.port) {
+        return '';
+      }
+      const protocol = normalizeCheckoutConversionProxyProtocol(entry.protocol);
+      if (!protocol) {
+        return '';
+      }
+      return `${protocol.toUpperCase()} ${String(entry.host || '').trim()}:${Number(entry.port) || 0}`;
+    }
+
+    function buildCheckoutConversionDirectPacScript(previousProxySettings = {}, options = {}) {
+      const previousValue = previousProxySettings?.value || {};
+      const previousMode = String(previousValue?.mode || '').trim().toLowerCase();
+      const directTargetHostPatterns = Array.isArray(options?.targetHostPatterns) && options.targetHostPatterns.length
+        ? options.targetHostPatterns
+        : CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS;
+      const directTargetHostPatternsLiteral = buildCheckoutConversionProxyPatternArrayLiteral(directTargetHostPatterns);
+      const bypassListLiteral = buildCheckoutConversionProxyPatternArrayLiteral(CHECKOUT_CONVERSION_PROXY_BYPASS_LIST);
+      const sentinel = escapePacStringLiteral(CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL);
+      if (!previousMode || previousMode === 'direct') {
+        return `
+var ${CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL} = true;
+${buildPacMatchFunctionSource()}
+function FindProxyForURL(url, host) {
+  if (!host) return "DIRECT";
+  var directTargets = [${directTargetHostPatternsLiteral}];
+  if (matchesPatternList(host, directTargets)) {
+    return "DIRECT";
+  }
+  return "DIRECT";
+}`.trim();
+      }
+      if (previousMode === 'pac_script') {
+        const previousPacData = String(previousValue?.pacScript?.data || '').trim();
+        if (!previousPacData) {
+          throw new Error('当前 PAC 代理缺少内联脚本数据，无法为支付转换无代理模式叠加直连规则。');
+        }
+        return `
+var ${CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL} = true;
+${previousPacData}
+var __mpOriginalCheckoutFindProxyForURL = typeof FindProxyForURL === "function" ? FindProxyForURL : null;
+${buildPacMatchFunctionSource()}
+function FindProxyForURL(url, host) {
+  if (!host) return "DIRECT";
+  var directTargets = [${directTargetHostPatternsLiteral}];
+  if (matchesPatternList(host, directTargets)) {
+    return "DIRECT";
+  }
+  if (typeof __mpOriginalCheckoutFindProxyForURL === "function") {
+    return __mpOriginalCheckoutFindProxyForURL(url, host);
+  }
+  return "DIRECT";
+}`.trim();
+      }
+      if (previousMode === 'fixed_servers') {
+        const singleProxy = previousValue?.rules?.singleProxy || null;
+        const proxyEndpoint = buildCheckoutConversionPacProxyEndpoint({
+          protocol: singleProxy?.scheme,
+          host: singleProxy?.host,
+          port: singleProxy?.port,
+        });
+        if (!proxyEndpoint) {
+          throw new Error('当前 fixed_servers 代理缺少 singleProxy，无法为支付转换无代理模式生成委托路由。');
+        }
+        return `
+var ${CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL} = true;
+${buildPacMatchFunctionSource()}
+function FindProxyForURL(url, host) {
+  if (!host) return "DIRECT";
+  var bypassList = [${bypassListLiteral}];
+  if (matchesPatternList(host, bypassList)) {
+    return "DIRECT";
+  }
+  var directTargets = [${directTargetHostPatternsLiteral}];
+  if (matchesPatternList(host, directTargets)) {
+    return "DIRECT";
+  }
+  return "${escapePacStringLiteral(proxyEndpoint)}";
+}`.trim();
+      }
+      if (previousMode === 'system') {
+        throw new Error('当前浏览器代理模式为 system，支付转换无代理模式不支持在系统代理之上叠加直连规则。');
+      }
+      if (previousMode === 'auto_detect') {
+        throw new Error('当前浏览器代理模式为 auto_detect，支付转换无代理模式不支持在自动探测代理之上叠加直连规则。');
+      }
+      if (previousMode === 'fixed_servers') {
+        throw new Error('当前 fixed_servers 代理配置不完整，支付转换无代理模式无法继续。');
+      }
+      throw new Error(`当前浏览器代理模式 ${previousMode || 'unknown'} 暂不支持支付转换无代理模式。`);
+    }
+
     function buildCheckoutConversionFixedProxyConfig(entry = null) {
       if (!entry?.host || !entry?.port) {
         return null;
@@ -207,6 +345,31 @@
         };
       }
 
+      return { ok: true };
+    }
+
+    function validateCheckoutDirectControlAfterApply(details = {}) {
+      const level = String(details?.levelOfControl || '').trim();
+      if (level && level !== 'controlled_by_this_extension') {
+        return {
+          ok: false,
+          message: `代理控制权不在当前扩展（levelOfControl=${level || 'unknown'}）。`,
+        };
+      }
+      const mode = String(details?.value?.mode || '').trim().toLowerCase();
+      if (mode !== 'pac_script') {
+        return {
+          ok: false,
+          message: `无代理模式未写入 pac_script（当前为 ${mode || 'unknown'}）。`,
+        };
+      }
+      const pacData = String(details?.value?.pacScript?.data || '').trim();
+      if (!pacData || !pacData.includes(CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL)) {
+        return {
+          ok: false,
+          message: '无代理模式 PAC 校验失败，未检测到预期的直连覆盖标记。',
+        };
+      }
       return { ok: true };
     }
 
@@ -266,6 +429,15 @@
       });
     }
 
+    async function restoreCheckoutProxySettingsFromSnapshot(previousProxySettings = {}) {
+      const restoreValue = previousProxySettings?.value;
+      if (restoreValue && restoreValue.mode) {
+        await setCheckoutProxySettings(restoreValue);
+        return;
+      }
+      await clearCheckoutProxySettings();
+    }
+
     async function defaultApplyCheckoutScopedProxyFromUrl(proxyUrl) {
       const entry = parseCheckoutConversionProxyUrl(proxyUrl);
       if (!entry) {
@@ -309,12 +481,7 @@
           setCurrentIpProxyAuthEntry(previousAuthEntry ? { ...previousAuthEntry } : null);
         }
         try {
-          const restoreValue = previousProxySettings?.value;
-          if (restoreValue && restoreValue.mode) {
-            await setCheckoutProxySettings(restoreValue);
-          } else {
-            await clearCheckoutProxySettings();
-          }
+          await restoreCheckoutProxySettingsFromSnapshot(previousProxySettings);
         } catch {
           // Surface the original apply error.
         }
@@ -330,6 +497,54 @@
       };
     }
 
+    async function defaultApplyCheckoutScopedDirectMode(options = {}) {
+      const previousProxySettings = await getCheckoutProxySettings({ incognito: false }).catch(() => ({}));
+      const previousAuthEntry = typeof getCurrentIpProxyAuthEntry === 'function'
+        ? (getCurrentIpProxyAuthEntry() || null)
+        : null;
+      const pacScript = buildCheckoutConversionDirectPacScript(previousProxySettings, options);
+      try {
+        if (typeof installIpProxyAuthListener === 'function') {
+          installIpProxyAuthListener();
+        }
+        if (typeof installIpProxyErrorListener === 'function') {
+          installIpProxyErrorListener();
+        }
+        if (typeof setCurrentIpProxyAuthEntry === 'function') {
+          setCurrentIpProxyAuthEntry(previousAuthEntry ? { ...previousAuthEntry } : null);
+        }
+        await setCheckoutProxySettings({
+          mode: 'pac_script',
+          pacScript: {
+            data: pacScript,
+            mandatory: true,
+          },
+        });
+        const appliedSettings = await getCheckoutProxySettings({ incognito: false }).catch(() => null);
+        const takeoverCheck = validateCheckoutDirectControlAfterApply(appliedSettings || {});
+        if (!takeoverCheck?.ok) {
+          throw new Error(takeoverCheck.message || '支付转换无代理模式接管校验失败。');
+        }
+      } catch (error) {
+        if (typeof setCurrentIpProxyAuthEntry === 'function') {
+          setCurrentIpProxyAuthEntry(previousAuthEntry ? { ...previousAuthEntry } : null);
+        }
+        try {
+          await restoreCheckoutProxySettingsFromSnapshot(previousProxySettings);
+        } catch {
+          // Surface the original apply error.
+        }
+        throw error;
+      }
+      return {
+        applied: true,
+        entry: null,
+        displayName: '无代理模式',
+        previousProxySettings,
+        previousAuthEntry,
+      };
+    }
+
     async function defaultRestoreCheckoutScopedProxySnapshot(snapshot = null) {
       if (!snapshot?.applied) {
         return;
@@ -337,12 +552,7 @@
       if (typeof setCurrentIpProxyAuthEntry === 'function') {
         setCurrentIpProxyAuthEntry(snapshot.previousAuthEntry ? { ...snapshot.previousAuthEntry } : null);
       }
-      const restoreValue = snapshot?.previousProxySettings?.value;
-      if (restoreValue && restoreValue.mode) {
-        await setCheckoutProxySettings(restoreValue);
-        return;
-      }
-      await clearCheckoutProxySettings();
+      await restoreCheckoutProxySettingsFromSnapshot(snapshot?.previousProxySettings || {});
     }
 
     function summarizeCheckoutConversionProxyDiagnostics(items = [], maxItems = 3) {
@@ -512,22 +722,28 @@
       const displayName = String(normalizedSession.displayName || '').trim();
       const entry = sanitizeCheckoutConversionProxyEntry(normalizedSession.entry);
       const baseSnapshot = sanitizeSnapshot(normalizedSession.baseSnapshot);
+      const source = normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual');
       const appliedAt = Math.max(0, Number(normalizedSession.appliedAt) || Date.now());
       const lastSwitchedAt = Math.max(0, Number(normalizedSession.lastSwitchedAt) || appliedAt);
-      if (!proxyUrl || !displayName || !entry?.host || !entry?.port || !baseSnapshot?.applied) {
+      const isDirectSource = source === 'direct';
+      if (
+        !displayName
+        || !baseSnapshot?.applied
+        || (!isDirectSource && (!proxyUrl || !entry?.host || !entry?.port))
+      ) {
         return null;
       }
       return {
         active: true,
         mode: 'manual',
-        source: normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual'),
+        source,
         provider: String(normalizedSession.provider || '').trim(),
-        proxyUrl,
+        proxyUrl: isDirectSource ? '' : proxyUrl,
         displayName,
         requestedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.requestedRegion || ''),
         resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
         selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
-        entry,
+        entry: isDirectSource ? null : entry,
         baseSnapshot,
         appliedAt,
         lastSwitchedAt,
@@ -753,6 +969,7 @@
         && (
           (source === 'manual' && existingSession.proxyUrl === proxyUrl)
           || (source === '711proxy_pool' && existingSession.requestedRegion === proxy711Region)
+          || source === 'direct'
         )
       ) {
         return {
@@ -762,26 +979,50 @@
           displayName: existingSession.displayName,
         };
       }
-      const resolved = source === '711proxy_pool'
-        ? await resolve711TemporaryPoolSnapshot(sourceState, {
-          ...options,
-          proxy711Region,
-          applyOptions: options?.applyOptions || {},
-        })
-        : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
-      const snapshot = source === '711proxy_pool' ? resolved?.snapshot : resolved;
+      let restoreSnapshot = null;
+      let resolved = null;
+      let snapshot = null;
+      try {
+        if (source === 'direct' && existingSession?.baseSnapshot?.applied) {
+          await defaultRestoreCheckoutScopedProxySnapshot(existingSession.baseSnapshot);
+          restoreSnapshot = existingSession.baseSnapshot;
+        }
+        resolved = source === '711proxy_pool'
+          ? await resolve711TemporaryPoolSnapshot(sourceState, {
+            ...options,
+            proxy711Region,
+            applyOptions: options?.applyOptions || {},
+          })
+          : (source === 'direct'
+            ? await defaultApplyCheckoutScopedDirectMode(options?.applyOptions || {})
+            : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {}));
+        snapshot = source === '711proxy_pool' ? resolved?.snapshot : resolved;
+      } catch (error) {
+        if (source === 'direct' && restoreSnapshot?.applied) {
+          try {
+            await defaultApplyCheckoutScopedProxyFromUrl(existingSession?.proxyUrl || '', options?.applyOptions || {});
+          } catch {
+            // Best-effort restore only.
+          }
+        }
+        throw error;
+      }
       const displayName = source === '711proxy_pool'
         ? String(resolved?.displayName || resolved?.selectedEntryDisplayName || '711 临时池').trim()
-        : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim();
+        : (source === 'direct'
+          ? '无代理模式'
+          : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim());
       const payload = await persistManualSession({
         source,
         provider: source === '711proxy_pool' ? '711proxy' : '',
-        proxyUrl: source === '711proxy_pool' ? (resolved?.proxyUrl || buildCheckoutConversionProxyUrlFromEntry(snapshot?.entry) || proxyUrl) : proxyUrl,
+        proxyUrl: source === '711proxy_pool'
+          ? (resolved?.proxyUrl || buildCheckoutConversionProxyUrlFromEntry(snapshot?.entry) || proxyUrl)
+          : (source === 'direct' ? '' : proxyUrl),
         displayName,
         requestedRegion: source === '711proxy_pool' ? resolved?.requestedRegion || proxy711Region : '',
         resolvedRegion: source === '711proxy_pool' ? resolved?.resolvedRegion || '' : '',
         selectedEntryDisplayName: source === '711proxy_pool' ? resolved?.selectedEntryDisplayName || displayName : '',
-        entry: snapshot?.entry,
+        entry: source === 'direct' ? null : snapshot?.entry,
         baseSnapshot: existingSession?.baseSnapshot || snapshot,
         appliedAt: existingSession?.appliedAt || Date.now(),
         lastSwitchedAt: Date.now(),
@@ -853,11 +1094,15 @@
           proxy711Region,
           applyOptions,
         })
-        : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, applyOptions);
+        : (source === 'direct'
+          ? await defaultApplyCheckoutScopedDirectMode(applyOptions)
+          : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, applyOptions));
       const snapshot = source === '711proxy_pool' ? resolved?.snapshot : resolved;
       const displayName = source === '711proxy_pool'
         ? String(resolved?.displayName || resolved?.selectedEntryDisplayName || '711 临时池').trim()
-        : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim();
+        : (source === 'direct'
+          ? '无代理模式'
+          : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim());
       const payload = await persistSession({
         flowType: sessionOptions.flowType,
         releaseNodeKey: sessionOptions.releaseNodeKey,
@@ -908,16 +1153,22 @@
             },
           })
           : await (async () => {
-            snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, {
-              targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
-            });
+            snapshot = source === 'direct'
+              ? await defaultApplyCheckoutScopedDirectMode({
+                targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+              })
+              : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, {
+                targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+              });
             const checked = await validateCheckoutProxyCandidateWithSnapshot(snapshot, {
               probeDiagnostics,
               targetDiagnostics,
             });
             return {
               ...checked,
-              proxyDisplayName: describeCheckoutConversionProxyEntry(parseCheckoutConversionProxyUrl(proxyUrl)),
+              proxyDisplayName: source === 'direct'
+                ? '无代理模式'
+                : describeCheckoutConversionProxyEntry(parseCheckoutConversionProxyUrl(proxyUrl)),
             };
           })();
         snapshot = result?.snapshot || snapshot;
@@ -945,6 +1196,7 @@
       CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS,
       CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
       defaultApplyCheckoutScopedProxyFromUrl,
+      defaultApplyCheckoutScopedDirectMode,
       defaultRestoreCheckoutScopedProxySnapshot,
       normalizeCheckoutConversionProxyUrl,
       parseCheckoutConversionProxyUrl,
