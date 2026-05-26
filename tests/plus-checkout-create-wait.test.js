@@ -783,6 +783,114 @@ test('checkout conversion proxy manual switch is noop for same proxy and blocks 
   );
 });
 
+test('checkout conversion proxy 711 temporary pool manual switch pulls fresh pool and preserves restore snapshot', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    plusCheckoutConversionProxyManualSession: null,
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=JP&proto=http&stype=text',
+      },
+    },
+  };
+  let authEntry = {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  };
+  let currentProxyValue = {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  };
+  const poolCalls = [];
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async (poolState) => {
+      poolCalls.push(poolState);
+      return [{
+        protocol: 'http',
+        host: 'proxy-711.example',
+        port: 8001,
+        username: 'user-711',
+        password: 'pass-711',
+      }];
+    },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '203.0.113.88',
+      region: 'US',
+      source: 'page_context',
+      endpoint: 'https://chatgpt.com/cdn-cgi/trace',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'page_context',
+    }),
+  });
+
+  const switched = await manager.switchManualSession({ state, source: '711proxy_pool', proxy711Region: 'US' });
+  assert.equal(switched.switched, true);
+  assert.equal(switched.session.source, '711proxy_pool');
+  assert.equal(switched.session.provider, '711proxy');
+  assert.equal(switched.session.requestedRegion, 'US');
+  assert.equal(switched.session.resolvedRegion, 'US');
+  assert.equal(switched.session.proxyUrl, 'http://user-711:pass-711@proxy-711.example:8001');
+  assert.equal(poolCalls.length, 1);
+  assert.equal(poolCalls[0].ipProxyService, '711proxy');
+  assert.match(poolCalls[0].ipProxyApiUrl, /region=US/);
+
+  const cancelResult = await manager.cancelManualSession(state);
+  assert.equal(cancelResult.cancelled, true);
+  assert.equal(state.plusCheckoutConversionProxyManualSession, null);
+  assert.deepStrictEqual(currentProxyValue, {
+    mode: 'pac_script',
+    pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
+  });
+  assert.deepStrictEqual(authEntry, {
+    host: 'baseline.proxy',
+    port: 7890,
+    username: 'baseline-user',
+    password: 'baseline-pass',
+  });
+});
+
 test('PayPal no-card binding create opens and submits hosted OpenAI checkout before completing', async () => {
   const events = [];
   let currentUrl = 'https://chatgpt.com/';

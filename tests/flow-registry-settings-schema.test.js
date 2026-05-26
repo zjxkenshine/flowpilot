@@ -158,12 +158,18 @@ test('settings schema preserves Plus checkout conversion proxy in canonical stat
   const { settingsSchema } = loadApis();
   const schema = settingsSchema.createSettingsSchema();
   const normalized = schema.normalizeSettingsState({
+    plusCheckoutConversionProxySource: '711proxy_pool',
     plusCheckoutConversionProxyUrl: ' socks5h://user:pass@proxy.example:1080 ',
+    plusCheckoutConversionProxy711Region: ' us ',
   });
   const view = schema.buildSettingsView(normalized);
 
+  assert.equal(normalized.flows.openai.plus.plusCheckoutConversionProxySource, '711proxy_pool');
   assert.equal(normalized.flows.openai.plus.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(normalized.flows.openai.plus.plusCheckoutConversionProxy711Region, 'US');
+  assert.equal(view.plusCheckoutConversionProxySource, '711proxy_pool');
   assert.equal(view.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(view.plusCheckoutConversionProxy711Region, 'US');
 });
 
 test('settings schema preserves Plus checkout wait settings in canonical state and read view', () => {

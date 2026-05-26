@@ -57,10 +57,29 @@
       installIpProxyErrorListener = null,
       getCurrentIpProxyAuthEntry = null,
       setCurrentIpProxyAuthEntry = null,
+      normalizeIpProxyServiceProfiles = null,
+      buildIpProxyServiceProfileFromState = null,
+      normalizeIpProxyServiceProfile = null,
+      pullIpProxyPoolFromApi = null,
+      validate711ProxyApiConfig = null,
+      build711ProxyApiUrl = null,
+      normalizeIpProxyCountryCode = null,
     } = deps;
 
     function normalizeCheckoutConversionProxyUrl(value = '') {
       return String(value || '').trim();
+    }
+
+    function normalizeCheckoutConversionProxySource(value = '') {
+      return String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual';
+    }
+
+    function normalizeCheckoutConversionProxy711Region(value = '') {
+      if (typeof normalizeIpProxyCountryCode === 'function') {
+        return normalizeIpProxyCountryCode(value);
+      }
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
     }
 
     function normalizeCheckoutConversionProxyProtocol(value = '') {
@@ -121,6 +140,24 @@
         return '';
       }
       return `${String(entry.protocol || '').toLowerCase()}://${String(entry.host || '').trim()}:${Number(entry.port) || 0}`;
+    }
+
+    function buildCheckoutConversionProxyUrlFromEntry(entry = null) {
+      if (!entry || typeof entry !== 'object') {
+        return '';
+      }
+      const protocol = normalizeCheckoutConversionProxyProtocol(entry.protocol);
+      const host = String(entry.host || '').trim();
+      const port = normalizeCheckoutConversionProxyPort(entry.port);
+      if (!protocol || !host || !port) {
+        return '';
+      }
+      const username = String(entry.username || '');
+      const password = String(entry.password || '');
+      const auth = username || password
+        ? `${encodeURIComponent(username)}${password ? `:${encodeURIComponent(password)}` : ''}@`
+        : '';
+      return `${protocol}://${auth}${host}:${port}`;
     }
 
     function buildCheckoutConversionFixedProxyConfig(entry = null) {
@@ -362,6 +399,83 @@
       };
     }
 
+    function getCheckoutConversionProxySourceFromState(state = {}, options = {}) {
+      return normalizeCheckoutConversionProxySource(
+        options?.source
+        ?? state?.plusCheckoutConversionProxySource
+        ?? 'manual'
+      );
+    }
+
+    function getCheckoutConversionProxy711RegionFromState(state = {}, options = {}) {
+      return normalizeCheckoutConversionProxy711Region(
+        options?.proxy711Region
+        ?? state?.plusCheckoutConversionProxy711Region
+        ?? ''
+      );
+    }
+
+    function resolve711ProfileFromState(state = {}) {
+      const profiles = typeof normalizeIpProxyServiceProfiles === 'function'
+        ? normalizeIpProxyServiceProfiles(state?.ipProxyServiceProfiles || {}, state || {})
+        : null;
+      const profile = profiles?.['711proxy']
+        || (typeof buildIpProxyServiceProfileFromState === 'function'
+          ? buildIpProxyServiceProfileFromState({
+            ...(state || {}),
+            ipProxyService: '711proxy',
+          })
+          : null)
+        || {};
+      return typeof normalizeIpProxyServiceProfile === 'function'
+        ? normalizeIpProxyServiceProfile(profile)
+        : profile;
+    }
+
+    function build711TemporaryPoolState(state = {}, options = {}) {
+      const profile = resolve711ProfileFromState(state);
+      if (String(profile?.mode || '').trim().toLowerCase() !== 'api') {
+        throw new Error('711 临时池仅支持读取已保存的 711Proxy API 模式配置，请先在 IP 代理中切换到 711 API 模式。');
+      }
+      const apiUrl = String(profile?.apiUrl || '').trim();
+      if (!apiUrl) {
+        throw new Error('711 临时池缺少可用的 API 地址，请先在 IP 代理中保存 711 API 配置。');
+      }
+      const requestedRegion = getCheckoutConversionProxy711RegionFromState(state, options);
+      const validation = typeof validate711ProxyApiConfig === 'function'
+        ? validate711ProxyApiConfig({
+          apiUrl: typeof build711ProxyApiUrl === 'function'
+            ? build711ProxyApiUrl(apiUrl, {
+              ...profile,
+              region: requestedRegion || profile?.apiRegion || profile?.region || '',
+            })
+            : apiUrl,
+        })
+        : { valid: true, config: null };
+      if (!validation?.valid) {
+        throw new Error(String(validation?.errors?.[0] || '711Proxy API 参数无效。'));
+      }
+      const resolvedConfig = validation?.config || null;
+      const resolvedRegion = String(
+        requestedRegion
+        || resolvedConfig?.region
+        || profile?.apiRegion
+        || profile?.region
+        || ''
+      ).trim();
+      return {
+        profile,
+        requestedRegion,
+        resolvedRegion,
+        apiUrl: typeof build711ProxyApiUrl === 'function'
+          ? build711ProxyApiUrl(apiUrl, {
+            ...profile,
+            region: requestedRegion || profile?.apiRegion || profile?.region || '',
+          })
+          : apiUrl,
+      };
+    }
+
     function buildSessionPayload(session = {}) {
       const normalizedSession = session && typeof session === 'object' && !Array.isArray(session)
         ? session
@@ -380,6 +494,11 @@
         releaseNodeKey,
         appliedStepKey,
         displayName,
+        source: normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual'),
+        provider: String(normalizedSession.provider || '').trim(),
+        requestedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.requestedRegion || ''),
+        resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
+        selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
         snapshot,
         appliedAt: Math.max(0, Number(normalizedSession.appliedAt) || Date.now()),
       };
@@ -401,8 +520,13 @@
       return {
         active: true,
         mode: 'manual',
+        source: normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual'),
+        provider: String(normalizedSession.provider || '').trim(),
         proxyUrl,
         displayName,
+        requestedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.requestedRegion || ''),
+        resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
+        selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
         entry,
         baseSnapshot,
         appliedAt,
@@ -415,6 +539,144 @@
         return state;
       }
       return typeof getState === 'function' ? await getState() : {};
+    }
+
+    async function validateCheckoutProxyCandidateWithSnapshot(snapshot = null, diagnostics = {}) {
+      const probeDiagnostics = Array.isArray(diagnostics?.probeDiagnostics) ? diagnostics.probeDiagnostics : [];
+      const targetDiagnostics = Array.isArray(diagnostics?.targetDiagnostics) ? diagnostics.targetDiagnostics : [];
+      let exit = null;
+      if (typeof detectProxyExitInfoByPageContext === 'function') {
+        exit = await detectProxyExitInfoByPageContext({
+          timeoutMs: 12000,
+          errors: probeDiagnostics,
+          probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+        }).catch((error) => {
+          probeDiagnostics.push(`probe:page_context:${error?.message || error}`);
+          return { ip: '', region: '', source: 'page_context_unavailable', endpoint: '' };
+        });
+      }
+      if (!exit?.ip && typeof detectProxyExitInfoByBackgroundFetch === 'function') {
+        exit = await detectProxyExitInfoByBackgroundFetch({
+          timeoutMs: 12000,
+          errors: probeDiagnostics,
+          probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+        }).catch((error) => {
+          probeDiagnostics.push(`probe:background:${error?.message || error}`);
+          return exit || { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
+        });
+      }
+      const exitIp = String(exit?.ip || '').trim();
+      const exitRegion = String(exit?.region || '').trim();
+      if (!exitIp) {
+        const diagnosticsSummary = summarizeCheckoutConversionProxyDiagnostics(probeDiagnostics, 4);
+        throw new Error(diagnosticsSummary
+          ? `未检测到代理出口 IP。诊断：${diagnosticsSummary}`
+          : '未检测到代理出口 IP。');
+      }
+
+      let reachability = { reachable: true, skipped: true, endpoint: '', source: '' };
+      if (typeof detectIpProxyTargetReachabilityByPageContext === 'function') {
+        reachability = await detectIpProxyTargetReachabilityByPageContext({
+          timeoutMs: 12000,
+          errors: targetDiagnostics,
+          targetReachabilityEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS,
+        }).catch((error) => {
+          targetDiagnostics.push(`target:${error?.message || error}`);
+          return {
+            reachable: false,
+            endpoint: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0],
+            source: 'target_page_context',
+            error: error?.message || String(error || '目标站点连通性检测失败'),
+          };
+        });
+      }
+      if (reachability?.reachable === false && reachability?.skipped !== true) {
+        const failureMessage = typeof buildTargetReachabilityFailureMessage === 'function'
+          ? buildTargetReachabilityFailureMessage({
+            exitIp,
+            exitRegion,
+          }, reachability)
+          : `已检测到出口 IP ${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}，但 chatgpt.com 不可达。`;
+        throw new Error(failureMessage);
+      }
+      return {
+        snapshot,
+        exitIp,
+        exitRegion,
+        exitSource: String(exit?.source || '').trim(),
+        exitEndpoint: String(exit?.endpoint || '').trim(),
+        targetEndpoint: String(reachability?.endpoint || CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0] || '').trim(),
+        diagnostics: summarizeCheckoutConversionProxyDiagnostics([
+          ...probeDiagnostics,
+          ...targetDiagnostics,
+        ], 4),
+      };
+    }
+
+    async function resolve711TemporaryPoolSnapshot(state = {}, options = {}) {
+      if (typeof pullIpProxyPoolFromApi !== 'function') {
+        throw new Error('711 临时池能力尚未接入。');
+      }
+      const sourceState = await loadState(state);
+      const temporaryPoolState = build711TemporaryPoolState(sourceState, options);
+      const poolState = {
+        ...(sourceState || {}),
+        ipProxyService: '711proxy',
+        ipProxyMode: 'api',
+        ipProxyApiUrl: temporaryPoolState.apiUrl,
+      };
+      const pool = await pullIpProxyPoolFromApi(poolState, {
+        maxItems: Number(options?.maxItems) || 100,
+        timeoutMs: options?.timeoutMs,
+      });
+      if (!Array.isArray(pool) || !pool.length) {
+        throw new Error('711 临时池为空，请检查 API 返回。');
+      }
+
+      const attemptErrors = [];
+      for (let index = 0; index < pool.length; index += 1) {
+        const entry = sanitizeCheckoutConversionProxyEntry(pool[index]);
+        if (!entry) {
+          continue;
+        }
+        const proxyUrl = buildCheckoutConversionProxyUrlFromEntry(entry);
+        if (!proxyUrl) {
+          continue;
+        }
+        let snapshot = null;
+        try {
+          snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
+          const checked = await validateCheckoutProxyCandidateWithSnapshot(snapshot, {
+            probeDiagnostics: [],
+            targetDiagnostics: [],
+          });
+          return {
+            ...checked,
+            snapshot,
+            proxyUrl,
+            source: '711proxy_pool',
+            provider: '711proxy',
+            entry: snapshot?.entry || entry,
+            displayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry || entry) || proxyUrl).trim(),
+            selectedEntryDisplayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry || entry) || proxyUrl).trim(),
+            requestedRegion: temporaryPoolState.requestedRegion,
+            resolvedRegion: temporaryPoolState.resolvedRegion,
+            poolSize: pool.length,
+            candidateIndex: index,
+          };
+        } catch (error) {
+          attemptErrors.push(`candidate_${index + 1}:${error?.message || error}`);
+          if (snapshot?.applied) {
+            await defaultRestoreCheckoutScopedProxySnapshot(snapshot).catch(() => {});
+          }
+        }
+      }
+
+      throw new Error(
+        attemptErrors.length
+          ? `711 临时池所有候选节点均不可用。${summarizeCheckoutConversionProxyDiagnostics(attemptErrors, 4)}`
+          : '711 临时池所有候选节点均不可用。'
+      );
     }
 
     async function getStoredSession(state = null) {
@@ -476,14 +738,23 @@
 
     async function switchManualSession(options = {}) {
       const sourceState = await loadState(options?.state);
+      const source = getCheckoutConversionProxySourceFromState(sourceState, options);
+      const proxy711Region = getCheckoutConversionProxy711RegionFromState(sourceState, options);
       const proxyUrl = normalizeCheckoutConversionProxyUrl(
         options?.proxyUrl ?? sourceState?.plusCheckoutConversionProxyUrl
       );
-      if (!proxyUrl) {
+      if (source === 'manual' && !proxyUrl) {
         throw new Error('请先填写支付转换代理地址。');
       }
       const existingSession = await getStoredManualSession(sourceState);
-      if (existingSession?.active && existingSession.proxyUrl === proxyUrl) {
+      if (
+        existingSession?.active
+        && existingSession.source === source
+        && (
+          (source === 'manual' && existingSession.proxyUrl === proxyUrl)
+          || (source === '711proxy_pool' && existingSession.requestedRegion === proxy711Region)
+        )
+      ) {
         return {
           switched: false,
           alreadyActive: true,
@@ -491,10 +762,25 @@
           displayName: existingSession.displayName,
         };
       }
-      const snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
+      const resolved = source === '711proxy_pool'
+        ? await resolve711TemporaryPoolSnapshot(sourceState, {
+          ...options,
+          proxy711Region,
+          applyOptions: options?.applyOptions || {},
+        })
+        : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, options?.applyOptions || {});
+      const snapshot = source === '711proxy_pool' ? resolved?.snapshot : resolved;
+      const displayName = source === '711proxy_pool'
+        ? String(resolved?.displayName || resolved?.selectedEntryDisplayName || '711 临时池').trim()
+        : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim();
       const payload = await persistManualSession({
-        proxyUrl,
-        displayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim(),
+        source,
+        provider: source === '711proxy_pool' ? '711proxy' : '',
+        proxyUrl: source === '711proxy_pool' ? (resolved?.proxyUrl || buildCheckoutConversionProxyUrlFromEntry(snapshot?.entry) || proxyUrl) : proxyUrl,
+        displayName,
+        requestedRegion: source === '711proxy_pool' ? resolved?.requestedRegion || proxy711Region : '',
+        resolvedRegion: source === '711proxy_pool' ? resolved?.resolvedRegion || '' : '',
+        selectedEntryDisplayName: source === '711proxy_pool' ? resolved?.selectedEntryDisplayName || displayName : '',
         entry: snapshot?.entry,
         baseSnapshot: existingSession?.baseSnapshot || snapshot,
         appliedAt: existingSession?.appliedAt || Date.now(),
@@ -548,8 +834,10 @@
     }
 
     async function applySessionFromState(state = {}, sessionOptions = {}, applyOptions = {}) {
+      const source = getCheckoutConversionProxySourceFromState(state, sessionOptions);
       const proxyUrl = normalizeCheckoutConversionProxyUrl(state?.plusCheckoutConversionProxyUrl);
-      if (!proxyUrl) {
+      const proxy711Region = getCheckoutConversionProxy711RegionFromState(state, sessionOptions);
+      if (source === 'manual' && !proxyUrl) {
         return null;
       }
       const manualSession = await getStoredManualSession(state);
@@ -559,12 +847,27 @@
       await cleanupResidualSession(state, {
         failureMessage: `检测到残留的支付转换代理会话，无法在当前支付提交前继续切换代理。请先处理残留代理：${sessionOptions.flowType || 'unknown'}`,
       });
-      const snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, applyOptions);
+      const resolved = source === '711proxy_pool'
+        ? await resolve711TemporaryPoolSnapshot(state, {
+          ...sessionOptions,
+          proxy711Region,
+          applyOptions,
+        })
+        : await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, applyOptions);
+      const snapshot = source === '711proxy_pool' ? resolved?.snapshot : resolved;
+      const displayName = source === '711proxy_pool'
+        ? String(resolved?.displayName || resolved?.selectedEntryDisplayName || '711 临时池').trim()
+        : String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim();
       const payload = await persistSession({
         flowType: sessionOptions.flowType,
         releaseNodeKey: sessionOptions.releaseNodeKey,
         appliedStepKey: sessionOptions.appliedStepKey,
-        displayName: String(snapshot?.displayName || describeCheckoutConversionProxyEntry(snapshot?.entry) || proxyUrl).trim(),
+        displayName,
+        source,
+        provider: source === '711proxy_pool' ? '711proxy' : '',
+        requestedRegion: source === '711proxy_pool' ? resolved?.requestedRegion || proxy711Region : '',
+        resolvedRegion: source === '711proxy_pool' ? resolved?.resolvedRegion || '' : '',
+        selectedEntryDisplayName: source === '711proxy_pool' ? resolved?.selectedEntryDisplayName || displayName : '',
         snapshot,
         appliedAt: Date.now(),
       });
@@ -584,91 +887,50 @@
     }
 
     async function testCheckoutConversionProxy(options = {}) {
+      const sourceState = await loadState(options?.state);
+      const source = getCheckoutConversionProxySourceFromState(sourceState, options);
       const proxyUrl = normalizeCheckoutConversionProxyUrl(options?.proxyUrl);
-      if (!proxyUrl) {
+      const proxy711Region = getCheckoutConversionProxy711RegionFromState(sourceState, options);
+      if (source === 'manual' && !proxyUrl) {
         throw new Error('请先填写支付转换代理地址。');
       }
-
-      const parsedEntry = parseCheckoutConversionProxyUrl(proxyUrl);
       const probeDiagnostics = [];
       const targetDiagnostics = [];
       let snapshot = null;
 
       try {
-        snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, {
-          targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
-        });
-
-        let exit = null;
-        if (typeof detectProxyExitInfoByPageContext === 'function') {
-          exit = await detectProxyExitInfoByPageContext({
-            timeoutMs: 12000,
-            errors: probeDiagnostics,
-            probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
-          }).catch((error) => {
-            probeDiagnostics.push(`probe:page_context:${error?.message || error}`);
-            return { ip: '', region: '', source: 'page_context_unavailable', endpoint: '' };
-          });
-        }
-        if (!exit?.ip && typeof detectProxyExitInfoByBackgroundFetch === 'function') {
-          exit = await detectProxyExitInfoByBackgroundFetch({
-            timeoutMs: 12000,
-            errors: probeDiagnostics,
-            probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
-          }).catch((error) => {
-            probeDiagnostics.push(`probe:background:${error?.message || error}`);
-            return exit || { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
-          });
-        }
-
-        const exitIp = String(exit?.ip || '').trim();
-        const exitRegion = String(exit?.region || '').trim();
-        if (!exitIp) {
-          const diagnostics = summarizeCheckoutConversionProxyDiagnostics(probeDiagnostics, 4);
-          throw new Error(diagnostics
-            ? `未检测到代理出口 IP。诊断：${diagnostics}`
-            : '未检测到代理出口 IP。');
-        }
-
-        let reachability = { reachable: true, skipped: true, endpoint: '', source: '' };
-        if (typeof detectIpProxyTargetReachabilityByPageContext === 'function') {
-          reachability = await detectIpProxyTargetReachabilityByPageContext({
-            timeoutMs: 12000,
-            errors: targetDiagnostics,
-            targetReachabilityEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS,
-          }).catch((error) => {
-            targetDiagnostics.push(`target:${error?.message || error}`);
+        const result = source === '711proxy_pool'
+          ? await resolve711TemporaryPoolSnapshot(sourceState, {
+            ...options,
+            proxy711Region,
+            applyOptions: {
+              targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+            },
+          })
+          : await (async () => {
+            snapshot = await defaultApplyCheckoutScopedProxyFromUrl(proxyUrl, {
+              targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+            });
+            const checked = await validateCheckoutProxyCandidateWithSnapshot(snapshot, {
+              probeDiagnostics,
+              targetDiagnostics,
+            });
             return {
-              reachable: false,
-              endpoint: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0],
-              source: 'target_page_context',
-              error: error?.message || String(error || '目标站点连通性检测失败'),
+              ...checked,
+              proxyDisplayName: describeCheckoutConversionProxyEntry(parseCheckoutConversionProxyUrl(proxyUrl)),
             };
-          });
-        }
-
-        if (reachability?.reachable === false && reachability?.skipped !== true) {
-          const failureMessage = typeof buildTargetReachabilityFailureMessage === 'function'
-            ? buildTargetReachabilityFailureMessage({
-              exitIp,
-              exitRegion,
-            }, reachability)
-            : `已检测到出口 IP ${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}，但 chatgpt.com 不可达。`;
-          throw new Error(failureMessage);
-        }
+          })();
+        snapshot = result?.snapshot || snapshot;
 
         return {
           ok: true,
-          proxyDisplayName: describeCheckoutConversionProxyEntry(parsedEntry),
-          exitIp,
-          exitRegion,
-          exitSource: String(exit?.source || '').trim(),
-          exitEndpoint: String(exit?.endpoint || '').trim(),
-          targetEndpoint: String(reachability?.endpoint || CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS[0] || '').trim(),
-          diagnostics: summarizeCheckoutConversionProxyDiagnostics([
-            ...probeDiagnostics,
-            ...targetDiagnostics,
-          ], 4),
+          proxyDisplayName: String(result?.proxyDisplayName || result?.displayName || result?.selectedEntryDisplayName || '').trim(),
+          exitIp: String(result?.exitIp || '').trim(),
+          exitRegion: String(result?.exitRegion || '').trim(),
+          exitSource: String(result?.exitSource || '').trim(),
+          exitEndpoint: String(result?.exitEndpoint || '').trim(),
+          targetEndpoint: String(result?.targetEndpoint || '').trim(),
+          diagnostics: String(result?.diagnostics || '').trim(),
         };
       } finally {
         if (snapshot?.applied) {

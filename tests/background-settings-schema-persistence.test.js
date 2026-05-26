@@ -84,7 +84,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusAccountAccessStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
+  'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
+  'plusCheckoutConversionProxy711Region',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -104,7 +106,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutCreatePreWaitSeconds: 10,
   plusCheckoutOpenStableWaitSeconds: 20,
+  plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
+  plusCheckoutConversionProxy711Region: '',
   phoneVerificationEnabled: false,
   mailProvider: '163',
   ipProxyEnabled: false,
@@ -146,6 +150,8 @@ function normalizePlusPaymentMethod(value = '') {
   return normalized === 'gopay' || normalized === 'gpc-helper' ? normalized : 'paypal';
 }
 ${extractFunction('normalizePlusAccountAccessStrategy')}
+${extractFunction('normalizePlusCheckoutConversionProxySource')}
+${extractFunction('normalizePlusCheckoutConversionProxy711Region')}
 function normalizeSub2ApiGroupNames(value) {
   return Array.isArray(value) ? value.map((entry) => String(entry || '').trim()).filter(Boolean) : [];
 }
@@ -294,14 +300,20 @@ test('buildPersistentSettingsPayload persists Plus checkout conversion proxy int
   const api = buildHarness();
 
   const payload = api.buildPersistentSettingsPayload({
+    plusCheckoutConversionProxySource: '711proxy_pool',
     plusCheckoutConversionProxyUrl: ' socks5h://user:pass@proxy.example:1080 ',
+    plusCheckoutConversionProxy711Region: ' us ',
   }, { fillDefaults: true });
 
+  assert.equal(payload.plusCheckoutConversionProxySource, '711proxy_pool');
   assert.equal(payload.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(payload.plusCheckoutConversionProxy711Region, 'US');
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutConversionProxySource, '711proxy_pool');
   assert.equal(
     payload.settingsState.flows.openai.plus.plusCheckoutConversionProxyUrl,
     'socks5h://user:pass@proxy.example:1080'
   );
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutConversionProxy711Region, 'US');
 });
 
 test('buildPersistentSettingsPayload persists Plus checkout wait settings into settings schema', () => {

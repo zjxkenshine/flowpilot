@@ -1447,7 +1447,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutCloudConversionEnabled: false,
   plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
   plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
+  plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
+  plusCheckoutConversionProxy711Region: '',
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutSmsPoolAutoDisableEnabled: false,
   hostedCheckoutFirstDirectResendEnabled: false,
@@ -1687,7 +1689,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusAccountAccessStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
+  'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
+  'plusCheckoutConversionProxy711Region',
   'hostedCheckoutVerificationPopupDelaySeconds',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
@@ -2315,6 +2319,16 @@ function normalizePlusAccountAccessStrategy(value = '') {
     return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
   }
   return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+}
+
+function normalizePlusCheckoutConversionProxySource(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+}
+
+function normalizePlusCheckoutConversionProxy711Region(value = '') {
+  const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
 }
 
 function normalizeFiveSimCountryId(value, fallback = FIVE_SIM_COUNTRY_ID) {
@@ -3533,6 +3547,8 @@ function normalizePersistentSettingValue(key, value) {
       }
     case 'plusCheckoutCloudConversionApiKey':
       return String(value || '').trim();
+    case 'plusCheckoutConversionProxySource':
+      return normalizePlusCheckoutConversionProxySource(value);
     case 'plusCheckoutConversionProxyUrl': {
       const rawValue = String(value || '').trim();
       if (!rawValue) {
@@ -3559,6 +3575,8 @@ function normalizePersistentSettingValue(key, value) {
         return rawValue;
       }
     }
+    case 'plusCheckoutConversionProxy711Region':
+      return normalizePlusCheckoutConversionProxy711Region(value);
     case 'hostedCheckoutVerificationPopupDelaySeconds': {
       const numeric = Number(value);
       return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
@@ -4581,7 +4599,9 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
+  assignIfUpdated('plusCheckoutConversionProxySource', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxySource']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
+  assignIfUpdated('plusCheckoutConversionProxy711Region', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxy711Region']);
   assignIfUpdated('hostedCheckoutVerificationPopupDelaySeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPopupDelaySeconds']);
   assignIfUpdated('hostedCheckoutSmsPoolAutoDisableEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolAutoDisableEnabled']);
   assignIfUpdated('hostedCheckoutFirstDirectResendEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutFirstDirectResendEnabled']);
@@ -15316,6 +15336,13 @@ const checkoutConversionProxyManager = self.MultiPageBackgroundCheckoutConversio
   installIpProxyErrorListener,
   getCurrentIpProxyAuthEntry,
   setCurrentIpProxyAuthEntry,
+  normalizeIpProxyServiceProfiles,
+  buildIpProxyServiceProfileFromState,
+  normalizeIpProxyServiceProfile,
+  pullIpProxyPoolFromApi,
+  validate711ProxyApiConfig,
+  build711ProxyApiUrl,
+  normalizeIpProxyCountryCode: typeof normalizeCountryCode === 'function' ? normalizeCountryCode : null,
 });
 const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.createPlusCheckoutCreateExecutor({
   addLog,

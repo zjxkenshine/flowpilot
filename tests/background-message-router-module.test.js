@@ -1667,9 +1667,11 @@ test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates proxy test when auto-run is 
   const calls = [];
 
   const router = api.createMessageRouter({
+    buildPersistentSettingsPayload: (value) => value,
     getState: async () => ({
       autoRunning: false,
       plusCheckoutConversionProxyUrl: 'http://saved.proxy:8080',
+      plusCheckoutConversionProxySource: 'manual',
     }),
     isAutoRunLockedState: (state) => Boolean(state.autoRunning),
     testPlusCheckoutConversionProxy: async (options) => {
@@ -1692,6 +1694,7 @@ test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates proxy test when auto-run is 
   assert.equal(response.exitIp, '203.0.113.55');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].proxyUrl, 'socks5h://proxy.example:1080');
+  assert.equal(calls[0].source, 'manual');
   assert.equal(calls[0].state.plusCheckoutConversionProxyUrl, 'http://saved.proxy:8080');
 });
 
@@ -1730,6 +1733,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
 
   const router = api.createMessageRouter({
     broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    buildPersistentSettingsPayload: (value) => value,
     checkoutConversionProxyManager: {
       switchManualSession: async (options) => {
         calls.push(options);
@@ -1740,6 +1744,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
           session: {
             active: true,
             mode: 'manual',
+            source: 'manual',
             proxyUrl: 'socks5h://proxy.example:1080',
             displayName: 'socks5://proxy.example:1080',
           },
@@ -1749,6 +1754,8 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
     getState: async () => ({
       autoRunning: false,
       plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+      plusCheckoutConversionProxySource: 'manual',
+      plusCheckoutConversionProxy711Region: '',
     }),
     isAutoRunLockedState: (state) => Boolean(state.autoRunning),
   });
@@ -1764,14 +1771,18 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
   assert.equal(response.displayName, 'socks5://proxy.example:1080');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].proxyUrl, 'socks5h://proxy.example:1080');
+  assert.equal(calls[0].source, 'manual');
   assert.deepStrictEqual(broadcasts[0], {
     plusCheckoutConversionProxyManualSession: {
       active: true,
       mode: 'manual',
+      source: 'manual',
       proxyUrl: 'socks5h://proxy.example:1080',
       displayName: 'socks5://proxy.example:1080',
     },
+    plusCheckoutConversionProxySource: 'manual',
     plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
+    plusCheckoutConversionProxy711Region: '',
   });
 });
 

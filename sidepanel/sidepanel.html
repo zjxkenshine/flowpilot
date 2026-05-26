@@ -369,9 +369,21 @@
       </div>
       <div class="data-row" id="row-plus-checkout-conversion-proxy" style="display:none;">
         <span class="data-label">支付转换代理</span>
-        <input type="text" id="input-plus-checkout-conversion-proxy" class="data-input mono"
-          placeholder="http://127.0.0.1:7890 或 socks5h://user:pass@host:port"
-          title="仅在第 6 步创建/打开支付页时临时生效；留空则沿用当前网络环境" autocomplete="off" />
+        <div class="data-inline" style="width:100%; flex-wrap:wrap; gap:8px;">
+          <div id="plus-checkout-conversion-proxy-source-group" class="choice-group" role="group" aria-label="支付转换代理来源">
+            <button type="button" class="choice-btn" data-plus-checkout-conversion-proxy-source="manual">手动代理</button>
+            <button type="button" class="choice-btn" data-plus-checkout-conversion-proxy-source="711proxy_pool">711临时池</button>
+          </div>
+          <input type="text" id="input-plus-checkout-conversion-proxy" class="data-input mono"
+            placeholder="http://127.0.0.1:7890 或 socks5h://user:pass@host:port"
+            title="仅在第 6 步创建/打开支付页时临时生效；留空则沿用当前网络环境" autocomplete="off" />
+          <div id="plus-checkout-conversion-proxy-711-shell" class="data-inline" style="display:none; width:100%; flex-wrap:wrap; gap:8px;">
+            <input type="text" id="input-plus-checkout-conversion-proxy-711-region" class="data-input mono"
+              placeholder="国家代码，例如 US"
+              title="留空时跟随已保存的 711Proxy API region；其余参数全部跟随 IP 代理中的 711 配置" autocomplete="off" />
+            <span class="setting-caption">留空则跟随 711Proxy IP 代理配置中的 region；其他参数全部跟随该 711 配置</span>
+          </div>
+        </div>
       </div>
       <div class="data-row" id="row-plus-checkout-conversion-proxy-test" style="display:none;">
         <span class="data-label" aria-hidden="true"></span>

@@ -311,7 +311,10 @@ const chatGptApiSmsPoolList = document.getElementById('chatgpt-api-sms-pool-list
 const rowPlusHostedCheckoutOauthDelay = document.getElementById('row-plus-hosted-checkout-oauth-delay');
 const inputPlusHostedCheckoutOauthDelaySeconds = document.getElementById('input-plus-hosted-checkout-oauth-delay-seconds');
 const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkout-conversion-proxy');
+const plusCheckoutConversionProxySourceButtons = Array.from(document.querySelectorAll('[data-plus-checkout-conversion-proxy-source]'));
 const inputPlusCheckoutConversionProxy = document.getElementById('input-plus-checkout-conversion-proxy');
+const plusCheckoutConversionProxy711Shell = document.getElementById('plus-checkout-conversion-proxy-711-shell');
+const inputPlusCheckoutConversionProxy711Region = document.getElementById('input-plus-checkout-conversion-proxy-711-region');
 const rowPlusCheckoutConversionProxyTest = document.getElementById('row-plus-checkout-conversion-proxy-test');
 const btnPlusCheckoutConversionProxyTest = document.getElementById('btn-plus-checkout-conversion-proxy-test');
 const inputPlusCheckoutCloudConversionEnabled = document.getElementById('input-plus-checkout-cloud-conversion-enabled');
@@ -3474,6 +3477,19 @@ function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   }
 }
 
+function normalizePlusCheckoutConversionProxySourceValue(value = '') {
+  return String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual';
+}
+
+function normalizePlusCheckoutConversionProxy711RegionDraftValue(value = '') {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+}
+
+function normalizePlusCheckoutConversionProxy711RegionValue(value = '') {
+  const draft = normalizePlusCheckoutConversionProxy711RegionDraftValue(value);
+  return draft.length === 2 ? draft : '';
+}
+
 function normalizePlusCheckoutCloudConversionApiUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -4591,12 +4607,27 @@ function collectSettingsPayload() {
   const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
     ? DEFAULT_GPC_HELPER_API_URL
     : 'https://gpc.qlhazycoder.top';
+  const defaultPlusCheckoutCreatePreWaitSeconds = typeof DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS
+    : 10;
+  const defaultPlusCheckoutOpenStableWaitSeconds = typeof DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS
+    : 20;
   const normalizeYydsBaseUrlValue = typeof normalizeYydsMailBaseUrl === 'function'
     ? normalizeYydsMailBaseUrl
     : ((value) => String(value || '').trim() || 'https://maliapi.215.im/v1');
   const normalizePlusCheckoutConversionProxyInput = typeof normalizePlusCheckoutConversionProxyUrlValue === 'function'
     ? normalizePlusCheckoutConversionProxyUrlValue
     : ((value) => String(value || '').trim());
+  const normalizePlusCheckoutConversionProxySourceInput = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
+    ? normalizePlusCheckoutConversionProxySourceValue
+    : ((value) => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+  const normalizePlusCheckoutConversionProxy711RegionInput = typeof normalizePlusCheckoutConversionProxy711RegionValue === 'function'
+    ? normalizePlusCheckoutConversionProxy711RegionValue
+    : ((value) => {
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+      return normalized.length === 2 ? normalized : '';
+    });
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
@@ -5270,10 +5301,10 @@ function collectSettingsPayload() {
       : requestedPlusAccountAccessStrategy,
     plusCheckoutCreatePreWaitSeconds: typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds
       ? normalizePlusCheckoutCreatePreWaitSeconds(inputPlusCheckoutCreatePreWaitSeconds.value)
-      : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
+      : defaultPlusCheckoutCreatePreWaitSeconds,
     plusCheckoutOpenStableWaitSeconds: typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds
       ? normalizePlusCheckoutOpenStableWaitSeconds(inputPlusCheckoutOpenStableWaitSeconds.value)
-      : DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
+      : defaultPlusCheckoutOpenStableWaitSeconds,
     hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
       ? normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
       : DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS,
@@ -5344,9 +5375,18 @@ function collectSettingsPayload() {
     plusCheckoutCloudConversionApiKey: typeof inputPlusCheckoutCloudConversionApiKey !== 'undefined' && inputPlusCheckoutCloudConversionApiKey
       ? normalizePlusCheckoutCloudConversionApiKeyValue(inputPlusCheckoutCloudConversionApiKey.value)
       : BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
+    plusCheckoutConversionProxySource: normalizePlusCheckoutConversionProxySourceInput(
+      (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)
+        ? plusCheckoutConversionProxySourceButtons.find((button) => button.classList.contains('active'))?.dataset.plusCheckoutConversionProxySource
+        : '')
+      || latestState?.plusCheckoutConversionProxySource
+    ),
     plusCheckoutConversionProxyUrl: typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy
       ? normalizePlusCheckoutConversionProxyInput(inputPlusCheckoutConversionProxy.value)
       : normalizePlusCheckoutConversionProxyInput(latestState?.plusCheckoutConversionProxyUrl || ''),
+    plusCheckoutConversionProxy711Region: typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region
+      ? normalizePlusCheckoutConversionProxy711RegionInput(inputPlusCheckoutConversionProxy711Region.value)
+      : normalizePlusCheckoutConversionProxy711RegionInput(latestState?.plusCheckoutConversionProxy711Region || ''),
     paypalEmail: String(currentPayPalAccount?.email || latestState?.paypalEmail || '').trim(),
     paypalPassword: String(currentPayPalAccount?.password || latestState?.paypalPassword || ''),
     currentPayPalAccountId: String(latestState?.currentPayPalAccountId || '').trim(),
@@ -11992,7 +12032,9 @@ function applySettingsState(state) {
       normalizeHostedCheckoutVerificationResendMaxAttemptsValue(state?.hostedCheckoutVerificationResendMaxAttempts, 1)
     );
   }
-  setHostedCheckoutManualCodeDisplay('未获取');
+  if (typeof setHostedCheckoutManualCodeDisplay === 'function') {
+    setHostedCheckoutManualCodeDisplay('未获取');
+  }
   if (typeof inputHostedCheckoutPhone !== 'undefined' && inputHostedCheckoutPhone) {
     inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(state?.hostedCheckoutPhoneNumber || '');
   }
@@ -12035,7 +12077,28 @@ function applySettingsState(state) {
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(state?.plusCheckoutConversionProxyUrl || '');
   }
-  updatePlusCheckoutConversionModeUi();
+  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
+    const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
+      ? normalizePlusCheckoutConversionProxySourceValue
+      : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
+    plusCheckoutConversionProxySourceButtons.forEach((button) => {
+      const active = normalizeSourceValue(button.dataset.plusCheckoutConversionProxySource) === normalizeSourceValue(state?.plusCheckoutConversionProxySource || 'manual');
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+  if (typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region) {
+    const normalizeRegionValue = typeof normalizePlusCheckoutConversionProxy711RegionValue === 'function'
+      ? normalizePlusCheckoutConversionProxy711RegionValue
+      : ((value = '') => {
+        const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+        return normalized.length === 2 ? normalized : '';
+      });
+    inputPlusCheckoutConversionProxy711Region.value = normalizeRegionValue(state?.plusCheckoutConversionProxy711Region || '');
+  }
+  if (typeof updatePlusCheckoutConversionModeUi === 'function') {
+    updatePlusCheckoutConversionModeUi();
+  }
   renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
@@ -16717,6 +16780,19 @@ function getPlusCheckoutConversionProxyManualSession(state = latestState) {
     : null;
 }
 
+function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
+  const activeButtonValue = plusCheckoutConversionProxySourceButtons.find((button) => button.classList.contains('active'))?.dataset.plusCheckoutConversionProxySource;
+  return normalizePlusCheckoutConversionProxySourceValue(activeButtonValue || state?.plusCheckoutConversionProxySource || 'manual');
+}
+
+function getCurrentPlusCheckoutConversionProxy711Region(state = latestState) {
+  return normalizePlusCheckoutConversionProxy711RegionValue(
+    typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region
+      ? inputPlusCheckoutConversionProxy711Region.value
+      : state?.plusCheckoutConversionProxy711Region || ''
+  );
+}
+
 function setPlusCheckoutConversionProxyButtonsBusy(isBusy = false, labels = {}) {
   const busy = Boolean(isBusy);
   if (btnPlusCheckoutConversionProxyTest) {
@@ -16749,19 +16825,48 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
   if (!displayPlusCheckoutConversionProxyRuntimeStatus) {
     return;
   }
+  const resolveSource = typeof getSelectedPlusCheckoutConversionProxySource === 'function'
+    ? getSelectedPlusCheckoutConversionProxySource
+    : ((currentState = latestState) => {
+      const normalized = String(currentState?.plusCheckoutConversionProxySource || 'manual').trim().toLowerCase();
+      return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+    });
+  const resolve711Region = typeof getCurrentPlusCheckoutConversionProxy711Region === 'function'
+    ? getCurrentPlusCheckoutConversionProxy711Region
+    : ((currentState = latestState) => {
+      const normalized = String(currentState?.plusCheckoutConversionProxy711Region || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+      return normalized.length === 2 ? normalized : '';
+    });
+  const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
+    ? normalizePlusCheckoutConversionProxySourceValue
+    : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
   const session = getPlusCheckoutConversionProxyManualSession(state);
+  const source = resolveSource(state);
   const inputProxyUrl = normalizePlusCheckoutConversionProxyUrlValue(
     typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy
       ? inputPlusCheckoutConversionProxy.value
       : state?.plusCheckoutConversionProxyUrl || ''
   );
+  const input711Region = resolve711Region(state);
   let text = '手动代理未开启';
   let title = text;
   let nextClass = '';
+  if (source === '711proxy_pool') {
+    text = `711 临时池未开启${input711Region ? `（国家代码：${input711Region}）` : '（国家代码跟随 IP 代理配置）'}`;
+    title = text;
+  }
   if (session?.active) {
     const displayName = String(session.displayName || '').trim() || '未知代理';
-    if (inputProxyUrl && inputProxyUrl !== String(session.proxyUrl || '').trim()) {
+    const currentSource = normalizeSourceValue(session?.source || source);
+    const pendingLabel = currentSource === '711proxy_pool'
+      ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}`
+      : inputProxyUrl;
+    if (currentSource === 'manual' && inputProxyUrl && inputProxyUrl !== String(session.proxyUrl || '').trim()) {
       text = `当前生效：${displayName}；待切换：${inputProxyUrl}`;
+      title = text;
+      nextClass = 'state-pending';
+    } else if (currentSource === '711proxy_pool' && source === '711proxy_pool' && pendingLabel !== String(session.displayName || '').trim()) {
+      text = `当前生效：${displayName}；待切换：${pendingLabel}`;
       title = text;
       nextClass = 'state-pending';
     } else {
@@ -16824,6 +16929,15 @@ function validatePlusCheckoutCloudConversionConfig() {
 
 function updatePlusCheckoutConversionModeUi() {
   const cloudEnabled = isPlusCheckoutCloudConversionEnabled();
+  const resolveSource = typeof getSelectedPlusCheckoutConversionProxySource === 'function'
+    ? getSelectedPlusCheckoutConversionProxySource
+    : ((state = latestState) => {
+      const normalized = String(state?.plusCheckoutConversionProxySource || 'manual').trim().toLowerCase();
+      return normalized === '711proxy_pool' ? '711proxy_pool' : 'manual';
+    });
+  const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
+    ? normalizePlusCheckoutConversionProxySourceValue
+    : ((value = '') => String(value || '').trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual');
   const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
     ? Boolean(inputPlusModeEnabled.checked)
     : Boolean(latestState?.plusModeEnabled);
@@ -16834,11 +16948,31 @@ function updatePlusCheckoutConversionModeUi() {
   );
   const paypalMode = selectedMethod === 'paypal';
   const cloudRowsVisible = plusModeEnabled && paypalMode && cloudEnabled;
+  const source = resolveSource(latestState);
+  const manualMode = source === 'manual';
+
+  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
+    plusCheckoutConversionProxySourceButtons.forEach((button) => {
+      const active = normalizeSourceValue(button.dataset.plusCheckoutConversionProxySource) === source;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.disabled = cloudEnabled;
+    });
+  }
 
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
+    inputPlusCheckoutConversionProxy.style.display = manualMode ? '' : 'none';
     inputPlusCheckoutConversionProxy.disabled = cloudEnabled;
     inputPlusCheckoutConversionProxy.readOnly = cloudEnabled;
     inputPlusCheckoutConversionProxy.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof plusCheckoutConversionProxy711Shell !== 'undefined' && plusCheckoutConversionProxy711Shell) {
+    plusCheckoutConversionProxy711Shell.style.display = manualMode ? 'none' : '';
+  }
+  if (typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region) {
+    inputPlusCheckoutConversionProxy711Region.disabled = cloudEnabled;
+    inputPlusCheckoutConversionProxy711Region.readOnly = cloudEnabled;
+    inputPlusCheckoutConversionProxy711Region.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
   }
   if (typeof btnPlusCheckoutConversionProxyTest !== 'undefined' && btnPlusCheckoutConversionProxyTest) {
     btnPlusCheckoutConversionProxyTest.disabled = cloudEnabled;
@@ -16861,17 +16995,24 @@ function updatePlusCheckoutConversionModeUi() {
     setPlusCheckoutConversionProxyTestResult('云端模式', {
       detail: '已启用云端支付转换，本地支付转换代理与代理测试已自动停用。',
     });
+  } else if (!manualMode) {
+    setPlusCheckoutConversionProxyTestResult('711 临时池', {
+      detail: '将从已保存的 711Proxy API 配置临时拉取代理池，并在本次支付转换完成后恢复原网络环境。',
+    });
   }
 }
 
 async function handlePlusCheckoutConversionProxyTest() {
-  if (!btnPlusCheckoutConversionProxyTest || !inputPlusCheckoutConversionProxy) {
+  if (!btnPlusCheckoutConversionProxyTest) {
     return;
   }
-
-  const proxyUrl = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
-  inputPlusCheckoutConversionProxy.value = proxyUrl;
-  if (!proxyUrl) {
+  const source = getSelectedPlusCheckoutConversionProxySource(latestState);
+  const proxyUrl = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy?.value || '');
+  const proxy711Region = getCurrentPlusCheckoutConversionProxy711Region(latestState);
+  if (inputPlusCheckoutConversionProxy) {
+    inputPlusCheckoutConversionProxy.value = proxyUrl;
+  }
+  if (source === 'manual' && !proxyUrl) {
     setPlusCheckoutConversionProxyTestResult('请先填写代理', {
       status: 'error',
       detail: '请先填写支付转换代理地址，再执行测试。',
@@ -16890,7 +17031,14 @@ async function handlePlusCheckoutConversionProxyTest() {
     const response = await sendRuntimeMessageWithTimeout({
       type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
       source: 'sidepanel',
-      payload: { proxyUrl },
+      payload: {
+        source,
+        proxyUrl,
+        proxy711Region,
+        ipProxyStateOverride: source === '711proxy_pool' && typeof buildCurrentIpProxyActionStateOverride === 'function'
+          ? buildCurrentIpProxyActionStateOverride(latestState)
+          : undefined,
+      },
     }, 45000, '支付转换代理测试');
     if (response?.error) {
       throw new Error(response.error);
@@ -16910,7 +17058,13 @@ async function handlePlusCheckoutConversionProxyTest() {
       status: 'success',
       detail: detailParts.join(' | ') || `代理测试通过：${exitSummary}`,
     });
-    showToast(`支付转换代理测试通过：${exitSummary}`, 'success', 2500);
+    showToast(
+      source === '711proxy_pool'
+        ? `711 临时池测试通过：${exitSummary}`
+        : `支付转换代理测试通过：${exitSummary}`,
+      'success',
+      2500
+    );
   } catch (error) {
     const message = error?.message || String(error || '支付转换代理测试失败');
     setPlusCheckoutConversionProxyTestResult('测试失败', {
@@ -16924,12 +17078,13 @@ async function handlePlusCheckoutConversionProxyTest() {
 }
 
 async function handlePlusCheckoutConversionProxyManualSwitch() {
-  if (!inputPlusCheckoutConversionProxy) {
-    return;
+  const source = getSelectedPlusCheckoutConversionProxySource(latestState);
+  const proxyUrl = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy?.value || '');
+  const proxy711Region = getCurrentPlusCheckoutConversionProxy711Region(latestState);
+  if (inputPlusCheckoutConversionProxy) {
+    inputPlusCheckoutConversionProxy.value = proxyUrl;
   }
-  const proxyUrl = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
-  inputPlusCheckoutConversionProxy.value = proxyUrl;
-  if (!proxyUrl) {
+  if (source === 'manual' && !proxyUrl) {
     showToast('请先填写支付转换代理地址。', 'error');
     return;
   }
@@ -16938,21 +17093,40 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
     const response = await sendRuntimeMessageWithTimeout({
       type: 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL',
       source: 'sidepanel',
-      payload: { proxyUrl },
+      payload: {
+        source,
+        proxyUrl,
+        proxy711Region,
+        ipProxyStateOverride: source === '711proxy_pool' && typeof buildCurrentIpProxyActionStateOverride === 'function'
+          ? buildCurrentIpProxyActionStateOverride(latestState)
+          : undefined,
+      },
     }, 30000, '支付转换代理手动切换');
     if (response?.error) {
       throw new Error(response.error);
     }
     syncLatestState({
       plusCheckoutConversionProxyManualSession: response?.plusCheckoutConversionProxyManualSession || null,
+      plusCheckoutConversionProxySource: response?.plusCheckoutConversionProxySource ?? source,
       plusCheckoutConversionProxyUrl: response?.plusCheckoutConversionProxyUrl ?? proxyUrl,
+      plusCheckoutConversionProxy711Region: response?.plusCheckoutConversionProxy711Region ?? proxy711Region,
     });
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
     if (response?.alreadyActive) {
-      showToast(`当前代理已生效：${response?.displayName || proxyUrl}`, 'info', 2200);
+      showToast(
+        `当前代理已生效：${response?.displayName || (source === '711proxy_pool' ? '711 临时池' : proxyUrl)}`,
+        'info',
+        2200
+      );
       return;
     }
-    showToast(`已切换支付转换代理：${response?.displayName || proxyUrl}`, 'success', 2200);
+    showToast(
+      source === '711proxy_pool'
+        ? `已切换到 711 临时池代理：${response?.displayName || '已选节点'}`
+        : `已切换支付转换代理：${response?.displayName || proxyUrl}`,
+      'success',
+      2200
+    );
   } finally {
     setPlusCheckoutConversionProxyButtonsBusy(false);
   }
@@ -17070,6 +17244,37 @@ inputPlusCheckoutConversionProxy?.addEventListener('input', () => {
 
 inputPlusCheckoutConversionProxy?.addEventListener('blur', () => {
   inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
+  setPlusCheckoutConversionProxyTestResult('未测试');
+  renderPlusCheckoutConversionProxyRuntimeStatus();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+plusCheckoutConversionProxySourceButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const nextSource = normalizePlusCheckoutConversionProxySourceValue(button.dataset.plusCheckoutConversionProxySource);
+    plusCheckoutConversionProxySourceButtons.forEach((candidate) => {
+      const active = normalizePlusCheckoutConversionProxySourceValue(candidate.dataset.plusCheckoutConversionProxySource) === nextSource;
+      candidate.classList.toggle('active', active);
+      candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    syncLatestState({ plusCheckoutConversionProxySource: nextSource });
+    updatePlusCheckoutConversionModeUi();
+    setPlusCheckoutConversionProxyTestResult('未测试');
+    renderPlusCheckoutConversionProxyRuntimeStatus();
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
+inputPlusCheckoutConversionProxy711Region?.addEventListener('input', () => {
+  inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionDraftValue(inputPlusCheckoutConversionProxy711Region.value);
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+  renderPlusCheckoutConversionProxyRuntimeStatus();
+});
+
+inputPlusCheckoutConversionProxy711Region?.addEventListener('blur', () => {
+  inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionValue(inputPlusCheckoutConversionProxy711Region.value);
   setPlusCheckoutConversionProxyTestResult('未测试');
   renderPlusCheckoutConversionProxyRuntimeStatus();
   saveSettings({ silent: true }).catch(() => { });
@@ -19949,10 +20154,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
       }
+      if (message.payload.plusCheckoutConversionProxySource !== undefined) {
+        plusCheckoutConversionProxySourceButtons.forEach((button) => {
+          const active = normalizePlusCheckoutConversionProxySourceValue(button.dataset.plusCheckoutConversionProxySource)
+            === normalizePlusCheckoutConversionProxySourceValue(message.payload.plusCheckoutConversionProxySource);
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+      }
+      if (message.payload.plusCheckoutConversionProxy711Region !== undefined && inputPlusCheckoutConversionProxy711Region) {
+        inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionValue(message.payload.plusCheckoutConversionProxy711Region);
+      }
       if (
         message.payload.plusCheckoutConversionProxyManualSession !== undefined
+        || message.payload.plusCheckoutConversionProxySource !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
+        || message.payload.plusCheckoutConversionProxy711Region !== undefined
       ) {
+        updatePlusCheckoutConversionModeUi();
         renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
       }
       if (message.payload.gopayHelperPhoneMode !== undefined && selectGpcHelperPhoneMode) {

@@ -111,7 +111,9 @@
               plusAccountAccessStrategy: 'oauth',
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
+              plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
+              plusCheckoutConversionProxy711Region: '',
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               plusHostedCheckoutOauthDelaySeconds: 3,
@@ -353,11 +355,24 @@
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusCheckoutOpenStableWaitSeconds)));
               })(),
+              plusCheckoutConversionProxySource: String(
+                input?.plusCheckoutConversionProxySource
+                ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxySource
+                ?? defaults.flows.openai.plus.plusCheckoutConversionProxySource
+              ).trim().toLowerCase() === '711proxy_pool' ? '711proxy_pool' : 'manual',
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl
                 ?? defaults.flows.openai.plus.plusCheckoutConversionProxyUrl
               ).trim(),
+              plusCheckoutConversionProxy711Region: (() => {
+                const normalized = String(
+                  input?.plusCheckoutConversionProxy711Region
+                  ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxy711Region
+                  ?? defaults.flows.openai.plus.plusCheckoutConversionProxy711Region
+                ).trim().toUpperCase().replace(/[^A-Z]/g, '');
+                return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+              })(),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -529,7 +544,9 @@
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
+      next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
+      next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;

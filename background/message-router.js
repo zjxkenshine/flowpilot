@@ -1875,13 +1875,16 @@
           if (typeof testPlusCheckoutConversionProxy !== 'function') {
             throw new Error('支付转换代理测试能力尚未接入。');
           }
-          const state = await getState();
+          const currentState = await getState();
+          const state = buildResolvedIpProxyState(currentState, message.payload || {});
           if (isAutoRunLockedState(state)) {
             throw new Error('自动流程运行中，当前不能测试支付转换代理。');
           }
           const result = await testPlusCheckoutConversionProxy({
             state,
+            source: message.payload?.source ?? state?.plusCheckoutConversionProxySource,
             proxyUrl: message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl,
+            proxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region,
           });
           return { ok: true, ...result };
         }
@@ -1890,16 +1893,21 @@
           if (!checkoutConversionProxyManager?.switchManualSession) {
             throw new Error('支付转换代理手动切换能力尚未接入。');
           }
-          const state = await getState();
+          const currentState = await getState();
+          const state = buildResolvedIpProxyState(currentState, message.payload || {});
           if (isAutoRunLockedState(state)) {
             throw new Error('自动流程运行中，当前不能手动切换支付转换代理。');
           }
           const result = await checkoutConversionProxyManager.switchManualSession({
             state,
+            source: message.payload?.source ?? state?.plusCheckoutConversionProxySource,
             proxyUrl: message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl,
+            proxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region,
           });
           const patch = {
             plusCheckoutConversionProxyManualSession: result?.session || null,
+            plusCheckoutConversionProxySource: message.payload?.source ?? state?.plusCheckoutConversionProxySource ?? 'manual',
+            plusCheckoutConversionProxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region ?? '',
           };
           if (message.payload?.proxyUrl !== undefined || state?.plusCheckoutConversionProxyUrl !== undefined) {
             patch.plusCheckoutConversionProxyUrl = message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl ?? '';
@@ -1912,7 +1920,9 @@
             switched: Boolean(result?.switched),
             alreadyActive: Boolean(result?.alreadyActive),
             plusCheckoutConversionProxyManualSession: result?.session || null,
+            plusCheckoutConversionProxySource: patch.plusCheckoutConversionProxySource,
             plusCheckoutConversionProxyUrl: patch.plusCheckoutConversionProxyUrl,
+            plusCheckoutConversionProxy711Region: patch.plusCheckoutConversionProxy711Region,
             displayName: String(result?.displayName || result?.session?.displayName || '').trim(),
           };
         }
