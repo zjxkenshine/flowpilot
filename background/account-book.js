@@ -72,6 +72,21 @@
       return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
     }
 
+    function normalizeTimestampMs(value = '') {
+      if (value === null || value === undefined || value === '') {
+        return 0;
+      }
+      if (typeof value === 'number') {
+        return Number.isFinite(value) && value > 0 ? value : 0;
+      }
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric;
+      }
+      const parsed = Date.parse(String(value || ''));
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+
     function getActivationPhoneNumber(activation = null) {
       if (!activation || typeof activation !== 'object' || Array.isArray(activation)) {
         return '';
@@ -270,15 +285,53 @@
       };
     }
 
-    function findExistingEntry(entries = [], draftEntry = null) {
+    function isSameAccountBookFlowContext(entry = {}, draftEntry = {}) {
+      return normalizeString(entry.flowId) === normalizeString(draftEntry.flowId)
+        && normalizeString(entry.panelMode) === normalizeString(draftEntry.panelMode);
+    }
+
+    function isFlowCompletionPhoneFallbackCandidate(entry = {}, draftEntry = {}) {
+      return normalizeCaptureStage(draftEntry.captureStage) === 'flow_completed'
+        && Boolean(normalizeString(draftEntry.email).toLowerCase())
+        && !normalizePhoneDigits(draftEntry.phoneNumber)
+        && !normalizeString(entry.email).toLowerCase()
+        && Boolean(normalizePhoneDigits(entry.phoneNumber))
+        && getCaptureStageRank(entry.captureStage) < getCaptureStageRank('flow_completed')
+        && isSameAccountBookFlowContext(entry, draftEntry);
+    }
+
+    function getEntryCreatedTimestampMs(entry = {}) {
+      return normalizeTimestampMs(entry.createdAt || entry.updatedAt || entry.finalFlowCompletedAt || '');
+    }
+
+    function findFlowCompletionPhoneFallbackEntry(entries = [], draftEntry = null, context = {}) {
+      if (!draftEntry) {
+        return null;
+      }
+
+      const candidates = entries.filter((entry) => isFlowCompletionPhoneFallbackCandidate(entry, draftEntry));
+      if (!candidates.length) {
+        return null;
+      }
+
+      const flowStartTime = normalizeTimestampMs(context?.flowStartTime);
+      if (flowStartTime > 0) {
+        return candidates.find((entry) => getEntryCreatedTimestampMs(entry) >= flowStartTime) || null;
+      }
+
+      return candidates.length === 1 ? candidates[0] : null;
+    }
+
+    function findExistingEntry(entries = [], draftEntry = null, context = {}) {
       if (!draftEntry) {
         return null;
       }
       const emailKey = normalizeString(draftEntry.email).toLowerCase();
       const phoneKey = normalizePhoneDigits(draftEntry.phoneNumber);
       const draftId = normalizeString(draftEntry.recordId).toLowerCase();
+      const normalizedEntries = normalizeAccountBookEntries(entries);
 
-      return normalizeAccountBookEntries(entries).find((entry) => {
+      return normalizedEntries.find((entry) => {
         const entryEmail = normalizeString(entry.email).toLowerCase();
         const entryPhone = normalizePhoneDigits(entry.phoneNumber);
         const entryId = normalizeString(entry.recordId).toLowerCase();
@@ -289,12 +342,14 @@
           return true;
         }
         return Boolean(draftId) && entryId === draftId;
-      }) || null;
+      })
+        || findFlowCompletionPhoneFallbackEntry(normalizedEntries, draftEntry, context)
+        || null;
     }
 
-    function upsertAccountBookEntryInList(entries = [], draftEntry = null) {
+    function upsertAccountBookEntryInList(entries = [], draftEntry = null, context = {}) {
       const normalizedEntries = normalizeAccountBookEntries(entries);
-      const existingEntry = findExistingEntry(normalizedEntries, draftEntry);
+      const existingEntry = findExistingEntry(normalizedEntries, draftEntry, context);
       const mergedEntry = mergeAccountBookEntry(existingEntry, draftEntry);
       if (!mergedEntry) {
         return normalizedEntries;
@@ -324,9 +379,9 @@
       }
 
       const currentEntries = await getPersistedAccountBookEntries();
-      const nextEntries = upsertAccountBookEntryInList(currentEntries, draftEntry);
+      const nextEntries = upsertAccountBookEntryInList(currentEntries, draftEntry, state);
       await setPersistedAccountBookEntries(nextEntries);
-      return findExistingEntry(nextEntries, draftEntry)
+      return findExistingEntry(nextEntries, draftEntry, state)
         || nextEntries[0]
         || null;
     }

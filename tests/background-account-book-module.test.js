@@ -238,6 +238,203 @@ test('account book helper supports phone_verification_passed stage and upgrades 
   assert.equal(storedEntries[0].captureStage, 'flow_completed');
 });
 
+test('account book helper merges phone registration into email flow completion when phone runtime was cleared', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: '',
+      signupPhoneNumber: '+66 11223',
+      customPassword: ' phone-pass ',
+      activeFlowId: 'openai',
+      panelMode: 'sub2api',
+      flowStartTime: Date.parse('2026-05-26T10:00:00.000Z'),
+      ipProxyAppliedExitIp: '203.0.113.88',
+      ipProxyAppliedExitRegion: 'th',
+    }),
+  });
+
+  const registrationEntry = await helpers.upsertAccountBookEntry('registration_success');
+  assert.equal(registrationEntry.recordId, 'phone:6611223');
+  assert.equal(registrationEntry.phoneNumber, '+66 11223');
+  assert.equal(registrationEntry.signupIp, '203.0.113.88');
+  assert.equal(registrationEntry.signupRegion, 'TH');
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'final@example.com',
+    signupPhoneNumber: '',
+    password: 'phone-pass',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+    flowStartTime: Date.parse('2026-05-26T10:00:00.000Z'),
+    ipProxyAppliedExitIp: '',
+    ipProxyAppliedExitRegion: '',
+  });
+
+  assert.equal(completedEntry.recordId, 'final@example.com');
+  assert.equal(completedEntry.email, 'final@example.com');
+  assert.equal(completedEntry.phoneNumber, '+66 11223');
+  assert.equal(completedEntry.captureStage, 'flow_completed');
+  assert.equal(completedEntry.signupIp, '203.0.113.88');
+  assert.equal(completedEntry.signupRegion, 'TH');
+  assert.equal(storedEntries.length, 1);
+  assert.equal(storedEntries[0].recordId, 'final@example.com');
+  assert.equal(storedEntries[0].phoneNumber, '+66 11223');
+  assert.equal(storedEntries[0].signupIp, '203.0.113.88');
+  assert.equal(storedEntries[0].signupRegion, 'TH');
+});
+
+test('account book helper uses flowStartTime to avoid merging old phone-only records', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [
+    {
+      recordId: 'phone:6611111',
+      email: '',
+      phoneNumber: '+66 11111',
+      password: 'old-secret',
+      flowId: 'openai',
+      panelMode: 'sub2api',
+      captureStage: 'registration_success',
+      createdAt: '2026-05-26T09:00:00.000Z',
+      updatedAt: '2026-05-26T09:00:00.000Z',
+      finalFlowCompletedAt: '',
+      signupIp: '203.0.113.1',
+      signupRegion: 'TH',
+    },
+    {
+      recordId: 'phone:6622222',
+      email: '',
+      phoneNumber: '+66 22222',
+      password: 'new-secret',
+      flowId: 'openai',
+      panelMode: 'sub2api',
+      captureStage: 'registration_success',
+      createdAt: '2026-05-26T10:05:00.000Z',
+      updatedAt: '2026-05-26T10:05:00.000Z',
+      finalFlowCompletedAt: '',
+      signupIp: '203.0.113.2',
+      signupRegion: 'TH',
+    },
+  ];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'final@example.com',
+      signupPhoneNumber: '',
+      password: 'new-secret',
+      activeFlowId: 'openai',
+      panelMode: 'sub2api',
+      flowStartTime: Date.parse('2026-05-26T10:00:00.000Z'),
+    }),
+  });
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed');
+
+  assert.equal(completedEntry.recordId, 'final@example.com');
+  assert.equal(completedEntry.phoneNumber, '+66 22222');
+  assert.equal(completedEntry.signupIp, '203.0.113.2');
+  assert.equal(storedEntries.length, 2);
+  assert.equal(storedEntries[0].recordId, 'final@example.com');
+  assert.equal(storedEntries[0].phoneNumber, '+66 22222');
+  assert.equal(storedEntries.some((entry) => entry.recordId === 'phone:6611111'), true);
+});
+
+test('account book helper does not fuzzily merge multiple phone-only candidates without flowStartTime', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [
+    {
+      recordId: 'phone:6611111',
+      email: '',
+      phoneNumber: '+66 11111',
+      password: 'first-secret',
+      flowId: 'openai',
+      panelMode: 'cpa',
+      captureStage: 'registration_success',
+      createdAt: '2026-05-26T09:00:00.000Z',
+      updatedAt: '2026-05-26T09:00:00.000Z',
+      finalFlowCompletedAt: '',
+      signupIp: '203.0.113.11',
+      signupRegion: 'TH',
+    },
+    {
+      recordId: 'phone:6622222',
+      email: '',
+      phoneNumber: '+66 22222',
+      password: 'second-secret',
+      flowId: 'openai',
+      panelMode: 'cpa',
+      captureStage: 'registration_success',
+      createdAt: '2026-05-26T09:05:00.000Z',
+      updatedAt: '2026-05-26T09:05:00.000Z',
+      finalFlowCompletedAt: '',
+      signupIp: '203.0.113.22',
+      signupRegion: 'TH',
+    },
+  ];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'ambiguous@example.com',
+      signupPhoneNumber: '',
+      password: 'final-secret',
+      activeFlowId: 'openai',
+      panelMode: 'cpa',
+      ipProxyAppliedExitIp: '',
+      ipProxyAppliedExitRegion: '',
+    }),
+  });
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed');
+
+  assert.equal(completedEntry.recordId, 'ambiguous@example.com');
+  assert.equal(completedEntry.email, 'ambiguous@example.com');
+  assert.equal(completedEntry.phoneNumber, '');
+  assert.equal(completedEntry.signupIp, '');
+  assert.equal(storedEntries.length, 3);
+  assert.equal(storedEntries[0].recordId, 'ambiguous@example.com');
+  assert.equal(storedEntries.filter((entry) => /^phone:/.test(entry.recordId)).length, 2);
+});
+
 test('account book helper does not downgrade higher capture stages when phone_verification_passed is written later', async () => {
   const source = fs.readFileSync('background/account-book.js', 'utf8');
   const globalScope = {};
