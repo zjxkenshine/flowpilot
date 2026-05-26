@@ -10,6 +10,7 @@ const PAYPAL_HOSTED_STAGE_VERIFICATION = 'verification';
 const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
 const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
 const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
+const PAYPAL_HOSTED_STAGE_BLOCKED = 'blocked';
 const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
 const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
 const PAYPAL_HOSTED_STEP_KEYS = {
@@ -292,6 +293,47 @@ function isPayPalHostedGenericErrorPage() {
     );
 }
 
+function getPayPalHostedGuestCardErrorMessage() {
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  const match = bodyText.match(
+    /We\s+weren['\u2019]?t\s+able\s+to\s+add\s+this\s+card\.?\s*Check\s+all\s+the\s+details\s+are\s+correct\s+and\s+try\s+again\s+or\s+try\s+a\s+different\s+card\.?|unable\s+to\s+add\s+this\s+card|try\s+a\s+different\s+card|无法添加此卡|无法新增此卡|请检查所有详细信息.*(?:其他|不同).*卡/i
+  );
+  return match ? match[0] : '';
+}
+
+function hasPayPalHostedGuestCardError() {
+  return Boolean(getPayPalHostedGuestCardErrorMessage());
+}
+
+function getPayPalHostedGuestPhoneErrorMessage() {
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  const match = bodyText.match(
+    /We['\u2019]?re\s+unable\s+to\s+complete\s+your\s+request\.?\s*Try\s+a\s+different\s+phone\s+number\.?|Try\s+a\s+different\s+phone\s+number\.?|请尝试其他手机号|请更换手机号/i
+  );
+  return match ? match[0] : '';
+}
+
+function hasPayPalHostedGuestPhoneError() {
+  return Boolean(getPayPalHostedGuestPhoneErrorMessage());
+}
+
+function getPayPalHostedBlockedMessage() {
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  const match = bodyText.match(
+    /You\s+have\s+been\s+blocked\.?|We\s+couldn['\u2019]?t\s+load\s+the\s+security\s+challenge\.?|security\s+challenge\s+(?:couldn['\u2019]?t|could\s+not)\s+load/i
+  );
+  return match ? match[0] : '';
+}
+
+function isPayPalHostedBlockedPage() {
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  return Boolean(getPayPalHostedBlockedMessage())
+    || (
+      /you\s+have\s+been\s+blocked/i.test(bodyText)
+      && /security\s+challenge/i.test(bodyText)
+    );
+}
+
 function findHostedVerificationInputs() {
   return Array.from({ length: 6 }, (_, index) => document.getElementById(`ci-ciBasic-${index}`))
     .filter((input) => isVisibleElement(input));
@@ -369,6 +411,9 @@ function detectPayPalHostedStage() {
   }
   if (hasHostedVerificationInputs()) {
     return PAYPAL_HOSTED_STAGE_VERIFICATION;
+  }
+  if (isPayPalHostedBlockedPage()) {
+    return PAYPAL_HOSTED_STAGE_BLOCKED;
   }
   if (isPayPalHostedGenericErrorPage()) {
     return PAYPAL_HOSTED_STAGE_GENERIC_ERROR;
@@ -736,6 +781,26 @@ async function clickHostedReviewConsent() {
 
 async function runPayPalHostedCheckoutStep(payload = {}) {
   const stage = detectPayPalHostedStage();
+  if (stage === PAYPAL_HOSTED_STAGE_BLOCKED) {
+    return {
+      stage,
+      submitted: false,
+      hostedBlocked: true,
+      hostedBlockedMessage: getPayPalHostedBlockedMessage(),
+      hostedGuestCardError: hasPayPalHostedGuestCardError(),
+      hostedGuestCardErrorMessage: getPayPalHostedGuestCardErrorMessage(),
+      hostedGuestPhoneError: hasPayPalHostedGuestPhoneError(),
+      hostedGuestPhoneErrorMessage: getPayPalHostedGuestPhoneErrorMessage(),
+    };
+  }
+  if (stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR) {
+    return {
+      stage,
+      submitted: false,
+      hostedGenericError: true,
+      hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
+    };
+  }
   if (payload.resendVerificationCode && stage !== PAYPAL_HOSTED_STAGE_VERIFICATION) {
     return {
       stage,
@@ -779,14 +844,6 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
   if (stage === PAYPAL_HOSTED_STAGE_REVIEW) {
     return clickHostedReviewConsent();
   }
-  if (stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR) {
-    return {
-      stage,
-      submitted: false,
-      hostedGenericError: true,
-      hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
-    };
-  }
   return {
     stage,
     submitted: false,
@@ -808,8 +865,14 @@ function inspectPayPalHostedState() {
     hostedVerificationInvalidCode: hasHostedInvalidVerificationCodeError(),
     hostedVerificationErrorText: getHostedVerificationErrorText(),
     hostedVerificationResendReady: Boolean(findHostedVerificationResendButton()),
+    hostedBlocked: stage === PAYPAL_HOSTED_STAGE_BLOCKED,
+    hostedBlockedMessage: getPayPalHostedBlockedMessage(),
     hostedGenericError: stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
     hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
+    hostedGuestCardError: hasPayPalHostedGuestCardError(),
+    hostedGuestCardErrorMessage: getPayPalHostedGuestCardErrorMessage(),
+    hostedGuestPhoneError: hasPayPalHostedGuestPhoneError(),
+    hostedGuestPhoneErrorMessage: getPayPalHostedGuestPhoneErrorMessage(),
     reviewConsentReady: Boolean(findHostedReviewConsentButton()),
     approveReady: Boolean(findApproveButton()),
     bodyTextPreview: normalizeText(document.body?.innerText || '').slice(0, 240),

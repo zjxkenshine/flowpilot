@@ -88,9 +88,16 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
   'hostedCheckoutVerificationPopupDelaySeconds',
+  'hostedCheckoutFirstDirectResendEnabled',
+  'hostedCheckoutFirstResendWaitSeconds',
+  'hostedCheckoutSubsequentResendWaitSeconds',
+  'hostedCheckoutVerificationPollAttempts',
+  'hostedCheckoutVerificationPollIntervalSeconds',
+  'hostedCheckoutVerificationResendMaxAttempts',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolAutoDisableEnabled',
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
   'paypalGeneratedProfile',
@@ -117,9 +124,16 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
   hostedCheckoutVerificationPopupDelaySeconds: 20,
+  hostedCheckoutFirstDirectResendEnabled: false,
+  hostedCheckoutFirstResendWaitSeconds: 20,
+  hostedCheckoutSubsequentResendWaitSeconds: 25,
+  hostedCheckoutVerificationPollAttempts: 6,
+  hostedCheckoutVerificationPollIntervalSeconds: 5,
+  hostedCheckoutVerificationResendMaxAttempts: 1,
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolAutoDisableEnabled: false,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
   paypalGeneratedProfile: {
@@ -299,6 +313,7 @@ ${extractFunction('setPersistentSettings')}
 ${extra}
 return {
   buildPersistentSettingsPayload,
+  buildPersistedSettingsStoragePayload,
   getPersistedSettings,
   setPersistentSettings,
   getRequestedKeys: typeof getRequestedKeys === 'function' ? getRequestedKeys : () => [],
@@ -395,6 +410,55 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   assert.equal(payload.plusCheckoutOpenStableWaitSeconds, 29);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 29);
+});
+
+test('buildPersistentSettingsPayload persists PayPal hosted checkout resend strategy into settings schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    hostedCheckoutFirstDirectResendEnabled: true,
+    hostedCheckoutFirstResendWaitSeconds: ' 31.8 ',
+    hostedCheckoutSubsequentResendWaitSeconds: ' 44.2 ',
+    hostedCheckoutVerificationPollAttempts: ' 9.9 ',
+    hostedCheckoutVerificationPollIntervalSeconds: ' 7.5 ',
+    hostedCheckoutVerificationResendMaxAttempts: ' 3.2 ',
+  }, { fillDefaults: true });
+
+  assert.equal(payload.hostedCheckoutFirstDirectResendEnabled, true);
+  assert.equal(payload.hostedCheckoutFirstResendWaitSeconds, 31);
+  assert.equal(payload.hostedCheckoutSubsequentResendWaitSeconds, 44);
+  assert.equal(payload.hostedCheckoutVerificationPollAttempts, 9);
+  assert.equal(payload.hostedCheckoutVerificationPollIntervalSeconds, 7);
+  assert.equal(payload.hostedCheckoutVerificationResendMaxAttempts, 3);
+  assert.equal(payload.hostedCheckoutVerificationPopupDelaySeconds, 20);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutFirstDirectResendEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutFirstResendWaitSeconds, 31);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSubsequentResendWaitSeconds, 44);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollAttempts, 9);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollIntervalSeconds, 7);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationResendMaxAttempts, 3);
+});
+
+test('buildPersistedSettingsStoragePayload omits PayPal hosted resend flat view keys', () => {
+  const api = buildHarness();
+
+  const persisted = api.buildPersistentSettingsPayload({
+    hostedCheckoutFirstDirectResendEnabled: true,
+    hostedCheckoutFirstResendWaitSeconds: 28,
+    hostedCheckoutSubsequentResendWaitSeconds: 33,
+    hostedCheckoutVerificationPollAttempts: 8,
+    hostedCheckoutVerificationPollIntervalSeconds: 4,
+    hostedCheckoutVerificationResendMaxAttempts: 2,
+  }, { fillDefaults: true });
+  const storagePayload = api.buildPersistedSettingsStoragePayload(persisted);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutFirstDirectResendEnabled'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutFirstResendWaitSeconds'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutSubsequentResendWaitSeconds'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutVerificationPollAttempts'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutVerificationPollIntervalSeconds'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(storagePayload, 'hostedCheckoutVerificationResendMaxAttempts'), false);
+  assert.equal(storagePayload.settingsState.flows.openai.plus.hostedCheckoutFirstResendWaitSeconds, 28);
 });
 
 test('buildPersistentSettingsPayload persists PayPal generated profile into settings schema', () => {
@@ -552,6 +616,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
     signupMethod: 'email',
     plusAccountAccessStrategy: 'sub2api_codex_session',
     hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+    hostedCheckoutSmsPoolAutoDisableEnabled: true,
     hostedCheckoutSmsPoolUsage: {
       '4155555678----https://example.com/verify': { useCount: 1 },
     },
@@ -573,6 +638,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
   assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
   assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
   assert.equal(payload.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(payload.hostedCheckoutSmsPoolAutoDisableEnabled, true);
   assert.deepEqual(payload.hostedCheckoutCurrentSmsEntry, {
     key: '4155555678----https://example.com/verify',
     phone: '4155555678',
@@ -582,6 +648,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
     payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolText,
     '4155555678----https://example.com/verify'
   );
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled, true);
 });
 
 test('buildPersistentSettingsPayload projects nested Phone Plus settings into flat view and canonical schema', () => {
@@ -1103,6 +1170,7 @@ function getRemovedKeys() {
       '4155555678----https://example.com/verify-a?t=9',
       '4155559999----https://example.com/verify-b',
     ].join('\n'),
+    hostedCheckoutSmsPoolAutoDisableEnabled: true,
     hostedCheckoutSmsPoolUsage: {
       '4155555678----https://example.com/verify-a': {
         useCount: 2,
@@ -1125,6 +1193,7 @@ function getRemovedKeys() {
     persisted.hostedCheckoutSmsPoolText,
     '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
   );
+  assert.equal(persisted.hostedCheckoutSmsPoolAutoDisableEnabled, true);
   assert.deepEqual(persisted.hostedCheckoutCurrentSmsEntry, {
     key: '4155555678----https://example.com/verify-a',
     phone: '4155555678',
@@ -1135,6 +1204,7 @@ function getRemovedKeys() {
     write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolText,
     '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
   );
+  assert.equal(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled, true);
   assert.deepEqual(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolUsage, {
     '4155555678----https://example.com/verify-a': {
       useCount: 2,

@@ -78,6 +78,9 @@ test('sidepanel html exposes PayPal hosted sms pool export and file import contr
   assert.match(html, /id="btn-hosted-sms-pool-export"/);
   assert.match(html, /id="btn-hosted-sms-pool-import-file"/);
   assert.match(html, /id="input-hosted-sms-pool-import-file"/);
+  assert.match(html, /id="input-hosted-checkout-sms-pool-auto-disable-enabled"/);
+  assert.match(html, /<option value="enabled">启用中<\/option>/);
+  assert.match(html, /<option value="disabled">已禁用<\/option>/);
   assert.match(html, /accept="\.txt,text\/plain"/);
 });
 

@@ -1379,6 +1379,44 @@ header {
   justify-content: space-between;
 }
 
+.hosted-checkout-manual-fetch-inline {
+  flex: 1;
+  min-width: 0;
+}
+
+.hosted-checkout-resend-settings-inline {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  row-gap: 6px;
+}
+
+#row-hosted-checkout-resend-settings > .data-label {
+  width: 76px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.hosted-checkout-setting-field,
+.hosted-checkout-setting-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.hosted-checkout-setting-toggle .toggle-switch {
+  flex: 0 0 auto;
+}
+
+.hosted-sms-pool-import-actions {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.hosted-sms-pool-auto-disable-toggle {
+  margin-left: auto;
+}
+
 .plus-checkout-conversion-proxy-test-result.status-running {
   color: var(--amber);
 }

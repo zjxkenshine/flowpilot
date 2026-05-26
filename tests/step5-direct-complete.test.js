@@ -51,8 +51,21 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
+function extractConst(name) {
+  const pattern = new RegExp(`const\\s+${name}\\s*=\\s*[\\s\\S]*?;`);
+  const match = source.match(pattern);
+  if (!match) {
+    throw new Error(`missing const ${name}`);
+  }
+  return match[0];
+}
+
 function getStep5OutcomeBundle() {
   return [
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_PATH_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_HEADING_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_SKIP_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_PRIMARY_PATTERN'),
     extractFunction('normalizeStep5SignupContext'),
     extractFunction('isStep5PhoneSignupContext'),
     extractFunction('getStep5CallbackErrorLandingText'),
@@ -67,6 +80,11 @@ function getStep5OutcomeBundle() {
     extractFunction('isStep5SubmitButtonClickable'),
     extractFunction('isStep5ProfileStillVisible'),
     extractFunction('getStep5PostSubmitSuccessState'),
+    extractFunction('getPageTextSnapshot'),
+    extractFunction('findCreateAccountEnrollPasskeyButton'),
+    extractFunction('getCreateAccountEnrollPasskeyPageState'),
+    extractFunction('skipCreateAccountEnrollPasskey'),
+    extractFunction('getStep5SubmitState'),
     extractFunction('installStep5NavigationCompletionReporter'),
     extractFunction('waitForStep5SubmitOutcome'),
   ].join('\n');
@@ -1078,6 +1096,147 @@ return {
 `)();
 
   assert.equal(api.run(), null);
+});
+
+test('step 5 submit state recognizes passkey enrollment as known auth page', () => {
+  const api = new Function(`
+const skipButton = {
+  textContent: 'Skip',
+  disabled: false,
+  getAttribute(name) {
+    return name === 'data-dd-action-name' ? 'skip create account enroll passkey' : '';
+  },
+};
+const location = {
+  href: 'https://auth.openai.com/create-account-enroll-passkey',
+  pathname: '/create-account-enroll-passkey',
+};
+const document = {
+  body: {
+    innerText: 'Create your account with a passkey. Skip',
+    textContent: 'Create your account with a passkey. Skip',
+  },
+  querySelector(selector) {
+    return String(selector || '').includes('skip create account enroll passkey') ? skipButton : null;
+  },
+  querySelectorAll(selector) {
+    return String(selector || '').includes('button') ? [skipButton] : [];
+  },
+};
+
+function throwIfStopped() {}
+function log() {}
+async function sleep() {}
+async function humanPause() {}
+function simulateClick() {}
+function isVisibleElement(element) { return Boolean(element); }
+function isActionEnabled(element) { return Boolean(element) && !element.disabled && element.getAttribute?.('aria-disabled') !== 'true'; }
+function getActionText(el) { return el?.textContent || ''; }
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return false; }
+function isLikelyLoggedInChatgptHomeUrl() { return false; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+function getPageTextSnapshot() { return document.body.innerText || document.body.textContent || ''; }
+
+${extractFunction('isSignupProfilePageUrl')}
+${getStep5OutcomeBundle()}
+
+return {
+  run() {
+    return getStep5SubmitState();
+  },
+};
+`)();
+
+  const state = api.run();
+  assert.equal(state.passkeyEnrollPage, true);
+  assert.equal(state.passkeySkipEnabled, true);
+  assert.equal(state.unknownAuthPage, false);
+});
+
+test('step 5 skips passkey enrollment and waits for final submit outcome', async () => {
+  const api = new Function(`
+let onPasskeyPage = true;
+const clicks = [];
+const skipButton = {
+  textContent: 'Skip',
+  disabled: false,
+  getAttribute(name) {
+    return name === 'data-dd-action-name' ? 'skip create account enroll passkey' : '';
+  },
+};
+const location = {
+  href: 'https://auth.openai.com/create-account-enroll-passkey',
+  pathname: '/create-account-enroll-passkey',
+};
+const document = {
+  body: {
+    get innerText() {
+      return onPasskeyPage ? 'Create your account with a passkey. Skip' : '';
+    },
+    get textContent() {
+      return this.innerText;
+    },
+  },
+  querySelector(selector) {
+    if (onPasskeyPage && String(selector || '').includes('skip create account enroll passkey')) return skipButton;
+    return null;
+  },
+  querySelectorAll(selector) {
+    return onPasskeyPage && String(selector || '').includes('button') ? [skipButton] : [];
+  },
+};
+
+function throwIfStopped() {}
+function log() {}
+async function sleep() {}
+async function humanPause() {}
+function simulateClick(el) {
+  clicks.push(el.textContent);
+  onPasskeyPage = false;
+  location.href = 'https://chatgpt.com/';
+  location.pathname = '/';
+}
+function isVisibleElement(element) { return Boolean(element); }
+function isActionEnabled(element) { return Boolean(element) && !element.disabled && element.getAttribute?.('aria-disabled') !== 'true'; }
+function getActionText(el) { return el?.textContent || ''; }
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return onPasskeyPage; }
+function isLikelyLoggedInChatgptHomeUrl() { return location.href === 'https://chatgpt.com/'; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+function getPageTextSnapshot() { return document.body.innerText || document.body.textContent || ''; }
+
+${extractFunction('isSignupProfilePageUrl')}
+${getStep5OutcomeBundle()}
+
+return {
+  run() {
+    return waitForStep5SubmitOutcome({ timeoutMs: 1000 });
+  },
+  snapshot() {
+    return { clicks };
+  },
+};
+`)();
+
+  const result = await api.run();
+  assert.deepEqual(api.snapshot().clicks, ['Skip']);
+  assert.deepEqual(result, {
+    state: 'logged_in_home',
+    url: 'https://chatgpt.com/',
+  });
 });
 
 test('step 5 treats phone signup callback error landing as success', async () => {

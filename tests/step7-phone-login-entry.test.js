@@ -229,6 +229,70 @@ return { clicks, step6OpenLoginEntry };
   assert.equal(result.routed, 'phone');
 });
 
+test('step 7 selects existing session on account chooser and routes by next state', async () => {
+  const cases = [
+    ['verification_page', 'verification'],
+    ['phone_verification_page', 'verification'],
+    ['oauth_consent_page', 'oauth'],
+    ['add_email_page', 'add-email'],
+    ['add_phone_page', 'add-phone'],
+    ['email_page', 'email'],
+    ['phone_entry_page', 'phone'],
+    ['password_page', 'password'],
+  ];
+
+  for (const [nextState, routed] of cases) {
+    const api = new Function(`
+const clicks = [];
+const metadata = [];
+const existingSessionButton = { id: 'session', textContent: 'user@example.com' };
+const nextState = ${JSON.stringify(nextState)};
+
+function normalizeStep6Snapshot(snapshot) { return snapshot; }
+function inspectLoginAuthState() { return { state: 'choose_account_page', existingSessionButton }; }
+function findChooseAccountExistingSessionButton() { return existingSessionButton; }
+function isActionEnabled() { return true; }
+function log() {}
+async function humanPause() {}
+async function sleep() {}
+function throwIfStopped() {}
+function simulateClick(el) { clicks.push(el.id); }
+function getOperationDelayRunner() {
+  return async (entry, operation) => {
+    metadata.push(entry);
+    return operation();
+  };
+}
+async function waitForChooseAccountTransition() { return { state: nextState }; }
+async function step6LoginFromEmailPage() { return { routed: 'email' }; }
+async function step6LoginFromPasswordPage() { return { routed: 'password' }; }
+async function step6LoginFromPhonePage() { return { routed: 'phone' }; }
+async function step6OpenLoginEntry() { return { routed: 'entry' }; }
+async function finalizeStep6VerificationReady() { return { routed: 'verification' }; }
+function createStep6OAuthConsentSuccessResult() { return { routed: 'oauth' }; }
+function createStep6AddEmailSuccessResult() { return { routed: 'add-email' }; }
+function createStep6AddPhoneSuccessResult() { return { routed: 'add-phone' }; }
+async function createStep6LoginTimeoutRecoveryTransition() { return { action: 'recoverable', result: { routed: 'recoverable' } }; }
+function createStep6RecoverableResult(reason, snapshot, options = {}) {
+  return { step6Outcome: 'recoverable', reason, state: snapshot?.state, message: options.message || '' };
+}
+
+${extractFunction('step6ChooseExistingAccount')}
+
+return { clicks, metadata, step6ChooseExistingAccount };
+    `)();
+
+    const result = await api.step6ChooseExistingAccount(
+      { visibleStep: 7 },
+      { state: 'choose_account_page', existingSessionButton: { id: 'session', textContent: 'user@example.com' } }
+    );
+
+    assert.equal(result.routed, routed, nextState);
+    assert.deepEqual(api.clicks, ['session'], nextState);
+    assert.deepEqual(api.metadata, [{ stepKey: 'oauth-login', kind: 'click', label: 'select-existing-session' }], nextState);
+  }
+});
+
 test('step 7 detects username text input when usernameKind is phone_number', () => {
   const api = createPhoneLoginEntryApi({
     phoneUsernameKind: true,

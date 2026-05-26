@@ -505,6 +505,27 @@ function createHostedPayPalHarness(options = {}) {
     setElements([submitButton]);
   }
 
+  function showBlockedPage() {
+    location.href = 'https://www.paypal.com/checkoutweb/blocked?token=EC-test';
+    location.host = 'www.paypal.com';
+    location.pathname = '/checkoutweb/blocked';
+    body.innerText = 'You have been blocked. We couldn\'t load the security challenge.';
+    body.textContent = body.innerText;
+    setElements([submitButton]);
+  }
+
+  function showGuestCardError() {
+    showGuestCheckout();
+    body.innerText = 'We weren\'t able to add this card. Check all the details are correct and try again or try a different card.';
+    body.textContent = body.innerText;
+  }
+
+  function showGuestPhoneError() {
+    showGuestCheckout();
+    body.innerText = 'We\'re unable to complete your request. Try a different phone number.';
+    body.textContent = body.innerText;
+  }
+
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
     location,
@@ -602,10 +623,13 @@ function createHostedPayPalHarness(options = {}) {
   return {
     events,
     send,
+    showBlockedPage,
+    showGuestCardError,
     showPayEmail,
     showCreateAccount,
     showGenericError,
     showGuestCheckout,
+    showGuestPhoneError,
     showVerification,
   };
 }
@@ -846,6 +870,62 @@ test('PayPal hosted genericError URL is exposed as generic_error stage', async (
   assert.equal(state.hostedStage, 'generic_error');
   assert.equal(state.hostedGenericError, true);
   assert.match(state.hostedGenericErrorMessage, /Things don'?t appear/);
+});
+
+test('PayPal hosted blocked page is exposed and does not click submit', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showBlockedPage();
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'blocked');
+  assert.equal(state.hostedBlocked, true);
+  assert.match(state.hostedBlockedMessage, /blocked|security challenge/i);
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: { expectedStage: 'guest_checkout' },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'blocked');
+  assert.equal(result.hostedBlocked, true);
+  assert.equal(result.submitted, false);
+  assert.equal(harness.events.some((event) => event.type === 'click'), false);
+});
+
+test('PayPal hosted guest checkout exposes card and phone errors', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestCardError();
+
+  const cardState = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(cardState.ok, true);
+  assert.equal(cardState.hostedStage, 'guest_checkout');
+  assert.equal(cardState.hostedGuestCardError, true);
+  assert.match(cardState.hostedGuestCardErrorMessage, /add this card|different card/i);
+
+  harness.showGuestPhoneError();
+  const phoneState = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(phoneState.ok, true);
+  assert.equal(phoneState.hostedStage, 'guest_checkout');
+  assert.equal(phoneState.hostedGuestPhoneError, true);
+  assert.match(phoneState.hostedGuestPhoneErrorMessage, /different phone number/i);
 });
 
 test('PayPal hosted genericError copy is exposed with message', async () => {

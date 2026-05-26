@@ -30,11 +30,15 @@
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS_LIMIT = 60;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_DEFAULT_SECONDS = 5;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_LIMIT_SECONDS = 60;
+  const HOSTED_CHECKOUT_PAYPAL_BLOCKED_ERROR_PREFIX = 'HOSTED_CHECKOUT_PAYPAL_BLOCKED::';
   const HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX = 'HOSTED_CHECKOUT_GENERIC_ERROR::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_DEFAULT = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
+  const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
+  const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
+  const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
   const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
   const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
@@ -42,6 +46,7 @@
   const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
   const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
   const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
+  const PAYPAL_HOSTED_STAGE_BLOCKED = 'blocked';
   const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
   const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
   const PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT = 'paypal-hosted-openai-checkout';
@@ -164,6 +169,103 @@
 
     function isPhonePlusModeState(state = {}) {
       return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
+    }
+
+    function normalizeString(value = '') {
+      return String(value || '').trim();
+    }
+
+    function firstNonEmpty(...values) {
+      for (const value of values) {
+        const normalized = normalizeString(value);
+        if (normalized) {
+          return normalized;
+        }
+      }
+      return '';
+    }
+
+    function collectSessionFieldValues(root, targetKeys = []) {
+      const normalizedTargets = new Set((Array.isArray(targetKeys) ? targetKeys : []).map((key) => normalizeString(key).toLowerCase()));
+      if (!normalizedTargets.size || !root || typeof root !== 'object') {
+        return [];
+      }
+
+      const results = [];
+      const queue = [{ value: root, path: '$' }];
+      const visited = new Set();
+      while (queue.length && results.length < 32) {
+        const current = queue.shift();
+        const value = current?.value;
+        if (!value || typeof value !== 'object') {
+          continue;
+        }
+        if (visited.has(value)) {
+          continue;
+        }
+        visited.add(value);
+
+        const entries = Array.isArray(value)
+          ? value.map((entry, index) => [String(index), entry])
+          : Object.entries(value);
+        for (const [key, entryValue] of entries) {
+          const normalizedKey = normalizeString(key).toLowerCase();
+          const path = `${current.path}.${key}`;
+          if (normalizedTargets.has(normalizedKey)) {
+            results.push({ key: normalizedKey, path, value: entryValue });
+          }
+          if (entryValue && typeof entryValue === 'object') {
+            queue.push({ value: entryValue, path });
+          }
+        }
+      }
+      return results;
+    }
+
+    function normalizePlanType(value = '') {
+      return normalizeString(value)
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+    }
+
+    function isPaidPlanType(value = '') {
+      const normalized = normalizePlanType(value);
+      if (!normalized) {
+        return false;
+      }
+      return !/(^|[_-])(free|guest|basic|default|none|null|unknown)([_-]|$)/i.test(normalized);
+    }
+
+    function inspectPlusActivationFromSession(session = null) {
+      const planSignals = collectSessionFieldValues(session, [
+        'planType',
+        'plan_type',
+        'chatgpt_plan_type',
+      ]);
+      const booleanSignals = collectSessionFieldValues(session, [
+        'isPaid',
+        'is_paid',
+        'hasActiveSubscription',
+        'has_active_subscription',
+        'subscriptionActive',
+        'subscription_active',
+        'isSubscribed',
+        'is_subscribed',
+      ]);
+      const planType = firstNonEmpty(
+        ...planSignals.map((entry) => typeof entry?.value === 'string' ? entry.value : ''),
+        session?.account?.planType,
+        session?.account?.plan_type,
+        session?.planType,
+        session?.plan_type
+      );
+      const paidSignal = booleanSignals.some((entry) => entry?.value === true);
+      return {
+        active: paidSignal || isPaidPlanType(planType),
+        paidSignal,
+        planType,
+        planSignalPath: normalizeString(planSignals[0]?.path || ''),
+      };
     }
 
     function normalizePlusPaymentEmailStateLocal(value = {}) {
@@ -2257,7 +2359,7 @@
       throw new Error('步骤 6：OpenAI hosted checkout 长时间未跳转到 PayPal 或支付成功页。');
     }
 
-    async function getHostedPayPalState(tabId) {
+    async function getHostedPayPalState(tabId, options = {}) {
       await waitForTabCompleteUntilStopped(tabId);
       await ensureContentScriptReadyOnTabUntilStopped(PAYPAL_SOURCE, tabId, {
         inject: PAYPAL_INJECT_FILES,
@@ -2274,12 +2376,22 @@
       }
       const pageState = result || {};
       if (isHostedCheckoutGenericErrorState(pageState)) {
-        await requestHostedCheckoutGenericErrorChoice(tabId, pageState);
+        const resolution = await requestHostedCheckoutGenericErrorChoice(tabId, pageState, options?.completionPayload || {});
+        if (resolution?.resolvedByPlusActivation) {
+          return {
+            ...pageState,
+            hostedStage: PAYPAL_HOSTED_STAGE_OUTSIDE,
+            plusActivationResolved: true,
+            resolvedByPlusActivation: true,
+            plusDetectedPlanType: resolution.planType || '',
+            plusCheckoutTabId: resolution.tabId,
+          };
+        }
       }
       return pageState;
     }
 
-    async function runHostedPayPalStep(tabId, payload = {}) {
+    async function runHostedPayPalStep(tabId, payload = {}, options = {}) {
       await waitForTabCompleteUntilStopped(tabId);
       await ensureContentScriptReadyOnTabUntilStopped(PAYPAL_SOURCE, tabId, {
         inject: PAYPAL_INJECT_FILES,
@@ -2296,7 +2408,17 @@
       }
       const stepResult = result || {};
       if (isHostedCheckoutGenericErrorState(stepResult)) {
-        await requestHostedCheckoutGenericErrorChoice(tabId, stepResult);
+        const resolution = await requestHostedCheckoutGenericErrorChoice(tabId, stepResult, options?.completionPayload || {});
+        if (resolution?.resolvedByPlusActivation) {
+          return {
+            ...stepResult,
+            hostedStage: PAYPAL_HOSTED_STAGE_OUTSIDE,
+            plusActivationResolved: true,
+            resolvedByPlusActivation: true,
+            plusDetectedPlanType: resolution.planType || '',
+            plusCheckoutTabId: resolution.tabId,
+          };
+        }
       }
       return stepResult;
     }
@@ -2379,6 +2501,66 @@
       };
     }
 
+    async function handleHostedGuestPhoneErrorWithSmsPool(tabId, pageState = {}, profile = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
+      const phoneErrorMessage = String(
+        pageState?.hostedGuestPhoneErrorMessage
+        || 'PayPal 提示当前号码不可用，请更换号码。'
+      ).trim();
+      const runtimeConfig = await getHostedCheckoutRuntimeConfig({}, {
+        ensureCurrentSmsEntry: false,
+      });
+      if (
+        !runtimeConfig?.hostedCheckoutUsesSmsPool
+        || !runtimeConfig?.hostedCheckoutCurrentSmsEntry?.key
+        || !runtimeConfig?.hostedCheckoutSmsPoolAutoDisableEnabled
+      ) {
+        return {
+          handled: false,
+          message: phoneErrorMessage,
+        };
+      }
+
+      const disableReason = `PayPal 提示号码不可用：${phoneErrorMessage}`;
+      const disableResult = await disableHostedCheckoutSmsPoolEntry(
+        runtimeConfig.hostedCheckoutCurrentSmsEntry,
+        disableReason,
+        { failureCount: HOSTED_CHECKOUT_SMS_POOL_DISABLE_THRESHOLD }
+      );
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码池号码 ${runtimeConfig.hostedCheckoutCurrentSmsEntry.phone} 已立即自动禁用。原因：${disableReason}`,
+        'warn'
+      );
+      if (!disableResult?.nextEntry?.phone) {
+        throw new Error(`步骤 ${getHostedStepNumber(stepKey)}：PayPal 提示当前号码不可用，且接码池已无其他启用号码：${phoneErrorMessage}`);
+      }
+
+      const nextProfile = {
+        ...profile,
+        phone: String(disableResult.nextEntry.phone || '').trim(),
+      };
+      await setState({
+        plusHostedCheckoutGuestProfile: nextProfile,
+        hostedCheckoutGuestProfile: nextProfile,
+        plusHostedCheckoutPhoneDigits: nextProfile.phone,
+      });
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码池已切换到下一个启用号码 ${disableResult.nextEntry.phone}，准备重新填写资料页。`,
+        'info'
+      );
+      await runHostedPayPalStep(tabId, {
+        ...nextProfile,
+        expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+        phone: nextProfile.phone,
+      });
+      return {
+        handled: true,
+        profile: nextProfile,
+        nextEntry: disableResult.nextEntry,
+      };
+    }
+
     function isHostedCheckoutGenericErrorState(pageState = {}) {
       return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR
         || pageState?.hostedGenericError === true;
@@ -2389,13 +2571,63 @@
         .test(String(error?.message || error || ''));
     }
 
-    async function requestHostedCheckoutGenericErrorChoice(tabId, pageState = {}) {
+    function isHostedCheckoutBlockedState(pageState = {}) {
+      return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_BLOCKED
+        || pageState?.hostedBlocked === true;
+    }
+
+    function buildHostedCheckoutBlockedError(pageState = {}) {
+      const blockedMessage = String(
+        pageState?.hostedBlockedMessage
+        || 'PayPal security challenge failed to load or the checkout page was blocked.'
+      ).trim();
+      return new Error(`${HOSTED_CHECKOUT_PAYPAL_BLOCKED_ERROR_PREFIX}${blockedMessage}`);
+    }
+
+    function isHostedCheckoutPlusActivationResolved(pageState = {}) {
+      return pageState?.plusActivationResolved === true
+        || pageState?.resolvedByPlusActivation === true;
+    }
+
+    async function requestHostedCheckoutGenericErrorChoice(tabId, pageState = {}, completionPayload = {}) {
       const requestId = `paypal-hosted-generic-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const pageMessage = String(pageState?.hostedGenericErrorMessage || '').trim()
         || 'Things don\'t appear to be working at the moment.';
       const latestState = typeof getState === 'function'
         ? await getState().catch(() => ({}))
         : {};
+      try {
+        const inspection = await refreshChatGptSessionAndInspectPlusActivation();
+        if (inspection?.active) {
+          await addLog(
+            `步骤 6：PayPal hosted checkout 返回 genericError，但刷新 ChatGPT 会话后检测到 PLUS 已生效（planType=${inspection.planType || 'unknown'}），直接继续下一步。`,
+            'ok'
+          );
+          await completeNodeFromBackground('plus-checkout-create', {
+            ...completionPayload,
+            plusDetectedPlanType: inspection.planType || '',
+            plusCheckoutTabId: inspection.tabId,
+          });
+          return {
+            resolvedByPlusActivation: true,
+            planType: inspection.planType || '',
+            tabId: inspection.tabId,
+          };
+        }
+        await addLog(
+          latestState?.autoRunRetryPaypalCallback
+            ? `步骤 6：PayPal hosted checkout 返回 genericError，刷新 ChatGPT 会话后暂未检测到 PLUS 生效${inspection?.planType ? `（planType=${inspection.planType}）` : ''}，将继续按 PAYPAL回调自动重试处理。`
+            : `步骤 6：PayPal hosted checkout 返回 genericError，刷新 ChatGPT 会话后暂未检测到 PLUS 生效${inspection?.planType ? `（planType=${inspection.planType}）` : ''}，将停止当前支付链路并等待你选择“检查”或“重试”。`,
+          'warn'
+        );
+      } catch (error) {
+        await addLog(
+          latestState?.autoRunRetryPaypalCallback
+            ? `步骤 6：PayPal hosted checkout 返回 genericError，刷新 ChatGPT 会话检查 PLUS 状态失败，将继续按 PAYPAL回调自动重试处理。原因：${error?.message || String(error || '未知错误')}`
+            : `步骤 6：PayPal hosted checkout 返回 genericError，刷新 ChatGPT 会话检查 PLUS 状态失败，将停止当前支付链路并等待你选择“检查”或“重试”。原因：${error?.message || String(error || '未知错误')}`,
+          'warn'
+        );
+      }
       if (latestState?.autoRunRetryPaypalCallback) {
         await addLog('步骤 6：PayPal hosted checkout 返回 genericError，PAYPAL回调自动重试已开启，将换新邮箱重走流程。', 'warn');
         throw new Error(`${HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX}${pageMessage}`);
@@ -2573,6 +2805,9 @@
         let pageState = null;
         try {
           pageState = await getHostedPayPalState(tabId);
+          if (isHostedCheckoutPlusActivationResolved(pageState)) {
+            return pageState;
+          }
           lastStage = pageState?.hostedStage || lastStage;
         } catch (error) {
           if (isHostedCheckoutGenericError(error)) {
@@ -2831,6 +3066,9 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if (isHostedCheckoutPlusActivationResolved(pageState)) {
+        return;
+      }
       if (isHostedStageAtOrAfter(pageState.hostedStage, PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT)
         && pageState.hostedStage !== PAYPAL_HOSTED_STAGE_LOGIN) {
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：当前 PayPal 已进入后续页面（${pageState.hostedStage}），邮箱节点直接完成。`, 'info');
@@ -2866,12 +3104,14 @@
           profile: refreshedProfile,
           config: refreshedProfileConfig,
         } = await ensureHostedGuestProfile(state, { forceRefresh: true });
-        const refreshedState = {
+        let refreshedState = {
           ...state,
           plusHostedCheckoutGuestProfile: refreshedProfile,
           hostedCheckoutGuestProfile: refreshedProfile,
           plusHostedCheckoutPhoneDigits: refreshedProfile.phone,
         };
+        let profile = refreshedProfile;
+        let hostedProfileSubmitted = false;
         if (await completeHostedStepIfSuccessful(stepKey, tabId, refreshedState)) {
           return;
         }
@@ -2884,7 +3124,14 @@
           return;
         }
 
-        const pageState = await getHostedPayPalState(tabId);
+        let pageState = await getHostedPayPalState(tabId, {
+          completionPayload: {
+            plusHostedCheckoutLastStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
+          },
+        });
+        if (isHostedCheckoutPlusActivationResolved(pageState)) {
+          return;
+        }
         const reviewConfig = refreshedProfileConfig || await getHostedCheckoutRuntimeConfig(refreshedState, {
           ensureCurrentSmsEntry: true,
         });
@@ -2893,10 +3140,41 @@
             ? `验证码链接已绑定当前池条目 ${maskHostedPhoneForLog(reviewConfig.hostedCheckoutCurrentSmsEntry?.phone)}`
             : `手动手机号 ${maskHostedPhoneForLog(reviewConfig.phone)}`,
         });
+        if (isHostedCheckoutBlockedState(pageState)) {
+          throw buildHostedCheckoutBlockedError(pageState);
+        }
+        if (pageState.hostedGuestPhoneError) {
+          const phoneErrorResult = await handleHostedGuestPhoneErrorWithSmsPool(tabId, pageState, profile, stepKey);
+          if (!phoneErrorResult.handled) {
+            throw new Error(`步骤 ${stepNumber}：PayPal 提示当前号码不可用：${phoneErrorResult.message || pageState.hostedGuestPhoneErrorMessage || '未知号码错误'}`);
+          }
+          profile = phoneErrorResult.profile;
+          refreshedState = {
+            ...refreshedState,
+            plusHostedCheckoutGuestProfile: profile,
+            hostedCheckoutGuestProfile: profile,
+            plusHostedCheckoutPhoneDigits: profile.phone,
+          };
+          hostedProfileSubmitted = true;
+          pageState = await getHostedPayPalState(tabId, {
+            completionPayload: {
+              plusHostedCheckoutLastStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
+            },
+          });
+          if (isHostedCheckoutPlusActivationResolved(pageState)) {
+            return;
+          }
+          if (isHostedCheckoutBlockedState(pageState)) {
+            throw buildHostedCheckoutBlockedError(pageState);
+          }
+        }
         if ((await handleHostedPayPalVerificationState(tabId, pageState, refreshedState, verificationContext, stepKey)).handled) {
           const nextState = await waitForHostedPayPalStage(
             tabId,
             async (stateInfo) => {
+              if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+                return true;
+              }
               if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
                 return false;
               }
@@ -2904,6 +3182,9 @@
             },
             { label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
           );
+          if (isHostedCheckoutPlusActivationResolved(nextState)) {
+            return;
+          }
           await completeHostedStep(stepKey, tabId, {
             plusHostedCheckoutLastStage: nextState.hostedStage || '',
           });
@@ -2921,13 +3202,14 @@
           throw new Error(`步骤 ${stepNumber}：当前不是 PayPal 资料页（当前状态：${pageState.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN}）。`);
         }
 
-        const profile = refreshedProfile;
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在填写 PayPal 无卡直绑资料，提交前会复查电话是否为 ${profile.phone}。`, 'info');
-        const cardResult = await runHostedPayPalStep(tabId, {
-          ...profile,
-          expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-          phone: profile.phone,
-        });
+        const cardResult = hostedProfileSubmitted
+          ? null
+          : await runHostedPayPalStep(tabId, {
+            ...profile,
+            expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+            phone: profile.phone,
+          });
         if (cardResult?.phoneMatched) {
           await addHostedStepLog(
             stepKey,
@@ -2935,9 +3217,63 @@
             'info'
           );
         }
+        let hostedGuestCardErrorRetries = 0;
+        let hostedGuestCardErrorRetrySettlingUntil = 0;
         const nextState = await waitForHostedPayPalStage(
           tabId,
           async (stateInfo) => {
+            if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+              return true;
+            }
+            if (isHostedCheckoutBlockedState(stateInfo)) {
+              throw buildHostedCheckoutBlockedError(stateInfo);
+            }
+            if (stateInfo?.hostedGuestPhoneError) {
+              const phoneErrorResult = await handleHostedGuestPhoneErrorWithSmsPool(tabId, stateInfo, profile, stepKey);
+              if (!phoneErrorResult.handled) {
+                throw new Error(`步骤 ${stepNumber}：PayPal 提示当前号码不可用：${phoneErrorResult.message || stateInfo.hostedGuestPhoneErrorMessage || '未知号码错误'}`);
+              }
+              profile = phoneErrorResult.profile;
+              refreshedState = {
+                ...refreshedState,
+                plusHostedCheckoutGuestProfile: profile,
+                hostedCheckoutGuestProfile: profile,
+                plusHostedCheckoutPhoneDigits: profile.phone,
+              };
+              hostedProfileSubmitted = true;
+              return false;
+            }
+            if (stateInfo?.hostedGuestCardError) {
+              if (Date.now() < hostedGuestCardErrorRetrySettlingUntil) {
+                return false;
+              }
+              if (hostedGuestCardErrorRetries >= HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS) {
+                const cardErrorMessage = String(stateInfo.hostedGuestCardErrorMessage || 'unknown card error').trim();
+                throw new Error(`Step ${stepNumber}: PayPal guest checkout card error exceeded ${HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS} retries. Error: ${cardErrorMessage}`);
+              }
+              hostedGuestCardErrorRetries += 1;
+              const retryProfileResult = await ensureHostedGuestProfile(refreshedState, { forceRefresh: true });
+              profile = retryProfileResult.profile;
+              refreshedState = {
+                ...refreshedState,
+                plusHostedCheckoutGuestProfile: profile,
+                hostedCheckoutGuestProfile: profile,
+                plusHostedCheckoutPhoneDigits: profile.phone,
+              };
+              await addHostedStepLog(
+                stepKey,
+                `Step ${stepNumber}: PayPal guest checkout reported a card error; retrying with a fresh profile (${hostedGuestCardErrorRetries}/${HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS}). Error: ${stateInfo.hostedGuestCardErrorMessage || 'unknown card error'}`,
+                'warn'
+              );
+              await runHostedPayPalStep(tabId, {
+                ...profile,
+                expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+                phone: profile.phone,
+              });
+              hostedProfileSubmitted = true;
+              hostedGuestCardErrorRetrySettlingUntil = Date.now() + HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS;
+              return false;
+            }
             if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
               return false;
             }
@@ -2945,6 +3281,9 @@
           },
           { label: `步骤 ${stepNumber}：等待 PayPal 资料页跳转` }
         );
+        if (isHostedCheckoutPlusActivationResolved(nextState)) {
+          return;
+        }
         await completeHostedStep(stepKey, tabId, {
           plusHostedCheckoutLastStage: nextState.hostedStage || '',
         });
@@ -2972,10 +3311,16 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if (isHostedCheckoutPlusActivationResolved(pageState)) {
+        return;
+      }
       if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
         const nextState = await waitForHostedPayPalStage(
           tabId,
           async (stateInfo) => {
+            if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+              return true;
+            }
             if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
               return false;
             }
@@ -3007,6 +3352,9 @@
       const nextState = await waitForHostedPayPalStage(
         tabId,
         async (stateInfo) => {
+          if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+            return true;
+          }
           if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
             return false;
           }
@@ -3014,6 +3362,9 @@
         },
         { label: `步骤 ${stepNumber}：等待 PayPal 创建确认页跳转` }
       );
+      if (isHostedCheckoutPlusActivationResolved(nextState)) {
+        return;
+      }
       await completeHostedStep(stepKey, tabId, {
         plusHostedCheckoutLastStage: nextState.hostedStage || '',
       });
@@ -3037,6 +3388,9 @@
       }
 
       const pageState = await getHostedPayPalState(tabId);
+      if (isHostedCheckoutPlusActivationResolved(pageState)) {
+        return;
+      }
       if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
         await waitForHostedUrlAfterAction(
           tabId,
@@ -3059,6 +3413,9 @@
       await waitForHostedPayPalStage(
         tabId,
         async (stateInfo) => {
+          if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+            return true;
+          }
           if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
             return false;
           }
@@ -3316,7 +3673,7 @@
       }
     }
 
-    async function readAccessTokenFromChatGptSessionTab(tabId) {
+    async function readChatGptSessionStateFromTab(tabId) {
       await waitForTabCompleteUntilStopped(tabId);
       await sleepWithStop(1000);
       await ensureContentScriptReadyOnTabUntilStopped(PLUS_CHECKOUT_SOURCE, tabId, {
@@ -3336,7 +3693,34 @@
       if (sessionResult?.error) {
         throw new Error(sessionResult.error);
       }
-      return String(sessionResult?.accessToken || sessionResult?.session?.accessToken || '').trim();
+      return {
+        session: sessionResult?.session || null,
+        accessToken: normalizeString(sessionResult?.accessToken || sessionResult?.session?.accessToken),
+        raw: sessionResult || {},
+      };
+    }
+
+    async function readAccessTokenFromChatGptSessionTab(tabId) {
+      const sessionState = await readChatGptSessionStateFromTab(tabId);
+      return normalizeString(sessionState?.accessToken);
+    }
+
+    async function refreshChatGptSessionAndInspectPlusActivation() {
+      const tabId = await openFreshChatGptTabForCheckoutCreate();
+      await waitForTabCompleteUntilStopped(tabId);
+      await addLog('步骤 6：已打开 ChatGPT，等待 5 秒后刷新会话并检查 PLUS 状态。', 'info');
+      await sleepWithStop(PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS);
+      if (chrome?.tabs?.reload) {
+        await chrome.tabs.reload(tabId).catch(() => {});
+        await waitForTabCompleteUntilStopped(tabId).catch(() => {});
+      }
+      const sessionState = await readChatGptSessionStateFromTab(tabId);
+      return {
+        tabId,
+        session: sessionState?.session || null,
+        accessToken: normalizeString(sessionState?.accessToken),
+        ...inspectPlusActivationFromSession(sessionState?.session || null),
+      };
     }
 
     async function generateCloudCheckoutFromApi(accessToken = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, state = {}) {

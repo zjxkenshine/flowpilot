@@ -504,9 +504,18 @@
             </div>
             <textarea id="input-hosted-sms-pool-import" class="data-textarea mono" rows="4"
               placeholder="1234567890&#10;&#10;https://mail.test.com/api/text-relay/eca_tr_xxxxxxxxx"></textarea>
-            <div class="data-inline">
+            <div class="data-inline hosted-sms-pool-import-actions">
               <button id="btn-hosted-sms-pool-import-file" class="btn btn-outline btn-sm" type="button">导入文件</button>
               <button id="btn-hosted-sms-pool-import" class="btn btn-primary btn-sm" type="button">导入号码</button>
+              <label class="hosted-checkout-setting-toggle hosted-sms-pool-auto-disable-toggle" title="开启后，PayPal 接码池号码连续接码失败会被自动禁用，后续选号自动跳过；默认关闭">
+                <span class="setting-caption">自动禁用</span>
+                <span class="toggle-switch">
+                  <input type="checkbox" id="input-hosted-checkout-sms-pool-auto-disable-enabled" />
+                  <span class="toggle-switch-track" aria-hidden="true">
+                    <span class="toggle-switch-thumb"></span>
+                  </span>
+                </span>
+              </label>
             </div>
             <input id="input-hosted-sms-pool-import-file" type="file" accept=".txt,text/plain" hidden />
             <div class="icloud-card">
@@ -516,6 +525,8 @@
                   placeholder="搜索号码 / 接口" />
                 <select id="select-hosted-sms-pool-filter" class="data-select icloud-filter">
                   <option value="all">全部</option>
+                  <option value="enabled">启用中</option>
+                  <option value="disabled">已禁用</option>
                   <option value="current">当前</option>
                   <option value="unused">0 次</option>
                   <option value="used">已使用</option>
@@ -530,15 +541,6 @@
       <div class="data-row" id="row-hosted-checkout-resend-settings" style="display:none;">
         <span class="data-label">PayPal 接码</span>
         <div class="data-inline data-value-actions hosted-checkout-resend-settings-inline">
-          <label class="hosted-checkout-setting-toggle hosted-sms-pool-auto-disable-toggle" title="开启后，PayPal 接码池号码连续接码失败会被自动禁用，后续选号自动跳过；默认关闭">
-            <span class="setting-caption">自动禁用</span>
-            <span class="toggle-switch">
-              <input type="checkbox" id="input-hosted-checkout-sms-pool-auto-disable-enabled" />
-              <span class="toggle-switch-track" aria-hidden="true">
-                <span class="toggle-switch-thumb"></span>
-              </span>
-            </span>
-          </label>
           <label class="hosted-checkout-setting-toggle" title="开启后检测到 PayPal 验证码弹窗 1 秒后先点击 Resend，再进入首次等码窗口">
             <span class="setting-caption">首次直接重发</span>
             <span class="toggle-switch">

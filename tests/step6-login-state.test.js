@@ -57,7 +57,10 @@ const bundle = [
   extractFunction('getContactVerificationServerErrorText'),
   extractFunction('hasPhoneVerificationPromptText'),
   extractFunction('isPhoneVerificationPageReady'),
+  extractFunction('findChooseAccountExistingSessionButton'),
+  extractFunction('isChooseAccountPageReady'),
   extractFunction('inspectLoginAuthState'),
+  extractFunction('serializeLoginAuthState'),
   extractFunction('normalizeStep6Snapshot'),
 ].join('\n');
 
@@ -69,6 +72,18 @@ const location = {
   pathname: ${JSON.stringify(overrides.pathname || '/log-in')},
 };
 
+const existingSessionButton = ${overrides.existingSessionButton ? `{
+  textContent: ${JSON.stringify(overrides.existingSessionButton.textContent || '')},
+  disabled: ${JSON.stringify(Boolean(overrides.existingSessionButton.disabled))},
+  getAttribute(name) {
+    return ({
+      name: ${JSON.stringify(overrides.existingSessionButton.name || '')},
+      value: ${JSON.stringify(overrides.existingSessionButton.value || '')},
+      'data-dd-action-name': ${JSON.stringify(overrides.existingSessionButton.ddActionName || '')},
+    })[name] || '';
+  },
+}` : 'null'};
+
 const document = {
   title: ${JSON.stringify(overrides.title || '')},
   body: {
@@ -77,6 +92,12 @@ const document = {
   },
   querySelector() {
     return null;
+  },
+  querySelectorAll(selector) {
+    if (existingSessionButton && String(selector || '').includes('button')) {
+      return [existingSessionButton];
+    }
+    return [];
   },
 };
 
@@ -136,6 +157,22 @@ function isVisibleElement() {
   return true;
 }
 
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true';
+}
+
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function getVerificationErrorText() {
+  return '';
+}
+
 function isStep8Ready() {
   return ${JSON.stringify(Boolean(overrides.consentReady))};
 }
@@ -148,6 +185,7 @@ ${bundle}
 
 return {
   inspectLoginAuthState,
+  serializeLoginAuthState,
   isPhoneVerificationPageReady,
   normalizeStep6Snapshot,
 };
@@ -337,6 +375,24 @@ return {
   assert.strictEqual(snapshot.addEmailPage, true);
 }
 
+{
+  const api = createApi({
+    pathname: '/choose-an-account',
+    href: 'https://auth.openai.com/choose-an-account',
+    pageText: 'Welcome back. Choose an account to continue.',
+    existingSessionButton: {
+      name: 'session_id',
+      value: 'session-1',
+      textContent: 'user@example.com',
+    },
+  });
+
+  const snapshot = api.inspectLoginAuthState();
+  assert.strictEqual(snapshot.state, 'choose_account_page');
+  assert.strictEqual(Boolean(snapshot.existingSessionButton), true);
+  assert.strictEqual(api.serializeLoginAuthState(snapshot).hasExistingSessionButton, true);
+}
+
 assert.ok(
   extractFunction('inspectLoginAuthState').includes("state: 'oauth_consent_page'"),
   'inspectLoginAuthState 应产出 oauth_consent_page 状态'
@@ -350,6 +406,11 @@ assert.ok(
 assert.ok(
   extractFunction('inspectLoginAuthState').includes("state: 'add_email_page'"),
   'inspectLoginAuthState 应产出 add_email_page 状态'
+);
+
+assert.ok(
+  extractFunction('inspectLoginAuthState').includes("state: 'choose_account_page'"),
+  'inspectLoginAuthState should produce choose_account_page state'
 );
 
 console.log('step6 login state tests passed');

@@ -268,9 +268,16 @@
               plusCheckoutConversionProxyUrl: '',
               plusCheckoutConversionProxy711Region: '',
               hostedCheckoutVerificationPopupDelaySeconds: 20,
+              hostedCheckoutFirstDirectResendEnabled: false,
+              hostedCheckoutFirstResendWaitSeconds: 20,
+              hostedCheckoutSubsequentResendWaitSeconds: 25,
+              hostedCheckoutVerificationPollAttempts: 6,
+              hostedCheckoutVerificationPollIntervalSeconds: 5,
+              hostedCheckoutVerificationResendMaxAttempts: 1,
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               hostedCheckoutSmsPoolText: '',
+              hostedCheckoutSmsPoolAutoDisableEnabled: false,
               hostedCheckoutSmsPoolUsage: {},
               hostedCheckoutCurrentSmsEntry: null,
               plusHostedCheckoutOauthDelaySeconds: 3,
@@ -547,6 +554,53 @@
                 0,
                 60
               ),
+              hostedCheckoutFirstDirectResendEnabled: Boolean(
+                input?.hostedCheckoutFirstDirectResendEnabled
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutFirstDirectResendEnabled
+                  ?? defaults.flows.openai.plus.hostedCheckoutFirstDirectResendEnabled
+              ),
+              hostedCheckoutFirstResendWaitSeconds: normalizeBoundedInteger(
+                input?.hostedCheckoutFirstResendWaitSeconds
+                  ?? input?.hostedCheckoutVerificationPopupDelaySeconds
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutFirstResendWaitSeconds
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationPopupDelaySeconds
+                  ?? defaults.flows.openai.plus.hostedCheckoutFirstResendWaitSeconds,
+                defaults.flows.openai.plus.hostedCheckoutFirstResendWaitSeconds,
+                0,
+                300
+              ),
+              hostedCheckoutSubsequentResendWaitSeconds: normalizeBoundedInteger(
+                input?.hostedCheckoutSubsequentResendWaitSeconds
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutSubsequentResendWaitSeconds
+                  ?? defaults.flows.openai.plus.hostedCheckoutSubsequentResendWaitSeconds,
+                defaults.flows.openai.plus.hostedCheckoutSubsequentResendWaitSeconds,
+                0,
+                300
+              ),
+              hostedCheckoutVerificationPollAttempts: normalizeBoundedInteger(
+                input?.hostedCheckoutVerificationPollAttempts
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationPollAttempts
+                  ?? defaults.flows.openai.plus.hostedCheckoutVerificationPollAttempts,
+                defaults.flows.openai.plus.hostedCheckoutVerificationPollAttempts,
+                1,
+                60
+              ),
+              hostedCheckoutVerificationPollIntervalSeconds: normalizeBoundedInteger(
+                input?.hostedCheckoutVerificationPollIntervalSeconds
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationPollIntervalSeconds
+                  ?? defaults.flows.openai.plus.hostedCheckoutVerificationPollIntervalSeconds,
+                defaults.flows.openai.plus.hostedCheckoutVerificationPollIntervalSeconds,
+                1,
+                60
+              ),
+              hostedCheckoutVerificationResendMaxAttempts: normalizeBoundedInteger(
+                input?.hostedCheckoutVerificationResendMaxAttempts
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationResendMaxAttempts
+                  ?? defaults.flows.openai.plus.hostedCheckoutVerificationResendMaxAttempts,
+                defaults.flows.openai.plus.hostedCheckoutVerificationResendMaxAttempts,
+                0,
+                10
+              ),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -565,6 +619,11 @@
                 );
                 return poolText;
               })(),
+              hostedCheckoutSmsPoolAutoDisableEnabled: Boolean(
+                input?.hostedCheckoutSmsPoolAutoDisableEnabled
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolAutoDisableEnabled
+                  ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled
+              ),
               hostedCheckoutSmsPoolUsage: (() => {
                 const poolText = normalizeHostedCheckoutSmsPoolText(
                   input?.hostedCheckoutSmsPoolText
@@ -763,9 +822,16 @@
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;
       next.hostedCheckoutVerificationPopupDelaySeconds = openaiState.plus.hostedCheckoutVerificationPopupDelaySeconds;
+      next.hostedCheckoutFirstDirectResendEnabled = openaiState.plus.hostedCheckoutFirstDirectResendEnabled;
+      next.hostedCheckoutFirstResendWaitSeconds = openaiState.plus.hostedCheckoutFirstResendWaitSeconds;
+      next.hostedCheckoutSubsequentResendWaitSeconds = openaiState.plus.hostedCheckoutSubsequentResendWaitSeconds;
+      next.hostedCheckoutVerificationPollAttempts = openaiState.plus.hostedCheckoutVerificationPollAttempts;
+      next.hostedCheckoutVerificationPollIntervalSeconds = openaiState.plus.hostedCheckoutVerificationPollIntervalSeconds;
+      next.hostedCheckoutVerificationResendMaxAttempts = openaiState.plus.hostedCheckoutVerificationResendMaxAttempts;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.hostedCheckoutSmsPoolText = openaiState.plus.hostedCheckoutSmsPoolText;
+      next.hostedCheckoutSmsPoolAutoDisableEnabled = openaiState.plus.hostedCheckoutSmsPoolAutoDisableEnabled;
       next.hostedCheckoutSmsPoolUsage = cloneValue(openaiState.plus.hostedCheckoutSmsPoolUsage);
       next.hostedCheckoutCurrentSmsEntry = cloneValue(openaiState.plus.hostedCheckoutCurrentSmsEntry);
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;

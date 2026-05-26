@@ -51,9 +51,28 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
+function extractConst(name) {
+  const pattern = new RegExp(`const\\s+${name}\\s*=\\s*[\\s\\S]*?;`);
+  const match = source.match(pattern);
+  if (!match) {
+    throw new Error(`missing const ${name}`);
+  }
+  return match[0];
+}
+
 function getStep5Bundle() {
   return [
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_PATH_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_HEADING_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_SKIP_PATTERN'),
+    extractConst('CREATE_ACCOUNT_ENROLL_PASSKEY_PRIMARY_PATTERN'),
+    extractFunction('normalizeStep5SignupContext'),
+    extractFunction('isStep5PhoneSignupContext'),
+    extractFunction('getStep5CallbackErrorLandingText'),
+    extractFunction('isStep5CallbackErrorLandingUrl'),
+    extractFunction('isStep5CallbackErrorLanding'),
     extractFunction('getStep5DirectCompletionPayload'),
+    extractFunction('getStep5DirectAdoptableSuccessState'),
     extractFunction('isSignupProfilePageUrl'),
     extractFunction('isStep5AllConsentText'),
     extractFunction('findStep5AllConsentCheckbox'),
@@ -67,6 +86,11 @@ function getStep5Bundle() {
     extractFunction('isStep5SubmitButtonClickable'),
     extractFunction('isStep5ProfileStillVisible'),
     extractFunction('getStep5PostSubmitSuccessState'),
+    extractFunction('getPageTextSnapshot'),
+    extractFunction('findCreateAccountEnrollPasskeyButton'),
+    extractFunction('getCreateAccountEnrollPasskeyPageState'),
+    extractFunction('skipCreateAccountEnrollPasskey'),
+    extractFunction('getStep5SubmitState'),
     extractFunction('installStep5NavigationCompletionReporter'),
     extractFunction('waitForStep5SubmitOutcome'),
     extractFunction('step5_fillNameBirthday'),

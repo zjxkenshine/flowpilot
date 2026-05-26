@@ -470,6 +470,12 @@ return {
             plus: {
               plusModeEnabled: true,
               plusPaymentMethod: 'paypal',
+              hostedCheckoutFirstDirectResendEnabled: true,
+              hostedCheckoutFirstResendWaitSeconds: 34,
+              hostedCheckoutSubsequentResendWaitSeconds: 41,
+              hostedCheckoutVerificationPollAttempts: 11,
+              hostedCheckoutVerificationPollIntervalSeconds: 6,
+              hostedCheckoutVerificationResendMaxAttempts: 4,
               hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
               hostedCheckoutSmsPoolUsage: {
                 '4155555678----https://example.com/verify': { useCount: 2, lastError: 'timeout' },
@@ -505,9 +511,18 @@ return {
     phone: '4155555678',
     verificationUrl: 'https://example.com/verify',
   });
+  assert.equal(api.getPersistedUpdates().hostedCheckoutFirstDirectResendEnabled, true);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutFirstResendWaitSeconds, 34);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutSubsequentResendWaitSeconds, 41);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollAttempts, 11);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollIntervalSeconds, 6);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationResendMaxAttempts, 4);
   assert.equal(api.getStateUpdates().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(api.getStateUpdates().hostedCheckoutFirstResendWaitSeconds, 34);
   assert.equal(api.getBroadcastPayload().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(api.getBroadcastPayload().hostedCheckoutVerificationResendMaxAttempts, 4);
   assert.equal(result.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(result.hostedCheckoutVerificationPollIntervalSeconds, 6);
 });
 
 test('importSettingsBundle restores hosted checkout first resend wait and mirrors legacy popup delay field', async () => {
