@@ -1032,15 +1032,17 @@
       );
 
       const tierFailures = [];
-      const attemptedTiers = eligibleQueue.slice(0, maxTierCount);
-      for (let tierIndex = 0; tierIndex < attemptedTiers.length; tierIndex += 1) {
-        const tier = attemptedTiers[tierIndex];
+      let expandedByWrongMaxPrice = false;
+      let attemptedTierCount = maxTierCount;
+      for (let tierIndex = 0; tierIndex < Math.min(attemptedTierCount, eligibleQueue.length); tierIndex += 1) {
+        const attemptedTiersTotal = Math.min(attemptedTierCount, eligibleQueue.length);
+        const tier = eligibleQueue[tierIndex];
         const tierLabel = getTierLabel(tier);
         let lastTierFailureText = '';
         for (let round = 1; round <= safeRounds; round += 1) {
           throwIfStopped();
           await addLog(
-            `步骤 9：${providerLabel} 正在获取手机号（档位 ${tierIndex + 1}/${attemptedTiers.length}：${tierLabel}，第 ${round}/${safeRounds} 轮）...`,
+            `步骤 9：${providerLabel} 正在获取手机号（档位 ${tierIndex + 1}/${attemptedTiersTotal}：${tierLabel}，第 ${round}/${safeRounds} 轮）...`,
             'info'
           );
           const result = await attemptTier(tier, { round, tierIndex, tierLabel });
@@ -1051,6 +1053,14 @@
               tierIndex,
               tierFailures,
             };
+          }
+          if (result?.expandTierQueue && !expandedByWrongMaxPrice && eligibleQueue.length > attemptedTierCount) {
+            expandedByWrongMaxPrice = true;
+            attemptedTierCount = eligibleQueue.length;
+            await addLog(
+              `步骤 9：${providerLabel} 检测到价格上限过低（WRONG_MAX_PRICE），本次取号将试完配置范围内剩余候选档位，不再受单次升档预算 ${safeUpgradeLimit} 次限制。`,
+              'warn'
+            );
           }
           if (result?.terminalError) {
             throw result.terminalError;
@@ -1064,6 +1074,9 @@
             };
           }
           lastTierFailureText = result?.failureText || result?.lastError?.message || lastTierFailureText || '暂无可用号码';
+          if (result?.skipRemainingRounds) {
+            break;
+          }
           if (round < safeRounds) {
             await addLog(
               `步骤 9：${providerLabel} 档位 ${tierLabel} 暂无可用号码（第 ${round}/${safeRounds} 轮）；${Math.ceil(retryDelayMs / 1000)} 秒后重试。`,
@@ -1078,7 +1091,9 @@
           label: tierLabel,
           reason: lastTierFailureText || '暂无可用号码',
         });
-        const nextTier = attemptedTiers[tierIndex + 1];
+        const nextTier = tierIndex + 1 < Math.min(attemptedTierCount, eligibleQueue.length)
+          ? eligibleQueue[tierIndex + 1]
+          : null;
         if (nextTier) {
           if (tier.source === 'preferred') {
             await addLog(
@@ -1087,13 +1102,16 @@
             );
           }
           await addLog(
-            `步骤 9：${providerLabel} 档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，正在于本次取号内切换到下一候选档位 ${getTierLabel(nextTier)}（${tierIndex + 1}/${safeUpgradeLimit}）。`,
+            expandedByWrongMaxPrice
+              ? `步骤 9：${providerLabel} 档位 ${tierLabel} 因价格上限过低或无号未获取到号码，正在切换到下一候选档位 ${getTierLabel(nextTier)}。`
+              : `步骤 9：${providerLabel} 档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，正在于本次取号内切换到下一候选档位 ${getTierLabel(nextTier)}（${tierIndex + 1}/${safeUpgradeLimit}）。`,
             'warn'
           );
         }
       }
 
-      const remainingTiers = Math.max(0, eligibleQueue.length - attemptedTiers.length);
+      const attemptedCount = Math.min(attemptedTierCount, eligibleQueue.length);
+      const remainingTiers = Math.max(0, eligibleQueue.length - attemptedCount);
       if (remainingTiers > 0) {
         if (safeUpgradeLimit <= 0) {
           await addLog(
@@ -3084,6 +3102,15 @@
       return /WRONG_MAX_PRICE|价格上限过低|价格上限不符合平台要求|低于当前配置的最低购买价|超过当前配置的价格上限/i.test(text);
     }
 
+    function describeHeroSmsWrongMaxPriceFailure(payloadOrMessage, fallback = '价格档位低于平台要求') {
+      const requiredPrice = extractHeroSmsWrongMaxPrice(payloadOrMessage);
+      const rawText = describeHeroSmsPayload(payloadOrMessage);
+      if (requiredPrice !== null) {
+        return `价格档位低于平台要求，平台要求至少 ${requiredPrice}（WRONG_MAX_PRICE）`;
+      }
+      return rawText || fallback;
+    }
+
     function isProviderNoSupplyFailureMessage(message = '') {
       const text = String(message || '').trim();
       if (!text) {
@@ -3409,38 +3436,54 @@
       let nextMaxPrice = maxPrice;
       let retriedWithUpdatedPrice = false;
       let retriedWithoutPrice = false;
+      let wrongMaxPriceAdjusted = false;
       const userLimit = normalizeHeroSmsPriceLimit(options.userLimit);
       const userMinLimit = normalizeHeroSmsPriceLimit(options.userMinLimit);
       const hasPriceBounds = userLimit !== null || userMinLimit !== null;
       const operator = String(options.operator || '').trim();
+      const maybeRetryWithUpdatedPrice = (payloadOrMessage) => {
+        const updatedMaxPrice = extractHeroSmsWrongMaxPrice(payloadOrMessage);
+        if (
+          nextMaxPrice === null
+          || nextMaxPrice === undefined
+          || retriedWithUpdatedPrice
+          || updatedMaxPrice === null
+        ) {
+          return false;
+        }
+        if (userLimit !== null && updatedMaxPrice > userLimit) {
+          throw new Error(
+            `HeroSMS ${formatHeroSmsActionName(action)}失败：价格上限过低，平台要求至少 ${updatedMaxPrice}，已超过当前配置的价格上限 ${userLimit}。`
+          );
+        }
+        if (userMinLimit !== null && updatedMaxPrice < userMinLimit) {
+          throw new Error(
+            `HeroSMS ${formatHeroSmsActionName(action)}失败：平台要求价格 ${updatedMaxPrice} 低于当前配置的最低购买价 ${userMinLimit}。`
+          );
+        }
+        nextMaxPrice = updatedMaxPrice;
+        retriedWithUpdatedPrice = true;
+        wrongMaxPriceAdjusted = true;
+        return true;
+      };
 
       while (true) {
         try {
-          return await fetchPhoneActivationPayload(config, countryConfig, action, {
+          const payload = await fetchPhoneActivationPayload(config, countryConfig, action, {
             maxPrice: nextMaxPrice,
             fixedPrice: options.fixedPrice,
             operator,
           });
+          if (maybeRetryWithUpdatedPrice(payload)) {
+            continue;
+          }
+          return {
+            payload,
+            effectiveMaxPrice: nextMaxPrice,
+            wrongMaxPriceAdjusted,
+          };
         } catch (error) {
-          const updatedMaxPrice = extractHeroSmsWrongMaxPrice(error?.payload || error?.message);
-          if (
-            nextMaxPrice !== null
-            && nextMaxPrice !== undefined
-            && !retriedWithUpdatedPrice
-            && updatedMaxPrice !== null
-          ) {
-            if (userLimit !== null && updatedMaxPrice > userLimit) {
-              throw new Error(
-                `HeroSMS ${formatHeroSmsActionName(action)}失败：价格上限过低，平台要求至少 ${updatedMaxPrice}，已超过当前配置的价格上限 ${userLimit}。`
-              );
-            }
-            if (userMinLimit !== null && updatedMaxPrice < userMinLimit) {
-              throw new Error(
-                `HeroSMS ${formatHeroSmsActionName(action)}失败：平台要求价格 ${updatedMaxPrice} 低于当前配置的最低购买价 ${userMinLimit}。`
-              );
-            }
-            nextMaxPrice = updatedMaxPrice;
-            retriedWithUpdatedPrice = true;
+          if (maybeRetryWithUpdatedPrice(error?.payload || error?.message)) {
             continue;
           }
 
@@ -4742,7 +4785,7 @@
 
           const tryWithoutPreferredOperator = async (requestAction) => {
             try {
-              const fallbackPayload = await requestPhoneActivationWithPrice(
+              const fallbackResult = await requestPhoneActivationWithPrice(
                 config,
                 countryConfig,
                 requestAction,
@@ -4753,6 +4796,7 @@
                   fixedPrice,
                 }
               );
+              const fallbackPayload = fallbackResult?.payload;
               const fallbackActivation = parseActivationPayload(fallbackPayload, {
                 provider: config.provider || PHONE_SMS_PROVIDER_HERO,
                 serviceCode: String(config.serviceCode || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE,
@@ -4761,11 +4805,17 @@
                 ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
               });
               if (fallbackActivation) {
-                const numericPrice = Number(tier.price);
+                const numericPrice = Number(fallbackResult?.effectiveMaxPrice ?? tier.price);
                 rememberActivationAcquiredPrice(fallbackActivation, numericPrice);
                 return { activation: fallbackActivation };
               }
               const fallbackText = describeHeroSmsPayload(fallbackPayload);
+              if (isHeroSmsWrongMaxPriceFailure(fallbackPayload)) {
+                return {
+                  wrongMaxPrice: true,
+                  failureText: describeHeroSmsWrongMaxPriceFailure(fallbackPayload),
+                };
+              }
               if (isHeroSmsNoNumbersPayload(fallbackPayload)) {
                 return { noNumbers: true, failureText: fallbackText || '暂无可用号码' };
               }
@@ -4786,6 +4836,12 @@
                   terminalError: createHeroSmsActionFailureError(requestAction, fallbackText || 'empty response'),
                 };
               }
+              if (isHeroSmsWrongMaxPriceFailure(fallbackPayloadOrMessage)) {
+                return {
+                  wrongMaxPrice: true,
+                  failureText: describeHeroSmsWrongMaxPriceFailure(fallbackPayloadOrMessage, fallbackText || '价格档位低于平台要求'),
+                };
+              }
               if (isHeroSmsNoNumbersPayload(fallbackPayloadOrMessage)) {
                 return { noNumbers: true, failureText: fallbackText || '暂无可用号码' };
               }
@@ -4802,7 +4858,7 @@
                 `步骤 9：HeroSMS ${countryLabel} 正在尝试${formatHeroSmsActionName(requestAction)}，价格档位 ${tier.price === null || tier.price === undefined ? '自动' : tier.price}。`,
                 'info'
               );
-              const payload = await requestPhoneActivationWithPrice(
+              const acquireResult = await requestPhoneActivationWithPrice(
                 config,
                 countryConfig,
                 requestAction,
@@ -4814,9 +4870,10 @@
                   operator: preferredOperator,
                 }
               );
+              const payload = acquireResult?.payload;
               const activation = parseActivationPayload(payload, buildFallbackActivation(requestAction));
               if (activation) {
-                const numericPrice = Number(tier.price);
+                const numericPrice = Number(acquireResult?.effectiveMaxPrice ?? tier.price);
                 rememberActivationAcquiredPrice(activation, numericPrice);
                 return {
                   activation: {
@@ -4828,30 +4885,39 @@
               const payloadText = describeHeroSmsPayload(payload);
               if (isHeroSmsWrongMaxPriceFailure(payloadText)) {
                 return {
-                  retryable: false,
-                  failureText: payloadText || '价格档位不符合平台要求',
-                  lastError: createHeroSmsActionFailureError(requestAction, payloadText || '价格档位不符合平台要求'),
+                  retryable: true,
+                  skipRemainingRounds: true,
+                  expandTierQueue: true,
+                  failureText: describeHeroSmsWrongMaxPriceFailure(payloadText, payloadText || '价格档位低于平台要求'),
                 };
               }
               if (preferredOperator && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
-                const fallbackResult = await tryWithoutPreferredOperator(requestAction);
-                if (fallbackResult.activation) {
+                const operatorFallbackResult = await tryWithoutPreferredOperator(requestAction);
+                if (operatorFallbackResult.activation) {
                   return {
                     activation: {
-                      ...fallbackResult.activation,
+                      ...operatorFallbackResult.activation,
                       countryId: countryConfig.id,
                     },
                   };
                 }
-                if (fallbackResult.terminalError) {
-                  return { terminalError: fallbackResult.terminalError };
+                if (operatorFallbackResult.terminalError) {
+                  return { terminalError: operatorFallbackResult.terminalError };
                 }
-                if (fallbackResult.noNumbers) {
+                if (operatorFallbackResult.wrongMaxPrice) {
+                  return {
+                    retryable: true,
+                    skipRemainingRounds: true,
+                    expandTierQueue: true,
+                    failureText: operatorFallbackResult.failureText || payloadText || '价格档位低于平台要求',
+                  };
+                }
+                if (operatorFallbackResult.noNumbers) {
                   noNumbersObservedInCountry = true;
-                  lastFailureText = fallbackResult.failureText || payloadText || lastFailureText;
+                  lastFailureText = operatorFallbackResult.failureText || payloadText || lastFailureText;
                   continue;
                 }
-                lastFailureText = fallbackResult.failureText || payloadText || lastFailureText;
+                lastFailureText = operatorFallbackResult.failureText || payloadText || lastFailureText;
                 continue;
               }
               if (isHeroSmsNoNumbersPayload(payload)) {
@@ -4870,9 +4936,10 @@
               const payloadOrMessage = error?.payload || error?.message;
               if (isHeroSmsWrongMaxPriceFailure(payloadOrMessage)) {
                 return {
-                  retryable: false,
-                  failureText: describeHeroSmsPayload(payloadOrMessage) || error?.message || '价格档位不符合平台要求',
-                  lastError: error,
+                  retryable: true,
+                  skipRemainingRounds: true,
+                  expandTierQueue: true,
+                  failureText: describeHeroSmsWrongMaxPriceFailure(payloadOrMessage, error?.message || '价格档位低于平台要求'),
                 };
               }
               if (isHeroSmsTerminalError(payloadOrMessage)) {
@@ -4881,24 +4948,32 @@
                 };
               }
               if (preferredOperator && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
-                const fallbackResult = await tryWithoutPreferredOperator(requestAction);
-                if (fallbackResult.activation) {
+                const operatorFallbackResult = await tryWithoutPreferredOperator(requestAction);
+                if (operatorFallbackResult.activation) {
                   return {
                     activation: {
-                      ...fallbackResult.activation,
+                      ...operatorFallbackResult.activation,
                       countryId: countryConfig.id,
                     },
                   };
                 }
-                if (fallbackResult.terminalError) {
-                  return { terminalError: fallbackResult.terminalError };
+                if (operatorFallbackResult.terminalError) {
+                  return { terminalError: operatorFallbackResult.terminalError };
                 }
-                if (fallbackResult.noNumbers) {
+                if (operatorFallbackResult.wrongMaxPrice) {
+                  return {
+                    retryable: true,
+                    skipRemainingRounds: true,
+                    expandTierQueue: true,
+                    failureText: operatorFallbackResult.failureText || lastFailureText || '价格档位低于平台要求',
+                  };
+                }
+                if (operatorFallbackResult.noNumbers) {
                   noNumbersObservedInCountry = true;
-                  lastFailureText = fallbackResult.failureText || lastFailureText;
+                  lastFailureText = operatorFallbackResult.failureText || lastFailureText;
                   continue;
                 }
-                lastFailureText = fallbackResult.failureText || lastFailureText;
+                lastFailureText = operatorFallbackResult.failureText || lastFailureText;
                 continue;
               }
               if (isHeroSmsNoNumbersPayload(payloadOrMessage)) {
