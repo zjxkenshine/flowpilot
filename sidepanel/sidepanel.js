@@ -286,6 +286,20 @@ const hostedSmsPoolSummary = document.getElementById('hosted-sms-pool-summary');
 const inputHostedSmsPoolSearch = document.getElementById('input-hosted-sms-pool-search');
 const selectHostedSmsPoolFilter = document.getElementById('select-hosted-sms-pool-filter');
 const hostedSmsPoolList = document.getElementById('hosted-sms-pool-list');
+const rowChatGptApiSmsPool = document.getElementById('row-chatgpt-api-sms-pool');
+const btnToggleChatGptApiSmsPool = document.getElementById('btn-toggle-chatgpt-api-sms-pool');
+const chatGptApiSmsPoolShell = document.getElementById('chatgpt-api-sms-pool-shell');
+const inputChatGptApiSmsPool = document.getElementById('input-chatgpt-api-sms-pool');
+const btnChatGptApiSmsPoolRefresh = document.getElementById('btn-chatgpt-api-sms-pool-refresh');
+const btnChatGptApiSmsPoolClearUsed = document.getElementById('btn-chatgpt-api-sms-pool-clear-used');
+const btnChatGptApiSmsPoolDeleteAll = document.getElementById('btn-chatgpt-api-sms-pool-delete-all');
+const inputChatGptApiSmsPoolImport = document.getElementById('input-chatgpt-api-sms-pool-import');
+const btnChatGptApiSmsPoolImport = document.getElementById('btn-chatgpt-api-sms-pool-import');
+const inputChatGptApiSmsPoolAutoDisableEnabled = document.getElementById('input-chatgpt-api-sms-pool-auto-disable-enabled');
+const chatGptApiSmsPoolSummary = document.getElementById('chatgpt-api-sms-pool-summary');
+const inputChatGptApiSmsPoolSearch = document.getElementById('input-chatgpt-api-sms-pool-search');
+const selectChatGptApiSmsPoolFilter = document.getElementById('select-chatgpt-api-sms-pool-filter');
+const chatGptApiSmsPoolList = document.getElementById('chatgpt-api-sms-pool-list');
 const rowPlusHostedCheckoutOauthDelay = document.getElementById('row-plus-hosted-checkout-oauth-delay');
 const inputPlusHostedCheckoutOauthDelaySeconds = document.getElementById('input-plus-hosted-checkout-oauth-delay-seconds');
 const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkout-conversion-proxy');
@@ -663,6 +677,7 @@ const DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED = false;
 const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复用，切回邮箱注册后会恢复原设置';
 let latestState = null;
 let hostedSmsPoolExpanded = false;
+let chatGptApiSmsPoolExpanded = false;
 let currentPlusModeEnabled = false;
 let currentPhonePlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
@@ -741,6 +756,11 @@ const PHONE_SMS_PROVIDER_HERO = 'hero-sms';
 const PHONE_SMS_PROVIDER_FIVE_SIM = '5sim';
 const PHONE_SMS_PROVIDER_HERO_SMS = PHONE_SMS_PROVIDER_HERO;
 const PHONE_SMS_PROVIDER_NEXSMS = 'nexsms';
+const PHONE_SMS_PROVIDER_SMSBOWER = 'smsbower';
+const PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER = 'sms-verification-number';
+const PHONE_SMS_PROVIDER_GRIZZLYSMS = 'grizzlysms';
+const PHONE_SMS_PROVIDER_SMSPOOL = 'smspool';
+const PHONE_SMS_PROVIDER_CHATGPT_API = 'chatgpt-api';
 const DEFAULT_PHONE_SMS_PROVIDER = PHONE_SMS_PROVIDER_HERO;
 const DEFAULT_PHONE_SMS_PROVIDER_ORDER = Object.freeze([
   PHONE_SMS_PROVIDER_HERO,
@@ -752,6 +772,8 @@ const DEFAULT_FIVE_SIM_OPERATOR = 'any';
 const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
 const DEFAULT_NEX_SMS_COUNTRY_ORDER = Object.freeze([1]);
 const DEFAULT_NEX_SMS_SERVICE_CODE = 'ot';
+const DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api';
+const DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'dr';
 const HERO_SMS_COUNTRY_SELECTION_MAX = 3;
 const DEFAULT_HERO_SMS_REUSE_ENABLED = true;
 const HERO_SMS_ACQUIRE_PRIORITY_COUNTRY = 'country';
@@ -4621,6 +4643,18 @@ function collectSettingsPayload() {
   const currentPhoneSmsApiKeyValue = typeof inputHeroSmsApiKey !== 'undefined' && inputHeroSmsApiKey
     ? (inputHeroSmsApiKey.value || '')
     : '';
+  const phoneSmsProviderSmsBower = typeof PHONE_SMS_PROVIDER_SMSBOWER !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMSBOWER
+    : 'smsbower';
+  const phoneSmsProviderSmsVerificationNumber = typeof PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER
+    : 'sms-verification-number';
+  const phoneSmsProviderGrizzlySms = typeof PHONE_SMS_PROVIDER_GRIZZLYSMS !== 'undefined'
+    ? PHONE_SMS_PROVIDER_GRIZZLYSMS
+    : 'grizzlysms';
+  const phoneSmsProviderSmsPool = typeof PHONE_SMS_PROVIDER_SMSPOOL !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMSPOOL
+    : 'smspool';
   const heroSmsApiKeyValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_HERO_SMS
     ? currentPhoneSmsApiKeyValue
     : String(latestState?.heroSmsApiKey || '');
@@ -4630,6 +4664,18 @@ function collectSettingsPayload() {
   const nexSmsApiKeyValue = typeof inputNexSmsApiKey !== 'undefined' && inputNexSmsApiKey
     ? String(inputNexSmsApiKey.value || '')
     : String(latestState?.nexSmsApiKey || '');
+  const smsBowerApiKeyValue = phoneSmsProviderValue === phoneSmsProviderSmsBower
+    ? currentPhoneSmsApiKeyValue
+    : String(latestState?.smsBowerApiKey || '');
+  const smsVerificationNumberApiKeyValue = phoneSmsProviderValue === phoneSmsProviderSmsVerificationNumber
+    ? currentPhoneSmsApiKeyValue
+    : String(latestState?.smsVerificationNumberApiKey || '');
+  const grizzlySmsApiKeyValue = phoneSmsProviderValue === phoneSmsProviderGrizzlySms
+    ? currentPhoneSmsApiKeyValue
+    : String(latestState?.grizzlySmsApiKey || '');
+  const smsPoolApiKeyValue = phoneSmsProviderValue === phoneSmsProviderSmsPool
+    ? currentPhoneSmsApiKeyValue
+    : String(latestState?.smsPoolApiKey || '');
   const defaultHeroSmsReuseEnabled = typeof DEFAULT_HERO_SMS_REUSE_ENABLED !== 'undefined'
     ? DEFAULT_HERO_SMS_REUSE_ENABLED
     : true;
@@ -4711,12 +4757,36 @@ function collectSettingsPayload() {
   const fiveSimMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? currentPhoneSmsMaxPriceValue
     : normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
+  const smsBowerMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsBower
+    ? currentPhoneSmsMaxPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '');
+  const smsVerificationNumberMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsVerificationNumber
+    ? currentPhoneSmsMaxPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '');
+  const grizzlySmsMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderGrizzlySms
+    ? currentPhoneSmsMaxPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '');
+  const smsPoolMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsPool
+    ? currentPhoneSmsMaxPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '');
   const heroSmsMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? normalizePhoneSmsMinPriceValueSafe(latestState?.heroSmsMinPrice || '', PHONE_SMS_PROVIDER_HERO_SMS)
     : currentPhoneSmsMinPriceValue;
   const fiveSimMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? currentPhoneSmsMinPriceValue
     : normalizePhoneSmsMinPriceValueSafe(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+  const smsBowerMinPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsBower
+    ? currentPhoneSmsMinPriceValue
+    : normalizePhoneSmsMinPriceValueSafe(latestState?.smsBowerMinPrice || '', phoneSmsProviderSmsBower);
+  const smsVerificationNumberMinPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsVerificationNumber
+    ? currentPhoneSmsMinPriceValue
+    : normalizePhoneSmsMinPriceValueSafe(latestState?.smsVerificationNumberMinPrice || '', phoneSmsProviderSmsVerificationNumber);
+  const grizzlySmsMinPriceValue = phoneSmsProviderValue === phoneSmsProviderGrizzlySms
+    ? currentPhoneSmsMinPriceValue
+    : normalizePhoneSmsMinPriceValueSafe(latestState?.grizzlySmsMinPrice || '', phoneSmsProviderGrizzlySms);
+  const smsPoolMinPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsPool
+    ? currentPhoneSmsMinPriceValue
+    : normalizePhoneSmsMinPriceValueSafe(latestState?.smsPoolMinPrice || '', phoneSmsProviderSmsPool);
   const defaultFiveSimProduct = typeof DEFAULT_FIVE_SIM_PRODUCT !== 'undefined'
     ? DEFAULT_FIVE_SIM_PRODUCT
     : 'openai';
@@ -4763,6 +4833,18 @@ function collectSettingsPayload() {
   const heroSmsPreferredPriceValue = typeof inputHeroSmsPreferredPrice !== 'undefined' && inputHeroSmsPreferredPrice
     ? normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice.value)
     : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsPreferredPrice || '');
+  const smsBowerPreferredPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsBower
+    ? heroSmsPreferredPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsBowerPreferredPrice || '');
+  const smsVerificationNumberPreferredPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsVerificationNumber
+    ? heroSmsPreferredPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberPreferredPrice || '');
+  const grizzlySmsPreferredPriceValue = phoneSmsProviderValue === phoneSmsProviderGrizzlySms
+    ? heroSmsPreferredPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsPreferredPrice || '');
+  const smsPoolPreferredPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsPool
+    ? heroSmsPreferredPriceValue
+    : normalizeHeroSmsMaxPriceValue(latestState?.smsPoolPreferredPrice || '');
   const phonePreferredActivationValue = phoneSignupReuseLocked
     ? (latestState?.phonePreferredActivation ? { ...latestState.phonePreferredActivation } : null)
     : typeof getSelectedPhonePreferredActivation === 'function'
@@ -5124,6 +5206,15 @@ function collectSettingsPayload() {
     hostedCheckoutSmsPoolUsage: latestState?.hostedCheckoutSmsPoolUsage && typeof latestState.hostedCheckoutSmsPoolUsage === 'object'
       ? latestState.hostedCheckoutSmsPoolUsage
       : {},
+    chatGptApiSmsPoolText: typeof inputChatGptApiSmsPool !== 'undefined' && inputChatGptApiSmsPool
+      ? normalizeHostedCheckoutSmsPoolTextValue(inputChatGptApiSmsPool.value)
+      : normalizeHostedCheckoutSmsPoolTextValue(latestState?.chatGptApiSmsPoolText || ''),
+    chatGptApiSmsPoolUsage: latestState?.chatGptApiSmsPoolUsage && typeof latestState.chatGptApiSmsPoolUsage === 'object'
+      ? latestState.chatGptApiSmsPoolUsage
+      : {},
+    chatGptApiSmsPoolAutoDisableEnabled: typeof inputChatGptApiSmsPoolAutoDisableEnabled !== 'undefined' && inputChatGptApiSmsPoolAutoDisableEnabled
+      ? Boolean(inputChatGptApiSmsPoolAutoDisableEnabled.checked)
+      : false,
     hostedCheckoutCurrentSmsEntry: normalizeHostedCheckoutCurrentSmsEntryValue(
       latestState?.hostedCheckoutCurrentSmsEntry || null,
       parseHostedCheckoutSmsPoolEntries(
@@ -5283,6 +5374,15 @@ function collectSettingsPayload() {
     nexSmsApiKey: nexSmsApiKeyValue,
     nexSmsCountryOrder: nexSmsCountryOrderValue,
     nexSmsServiceCode: nexSmsServiceCodeValue,
+    smsBowerApiKey: smsBowerApiKeyValue,
+    smsBowerServiceCode: latestState?.smsBowerServiceCode || 'dr',
+    smsVerificationNumberApiKey: smsVerificationNumberApiKeyValue,
+    smsVerificationNumberBaseUrl: latestState?.smsVerificationNumberBaseUrl || DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL,
+    smsVerificationNumberServiceCode: latestState?.smsVerificationNumberServiceCode || DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE,
+    grizzlySmsApiKey: grizzlySmsApiKeyValue,
+    grizzlySmsServiceCode: latestState?.grizzlySmsServiceCode || 'dr',
+    smsPoolApiKey: smsPoolApiKeyValue,
+    smsPoolServiceCode: latestState?.smsPoolServiceCode || '671',
     phoneSmsReuseEnabled: phoneSmsReuseEnabledValue,
     heroSmsReuseEnabled: heroSmsReuseEnabledValue,
     freePhoneReuseEnabled: freePhoneReuseEnabledValue,
@@ -5291,6 +5391,18 @@ function collectSettingsPayload() {
     heroSmsMinPrice: heroSmsMinPriceValue,
     heroSmsMaxPrice: heroSmsMaxPriceValue,
     heroSmsPreferredPrice: heroSmsPreferredPriceValue,
+    smsBowerMinPrice: smsBowerMinPriceValue,
+    smsBowerMaxPrice: smsBowerMaxPriceValue,
+    smsBowerPreferredPrice: smsBowerPreferredPriceValue,
+    smsVerificationNumberMinPrice: smsVerificationNumberMinPriceValue,
+    smsVerificationNumberMaxPrice: smsVerificationNumberMaxPriceValue,
+    smsVerificationNumberPreferredPrice: smsVerificationNumberPreferredPriceValue,
+    grizzlySmsMinPrice: grizzlySmsMinPriceValue,
+    grizzlySmsMaxPrice: grizzlySmsMaxPriceValue,
+    grizzlySmsPreferredPrice: grizzlySmsPreferredPriceValue,
+    smsPoolMinPrice: smsPoolMinPriceValue,
+    smsPoolMaxPrice: smsPoolMaxPriceValue,
+    smsPoolPreferredPrice: smsPoolPreferredPriceValue,
     phonePreferredActivation: phonePreferredActivationValue,
     phoneVerificationReplacementLimit: phoneVerificationReplacementLimitValue,
     phoneActivationTierUpgradeLimit: phoneActivationTierUpgradeLimitValue,
@@ -5307,6 +5419,18 @@ function collectSettingsPayload() {
     fiveSimCountryFallback,
     fiveSimMaxPrice: fiveSimMaxPriceValue,
     fiveSimMinPrice: fiveSimMinPriceValue,
+    smsBowerCountryId: selectedPhoneSmsCountry.id,
+    smsBowerCountryLabel: selectedPhoneSmsCountry.label,
+    smsBowerCountryFallback: selectedPhoneSmsCountryFallback,
+    smsVerificationNumberCountryId: selectedPhoneSmsCountry.id,
+    smsVerificationNumberCountryLabel: selectedPhoneSmsCountry.label,
+    smsVerificationNumberCountryFallback: selectedPhoneSmsCountryFallback,
+    grizzlySmsCountryId: selectedPhoneSmsCountry.id,
+    grizzlySmsCountryLabel: selectedPhoneSmsCountry.label,
+    grizzlySmsCountryFallback: selectedPhoneSmsCountryFallback,
+    smsPoolCountryId: selectedPhoneSmsCountry.id,
+    smsPoolCountryLabel: selectedPhoneSmsCountry.label,
+    smsPoolCountryFallback: selectedPhoneSmsCountryFallback,
   };
 }
 
@@ -5370,12 +5494,42 @@ function normalizePhoneSmsProvider(value = '') {
   const nexSmsProvider = typeof PHONE_SMS_PROVIDER_NEXSMS !== 'undefined'
     ? PHONE_SMS_PROVIDER_NEXSMS
     : 'nexsms';
+  const smsBowerProvider = typeof PHONE_SMS_PROVIDER_SMSBOWER !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMSBOWER
+    : 'smsbower';
+  const smsVerificationNumberProvider = typeof PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER
+    : 'sms-verification-number';
+  const grizzlySmsProvider = typeof PHONE_SMS_PROVIDER_GRIZZLYSMS !== 'undefined'
+    ? PHONE_SMS_PROVIDER_GRIZZLYSMS
+    : 'grizzlysms';
+  const smsPoolProvider = typeof PHONE_SMS_PROVIDER_SMSPOOL !== 'undefined'
+    ? PHONE_SMS_PROVIDER_SMSPOOL
+    : 'smspool';
+  const chatGptApiProvider = typeof PHONE_SMS_PROVIDER_CHATGPT_API !== 'undefined'
+    ? PHONE_SMS_PROVIDER_CHATGPT_API
+    : 'chatgpt-api';
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === PHONE_SMS_PROVIDER_FIVE_SIM) {
     return PHONE_SMS_PROVIDER_FIVE_SIM;
   }
   if (normalized === nexSmsProvider) {
     return nexSmsProvider;
+  }
+  if (normalized === smsBowerProvider) {
+    return smsBowerProvider;
+  }
+  if (normalized === smsVerificationNumberProvider) {
+    return smsVerificationNumberProvider;
+  }
+  if (normalized === grizzlySmsProvider) {
+    return grizzlySmsProvider;
+  }
+  if (normalized === smsPoolProvider) {
+    return smsPoolProvider;
+  }
+  if (normalized === chatGptApiProvider) {
+    return chatGptApiProvider;
   }
   return PHONE_SMS_PROVIDER_HERO_SMS;
 }
@@ -5406,7 +5560,15 @@ function getPhoneSmsProviderLabel(provider = getSelectedPhoneSmsProvider()) {
   if (typeof window !== 'undefined' && window.PhoneSmsProviderRegistry?.getProviderLabel) {
     return window.PhoneSmsProviderRegistry.getProviderLabel(provider);
   }
-  return normalizePhoneSmsProvider(provider) === PHONE_SMS_PROVIDER_FIVE_SIM ? '5sim' : 'HeroSMS';
+  const normalized = normalizePhoneSmsProvider(provider);
+  if (normalized === PHONE_SMS_PROVIDER_FIVE_SIM) return '5sim';
+  if (normalized === PHONE_SMS_PROVIDER_NEXSMS) return 'NexSMS';
+  if (normalized === PHONE_SMS_PROVIDER_SMSBOWER) return 'SMSBower';
+  if (normalized === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) return 'SMS Verification Number';
+  if (normalized === PHONE_SMS_PROVIDER_GRIZZLYSMS) return 'GrizzlySMS';
+  if (normalized === PHONE_SMS_PROVIDER_SMSPOOL) return 'SMSPool';
+  if (normalized === PHONE_SMS_PROVIDER_CHATGPT_API) return 'ChatGPT API 接码';
+  return 'HeroSMS';
 }
 
 function isFiveSimProviderSelected() {
@@ -7141,9 +7303,23 @@ function updateHeroSmsPlatformDisplay() {
   const countryText = selected?.label ? ` / ${selected.label}` : '';
   displayHeroSmsPlatform.textContent = `${getPhoneSmsProviderLabel(provider)} / OpenAI${countryText}`;
   if (inputHeroSmsApiKey) {
-    inputHeroSmsApiKey.placeholder = provider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? '请输入 5sim API Key'
-      : (provider === PHONE_SMS_PROVIDER_NEXSMS ? '请输入 NexSMS API Key' : '请输入 HeroSMS API Key');
+    if (provider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsApiKey.placeholder = '请输入 5sim API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_NEXSMS) {
+      inputHeroSmsApiKey.placeholder = '请输入 NexSMS API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsApiKey.placeholder = '请输入 SMSBower API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsApiKey.placeholder = '请输入 SMS Verification Number API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsApiKey.placeholder = '请输入 GrizzlySMS API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsApiKey.placeholder = '请输入 SMSPool API Key';
+    } else if (provider === PHONE_SMS_PROVIDER_CHATGPT_API) {
+      inputHeroSmsApiKey.placeholder = 'ChatGPT API 接码无需填写平台 API Key';
+    } else {
+      inputHeroSmsApiKey.placeholder = '请输入 HeroSMS API Key';
+    }
   }
 }
 
@@ -9159,6 +9335,11 @@ async function previewPhoneSmsBalance() {
     return;
   }
   const provider = getSelectedPhoneSmsProvider();
+  if (provider === PHONE_SMS_PROVIDER_CHATGPT_API) {
+    displayPhoneSmsBalance.textContent = 'ChatGPT API 接码使用自定义号码池，无余额接口';
+    if (rowHeroSmsPriceTiers) rowHeroSmsPriceTiers.style.display = '';
+    return;
+  }
   const apiKey = String(inputHeroSmsApiKey?.value || '').trim();
   if (!apiKey) {
     displayPhoneSmsBalance.textContent = '请先填写接码 API Key';
@@ -9168,9 +9349,20 @@ async function previewPhoneSmsBalance() {
   displayPhoneSmsBalance.textContent = '余额查询中...';
   if (rowHeroSmsPriceTiers) rowHeroSmsPriceTiers.style.display = '';
   try {
-    const url = provider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? new URL('https://5sim.net/v1/user/profile')
-      : new URL('https://hero-sms.com/stubs/handler_api.php');
+    let url = null;
+    if (provider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      url = new URL('https://5sim.net/v1/user/profile');
+    } else if (provider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      url = new URL('https://smsbower.page/stubs/handler_api.php');
+    } else if (provider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      url = new URL('https://sms-verification-number.com/stubs/handler_api');
+    } else if (provider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      url = new URL('https://api.grizzlysms.com/stubs/handler_api.php');
+    } else if (provider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      url = new URL('https://api.smspool.net/stubs/handler_api.php?setting=smspool');
+    } else {
+      url = new URL('https://hero-sms.com/stubs/handler_api.php');
+    }
     const requestOptions = {};
     if (provider === PHONE_SMS_PROVIDER_FIVE_SIM) {
       requestOptions.headers = {
@@ -9201,7 +9393,7 @@ async function previewPhoneSmsBalance() {
         : `5sim 余额：${describeHeroSmsPreviewPayload(payload) || '未知'}`;
     } else {
       const text = describeHeroSmsPreviewPayload(payload).replace(/^ACCESS_BALANCE:/i, '').trim();
-      displayPhoneSmsBalance.textContent = `HeroSMS 余额 ${text || '未知'}`;
+      displayPhoneSmsBalance.textContent = `${getPhoneSmsProviderLabel(provider)} 余额 ${text || '未知'}`;
     }
   } catch (error) {
     displayPhoneSmsBalance.textContent = `余额查询失败：${normalizeHeroSmsFetchErrorMessage(error)}`;
@@ -9899,6 +10091,11 @@ function updatePhoneVerificationSettingsUI() {
   const heroProviderValue = typeof PHONE_SMS_PROVIDER_HERO !== 'undefined' ? PHONE_SMS_PROVIDER_HERO : 'hero-sms';
   const fiveSimProviderValue = typeof PHONE_SMS_PROVIDER_FIVE_SIM !== 'undefined' ? PHONE_SMS_PROVIDER_FIVE_SIM : '5sim';
   const nexSmsProviderValue = typeof PHONE_SMS_PROVIDER_NEXSMS !== 'undefined' ? PHONE_SMS_PROVIDER_NEXSMS : 'nexsms';
+  const smsBowerProviderValue = typeof PHONE_SMS_PROVIDER_SMSBOWER !== 'undefined' ? PHONE_SMS_PROVIDER_SMSBOWER : 'smsbower';
+  const smsVerificationNumberProviderValue = typeof PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER !== 'undefined' ? PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER : 'sms-verification-number';
+  const grizzlySmsProviderValue = typeof PHONE_SMS_PROVIDER_GRIZZLYSMS !== 'undefined' ? PHONE_SMS_PROVIDER_GRIZZLYSMS : 'grizzlysms';
+  const smsPoolProviderValue = typeof PHONE_SMS_PROVIDER_SMSPOOL !== 'undefined' ? PHONE_SMS_PROVIDER_SMSPOOL : 'smspool';
+  const chatGptApiProviderValue = typeof PHONE_SMS_PROVIDER_CHATGPT_API !== 'undefined' ? PHONE_SMS_PROVIDER_CHATGPT_API : 'chatgpt-api';
   const providerOrderForDisplay = resolveNormalizedProviderOrderForRuntime(latestState || {});
   const provider = providerOrderForDisplay[0] || (
     typeof getSelectedPhoneSmsProvider === 'function'
@@ -9908,6 +10105,12 @@ function updatePhoneVerificationSettingsUI() {
   const heroProvider = provider === heroProviderValue;
   const fiveSimProvider = provider === fiveSimProviderValue;
   const nexSmsProvider = provider === nexSmsProviderValue;
+  const smsBowerProvider = provider === smsBowerProviderValue;
+  const smsVerificationNumberProvider = provider === smsVerificationNumberProviderValue;
+  const grizzlySmsProvider = provider === grizzlySmsProviderValue;
+  const smsPoolProvider = provider === smsPoolProviderValue;
+  const chatGptApiProvider = provider === chatGptApiProviderValue;
+  const heroLikeProvider = heroProvider || smsBowerProvider || smsVerificationNumberProvider || grizzlySmsProvider || smsPoolProvider;
   if (rowPhoneVerificationEnabled) {
     rowPhoneVerificationEnabled.style.display = canShowPhoneSettings ? '' : 'none';
   }
@@ -9965,11 +10168,11 @@ function updatePhoneVerificationSettingsUI() {
   if (typeof rowPhoneSignupReloginAfterBindEmail !== 'undefined' && rowPhoneSignupReloginAfterBindEmail) {
     rowPhoneSignupReloginAfterBindEmail.style.display = showPhoneSignupReloginAfterBindEmail ? '' : 'none';
   }
-  if (rowHeroSmsCountry) rowHeroSmsCountry.style.display = showSettings && heroProvider ? '' : 'none';
-  if (rowHeroSmsCountryFallback) rowHeroSmsCountryFallback.style.display = showSettings && heroProvider ? '' : 'none';
+  if (rowHeroSmsCountry) rowHeroSmsCountry.style.display = showSettings && heroLikeProvider ? '' : 'none';
+  if (rowHeroSmsCountryFallback) rowHeroSmsCountryFallback.style.display = showSettings && heroLikeProvider ? '' : 'none';
   if (typeof rowHeroSmsOperator !== 'undefined' && rowHeroSmsOperator) rowHeroSmsOperator.style.display = showSettings && heroProvider ? '' : 'none';
-  if (rowHeroSmsAcquirePriority) rowHeroSmsAcquirePriority.style.display = showSettings && heroProvider ? '' : 'none';
-  if (rowHeroSmsApiKey) rowHeroSmsApiKey.style.display = showSettings && heroProvider ? '' : 'none';
+  if (rowHeroSmsAcquirePriority) rowHeroSmsAcquirePriority.style.display = showSettings && heroLikeProvider ? '' : 'none';
+  if (rowHeroSmsApiKey) rowHeroSmsApiKey.style.display = showSettings && (heroLikeProvider || chatGptApiProvider) ? '' : 'none';
   if (rowFiveSimApiKey) rowFiveSimApiKey.style.display = showSettings && fiveSimProvider ? '' : 'none';
   if (rowFiveSimCountry) rowFiveSimCountry.style.display = showSettings && fiveSimProvider ? '' : 'none';
   if (rowFiveSimCountryFallback) rowFiveSimCountryFallback.style.display = showSettings && fiveSimProvider ? '' : 'none';
@@ -9981,6 +10184,9 @@ function updatePhoneVerificationSettingsUI() {
   if (rowNexSmsServiceCode) rowNexSmsServiceCode.style.display = showSettings && nexSmsProvider ? '' : 'none';
   if (rowFiveSimOperator) {
     rowFiveSimOperator.style.display = showSettings && fiveSimProvider ? '' : 'none';
+  }
+  if (rowChatGptApiSmsPool) {
+    rowChatGptApiSmsPool.style.display = showSettings && chatGptApiProvider ? '' : 'none';
   }
   if (typeof rowFreePhoneReuseEnabled !== 'undefined' && rowFreePhoneReuseEnabled) {
     rowFreePhoneReuseEnabled.style.display = showSettings ? '' : 'none';
@@ -11992,9 +12198,19 @@ function applySettingsState(state) {
     syncHeroSmsOperatorSelectionState(state?.heroSmsOperatorByCountry || {});
   }
   if (inputHeroSmsApiKey) {
-    inputHeroSmsApiKey.value = restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? (state?.fiveSimApiKey || '')
-      : (state?.heroSmsApiKey || '');
+    if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsApiKey.value = state?.fiveSimApiKey || '';
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsApiKey.value = state?.smsBowerApiKey || '';
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsApiKey.value = state?.smsVerificationNumberApiKey || '';
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsApiKey.value = state?.grizzlySmsApiKey || '';
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsApiKey.value = state?.smsPoolApiKey || '';
+    } else {
+      inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
+    }
   }
   if (typeof inputFiveSimApiKey !== 'undefined' && inputFiveSimApiKey) {
     inputFiveSimApiKey.value = String(state?.fiveSimApiKey || '');
@@ -12033,20 +12249,56 @@ function applySettingsState(state) {
     selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
   }
   if (inputHeroSmsMaxPrice) {
-    inputHeroSmsMaxPrice.value = restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? normalizeFiveSimMaxPriceValue(state?.fiveSimMaxPrice || '')
-      : normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice || '');
+    if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsMaxPrice.value = normalizeFiveSimMaxPriceValue(state?.fiveSimMaxPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsBowerMaxPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsVerificationNumberMaxPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.grizzlySmsMaxPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsPoolMaxPrice || '');
+    } else {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice || '');
+    }
   }
   if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
-    inputHeroSmsMinPrice.value = restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? normalizePhoneSmsMinPriceValue(state?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM)
-      : normalizePhoneSmsMinPriceValue(state?.heroSmsMinPrice || '', restoredPhoneSmsProvider);
+    if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.smsBowerMinPrice || '', restoredPhoneSmsProvider);
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.smsVerificationNumberMinPrice || '', restoredPhoneSmsProvider);
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.grizzlySmsMinPrice || '', restoredPhoneSmsProvider);
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.smsPoolMinPrice || '', restoredPhoneSmsProvider);
+    } else {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(state?.heroSmsMinPrice || '', restoredPhoneSmsProvider);
+    }
   }
   if (inputFiveSimOperator) {
     inputFiveSimOperator.value = normalizeFiveSimOperator(state?.fiveSimOperator);
   }
   if (typeof inputHeroSmsPreferredPrice !== 'undefined' && inputHeroSmsPreferredPrice) {
-    inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsPreferredPrice || '');
+    if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsBowerPreferredPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsVerificationNumberPreferredPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.grizzlySmsPreferredPrice || '');
+    } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsPoolPreferredPrice || '');
+    } else {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsPreferredPrice || '');
+    }
+  }
+  if (inputChatGptApiSmsPool) {
+    inputChatGptApiSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(state?.chatGptApiSmsPoolText || '');
+  }
+  if (inputChatGptApiSmsPoolAutoDisableEnabled) {
+    inputChatGptApiSmsPoolAutoDisableEnabled.checked = Boolean(state?.chatGptApiSmsPoolAutoDisableEnabled);
   }
   if (typeof inputPhoneReplacementLimit !== 'undefined' && inputPhoneReplacementLimit) {
     inputPhoneReplacementLimit.value = String(
@@ -13441,6 +13693,82 @@ const resetHostedSmsPoolManager = hostedSmsPoolManager?.reset || (() => {});
 const bindHostedSmsPoolEvents = hostedSmsPoolManager?.bindEvents || (() => {});
 bindHostedSmsPoolEvents();
 
+const chatGptApiSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedSmsPoolManager({
+  dom: {
+    btnHostedSmsPoolRefresh: btnChatGptApiSmsPoolRefresh,
+    btnHostedSmsPoolClearUsed: btnChatGptApiSmsPoolClearUsed,
+    btnHostedSmsPoolDeleteAll: btnChatGptApiSmsPoolDeleteAll,
+    inputHostedSmsPoolImport: inputChatGptApiSmsPoolImport,
+    btnHostedSmsPoolImport: btnChatGptApiSmsPoolImport,
+    hostedSmsPoolSummary: chatGptApiSmsPoolSummary,
+    inputHostedSmsPoolSearch: inputChatGptApiSmsPoolSearch,
+    selectHostedSmsPoolFilter: selectChatGptApiSmsPoolFilter,
+    hostedSmsPoolList: chatGptApiSmsPoolList,
+  },
+  helpers: {
+    copyTextToClipboard,
+    escapeHtml,
+    openConfirmModal,
+    showToast,
+  },
+  state: {
+    getText: () => normalizeHostedCheckoutSmsPoolTextValue(inputChatGptApiSmsPool?.value || latestState?.chatGptApiSmsPoolText || ''),
+    setText: (text) => {
+      const normalized = normalizeHostedCheckoutSmsPoolTextValue(text);
+      if (inputChatGptApiSmsPool) {
+        inputChatGptApiSmsPool.value = normalized;
+      }
+      syncLatestState({ chatGptApiSmsPoolText: normalized });
+    },
+    getUsage: () => latestState?.chatGptApiSmsPoolUsage || {},
+    setUsage: (usage) => {
+      syncLatestState({ chatGptApiSmsPoolUsage: usage && typeof usage === 'object' ? usage : {} });
+    },
+    getCurrentEntry: () => latestState?.chatGptApiCurrentSmsEntry || null,
+    setCurrentEntry: (entry) => {
+      syncLatestState({
+        chatGptApiCurrentSmsEntry: normalizeHostedCheckoutCurrentSmsEntryValue(
+          entry,
+          parseHostedCheckoutSmsPoolEntries(inputChatGptApiSmsPool?.value || latestState?.chatGptApiSmsPoolText || '')
+        ),
+      });
+    },
+    isVisible: () => Boolean(rowChatGptApiSmsPool) && rowChatGptApiSmsPool.style.display !== 'none',
+  },
+  actions: {
+    persistPool: async () => {
+      markSettingsDirty(true);
+      await saveSettings({ silent: true });
+    },
+  },
+  constants: {
+    copyIcon: COPY_ICON,
+  },
+  labels: {
+    poolLabel: 'ChatGPT API 接码池',
+    importSubject: 'ChatGPT API 接码号码',
+    localPhonePrefix: '填入',
+    emptySummary: '导入 ChatGPT API 接码号码，每行一个号码和验证码接口。',
+    emptyListText: '还没有 ChatGPT API 接码号码，先导入一批号码再开始。',
+    refreshLoadingText: '正在刷新 ChatGPT API 接码池...',
+    updateLoadingText: '正在更新 ChatGPT API 接码池...',
+    updateFailedPrefix: '更新 ChatGPT API 接码池失败',
+    importEmptyWarning: '请先粘贴 ChatGPT API 接码号码，每行一个号码和验证码接口。',
+    deleteTitle: '删除 ChatGPT API 接码号码',
+    clearUsageMessage: '确认清空 ChatGPT API 接码池的使用次数吗？号码本身会保留。',
+    deleteAllTitle: '删除 ChatGPT API 接码池',
+    deleteAllMessage: '确认删除当前全部 ChatGPT API 接码号码吗？此操作不可撤销。',
+  },
+  normalizers: {
+    normalizePhone: (value = '') => String(value || '').trim().replace(/\D+/g, '') || String(value || '').trim(),
+    formatLocalPhone: (value = '') => String(value || '').trim().replace(/\D+/g, '') || String(value || '').trim(),
+  },
+});
+const queueChatGptApiSmsPoolRefresh = chatGptApiSmsPoolManager?.queueRefresh || (() => {});
+const resetChatGptApiSmsPoolManager = chatGptApiSmsPoolManager?.reset || (() => {});
+const bindChatGptApiSmsPoolEvents = chatGptApiSmsPoolManager?.bindEvents || (() => {});
+bindChatGptApiSmsPoolEvents();
+
 function updateHostedSmsPoolCollapseUI(expanded = hostedSmsPoolExpanded) {
   hostedSmsPoolExpanded = Boolean(expanded);
   if (btnToggleHostedSmsPool) {
@@ -13459,6 +13787,26 @@ function updateHostedSmsPoolCollapseUI(expanded = hostedSmsPoolExpanded) {
 
 btnToggleHostedSmsPool?.addEventListener('click', () => {
   updateHostedSmsPoolCollapseUI(!hostedSmsPoolExpanded);
+});
+
+function updateChatGptApiSmsPoolCollapseUI(expanded = chatGptApiSmsPoolExpanded) {
+  chatGptApiSmsPoolExpanded = Boolean(expanded);
+  if (btnToggleChatGptApiSmsPool) {
+    btnToggleChatGptApiSmsPool.textContent = chatGptApiSmsPoolExpanded ? '收起' : '展开';
+    btnToggleChatGptApiSmsPool.setAttribute('aria-expanded', String(chatGptApiSmsPoolExpanded));
+  }
+  if (chatGptApiSmsPoolShell) {
+    chatGptApiSmsPoolShell.hidden = !chatGptApiSmsPoolExpanded;
+    chatGptApiSmsPoolShell.classList.toggle('is-expanded', chatGptApiSmsPoolExpanded);
+    chatGptApiSmsPoolShell.classList.toggle('is-collapsed', !chatGptApiSmsPoolExpanded);
+  }
+  if (chatGptApiSmsPoolExpanded) {
+    queueChatGptApiSmsPoolRefresh();
+  }
+}
+
+btnToggleChatGptApiSmsPool?.addEventListener('click', () => {
+  updateChatGptApiSmsPoolCollapseUI(!chatGptApiSmsPoolExpanded);
 });
 
 function validateHostedCheckoutContactConfig(options = {}) {
@@ -17957,6 +18305,38 @@ async function switchPhoneSmsProvider(nextProvider) {
       .map((country) => normalizeFiveSimCountryId(country?.id, ''))
       .filter(Boolean);
     patch.fiveSimOperator = normalizeFiveSimOperator(inputFiveSimOperator?.value || latestState?.fiveSimOperator);
+  } else if (previousProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+    patch.smsBowerApiKey = currentApiKey;
+    patch.smsBowerMaxPrice = currentMaxPrice;
+    patch.smsBowerMinPrice = currentMinPrice;
+    patch.smsBowerPreferredPrice = normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice?.value || latestState?.smsBowerPreferredPrice || '');
+    patch.smsBowerCountryId = currentPrimary.id;
+    patch.smsBowerCountryLabel = currentPrimary.label;
+    patch.smsBowerCountryFallback = currentFallback;
+  } else if (previousProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+    patch.smsVerificationNumberApiKey = currentApiKey;
+    patch.smsVerificationNumberMaxPrice = currentMaxPrice;
+    patch.smsVerificationNumberMinPrice = currentMinPrice;
+    patch.smsVerificationNumberPreferredPrice = normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice?.value || latestState?.smsVerificationNumberPreferredPrice || '');
+    patch.smsVerificationNumberCountryId = currentPrimary.id;
+    patch.smsVerificationNumberCountryLabel = currentPrimary.label;
+    patch.smsVerificationNumberCountryFallback = currentFallback;
+  } else if (previousProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+    patch.grizzlySmsApiKey = currentApiKey;
+    patch.grizzlySmsMaxPrice = currentMaxPrice;
+    patch.grizzlySmsMinPrice = currentMinPrice;
+    patch.grizzlySmsPreferredPrice = normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice?.value || latestState?.grizzlySmsPreferredPrice || '');
+    patch.grizzlySmsCountryId = currentPrimary.id;
+    patch.grizzlySmsCountryLabel = currentPrimary.label;
+    patch.grizzlySmsCountryFallback = currentFallback;
+  } else if (previousProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+    patch.smsPoolApiKey = currentApiKey;
+    patch.smsPoolMaxPrice = currentMaxPrice;
+    patch.smsPoolMinPrice = currentMinPrice;
+    patch.smsPoolPreferredPrice = normalizeHeroSmsMaxPriceValue(inputHeroSmsPreferredPrice?.value || latestState?.smsPoolPreferredPrice || '');
+    patch.smsPoolCountryId = currentPrimary.id;
+    patch.smsPoolCountryLabel = currentPrimary.label;
+    patch.smsPoolCountryFallback = currentFallback;
   } else {
     patch.heroSmsApiKey = currentApiKey;
     patch.heroSmsMaxPrice = currentMaxPrice;
@@ -17973,19 +18353,62 @@ async function switchPhoneSmsProvider(nextProvider) {
   setPhoneSmsProviderSelectValue(normalizedNextProvider);
   heroSmsCountrySelectionOrder = [];
   if (inputHeroSmsApiKey) {
-    inputHeroSmsApiKey.value = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? String(latestState?.fiveSimApiKey || '')
-      : String(latestState?.heroSmsApiKey || '');
+    if (normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsApiKey.value = String(latestState?.fiveSimApiKey || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsApiKey.value = String(latestState?.smsBowerApiKey || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsApiKey.value = String(latestState?.smsVerificationNumberApiKey || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsApiKey.value = String(latestState?.grizzlySmsApiKey || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsApiKey.value = String(latestState?.smsPoolApiKey || '');
+    } else {
+      inputHeroSmsApiKey.value = String(latestState?.heroSmsApiKey || '');
+    }
   }
   if (inputHeroSmsMaxPrice) {
-    inputHeroSmsMaxPrice.value = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '')
-      : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
+    if (normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsMaxPrice.value = normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '');
+    } else {
+      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
+    }
   }
   if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
-    inputHeroSmsMinPrice.value = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
-      ? normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM)
-      : normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', normalizedNextProvider);
+    if (normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsBowerMinPrice || '', normalizedNextProvider);
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsVerificationNumberMinPrice || '', normalizedNextProvider);
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.grizzlySmsMinPrice || '', normalizedNextProvider);
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsPoolMinPrice || '', normalizedNextProvider);
+    } else {
+      inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', normalizedNextProvider);
+    }
+  }
+  if (typeof inputHeroSmsPreferredPrice !== 'undefined' && inputHeroSmsPreferredPrice) {
+    if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsBowerPreferredPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberPreferredPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsPreferredPrice || '');
+    } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsPoolPreferredPrice || '');
+    } else {
+      inputHeroSmsPreferredPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.heroSmsPreferredPrice || '');
+    }
   }
   if (inputFiveSimOperator) {
     inputFiveSimOperator.value = normalizeFiveSimOperator(latestState?.fiveSimOperator);
@@ -18000,12 +18423,40 @@ async function switchPhoneSmsProvider(nextProvider) {
       id: normalizeFiveSimCountryId(latestState?.fiveSimCountryId),
       label: normalizeFiveSimCountryLabel(latestState?.fiveSimCountryLabel),
     }
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER
+    ? {
+      id: normalizeHeroSmsCountryId(latestState?.smsBowerCountryId || latestState?.heroSmsCountryId),
+      label: normalizeHeroSmsCountryLabel(latestState?.smsBowerCountryLabel || latestState?.heroSmsCountryLabel),
+    }
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER
+    ? {
+      id: normalizeHeroSmsCountryId(latestState?.smsVerificationNumberCountryId || 33),
+      label: normalizeHeroSmsCountryLabel(latestState?.smsVerificationNumberCountryLabel || 'Colombia'),
+    }
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS
+    ? {
+      id: normalizeHeroSmsCountryId(latestState?.grizzlySmsCountryId || 52),
+      label: normalizeHeroSmsCountryLabel(latestState?.grizzlySmsCountryLabel || 'Thailand'),
+    }
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL
+    ? {
+      id: normalizeHeroSmsCountryId(latestState?.smsPoolCountryId || 1),
+      label: normalizeHeroSmsCountryLabel(latestState?.smsPoolCountryLabel || 'United States'),
+    }
     : {
       id: normalizeHeroSmsCountryId(latestState?.heroSmsCountryId),
       label: normalizeHeroSmsCountryLabel(latestState?.heroSmsCountryLabel),
     };
   const restoredFallback = normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM
     ? normalizeFiveSimCountryFallbackList(latestState?.fiveSimCountryFallback || [])
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER
+    ? normalizeHeroSmsCountryFallbackList(latestState?.smsBowerCountryFallback || [])
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER
+    ? normalizeHeroSmsCountryFallbackList(latestState?.smsVerificationNumberCountryFallback || [])
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS
+    ? normalizeHeroSmsCountryFallbackList(latestState?.grizzlySmsCountryFallback || [])
+    : normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL
+    ? normalizeHeroSmsCountryFallbackList(latestState?.smsPoolCountryFallback || [])
     : normalizeHeroSmsCountryFallbackList(latestState?.heroSmsCountryFallback || []);
   if (typeof syncHeroSmsOperatorSelectionState === 'function') {
     syncHeroSmsOperatorSelectionState(latestState?.heroSmsOperatorByCountry || {});

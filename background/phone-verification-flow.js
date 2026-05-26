@@ -28,8 +28,21 @@
       DEFAULT_NEX_SMS_BASE_URL = 'https://api.nexsms.net',
       DEFAULT_NEX_SMS_COUNTRY_ORDER = [1],
       DEFAULT_NEX_SMS_SERVICE_CODE = 'ot',
+      DEFAULT_SMSBOWER_BASE_URL = 'https://smsbower.page/stubs/handler_api.php',
+      DEFAULT_SMSBOWER_SERVICE_CODE = 'dr',
+      DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api',
+      DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'dr',
+      DEFAULT_GRIZZLY_SMS_BASE_URL = 'https://api.grizzlysms.com/stubs/handler_api.php',
+      DEFAULT_GRIZZLY_SMS_SERVICE_CODE = 'dr',
+      DEFAULT_SMSPOOL_BASE_URL = 'https://api.smspool.net/stubs/handler_api.php?setting=smspool',
+      DEFAULT_SMSPOOL_SERVICE_CODE = '671',
       DEFAULT_HERO_SMS_REUSE_ENABLED = true,
       createFiveSimProvider = null,
+      createNexSmsProvider = null,
+      createSmsBowerProvider = null,
+      createSmsVerificationNumberProvider = null,
+      createGrizzlySmsProvider = null,
+      createSmsPoolProvider = null,
       HERO_SMS_COUNTRY_ID = 52,
       HERO_SMS_COUNTRY_LABEL = 'Thailand',
       HERO_SMS_SERVICE_CODE = 'dr',
@@ -87,11 +100,21 @@
     const PHONE_SMS_PROVIDER_HERO_SMS = PHONE_SMS_PROVIDER_HERO;
     const PHONE_SMS_PROVIDER_FIVE_SIM = PHONE_SMS_PROVIDER_5SIM;
     const PHONE_SMS_PROVIDER_NEXSMS = 'nexsms';
+    const PHONE_SMS_PROVIDER_SMSBOWER = 'smsbower';
+    const PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER = 'sms-verification-number';
+    const PHONE_SMS_PROVIDER_GRIZZLYSMS = 'grizzlysms';
+    const PHONE_SMS_PROVIDER_SMSPOOL = 'smspool';
+    const PHONE_SMS_PROVIDER_CHATGPT_API = 'chatgpt-api';
     const DEFAULT_PHONE_SMS_PROVIDER = PHONE_SMS_PROVIDER_HERO;
     const DEFAULT_PHONE_SMS_PROVIDER_ORDER = Object.freeze([
       PHONE_SMS_PROVIDER_HERO,
       PHONE_SMS_PROVIDER_5SIM,
       PHONE_SMS_PROVIDER_NEXSMS,
+      PHONE_SMS_PROVIDER_SMSBOWER,
+      PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER,
+      PHONE_SMS_PROVIDER_GRIZZLYSMS,
+      PHONE_SMS_PROVIDER_SMSPOOL,
+      PHONE_SMS_PROVIDER_CHATGPT_API,
     ]);
     const MAX_PHONE_REUSABLE_POOL = 12;
     const PHONE_CODE_TIMEOUT_ERROR_PREFIX = 'PHONE_CODE_TIMEOUT::';
@@ -195,6 +218,21 @@
       }
       if (normalized === PHONE_SMS_PROVIDER_NEXSMS) {
         return PHONE_SMS_PROVIDER_NEXSMS;
+      }
+      if (normalized === PHONE_SMS_PROVIDER_SMSBOWER) {
+        return PHONE_SMS_PROVIDER_SMSBOWER;
+      }
+      if (normalized === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        return PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER;
+      }
+      if (normalized === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        return PHONE_SMS_PROVIDER_GRIZZLYSMS;
+      }
+      if (normalized === PHONE_SMS_PROVIDER_SMSPOOL) {
+        return PHONE_SMS_PROVIDER_SMSPOOL;
+      }
+      if (normalized === PHONE_SMS_PROVIDER_CHATGPT_API) {
+        return PHONE_SMS_PROVIDER_CHATGPT_API;
       }
       return PHONE_SMS_PROVIDER_HERO;
     }
@@ -447,14 +485,62 @@
       return Math.round(parsed * 10000) / 10000;
     }
 
+    function getPhoneProviderPriceSettingKeys(provider = DEFAULT_PHONE_SMS_PROVIDER) {
+      const normalizedProvider = normalizePhoneSmsProvider(provider);
+      if (normalizedProvider === PHONE_SMS_PROVIDER_5SIM) {
+        return {
+          min: 'fiveSimMinPrice',
+          max: 'fiveSimMaxPrice',
+          preferred: 'heroSmsPreferredPrice',
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+        return {
+          min: 'smsBowerMinPrice',
+          max: 'smsBowerMaxPrice',
+          preferred: 'smsBowerPreferredPrice',
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        return {
+          min: 'smsVerificationNumberMinPrice',
+          max: 'smsVerificationNumberMaxPrice',
+          preferred: 'smsVerificationNumberPreferredPrice',
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        return {
+          min: 'grizzlySmsMinPrice',
+          max: 'grizzlySmsMaxPrice',
+          preferred: 'grizzlySmsPreferredPrice',
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+        return {
+          min: 'smsPoolMinPrice',
+          max: 'smsPoolMaxPrice',
+          preferred: 'smsPoolPreferredPrice',
+        };
+      }
+      return {
+        min: 'heroSmsMinPrice',
+        max: 'heroSmsMaxPrice',
+        preferred: 'heroSmsPreferredPrice',
+      };
+    }
+
+    function getPhoneProviderPriceSettings(state = {}, provider = DEFAULT_PHONE_SMS_PROVIDER) {
+      const keys = getPhoneProviderPriceSettingKeys(provider);
+      return {
+        minPriceLimit: normalizeHeroSmsPriceLimit(state?.[keys.min]),
+        maxPriceLimit: normalizeHeroSmsPriceLimit(state?.[keys.max]),
+        preferredPrice: normalizeHeroSmsPriceLimit(state?.[keys.preferred]),
+      };
+    }
+
     function resolvePhonePriceRange(state = {}, provider = DEFAULT_PHONE_SMS_PROVIDER) {
       const normalizedProvider = normalizePhoneSmsProvider(provider);
-      const minPriceLimit = normalizedProvider === PHONE_SMS_PROVIDER_5SIM
-        ? normalizeHeroSmsPriceLimit(state?.fiveSimMinPrice)
-        : normalizeHeroSmsPriceLimit(state?.heroSmsMinPrice);
-      const maxPriceLimit = normalizedProvider === PHONE_SMS_PROVIDER_5SIM
-        ? normalizeHeroSmsPriceLimit(state?.fiveSimMaxPrice)
-        : normalizeHeroSmsPriceLimit(state?.heroSmsMaxPrice);
+      const { minPriceLimit, maxPriceLimit } = getPhoneProviderPriceSettings(state, normalizedProvider);
       return {
         provider: normalizedProvider,
         minPriceLimit,
@@ -1106,7 +1192,7 @@
     }
 
     async function resolveHeroSmsPricePlanFromPricePayloads(config, countryConfig, state = {}, payloads = []) {
-      const userLimit = normalizeHeroSmsPriceLimit(state.heroSmsMaxPrice);
+      const userLimit = getPhoneProviderPriceSettings(state, config?.provider).maxPriceLimit;
       const inStockCandidates = buildSortedUniquePriceCandidates(
         (Array.isArray(payloads) ? payloads : [])
           .flatMap((payload) => collectHeroSmsPriceCandidates(payload, []))
@@ -1444,6 +1530,124 @@
 
     function getFiveSimProviderForState(_state = {}) {
       return createResolvedFiveSimProvider();
+    }
+
+    function createResolvedNexSmsProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = createNexSmsProvider || rootScope.PhoneSmsNexSmsProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+        rememberActivationAcquiredPrice,
+      });
+    }
+
+    function getNexSmsProviderForState(_state = {}) {
+      return createResolvedNexSmsProvider();
+    }
+
+    function createResolvedSmsBowerProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = createSmsBowerProvider || rootScope.PhoneSmsBowerProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+      });
+    }
+
+    function getSmsBowerProviderForState(_state = {}) {
+      return createResolvedSmsBowerProvider();
+    }
+
+    function createResolvedSmsVerificationNumberProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = createSmsVerificationNumberProvider || rootScope.PhoneSmsVerificationNumberProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+      });
+    }
+
+    function getSmsVerificationNumberProviderForState(_state = {}) {
+      return createResolvedSmsVerificationNumberProvider();
+    }
+
+    function createResolvedGrizzlySmsProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = createGrizzlySmsProvider || rootScope.PhoneSmsGrizzlySmsProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+      });
+    }
+
+    function getGrizzlySmsProviderForState(_state = {}) {
+      return createResolvedGrizzlySmsProvider();
+    }
+
+    function createResolvedSmsPoolProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = createSmsPoolProvider || rootScope.PhoneSmsPoolProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+      });
+    }
+
+    function getSmsPoolProviderForState(_state = {}) {
+      return createResolvedSmsPoolProvider();
+    }
+
+    function createResolvedChatGptApiProvider() {
+      const rootScope = typeof self !== 'undefined' ? self : globalThis;
+      const factory = rootScope.PhoneSmsChatGptApiProvider?.createProvider;
+      if (typeof factory !== 'function') {
+        return null;
+      }
+      return factory({
+        addLog,
+        fetchImpl,
+        requestTimeoutMs: DEFAULT_PHONE_REQUEST_TIMEOUT_MS,
+        sleepWithStop,
+        throwIfStopped,
+        getState,
+        setState,
+        broadcastDataUpdate,
+      });
+    }
+
+    function getChatGptApiProviderForState(_state = {}) {
+      return createResolvedChatGptApiProvider();
     }
 
     function normalizeFiveSimCountryId(value, fallback = 'england') {
@@ -2525,6 +2729,94 @@
           baseUrl: normalizeUrl(state.nexSmsBaseUrl, DEFAULT_NEX_SMS_BASE_URL).replace(/\/+$/, ''),
           serviceCode: normalizeNexSmsServiceCode(state.nexSmsServiceCode, DEFAULT_NEX_SMS_SERVICE_CODE),
           countryCandidates: resolveNexSmsCountryCandidates(state),
+        };
+      }
+
+      if (provider === PHONE_SMS_PROVIDER_SMSBOWER) {
+        const apiKey = normalizeApiKey(state.smsBowerApiKey || state.heroSmsApiKey);
+        if (!apiKey) {
+          throw new Error('SMSBower API Key 缺失，请先在侧边栏保存接码 API Key。');
+        }
+        return {
+          provider,
+          apiKey,
+          baseUrl: normalizeUrl(state.smsBowerBaseUrl, DEFAULT_SMSBOWER_BASE_URL),
+          serviceCode: normalizeNexSmsServiceCode(state.smsBowerServiceCode, DEFAULT_SMSBOWER_SERVICE_CODE),
+          countryCandidates: resolveCountryCandidates({
+            ...state,
+            heroSmsCountryId: state?.smsBowerCountryId || state?.heroSmsCountryId,
+            heroSmsCountryLabel: state?.smsBowerCountryLabel || state?.heroSmsCountryLabel,
+            heroSmsCountryFallback: state?.smsBowerCountryFallback || state?.heroSmsCountryFallback,
+          }),
+          heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
+        };
+      }
+
+      if (provider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        const apiKey = normalizeApiKey(state.smsVerificationNumberApiKey || state.heroSmsApiKey);
+        if (!apiKey) {
+          throw new Error('SMS Verification Number API Key 缺失，请先在侧边栏保存接码 API Key。');
+        }
+        return {
+          provider,
+          apiKey,
+          baseUrl: normalizeUrl(state.smsVerificationNumberBaseUrl, DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL),
+          serviceCode: normalizeNexSmsServiceCode(state.smsVerificationNumberServiceCode, DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE),
+          countryCandidates: resolveCountryCandidates({
+            ...state,
+            heroSmsCountryId: state?.smsVerificationNumberCountryId || state?.heroSmsCountryId,
+            heroSmsCountryLabel: state?.smsVerificationNumberCountryLabel || state?.heroSmsCountryLabel,
+            heroSmsCountryFallback: state?.smsVerificationNumberCountryFallback || state?.heroSmsCountryFallback,
+          }),
+          heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
+        };
+      }
+
+      if (provider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        const apiKey = normalizeApiKey(state.grizzlySmsApiKey || state.heroSmsApiKey);
+        if (!apiKey) {
+          throw new Error('GrizzlySMS API Key 缺失，请先在侧边栏保存接码 API Key。');
+        }
+        return {
+          provider,
+          apiKey,
+          baseUrl: normalizeUrl(state.grizzlySmsBaseUrl, DEFAULT_GRIZZLY_SMS_BASE_URL),
+          serviceCode: normalizeNexSmsServiceCode(state.grizzlySmsServiceCode, DEFAULT_GRIZZLY_SMS_SERVICE_CODE),
+          countryCandidates: resolveCountryCandidates({
+            ...state,
+            heroSmsCountryId: state?.grizzlySmsCountryId || state?.heroSmsCountryId,
+            heroSmsCountryLabel: state?.grizzlySmsCountryLabel || state?.heroSmsCountryLabel,
+            heroSmsCountryFallback: state?.grizzlySmsCountryFallback || state?.heroSmsCountryFallback,
+          }),
+          heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
+        };
+      }
+
+      if (provider === PHONE_SMS_PROVIDER_SMSPOOL) {
+        const apiKey = normalizeApiKey(state.smsPoolApiKey || state.heroSmsApiKey);
+        if (!apiKey) {
+          throw new Error('SMSPool API Key 缺失，请先在侧边栏保存接码 API Key。');
+        }
+        return {
+          provider,
+          apiKey,
+          baseUrl: normalizeUrl(state.smsPoolBaseUrl, DEFAULT_SMSPOOL_BASE_URL),
+          serviceCode: normalizeNexSmsServiceCode(state.smsPoolServiceCode, DEFAULT_SMSPOOL_SERVICE_CODE),
+          countryCandidates: resolveCountryCandidates({
+            ...state,
+            heroSmsCountryId: state?.smsPoolCountryId || state?.heroSmsCountryId,
+            heroSmsCountryLabel: state?.smsPoolCountryLabel || state?.heroSmsCountryLabel,
+            heroSmsCountryFallback: state?.smsPoolCountryFallback || state?.heroSmsCountryFallback,
+          }),
+          heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
+        };
+      }
+
+      if (provider === PHONE_SMS_PROVIDER_CHATGPT_API) {
+        return {
+          provider,
+          countryCandidates: [],
+          heroSmsOperatorByCountry: {},
         };
       }
 
@@ -4114,6 +4406,12 @@
           return provider.requestActivation(state, options);
         }
       }
+      if (normalizePhoneSmsProvider(state?.phoneSmsProvider) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+        const provider = getChatGptApiProviderForState(state);
+        if (provider) {
+          return provider.requestActivation(state, options);
+        }
+      }
       const config = resolvePhoneConfig(state);
       if (config.provider === PHONE_SMS_PROVIDER_5SIM) {
         return requestFiveSimActivation(state, options);
@@ -4121,11 +4419,12 @@
       if (config.provider === PHONE_SMS_PROVIDER_NEXSMS) {
         return requestNexSmsActivation(state, options);
       }
+      const heroLikeProviderLabel = getPhoneSmsProviderLabel(config.provider);
       const allCountryCandidates = Array.isArray(config.countryCandidates) && config.countryCandidates.length
         ? config.countryCandidates
         : resolveCountryCandidates(state);
       if (!allCountryCandidates.length) {
-        throw new Error(`步骤 ${getActivePhoneVerificationVisibleStep()}：HeroSMS 未选择国家，请先在接码设置中至少选择 1 个国家。`);
+        throw new Error(`步骤 ${getActivePhoneVerificationVisibleStep()}：${heroLikeProviderLabel} 未选择国家，请先在接码设置中至少选择 1 个国家。`);
       }
       const blockedCountryIds = new Set(
         (Array.isArray(options?.blockedCountryIds) ? options.blockedCountryIds : [])
@@ -4145,16 +4444,16 @@
         }
       }
       const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
-      const priceRange = resolvePhonePriceRange(state, PHONE_SMS_PROVIDER_HERO);
+      const priceRange = resolvePhonePriceRange(state, config.provider);
       if (priceRange.invalidRange) {
         throw new Error(
-          `HeroSMS 价格区间无效：最低购买价 ${priceRange.minPriceLimit} 高于价格上限 ${priceRange.maxPriceLimit}。`
+          `${heroLikeProviderLabel} 价格区间无效：最低购买价 ${priceRange.minPriceLimit} 高于价格上限 ${priceRange.maxPriceLimit}。`
         );
       }
       const minPriceLimit = priceRange.minPriceLimit;
       const maxPriceLimit = priceRange.maxPriceLimit;
       const hasPriceBounds = priceRange.hasMinPriceLimit || priceRange.hasMaxPriceLimit;
-      const preferredPriceTier = normalizeHeroSmsPriceLimit(state?.heroSmsPreferredPrice);
+      const preferredPriceTier = getPhoneProviderPriceSettings(state, config.provider).preferredPrice;
       const countryPriceFloorByCountryId = normalizeCountryPriceFloorMap(
         options?.countryPriceFloorByCountryId,
         (value) => String(normalizeCountryId(value, 0))
@@ -4392,7 +4691,10 @@
           });
           const preferredOperator = attempt.preferredOperator || String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim();
           const buildFallbackActivation = (requestAction) => ({
+            provider: config.provider || PHONE_SMS_PROVIDER_HERO,
+            serviceCode: String(config.serviceCode || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE,
             countryId: countryConfig.id,
+            countryLabel,
             ...(preferredOperator ? { operator: preferredOperator } : {}),
             ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
           });
@@ -4428,7 +4730,10 @@
                 }
               );
               const fallbackActivation = parseActivationPayload(fallbackPayload, {
+                provider: config.provider || PHONE_SMS_PROVIDER_HERO,
+                serviceCode: String(config.serviceCode || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE,
                 countryId: countryConfig.id,
+                countryLabel,
                 ...(requestAction === 'getNumberV2' ? { statusAction: 'getStatusV2' } : {}),
               });
               if (fallbackActivation) {
@@ -4724,6 +5029,41 @@
           return;
         }
       }
+      if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_NEXSMS) {
+        const provider = getNexSmsProviderForState(state);
+        if (provider) {
+          await provider.finishActivation(state, activation);
+          return;
+        }
+      }
+      if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMSBOWER) {
+        const provider = getSmsBowerProviderForState(state);
+        if (provider) {
+          await provider.finishActivation(state, activation);
+          return;
+        }
+      }
+      if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        const provider = getSmsVerificationNumberProviderForState(state);
+        if (provider) {
+          await provider.finishActivation(state, activation);
+          return;
+        }
+      }
+      if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        const provider = getGrizzlySmsProviderForState(state);
+        if (provider) {
+          await provider.finishActivation(state, activation);
+          return;
+        }
+      }
+      if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+        const provider = getChatGptApiProviderForState(state);
+        if (provider) {
+          await provider.finishActivation(state, activation);
+          return;
+        }
+      }
       await setPhoneActivationStatus(state, activation, 6, 'HeroSMS setStatus(6)');
     }
 
@@ -4740,6 +5080,41 @@
         }
         if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_FIVE_SIM) {
           const provider = getFiveSimProviderForState(state);
+          if (provider) {
+            await provider.cancelActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_NEXSMS) {
+          const provider = getNexSmsProviderForState(state);
+          if (provider) {
+            await provider.cancelActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMSBOWER) {
+          const provider = getSmsBowerProviderForState(state);
+          if (provider) {
+            await provider.cancelActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+          const provider = getSmsVerificationNumberProviderForState(state);
+          if (provider) {
+            await provider.cancelActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+          const provider = getGrizzlySmsProviderForState(state);
+          if (provider) {
+            await provider.cancelActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+          const provider = getChatGptApiProviderForState(state);
           if (provider) {
             await provider.cancelActivation(state, activation);
             return;
@@ -4846,6 +5221,41 @@
             return;
           }
         }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_NEXSMS) {
+          const provider = getNexSmsProviderForState(state);
+          if (provider) {
+            await provider.banActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMSBOWER) {
+          const provider = getSmsBowerProviderForState(state);
+          if (provider) {
+            await provider.banActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+          const provider = getSmsVerificationNumberProviderForState(state);
+          if (provider) {
+            await provider.banActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+          const provider = getGrizzlySmsProviderForState(state);
+          if (provider) {
+            await provider.banActivation(state, activation);
+            return;
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+          const provider = getChatGptApiProviderForState(state);
+          if (provider) {
+            await provider.banActivation(state, activation);
+            return;
+          }
+        }
         await setPhoneActivationStatus(state, activation, 8, 'HeroSMS setStatus(8)');
       } catch (_) {
         // Best-effort cleanup.
@@ -4855,6 +5265,30 @@
     async function requestAdditionalPhoneSms(state = {}, activation) {
       const config = resolvePhoneConfig(state);
       if (config.provider !== PHONE_SMS_PROVIDER_HERO) {
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMSBOWER) {
+          const provider = getSmsBowerProviderForState(state);
+          if (provider?.requestAdditionalSms) {
+            await provider.requestAdditionalSms(state, activation);
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+          const provider = getSmsVerificationNumberProviderForState(state);
+          if (provider?.requestAdditionalSms) {
+            await provider.requestAdditionalSms(state, activation);
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+          const provider = getGrizzlySmsProviderForState(state);
+          if (provider?.requestAdditionalSms) {
+            await provider.requestAdditionalSms(state, activation);
+          }
+        }
+        if (getActivationProviderId(activation, state) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+          const provider = getChatGptApiProviderForState(state);
+          if (provider?.requestAdditionalSms) {
+            await provider.requestAdditionalSms(state, activation);
+          }
+        }
         return;
       }
       try {
@@ -5032,6 +5466,36 @@
       }
       if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_FIVE_SIM) {
         const provider = getFiveSimProviderForState(state);
+        if (provider) {
+          return provider.pollActivationCode(state, normalizedActivation, options);
+        }
+      }
+      if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_NEXSMS) {
+        const provider = getNexSmsProviderForState(state);
+        if (provider) {
+          return provider.pollActivationCode(state, normalizedActivation, options);
+        }
+      }
+      if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_SMSBOWER) {
+        const provider = getSmsBowerProviderForState(state);
+        if (provider) {
+          return provider.pollActivationCode(state, normalizedActivation, options);
+        }
+      }
+      if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        const provider = getSmsVerificationNumberProviderForState(state);
+        if (provider) {
+          return provider.pollActivationCode(state, normalizedActivation, options);
+        }
+      }
+      if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        const provider = getGrizzlySmsProviderForState(state);
+        if (provider) {
+          return provider.pollActivationCode(state, normalizedActivation, options);
+        }
+      }
+      if (getActivationProviderId(normalizedActivation, state) === PHONE_SMS_PROVIDER_CHATGPT_API) {
+        const provider = getChatGptApiProviderForState(state);
         if (provider) {
           return provider.pollActivationCode(state, normalizedActivation, options);
         }

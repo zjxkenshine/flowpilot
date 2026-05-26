@@ -13,6 +13,11 @@ importScripts(
   'gopay-utils.js',
   'phone-sms/providers/hero-sms.js',
   'phone-sms/providers/five-sim.js',
+  'phone-sms/providers/smsbower.js',
+  'phone-sms/providers/sms-verification-number.js',
+  'phone-sms/providers/grizzlysms.js',
+  'phone-sms/providers/smspool.js',
+  'phone-sms/providers/chatgpt-api.js',
   'phone-sms/providers/registry.js',
   'background/phone-verification-flow.js',
   'background/account-book.js',
@@ -748,6 +753,11 @@ const PHONE_SMS_PROVIDER_5SIM = '5sim';
 const PHONE_SMS_PROVIDER_HERO_SMS = PHONE_SMS_PROVIDER_HERO;
 const PHONE_SMS_PROVIDER_FIVE_SIM = PHONE_SMS_PROVIDER_5SIM;
 const PHONE_SMS_PROVIDER_NEXSMS = 'nexsms';
+const PHONE_SMS_PROVIDER_SMSBOWER = 'smsbower';
+const PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER = 'sms-verification-number';
+const PHONE_SMS_PROVIDER_GRIZZLYSMS = 'grizzlysms';
+const PHONE_SMS_PROVIDER_SMSPOOL = 'smspool';
+const PHONE_SMS_PROVIDER_CHATGPT_API = 'chatgpt-api';
 const DEFAULT_PHONE_SMS_PROVIDER = PHONE_SMS_PROVIDER_HERO;
 const DEFAULT_PHONE_SMS_PROVIDER_ORDER = Object.freeze([
   PHONE_SMS_PROVIDER_HERO,
@@ -761,6 +771,16 @@ const DEFAULT_FIVE_SIM_COUNTRY_ORDER = Object.freeze(['thailand']);
 const DEFAULT_NEX_SMS_BASE_URL = 'https://api.nexsms.net';
 const DEFAULT_NEX_SMS_SERVICE_CODE = 'ot';
 const DEFAULT_NEX_SMS_COUNTRY_ORDER = Object.freeze([1]);
+const DEFAULT_SMSBOWER_BASE_URL = 'https://smsbower.page/stubs/handler_api.php';
+const DEFAULT_SMSBOWER_SERVICE_CODE = 'dr';
+const DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api';
+const DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'dr';
+const DEFAULT_GRIZZLY_SMS_BASE_URL = 'https://api.grizzlysms.com/stubs/handler_api.php';
+const DEFAULT_GRIZZLY_SMS_SERVICE_CODE = 'dr';
+const DEFAULT_SMSPOOL_BASE_URL = 'https://api.smspool.net/stubs/handler_api.php?setting=smspool';
+const DEFAULT_SMSPOOL_SERVICE_CODE = '671';
+const DEFAULT_SMSPOOL_COUNTRY_ID = 1;
+const DEFAULT_SMSPOOL_COUNTRY_LABEL = 'United States';
 const DEFAULT_HERO_SMS_REUSE_ENABLED = true;
 const HERO_SMS_ACQUIRE_PRIORITY_COUNTRY = 'country';
 const HERO_SMS_ACQUIRE_PRIORITY_PRICE = 'price';
@@ -1426,6 +1446,10 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutSmsPoolText: '',
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
+  chatGptApiSmsPoolText: '',
+  chatGptApiSmsPoolUsage: {},
+  chatGptApiSmsPoolAutoDisableEnabled: false,
+  chatGptApiCurrentSmsEntry: null,
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
   paypalEmail: '',
   paypalPassword: '',
@@ -1575,6 +1599,42 @@ const PERSISTED_SETTING_DEFAULTS = {
   nexSmsApiKey: '',
   nexSmsCountryOrder: [...DEFAULT_NEX_SMS_COUNTRY_ORDER],
   nexSmsServiceCode: DEFAULT_NEX_SMS_SERVICE_CODE,
+  smsBowerApiKey: '',
+  smsBowerBaseUrl: DEFAULT_SMSBOWER_BASE_URL,
+  smsBowerServiceCode: DEFAULT_SMSBOWER_SERVICE_CODE,
+  smsBowerCountryId: HERO_SMS_COUNTRY_ID,
+  smsBowerCountryLabel: HERO_SMS_COUNTRY_LABEL,
+  smsBowerCountryFallback: [],
+  smsBowerMinPrice: '',
+  smsBowerMaxPrice: '',
+  smsBowerPreferredPrice: '',
+  smsVerificationNumberApiKey: '',
+  smsVerificationNumberBaseUrl: DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL,
+  smsVerificationNumberServiceCode: DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE,
+  smsVerificationNumberCountryId: 33,
+  smsVerificationNumberCountryLabel: 'Colombia',
+  smsVerificationNumberCountryFallback: [],
+  smsVerificationNumberMinPrice: '',
+  smsVerificationNumberMaxPrice: '',
+  smsVerificationNumberPreferredPrice: '',
+  grizzlySmsApiKey: '',
+  grizzlySmsBaseUrl: DEFAULT_GRIZZLY_SMS_BASE_URL,
+  grizzlySmsServiceCode: DEFAULT_GRIZZLY_SMS_SERVICE_CODE,
+  grizzlySmsCountryId: 52,
+  grizzlySmsCountryLabel: 'Thailand',
+  grizzlySmsCountryFallback: [],
+  grizzlySmsMinPrice: '',
+  grizzlySmsMaxPrice: '',
+  grizzlySmsPreferredPrice: '',
+  smsPoolApiKey: '',
+  smsPoolBaseUrl: DEFAULT_SMSPOOL_BASE_URL,
+  smsPoolServiceCode: DEFAULT_SMSPOOL_SERVICE_CODE,
+  smsPoolCountryId: DEFAULT_SMSPOOL_COUNTRY_ID,
+  smsPoolCountryLabel: DEFAULT_SMSPOOL_COUNTRY_LABEL,
+  smsPoolCountryFallback: [],
+  smsPoolMinPrice: '',
+  smsPoolMaxPrice: '',
+  smsPoolPreferredPrice: '',
   phonePreferredActivation: null,
 };
 
@@ -3460,6 +3520,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\r/g, '').trim();
     case 'hostedCheckoutSmsPoolUsage':
+    case 'chatGptApiSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return {};
       }
@@ -3472,9 +3533,48 @@ function normalizePersistentSettingValue(key, value) {
           usedAt: Math.max(0, Number(usage.usedAt) || 0),
           lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
           lastError: String(usage.lastError || '').trim(),
+          enabled: usage.enabled !== false,
+          disabledReason: String(usage.disabledReason || '').trim(),
+          disabledAt: Math.max(0, Number(usage.disabledAt) || 0),
+          failureCount: Math.max(0, Math.floor(Number(usage.failureCount) || 0)),
         }];
       }).filter(([entryKey]) => Boolean(entryKey)));
+    case 'chatGptApiSmsPoolText':
+      return String(value || '').replace(/\r/g, '').trim();
+    case 'chatGptApiSmsPoolAutoDisableEnabled':
+      return Boolean(value);
     case 'hostedCheckoutCurrentSmsEntry': {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+      }
+      const normalizedPhone = String(value.phone || '').trim().replace(/\D+/g, '');
+      const phone = normalizedPhone.length === 11 && normalizedPhone.startsWith('1')
+        ? normalizedPhone.slice(1)
+        : normalizedPhone;
+      const rawUrl = String(value.verificationUrl || '').trim();
+      let verificationUrl = rawUrl;
+      if (rawUrl) {
+        try {
+          const parsed = new URL(rawUrl);
+          parsed.searchParams.delete('t');
+          verificationUrl = parsed.toString();
+        } catch {
+          verificationUrl = rawUrl
+            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+            .replace(/[?&]$/g, '');
+        }
+      }
+      const key = String(value.key || (phone && verificationUrl ? `${phone}----${verificationUrl}` : '')).trim();
+      if (!phone || !verificationUrl || !key) {
+        return null;
+      }
+      return {
+        key,
+        phone,
+        verificationUrl,
+      };
+    }
+    case 'chatGptApiCurrentSmsEntry': {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null;
       }
@@ -3810,6 +3910,90 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeNexSmsCountryOrder(value);
     case 'nexSmsServiceCode':
       return normalizeNexSmsServiceCode(value);
+    case 'smsBowerApiKey':
+      return String(value || '');
+    case 'smsBowerBaseUrl':
+      return normalizeUrl(value, DEFAULT_SMSBOWER_BASE_URL);
+    case 'smsBowerServiceCode':
+      return normalizeNexSmsServiceCode(value, DEFAULT_SMSBOWER_SERVICE_CODE);
+    case 'smsBowerCountryId': {
+      const parsed = Math.floor(Number(value));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return HERO_SMS_COUNTRY_ID;
+    }
+    case 'smsBowerCountryLabel':
+      return String(value || HERO_SMS_COUNTRY_LABEL).trim() || HERO_SMS_COUNTRY_LABEL;
+    case 'smsBowerCountryFallback':
+      return normalizeHeroSmsCountryFallback(value);
+    case 'smsBowerMinPrice':
+    case 'smsBowerMaxPrice':
+    case 'smsBowerPreferredPrice':
+      return normalizeHeroSmsMaxPrice(value);
+    case 'smsVerificationNumberApiKey':
+      return String(value || '');
+    case 'smsVerificationNumberBaseUrl':
+      return normalizeUrl(value, DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL);
+    case 'smsVerificationNumberServiceCode':
+      return normalizeNexSmsServiceCode(value, DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE);
+    case 'smsVerificationNumberCountryId': {
+      const parsed = Math.floor(Number(value));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return 33;
+    }
+    case 'smsVerificationNumberCountryLabel':
+      return String(value || 'Colombia').trim() || 'Colombia';
+    case 'smsVerificationNumberCountryFallback':
+      return normalizeHeroSmsCountryFallback(value);
+    case 'smsVerificationNumberMinPrice':
+    case 'smsVerificationNumberMaxPrice':
+    case 'smsVerificationNumberPreferredPrice':
+      return normalizeHeroSmsMaxPrice(value);
+    case 'grizzlySmsApiKey':
+      return String(value || '');
+    case 'grizzlySmsBaseUrl':
+      return normalizeUrl(value, DEFAULT_GRIZZLY_SMS_BASE_URL);
+    case 'grizzlySmsServiceCode':
+      return normalizeNexSmsServiceCode(value, DEFAULT_GRIZZLY_SMS_SERVICE_CODE);
+    case 'grizzlySmsCountryId': {
+      const parsed = Math.floor(Number(value));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return 52;
+    }
+    case 'grizzlySmsCountryLabel':
+      return String(value || 'Thailand').trim() || 'Thailand';
+    case 'grizzlySmsCountryFallback':
+      return normalizeHeroSmsCountryFallback(value);
+    case 'grizzlySmsMinPrice':
+    case 'grizzlySmsMaxPrice':
+    case 'grizzlySmsPreferredPrice':
+      return normalizeHeroSmsMaxPrice(value);
+    case 'smsPoolApiKey':
+      return String(value || '');
+    case 'smsPoolBaseUrl':
+      return normalizeUrl(value, DEFAULT_SMSPOOL_BASE_URL);
+    case 'smsPoolServiceCode':
+      return normalizeNexSmsServiceCode(value, DEFAULT_SMSPOOL_SERVICE_CODE);
+    case 'smsPoolCountryId': {
+      const parsed = Math.floor(Number(value));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      return DEFAULT_SMSPOOL_COUNTRY_ID;
+    }
+    case 'smsPoolCountryLabel':
+      return String(value || DEFAULT_SMSPOOL_COUNTRY_LABEL).trim() || DEFAULT_SMSPOOL_COUNTRY_LABEL;
+    case 'smsPoolCountryFallback':
+      return normalizeHeroSmsCountryFallback(value);
+    case 'smsPoolMinPrice':
+    case 'smsPoolMaxPrice':
+    case 'smsPoolPreferredPrice':
+      return normalizeHeroSmsMaxPrice(value);
     case 'phonePreferredActivation':
       return normalizePhonePreferredActivation(value);
     default:
@@ -3984,6 +4168,75 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       ).trim();
       const matchedEntry = poolEntries.find((entry) => entry.key === currentKey) || null;
       payload.hostedCheckoutCurrentSmsEntry = matchedEntry
+        ? {
+            key: matchedEntry.key,
+            phone: matchedEntry.phone,
+            verificationUrl: matchedEntry.verificationUrl,
+          }
+        : null;
+    }
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'chatGptApiSmsPoolText')
+    || Object.prototype.hasOwnProperty.call(payload, 'chatGptApiCurrentSmsEntry')
+    || Object.prototype.hasOwnProperty.call(payload, 'chatGptApiSmsPoolUsage')
+  ) {
+    const poolEntries = String(payload.chatGptApiSmsPoolText || '')
+      .replace(/\r/g, '')
+      .split('\n')
+      .map((line) => String(line || '').trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separatorIndex = line.indexOf('----');
+        if (separatorIndex <= 0) {
+          return null;
+        }
+        const phone = String(line.slice(0, separatorIndex) || '').trim().replace(/\D+/g, '');
+        const rawUrl = String(line.slice(separatorIndex + 4) || '').trim();
+        if (!phone || !rawUrl) {
+          return null;
+        }
+        let verificationUrl = rawUrl;
+        try {
+          const parsed = new URL(rawUrl);
+          parsed.searchParams.delete('t');
+          verificationUrl = parsed.toString();
+        } catch {
+          verificationUrl = rawUrl
+            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+            .replace(/[?&]$/g, '');
+        }
+        if (!verificationUrl) {
+          return null;
+        }
+        return {
+          key: `${phone}----${verificationUrl}`,
+          phone,
+          verificationUrl,
+        };
+      })
+      .filter(Boolean);
+    payload.chatGptApiSmsPoolText = poolEntries
+      .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+      .join('\n');
+    const allowedKeys = new Set(poolEntries.map((entry) => entry.key));
+    if (Object.prototype.hasOwnProperty.call(payload, 'chatGptApiSmsPoolUsage')) {
+      payload.chatGptApiSmsPoolUsage = Object.fromEntries(
+        Object.entries(payload.chatGptApiSmsPoolUsage || {}).filter(([key]) => allowedKeys.has(String(key || '').trim()))
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'chatGptApiCurrentSmsEntry')) {
+      const currentEntry = payload.chatGptApiCurrentSmsEntry;
+      const currentKey = String(
+        currentEntry?.key
+        || (
+          currentEntry?.phone && currentEntry?.verificationUrl
+            ? `${currentEntry.phone}----${currentEntry.verificationUrl}`
+            : ''
+        )
+      ).trim();
+      const matchedEntry = poolEntries.find((entry) => entry.key === currentKey) || null;
+      payload.chatGptApiCurrentSmsEntry = matchedEntry
         ? {
             key: matchedEntry.key,
             phone: matchedEntry.phone,

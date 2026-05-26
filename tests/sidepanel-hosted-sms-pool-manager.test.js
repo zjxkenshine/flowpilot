@@ -288,3 +288,85 @@ test('hosted sms pool manager imports legacy txt without meta and clears usage/c
   assert.deepEqual(latest.usage, {});
   assert.equal(latest.currentEntry, null);
 });
+
+test('hosted sms pool manager renders disabled entries and supports custom labels', async () => {
+  const source = fs.readFileSync('sidepanel/hosted-sms-pool-manager.js', 'utf8');
+  const documentObject = {
+    createElement() {
+      return {
+        className: '',
+        innerHTML: '',
+        querySelector() {
+          return { addEventListener() {} };
+        },
+        appendChild() {},
+      };
+    },
+  };
+  const windowObject = { document: documentObject };
+  const api = new Function('window', 'document', `${source}; return window.SidepanelHostedSmsPoolManager;`)(windowObject, documentObject);
+
+  let latest = {
+    text: '628111111111----https://example.com/api/sms/1',
+    usage: {
+      '628111111111----https://example.com/api/sms/1': {
+        useCount: 2,
+        usedAt: 10,
+        lastAttemptAt: 11,
+        lastError: 'waiting',
+        enabled: false,
+        disabledReason: 'timeout',
+        disabledAt: 12,
+        failureCount: 2,
+      },
+    },
+    currentEntry: null,
+  };
+  const dom = {
+    hostedSmsPoolSummary: createNode(),
+    hostedSmsPoolList: createNode(),
+    btnHostedSmsPoolRefresh: createNode(),
+    btnHostedSmsPoolClearUsed: createNode(),
+    btnHostedSmsPoolDeleteAll: createNode(),
+    inputHostedSmsPoolImport: createNode(),
+    btnHostedSmsPoolImport: createNode(),
+    inputHostedSmsPoolSearch: createNode(),
+    selectHostedSmsPoolFilter: createNode({ value: 'disabled' }),
+  };
+
+  const manager = api.createHostedSmsPoolManager({
+    dom,
+    helpers: {
+      copyTextToClipboard: async () => {},
+      escapeHtml: (value) => String(value || ''),
+      openConfirmModal: async () => true,
+      showToast() {},
+    },
+    state: {
+      getText: () => latest.text,
+      setText: (text) => { latest.text = String(text || ''); },
+      getUsage: () => latest.usage,
+      setUsage: (usage) => { latest.usage = usage; },
+      getCurrentEntry: () => latest.currentEntry,
+      setCurrentEntry: (entry) => { latest.currentEntry = entry; },
+      isVisible: () => true,
+    },
+    actions: {
+      persistPool: async () => {},
+    },
+    labels: {
+      poolLabel: 'ChatGPT API 接码池',
+      importSubject: 'ChatGPT API 接码号码',
+      emptySummary: '导入 ChatGPT API 接码号码，每行一个号码和验证码接口。',
+    },
+    normalizers: {
+      normalizePhone: (value = '') => String(value || '').trim().replace(/\D+/g, ''),
+      formatLocalPhone: (value = '') => String(value || '').trim().replace(/\D+/g, ''),
+    },
+  });
+
+  manager.bindEvents();
+  manager.render();
+
+  assert.match(dom.hostedSmsPoolSummary.textContent, /已禁用/);
+});

@@ -1710,20 +1710,30 @@
                 <option value="hero-sms">HeroSMS</option>
                 <option value="5sim">5sim</option>
                 <option value="nexsms">NexSMS</option>
+                <option value="smsbower">SMSBower</option>
+                <option value="sms-verification-number">SMS Verification Number</option>
+                <option value="grizzlysms">GrizzlySMS</option>
+                <option value="smspool">SMSPool</option>
+                <option value="chatgpt-api">ChatGPT API 接码</option>
               </select>
             </div>
             <div class="data-row" id="row-phone-sms-provider-order" style="display:none;">
               <span class="data-label">服务商顺序</span>
               <div class="data-inline hero-sms-country-stack">
-                <select id="select-phone-sms-provider-order" class="data-input mono" multiple size="3" style="display:none;">
+                <select id="select-phone-sms-provider-order" class="data-input mono" multiple size="4" style="display:none;">
                   <option value="hero-sms" selected>HeroSMS</option>
                   <option value="5sim" selected>5sim</option>
                   <option value="nexsms" selected>NexSMS</option>
+                  <option value="smsbower">SMSBower</option>
+                  <option value="sms-verification-number">SMS Verification Number</option>
+                  <option value="grizzlysms">GrizzlySMS</option>
+                  <option value="smspool">SMSPool</option>
+                  <option value="chatgpt-api">ChatGPT API 接码</option>
                 </select>
                 <div class="hero-sms-country-mainline">
                   <div id="phone-sms-provider-order-menu-shell" class="hero-sms-country-menu">
                     <button id="btn-phone-sms-provider-order-menu" class="btn btn-outline btn-sm hero-sms-country-menu-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
-                      HeroSMS / 5sim / NexSMS (3/3)
+                      HeroSMS / 5sim / NexSMS (3/8)
                     </button>
                     <div id="phone-sms-provider-order-menu" class="hero-sms-country-menu-dropdown" role="listbox" aria-multiselectable="true" hidden></div>
                   </div>
@@ -1992,6 +2002,61 @@
                 </div>
               </div>
             </div>
+            <div class="data-row data-check-row" id="row-chatgpt-api-sms-pool" style="display:none;">
+              <span class="data-label">ChatGPT API 接码池</span>
+              <div class="hotmail-import-box hosted-sms-pool-box">
+                <textarea id="input-chatgpt-api-sms-pool" class="data-textarea mono" hidden
+                  placeholder="628123456789----https://example.com/api/get-sms?id=xxxx"></textarea>
+                <div class="section-mini-header">
+                  <div class="section-mini-copy">
+                    <span class="section-label">ChatGPT API 接码池</span>
+                    <span class="data-value">号码和验证码接口按行绑定</span>
+                  </div>
+                  <div class="section-mini-actions">
+                    <button id="btn-toggle-chatgpt-api-sms-pool" class="btn btn-ghost btn-xs" type="button"
+                      aria-expanded="false">展开</button>
+                  </div>
+                </div>
+                <div id="chatgpt-api-sms-pool-shell" class="hosted-sms-pool-shell is-collapsed" hidden>
+                  <div class="section-mini-actions hosted-sms-pool-toolbar">
+                    <button id="btn-chatgpt-api-sms-pool-refresh" class="btn btn-ghost btn-xs" type="button">刷新</button>
+                    <button id="btn-chatgpt-api-sms-pool-clear-used" class="btn btn-ghost btn-xs" type="button">清空次数</button>
+                    <button id="btn-chatgpt-api-sms-pool-delete-all" class="btn btn-ghost btn-xs" type="button">全部删除</button>
+                  </div>
+                  <textarea id="input-chatgpt-api-sms-pool-import" class="data-textarea mono" rows="4"
+                    placeholder="628123456789----https://example.com/api/get-sms?id=xxxx"></textarea>
+                  <div class="data-inline hosted-sms-pool-import-actions">
+                    <button id="btn-chatgpt-api-sms-pool-import" class="btn btn-primary btn-sm" type="button">导入号码</button>
+                    <label class="hosted-checkout-setting-toggle hosted-sms-pool-auto-disable-toggle" title="开启后，ChatGPT API 接码池号码连续取码失败会被自动禁用，后续选号自动跳过；默认关闭">
+                      <span class="setting-caption">自动禁用</span>
+                      <span class="toggle-switch">
+                        <input type="checkbox" id="input-chatgpt-api-sms-pool-auto-disable-enabled" />
+                        <span class="toggle-switch-track" aria-hidden="true">
+                          <span class="toggle-switch-thumb"></span>
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  <div class="icloud-card">
+                    <div id="chatgpt-api-sms-pool-summary" class="icloud-summary">导入 ChatGPT API 接码号码，每行一个号码和验证码接口。</div>
+                    <div class="icloud-toolbar">
+                      <input id="input-chatgpt-api-sms-pool-search" class="data-input icloud-search" type="text"
+                        placeholder="搜索号码 / 接口" />
+                      <select id="select-chatgpt-api-sms-pool-filter" class="data-select icloud-filter">
+                        <option value="all">全部</option>
+                        <option value="enabled">启用中</option>
+                        <option value="disabled">已禁用</option>
+                        <option value="current">当前</option>
+                        <option value="unused">0 次</option>
+                        <option value="used">已使用</option>
+                        <option value="error">异常</option>
+                      </select>
+                    </div>
+                    <div id="chatgpt-api-sms-pool-list" class="luckmail-list"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2190,6 +2255,10 @@
   <script src="../gopay-utils.js"></script>
   <script src="../phone-sms/providers/hero-sms.js"></script>
   <script src="../phone-sms/providers/five-sim.js"></script>
+  <script src="../phone-sms/providers/smsbower.js"></script>
+  <script src="../phone-sms/providers/sms-verification-number.js"></script>
+  <script src="../phone-sms/providers/grizzlysms.js"></script>
+  <script src="../phone-sms/providers/chatgpt-api.js"></script>
   <script src="../phone-sms/providers/registry.js"></script>
   <script src="../icloud-utils.js"></script>
   <script src="../mail-provider-utils.js"></script>
