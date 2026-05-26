@@ -109,6 +109,8 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="row-hero-sms-api-key"/);
   assert.match(html, /id="row-hero-sms-max-price"/);
   assert.match(html, /id="input-hero-sms-min-price"/);
+  assert.match(html, /id="input-hero-sms-min-price"[^>]*max="0\.1"/);
+  assert.match(html, /id="input-hero-sms-max-price"[^>]*max="0\.1"/);
   assert.match(html, /id="btn-phone-sms-balance"/);
   assert.match(html, /id="display-phone-sms-balance"/);
   assert.match(html, /id="row-five-sim-operator"/);
@@ -505,7 +507,7 @@ test('hero sms country helpers keep empty summary state and expose removable ord
   );
 
   const api = new Function(`
-const HERO_SMS_COUNTRY_SELECTION_MAX = 3;
+const HERO_SMS_COUNTRY_SELECTION_MAX = 10;
 const btnHeroSmsCountryMenu = { textContent: '' };
 function isFiveSimProviderSelected() { return false; }
 function normalizeFiveSimCountryFallbackList(value = []) { return Array.isArray(value) ? value : []; }
@@ -515,7 +517,49 @@ return { btnHeroSmsCountryMenu, updateHeroSmsCountryMenuSummary };
 `)();
 
   api.updateHeroSmsCountryMenuSummary([]);
-  assert.equal(api.btnHeroSmsCountryMenu.textContent, '\u672a\u9009\u62e9 (0/3)');
+  assert.equal(api.btnHeroSmsCountryMenu.textContent, '\u672a\u9009\u62e9 (0/10)');
+});
+
+test('phone sms country fallback helpers keep at most 10 countries', () => {
+const api = new Function(`
+const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
+const DEFAULT_FIVE_SIM_COUNTRY_LABEL = '越南 (Vietnam)';
+const DEFAULT_HERO_SMS_COUNTRY_ID = 52;
+const DEFAULT_HERO_SMS_COUNTRY_LABEL = 'Thailand';
+${extractFunction('normalizeFiveSimCountryId')}
+${extractFunction('normalizeFiveSimCountryLabel')}
+${extractFunction('formatFiveSimCountryDisplayLabel')}
+${extractFunction('normalizeFiveSimCountryCode')}
+${extractFunction('normalizeNexSmsCountryIdValue')}
+${extractFunction('normalizeNexSmsCountryLabel')}
+${extractFunction('normalizeHeroSmsCountryId')}
+${extractFunction('normalizeHeroSmsCountryLabel')}
+${extractFunction('normalizeFiveSimCountryFallbackList')}
+${extractFunction('normalizeNexSmsCountryFallbackList')}
+${extractFunction('normalizeHeroSmsCountryFallbackList')}
+return {
+  normalizeFiveSimCountryFallbackList,
+  normalizeNexSmsCountryFallbackList,
+  normalizeHeroSmsCountryFallbackList,
+};
+`)();
+
+  const heroCountries = Array.from({ length: 12 }, (_, index) => ({ id: index + 1, label: `Country ${index + 1}` }));
+  const fiveSimCountries = Array.from({ length: 12 }, (_, index) => `country${index + 1}:Country ${index + 1}`);
+  const nexSmsCountries = Array.from({ length: 12 }, (_, index) => index + 1);
+
+  assert.deepStrictEqual(
+    api.normalizeHeroSmsCountryFallbackList(heroCountries).map((country) => country.id),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  );
+  assert.deepStrictEqual(
+    api.normalizeFiveSimCountryFallbackList(fiveSimCountries).map((country) => country.id),
+    ['country1', 'country2', 'country3', 'country4', 'country5', 'country6', 'country7', 'country8', 'country9', 'country10']
+  );
+  assert.deepStrictEqual(
+    api.normalizeNexSmsCountryFallbackList(nexSmsCountries).map((country) => country.id),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  );
 });
 
 test('live phone country sources are not hard-filtered down to the reduced country whitelist', () => {
@@ -1131,6 +1175,7 @@ ${extractFunction('normalizeFiveSimCountryLabel')}
 ${extractFunction('normalizeFiveSimOperator')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}
 ${extractFunction('normalizeFiveSimCountryFallbackList')}
+${extractFunction('normalizePhoneSmsPriceInputValue')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
@@ -1197,7 +1242,7 @@ return { collectSettingsPayload };
   assert.equal(payload.freePhoneReuseAutoEnabled, false);
   assert.equal(payload.heroSmsAcquirePriority, 'price');
   assert.equal(payload.heroSmsMinPrice, '0.03');
-  assert.equal(payload.heroSmsMaxPrice, '0.12');
+  assert.equal(payload.heroSmsMaxPrice, '0.1');
   assert.equal(payload.heroSmsPreferredPrice, '0.0512');
   assert.deepStrictEqual(payload.phonePreferredActivation, {
     provider: 'hero-sms',
@@ -1221,7 +1266,36 @@ return { collectSettingsPayload };
   assert.deepStrictEqual(payload.heroSmsOperatorByCountry, { 52: 'ais', 16: 'vodafone' });
   assert.equal(payload.fiveSimApiKey, 'five-sim-key');
   assert.equal(payload.fiveSimCountryId, 'vietnam');
-  assert.equal(payload.fiveSimMinPrice, '0.3333');
+  assert.equal(payload.fiveSimMinPrice, '0.1');
+});
+
+test('phone sms price range inputs clamp at 0.1 without affecting preferred price', () => {
+const api = new Function(`
+const PHONE_SMS_PRICE_INPUT_MAX = 0.1;
+const PHONE_SMS_PROVIDER_HERO_SMS = 'hero-sms';
+const PHONE_SMS_PROVIDER_FIVE_SIM = '5sim';
+function getSelectedPhoneSmsProvider() { return 'hero-sms'; }
+${extractFunction('normalizePhoneSmsProvider')}
+${extractFunction('normalizePhoneSmsPriceInputValue')}
+${extractFunction('normalizePhoneSmsMaxPriceValue')}
+${extractFunction('normalizePhoneSmsMinPriceValue')}
+${extractFunction('normalizeHeroSmsMaxPriceValue')}
+return {
+  normalizePhoneSmsMaxPriceValue,
+  normalizePhoneSmsMinPriceValue,
+  normalizeHeroSmsMaxPriceValue,
+};
+`)();
+
+  assert.equal(api.normalizePhoneSmsMinPriceValue('0.12'), '0.1');
+  assert.equal(api.normalizePhoneSmsMaxPriceValue('0.3333'), '0.1');
+  assert.equal(api.normalizePhoneSmsMaxPriceValue('12', '5sim'), '0.1');
+  assert.equal(api.normalizePhoneSmsMinPriceValue('0.1'), '0.1');
+  assert.equal(api.normalizePhoneSmsMaxPriceValue('0.09999'), '0.1');
+  assert.equal(api.normalizePhoneSmsMaxPriceValue(''), '');
+  assert.equal(api.normalizePhoneSmsMinPriceValue('0'), '');
+  assert.equal(api.normalizePhoneSmsMinPriceValue('abc'), '');
+  assert.equal(api.normalizeHeroSmsMaxPriceValue('0.3333'), '0.3333');
 });
 
 test('switchPhoneSmsProvider saves API keys independently when the select value has already changed', async () => {
@@ -1276,6 +1350,7 @@ ${extractFunction('normalizeFiveSimCountryLabel')}
 ${extractFunction('normalizeFiveSimOperator')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
+${extractFunction('normalizePhoneSmsPriceInputValue')}
 ${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizeHeroSmsCountryId')}
@@ -1321,9 +1396,9 @@ return {
   assert.equal(api.latestState.heroSmsApiKey, 'hero-live');
   assert.equal(api.latestState.fiveSimApiKey, 'five-old');
   assert.equal(api.latestState.heroSmsMinPrice, '0.03');
-  assert.equal(api.latestState.fiveSimMinPrice, '0.88');
+  assert.equal(api.latestState.fiveSimMinPrice, '0.1');
   assert.equal(api.inputHeroSmsApiKey.value, 'five-old');
-  assert.equal(api.inputHeroSmsMinPrice.value, '0.88');
+  assert.equal(api.inputHeroSmsMinPrice.value, '0.1');
   assert.equal(api.selectPhoneSmsProvider.dataset.activeProvider, '5sim');
 
   api.inputHeroSmsApiKey.value = 'five-live';
@@ -1334,14 +1409,14 @@ return {
   assert.equal(api.latestState.heroSmsApiKey, 'hero-live');
   assert.equal(api.latestState.fiveSimApiKey, 'five-live');
   assert.equal(api.latestState.heroSmsMinPrice, '0.03');
-  assert.equal(api.latestState.fiveSimMinPrice, '0.88');
+  assert.equal(api.latestState.fiveSimMinPrice, '0.1');
   assert.equal(api.inputHeroSmsApiKey.value, 'hero-live');
   assert.equal(api.inputHeroSmsMinPrice.value, '0.03');
   assert.equal(api.selectPhoneSmsProvider.dataset.activeProvider, 'hero-sms');
   assert.equal(api.savedPayload.heroSmsApiKey, 'hero-live');
   assert.equal(api.savedPayload.fiveSimApiKey, 'five-live');
   assert.equal(api.savedPayload.heroSmsMinPrice, '0.03');
-  assert.equal(api.savedPayload.fiveSimMinPrice, '0.88');
+  assert.equal(api.savedPayload.fiveSimMinPrice, '0.1');
 });
 
 test('formatPhoneSmsPriceEntriesSummary treats HeroSMS physicalCount=0 as out of stock even when count is positive', () => {
@@ -1428,6 +1503,7 @@ ${extractFunction('normalizeFiveSimCountryLabel')}
 ${extractFunction('normalizeFiveSimCountryCode')}
 ${extractFunction('normalizeFiveSimProductValue')}
 ${extractFunction('normalizeFiveSimOperator')}
+${extractFunction('normalizePhoneSmsPriceInputValue')}
 ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizeFiveSimMaxPriceValue')}

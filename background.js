@@ -792,6 +792,7 @@ const DEFAULT_PHONE_SMS_PROVIDER_ORDER = Object.freeze([
   PHONE_SMS_PROVIDER_5SIM,
   PHONE_SMS_PROVIDER_NEXSMS,
 ]);
+const PHONE_SMS_PRICE_INPUT_MAX = 0.1;
 const DEFAULT_FIVE_SIM_BASE_URL = 'https://5sim.net/v1';
 const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
 const DEFAULT_FIVE_SIM_OPERATOR = 'any';
@@ -2078,6 +2079,15 @@ function normalizeHeroSmsMaxPrice(value = '') {
   return String(Math.round(numeric * 10000) / 10000);
 }
 
+function normalizePhoneSmsPriceLimit(value = '') {
+  const normalized = normalizeHeroSmsMaxPrice(value);
+  if (!normalized) {
+    return '';
+  }
+  const maxPrice = Math.round(PHONE_SMS_PRICE_INPUT_MAX * 10000) / 10000;
+  return String(Math.min(Number(normalized), maxPrice));
+}
+
 function normalizeHeroSmsAcquirePriority(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === HERO_SMS_ACQUIRE_PRIORITY_PRICE) {
@@ -2125,7 +2135,7 @@ function normalizeHeroSmsCountryFallback(value = []) {
       id: countryId,
       label: countryLabel || `Country #${countryId}`,
     });
-    if (normalized.length >= 20) {
+    if (normalized.length >= 10) {
       break;
     }
   }
@@ -2598,7 +2608,7 @@ function normalizeFiveSimCountryFallback(value = []) {
       id: countryId,
       label: countryLabel || normalizeFiveSimCountryLabel('', countryId),
     });
-    if (normalized.length >= 20) {
+    if (normalized.length >= 10) {
       break;
     }
   }
@@ -4072,7 +4082,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHeroSmsAcquirePriority(value);
     case 'heroSmsMinPrice':
     case 'heroSmsMaxPrice':
-      return normalizeHeroSmsMaxPrice(value);
+      return normalizePhoneSmsPriceLimit(value);
     case 'heroSmsPreferredPrice':
       return normalizeHeroSmsMaxPrice(value);
     case 'heroSmsCountryId': {
@@ -4102,7 +4112,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeFiveSimCountryOrder(value);
     case 'fiveSimMinPrice':
     case 'fiveSimMaxPrice':
-      return normalizeFiveSimMaxPrice(value);
+      return normalizePhoneSmsPriceLimit(value);
     case 'fiveSimOperator':
       return normalizeFiveSimOperator(value);
     case 'nexSmsApiKey':
@@ -4130,6 +4140,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHeroSmsCountryFallback(value);
     case 'smsBowerMinPrice':
     case 'smsBowerMaxPrice':
+      return normalizePhoneSmsPriceLimit(value);
     case 'smsBowerPreferredPrice':
       return normalizeHeroSmsMaxPrice(value);
     case 'smsVerificationNumberApiKey':
@@ -4151,6 +4162,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHeroSmsCountryFallback(value);
     case 'smsVerificationNumberMinPrice':
     case 'smsVerificationNumberMaxPrice':
+      return normalizePhoneSmsPriceLimit(value);
     case 'smsVerificationNumberPreferredPrice':
       return normalizeHeroSmsMaxPrice(value);
     case 'grizzlySmsApiKey':
@@ -4172,6 +4184,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHeroSmsCountryFallback(value);
     case 'grizzlySmsMinPrice':
     case 'grizzlySmsMaxPrice':
+      return normalizePhoneSmsPriceLimit(value);
     case 'grizzlySmsPreferredPrice':
       return normalizeHeroSmsMaxPrice(value);
     case 'smsPoolApiKey':
@@ -4193,6 +4206,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHeroSmsCountryFallback(value);
     case 'smsPoolMinPrice':
     case 'smsPoolMaxPrice':
+      return normalizePhoneSmsPriceLimit(value);
     case 'smsPoolPreferredPrice':
       return normalizeHeroSmsMaxPrice(value);
     case 'phonePreferredActivation':
@@ -4719,6 +4733,9 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutVerificationResendMaxAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationResendMaxAttempts']);
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
+  assignIfUpdated('hostedCheckoutSmsPoolText', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolText']);
+  assignIfUpdated('hostedCheckoutSmsPoolUsage', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolUsage']);
+  assignIfUpdated('hostedCheckoutCurrentSmsEntry', ['flows', 'openai', 'plus', 'hostedCheckoutCurrentSmsEntry']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);

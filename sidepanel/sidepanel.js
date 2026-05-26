@@ -798,6 +798,7 @@ const DEFAULT_PHONE_SMS_PROVIDER_ORDER = Object.freeze([
   PHONE_SMS_PROVIDER_FIVE_SIM,
   PHONE_SMS_PROVIDER_NEXSMS,
 ]);
+const PHONE_SMS_PRICE_INPUT_MAX = 0.1;
 const DEFAULT_FIVE_SIM_COUNTRY_ORDER = Object.freeze(['thailand']);
 const DEFAULT_FIVE_SIM_OPERATOR = 'any';
 const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
@@ -805,7 +806,7 @@ const DEFAULT_NEX_SMS_COUNTRY_ORDER = Object.freeze([1]);
 const DEFAULT_NEX_SMS_SERVICE_CODE = 'ot';
 const DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api';
 const DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'dr';
-const HERO_SMS_COUNTRY_SELECTION_MAX = 3;
+const HERO_SMS_COUNTRY_SELECTION_MAX = 10;
 const DEFAULT_HERO_SMS_REUSE_ENABLED = true;
 const HERO_SMS_ACQUIRE_PRIORITY_COUNTRY = 'country';
 const HERO_SMS_ACQUIRE_PRIORITY_PRICE = 'price';
@@ -4871,12 +4872,9 @@ function collectSettingsPayload() {
   const normalizePhoneSmsMinPriceValueSafe = typeof normalizePhoneSmsMinPriceValue === 'function'
     ? normalizePhoneSmsMinPriceValue
     : ((value = '', provider = phoneSmsProviderValue) => {
-      const normalizedProvider = normalizePhoneSmsProvider(provider);
-      if (normalizedProvider === PHONE_SMS_PROVIDER_FIVE_SIM && typeof normalizeFiveSimMaxPriceValue === 'function') {
-        return normalizeFiveSimMaxPriceValue(value);
-      }
-      if (typeof normalizeHeroSmsMaxPriceValue === 'function') {
-        return normalizeHeroSmsMaxPriceValue(value);
+      normalizePhoneSmsProvider(provider);
+      if (typeof normalizePhoneSmsPriceInputValue === 'function') {
+        return normalizePhoneSmsPriceInputValue(value);
       }
       return String(value || '').trim();
     });
@@ -4885,22 +4883,22 @@ function collectSettingsPayload() {
     : '';
   const heroSmsMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_HERO_SMS
     ? currentPhoneSmsMaxPriceValue
-    : normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '', PHONE_SMS_PROVIDER_HERO_SMS);
   const fiveSimMaxPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? currentPhoneSmsMaxPriceValue
-    : normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.fiveSimMaxPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
   const smsBowerMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsBower
     ? currentPhoneSmsMaxPriceValue
-    : normalizeHeroSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '', phoneSmsProviderSmsBower);
   const smsVerificationNumberMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsVerificationNumber
     ? currentPhoneSmsMaxPriceValue
-    : normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '', phoneSmsProviderSmsVerificationNumber);
   const grizzlySmsMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderGrizzlySms
     ? currentPhoneSmsMaxPriceValue
-    : normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '', phoneSmsProviderGrizzlySms);
   const smsPoolMaxPriceValue = phoneSmsProviderValue === phoneSmsProviderSmsPool
     ? currentPhoneSmsMaxPriceValue
-    : normalizeHeroSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '');
+    : normalizePhoneSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '', phoneSmsProviderSmsPool);
   const heroSmsMinPriceValue = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? normalizePhoneSmsMinPriceValueSafe(latestState?.heroSmsMinPrice || '', PHONE_SMS_PROVIDER_HERO_SMS)
     : currentPhoneSmsMinPriceValue;
@@ -5779,18 +5777,31 @@ function normalizePhoneSmsCountryLabel(value = '', provider = getSelectedPhoneSm
   return normalizeHeroSmsCountryLabel(value);
 }
 
-function normalizePhoneSmsMaxPriceValue(value = '', provider = getSelectedPhoneSmsProvider()) {
-  if (normalizePhoneSmsProvider(provider) === PHONE_SMS_PROVIDER_FIVE_SIM) {
-    return normalizeFiveSimMaxPriceValue(value);
+function normalizePhoneSmsPriceInputValue(value = '', max = (typeof PHONE_SMS_PRICE_INPUT_MAX !== 'undefined' ? PHONE_SMS_PRICE_INPUT_MAX : 0.1)) {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return '';
   }
-  return normalizeHeroSmsMaxPriceValue(value);
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '';
+  }
+  const rounded = Math.round(numeric * 10000) / 10000;
+  const maxNumeric = Number(max);
+  if (!Number.isFinite(maxNumeric) || maxNumeric <= 0) {
+    return String(rounded);
+  }
+  return String(Math.min(rounded, Math.round(maxNumeric * 10000) / 10000));
 }
 
-function normalizePhoneSmsMinPriceValue(value = '', provider = getSelectedPhoneSmsProvider()) {
-  if (normalizePhoneSmsProvider(provider) === PHONE_SMS_PROVIDER_FIVE_SIM) {
-    return normalizeFiveSimMaxPriceValue(value);
-  }
-  return normalizeHeroSmsMaxPriceValue(value);
+function normalizePhoneSmsMaxPriceValue(value = '', provider = '') {
+  void provider;
+  return normalizePhoneSmsPriceInputValue(value);
+}
+
+function normalizePhoneSmsMinPriceValue(value = '', provider = '') {
+  void provider;
+  return normalizePhoneSmsPriceInputValue(value);
 }
 
 function getHeroSmsProviderModule() {
@@ -5896,7 +5907,7 @@ function normalizeFiveSimCountryFallbackList(value = []) {
     normalized.push({ id, label: label || formatFiveSimCountryDisplayLabel(id, id, id) });
   });
 
-  return normalized;
+  return normalized.slice(0, 10);
 }
 
 function normalizeHeroSmsCountryId(value, fallback = DEFAULT_HERO_SMS_COUNTRY_ID) {
@@ -6328,7 +6339,7 @@ function normalizeFiveSimCountryFallbackList(value = []) {
       label: label || code,
     });
   });
-  return normalized;
+  return normalized.slice(0, 10);
 }
 
 function normalizeNexSmsCountryLabel(value = '', fallback = '') {
@@ -6362,7 +6373,7 @@ function normalizeNexSmsCountryFallbackList(value = []) {
       label: label || `Country #${countryId}`,
     });
   });
-  return normalized;
+  return normalized.slice(0, 10);
 }
 
 function getFiveSimCountryDisplayNameByIso(isoCode = '') {
@@ -6583,7 +6594,7 @@ function normalizeHeroSmsCountryFallbackList(value = []) {
     });
   });
 
-  return normalized;
+  return normalized.slice(0, 10);
 }
 
 function syncHeroSmsOperatorSelectionState(value = {}) {
@@ -12550,17 +12561,17 @@ function applySettingsState(state) {
   }
   if (inputHeroSmsMaxPrice) {
     if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
-      inputHeroSmsMaxPrice.value = normalizeFiveSimMaxPriceValue(state?.fiveSimMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.fiveSimMaxPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
     } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsBowerMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.smsBowerMaxPrice || '', restoredPhoneSmsProvider);
     } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsVerificationNumberMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.smsVerificationNumberMaxPrice || '', restoredPhoneSmsProvider);
     } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.grizzlySmsMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.grizzlySmsMaxPrice || '', restoredPhoneSmsProvider);
     } else if (restoredPhoneSmsProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.smsPoolMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.smsPoolMaxPrice || '', restoredPhoneSmsProvider);
     } else {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(state?.heroSmsMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(state?.heroSmsMaxPrice || '', restoredPhoneSmsProvider);
     }
   }
   if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
@@ -19146,32 +19157,44 @@ async function switchPhoneSmsProvider(nextProvider) {
   }
   if (inputHeroSmsMaxPrice) {
     if (normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
-      inputHeroSmsMaxPrice.value = normalizeFiveSimMaxPriceValue(latestState?.fiveSimMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.fiveSimMaxPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+      latestState.fiveSimMaxPrice = inputHeroSmsMaxPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.smsBowerMaxPrice || '', normalizedNextProvider);
+      latestState.smsBowerMaxPrice = inputHeroSmsMaxPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.smsVerificationNumberMaxPrice || '', normalizedNextProvider);
+      latestState.smsVerificationNumberMaxPrice = inputHeroSmsMaxPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.grizzlySmsMaxPrice || '', normalizedNextProvider);
+      latestState.grizzlySmsMaxPrice = inputHeroSmsMaxPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.smsPoolMaxPrice || '', normalizedNextProvider);
+      latestState.smsPoolMaxPrice = inputHeroSmsMaxPrice.value;
     } else {
-      inputHeroSmsMaxPrice.value = normalizeHeroSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '');
+      inputHeroSmsMaxPrice.value = normalizePhoneSmsMaxPriceValue(latestState?.heroSmsMaxPrice || '', normalizedNextProvider);
+      latestState.heroSmsMaxPrice = inputHeroSmsMaxPrice.value;
     }
   }
   if (typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
     if (normalizedNextProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.fiveSimMinPrice || '', PHONE_SMS_PROVIDER_FIVE_SIM);
+      latestState.fiveSimMinPrice = inputHeroSmsMinPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsBowerMinPrice || '', normalizedNextProvider);
+      latestState.smsBowerMinPrice = inputHeroSmsMinPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsVerificationNumberMinPrice || '', normalizedNextProvider);
+      latestState.smsVerificationNumberMinPrice = inputHeroSmsMinPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.grizzlySmsMinPrice || '', normalizedNextProvider);
+      latestState.grizzlySmsMinPrice = inputHeroSmsMinPrice.value;
     } else if (normalizedNextProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.smsPoolMinPrice || '', normalizedNextProvider);
+      latestState.smsPoolMinPrice = inputHeroSmsMinPrice.value;
     } else {
       inputHeroSmsMinPrice.value = normalizePhoneSmsMinPriceValue(latestState?.heroSmsMinPrice || '', normalizedNextProvider);
+      latestState.heroSmsMinPrice = inputHeroSmsMinPrice.value;
     }
   }
   if (typeof inputHeroSmsPreferredPrice !== 'undefined' && inputHeroSmsPreferredPrice) {
@@ -20666,8 +20689,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if ((message.payload.heroSmsMaxPrice !== undefined || message.payload.fiveSimMaxPrice !== undefined) && inputHeroSmsMaxPrice) {
         inputHeroSmsMaxPrice.value = getSelectedPhoneSmsProvider() === PHONE_SMS_PROVIDER_FIVE_SIM
-          ? normalizeFiveSimMaxPriceValue(message.payload.fiveSimMaxPrice !== undefined ? message.payload.fiveSimMaxPrice : latestState?.fiveSimMaxPrice)
-          : normalizeHeroSmsMaxPriceValue(message.payload.heroSmsMaxPrice !== undefined ? message.payload.heroSmsMaxPrice : latestState?.heroSmsMaxPrice);
+          ? normalizePhoneSmsMaxPriceValue(message.payload.fiveSimMaxPrice !== undefined ? message.payload.fiveSimMaxPrice : latestState?.fiveSimMaxPrice, PHONE_SMS_PROVIDER_FIVE_SIM)
+          : normalizePhoneSmsMaxPriceValue(message.payload.heroSmsMaxPrice !== undefined ? message.payload.heroSmsMaxPrice : latestState?.heroSmsMaxPrice, getSelectedPhoneSmsProvider());
       }
       if ((message.payload.heroSmsMinPrice !== undefined || message.payload.fiveSimMinPrice !== undefined) && typeof inputHeroSmsMinPrice !== 'undefined' && inputHeroSmsMinPrice) {
         inputHeroSmsMinPrice.value = getSelectedPhoneSmsProvider() === PHONE_SMS_PROVIDER_FIVE_SIM

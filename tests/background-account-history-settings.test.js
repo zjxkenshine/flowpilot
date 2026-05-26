@@ -74,6 +74,7 @@ test('background account history settings are normalized independently from hotm
     extractFunction('normalizePhoneCodePollIntervalSeconds'),
     extractFunction('normalizePhoneCodePollMaxRounds'),
     extractFunction('normalizeHeroSmsMaxPrice'),
+    extractFunction('normalizePhoneSmsPriceLimit'),
     extractFunction('normalizeHeroSmsCountryFallback'),
     extractFunction('normalizeHeroSmsOperatorByCountry'),
     extractFunction('normalizePhoneSmsProvider'),
@@ -128,6 +129,7 @@ const PHONE_SMS_PROVIDER_FIVE_SIM = '5sim';
 const PHONE_SMS_PROVIDER_NEXSMS = 'nexsms';
 const DEFAULT_PHONE_SMS_PROVIDER_ORDER = ['hero-sms', '5sim', 'nexsms'];
 const DEFAULT_PHONE_SMS_PROVIDER = PHONE_SMS_PROVIDER_HERO_SMS;
+const PHONE_SMS_PRICE_INPUT_MAX = 0.1;
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
@@ -312,10 +314,13 @@ return {
   assert.equal(api.normalizePersistentSettingValue('phoneCodeTimeoutWindows', '3'), 3);
   assert.equal(api.normalizePersistentSettingValue('phoneCodePollIntervalSeconds', '6'), 6);
   assert.equal(api.normalizePersistentSettingValue('phoneCodePollMaxRounds', '18'), 18);
-  assert.equal(api.normalizePersistentSettingValue('heroSmsMinPrice', '0.123456'), '0.1235');
+  assert.equal(api.normalizePersistentSettingValue('heroSmsMinPrice', '0.123456'), '0.1');
   assert.equal(api.normalizePersistentSettingValue('heroSmsMinPrice', '0'), '');
-  assert.equal(api.normalizePersistentSettingValue('heroSmsMaxPrice', '0.123456'), '0.1235');
+  assert.equal(api.normalizePersistentSettingValue('heroSmsMaxPrice', '0.123456'), '0.1');
   assert.equal(api.normalizePersistentSettingValue('heroSmsMaxPrice', '0'), '');
+  assert.equal(api.normalizePersistentSettingValue('smsBowerMinPrice', '0.3333'), '0.1');
+  assert.equal(api.normalizePersistentSettingValue('smsBowerMaxPrice', '12'), '0.1');
+  assert.equal(api.normalizePersistentSettingValue('smsBowerPreferredPrice', '0.3333'), '0.3333');
   assert.equal(api.normalizePersistentSettingValue('heroSmsPreferredPrice', '0.051234'), '0.0512');
   assert.equal(api.normalizePersistentSettingValue('signupMethod', 'phone'), 'phone');
   assert.equal(api.normalizePersistentSettingValue('signupMethod', 'unknown'), 'email');
@@ -335,9 +340,9 @@ return {
   assert.equal(api.normalizePersistentSettingValue('fiveSimCountryId', ' England! '), 'england');
   assert.equal(api.normalizePersistentSettingValue('fiveSimCountryId', ''), 'vietnam');
   assert.equal(api.normalizePersistentSettingValue('fiveSimCountryLabel', ''), '越南 (Vietnam)');
-  assert.equal(api.normalizePersistentSettingValue('fiveSimMaxPrice', '9.87654'), '9.8765');
+  assert.equal(api.normalizePersistentSettingValue('fiveSimMaxPrice', '9.87654'), '0.1');
   assert.equal(api.normalizePersistentSettingValue('fiveSimMaxPrice', '-1'), '');
-  assert.equal(api.normalizePersistentSettingValue('fiveSimMinPrice', '9.87654'), '9.8765');
+  assert.equal(api.normalizePersistentSettingValue('fiveSimMinPrice', '9.87654'), '0.1');
   assert.equal(api.normalizePersistentSettingValue('fiveSimMinPrice', '-1'), '');
   assert.equal(api.normalizePersistentSettingValue('fiveSimOperator', ''), 'any');
   assert.deepStrictEqual(
@@ -347,6 +352,20 @@ return {
   assert.deepStrictEqual(
     api.normalizePersistentSettingValue('heroSmsCountryFallback', [{ id: 16, label: 'United Kingdom' }, { id: 52 }]),
     [{ id: 16, label: 'United Kingdom' }, { id: 52, label: 'Country #52' }]
+  );
+  assert.deepStrictEqual(
+    api.normalizePersistentSettingValue(
+      'heroSmsCountryFallback',
+      Array.from({ length: 12 }, (_, index) => ({ id: index + 1, label: `Country ${index + 1}` }))
+    ).map((country) => country.id),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  );
+  assert.deepStrictEqual(
+    api.normalizePersistentSettingValue(
+      'fiveSimCountryFallback',
+      Array.from({ length: 12 }, (_, index) => `country${index + 1}:Country ${index + 1}`)
+    ).map((country) => country.id),
+    ['country1', 'country2', 'country3', 'country4', 'country5', 'country6', 'country7', 'country8', 'country9', 'country10']
   );
   assert.deepStrictEqual(
     api.normalizePersistentSettingValue('heroSmsOperatorByCountry', {

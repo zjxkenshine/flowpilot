@@ -13,6 +13,14 @@ function createTextResponse(payload, ok = true, status = ok ? 200 : 400) {
   };
 }
 
+test('5sim country fallback normalization keeps at most 10 countries', () => {
+  const countries = Array.from({ length: 12 }, (_, index) => `country${index + 1}:Country ${index + 1}`);
+  assert.deepStrictEqual(
+    api.normalizeFiveSimCountryFallback(countries).map((country) => country.id),
+    ['country1', 'country2', 'country3', 'country4', 'country5', 'country6', 'country7', 'country8', 'country9', 'country10']
+  );
+});
+
 test('5sim provider fetches profile balance with bearer token', async () => {
   const requests = [];
   const provider = api.createProvider({

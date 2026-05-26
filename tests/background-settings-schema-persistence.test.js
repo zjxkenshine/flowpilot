@@ -87,6 +87,12 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
+  'hostedCheckoutVerificationPopupDelaySeconds',
+  'hostedCheckoutVerificationUrl',
+  'hostedCheckoutPhoneNumber',
+  'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolUsage',
+  'hostedCheckoutCurrentSmsEntry',
   'paypalGeneratedProfile',
   'mailProvider',
   'ipProxyEnabled',
@@ -110,6 +116,12 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
+  hostedCheckoutVerificationPopupDelaySeconds: 20,
+  hostedCheckoutVerificationUrl: '',
+  hostedCheckoutPhoneNumber: '',
+  hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolUsage: {},
+  hostedCheckoutCurrentSmsEntry: null,
   paypalGeneratedProfile: {
     email: '',
     phone: '',
@@ -539,6 +551,15 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
     phoneVerificationEnabled: false,
     signupMethod: 'email',
     plusAccountAccessStrategy: 'sub2api_codex_session',
+    hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+    hostedCheckoutSmsPoolUsage: {
+      '4155555678----https://example.com/verify': { useCount: 1 },
+    },
+    hostedCheckoutCurrentSmsEntry: {
+      key: '4155555678----https://example.com/verify',
+      phone: '4155555678',
+      verificationUrl: 'https://example.com/verify?t=5',
+    },
   }, { fillDefaults: true });
 
   assert.equal(payload.phonePlusModeEnabled, true);
@@ -551,6 +572,16 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
   assert.equal(payload.settingsState.flows.openai.signup.phoneVerificationEnabled, true);
   assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
   assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
+  assert.equal(payload.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.deepEqual(payload.hostedCheckoutCurrentSmsEntry, {
+    key: '4155555678----https://example.com/verify',
+    phone: '4155555678',
+    verificationUrl: 'https://example.com/verify',
+  });
+  assert.equal(
+    payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolText,
+    '4155555678----https://example.com/verify'
+  );
 });
 
 test('buildPersistentSettingsPayload projects nested Phone Plus settings into flat view and canonical schema', () => {
@@ -735,6 +766,104 @@ const chrome = {
   });
 });
 
+test('getPersistedSettings restores PayPal hosted sms pool from schema-only storage', async () => {
+  const api = buildHarness(`
+const chrome = {
+  storage: {
+    local: {
+      async get() {
+        return {
+          settingsSchemaVersion: 4,
+          settingsState: {
+            activeFlowId: 'openai',
+            services: {
+              account: { customPassword: '' },
+              email: { provider: '163' },
+              proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+            },
+            flows: {
+              openai: {
+                integrationTargetId: 'cpa',
+                integrationTargets: {
+                  cpa: {
+                    vpsUrl: '',
+                    vpsPassword: '',
+                    localCpaStep9Mode: 'submit',
+                  },
+                  sub2api: {
+                    sub2apiUrl: '',
+                    sub2apiEmail: '',
+                    sub2apiPassword: '',
+                    sub2apiGroupName: 'codex',
+                    sub2apiGroupNames: ['codex', 'openai-plus'],
+                    sub2apiAccountPriority: 1,
+                    sub2apiDefaultProxyName: '',
+                  },
+                  codex2api: {
+                    codex2apiUrl: '',
+                    codex2apiAdminKey: '',
+                  },
+                },
+                signup: {
+                  signupMethod: 'email',
+                  phoneVerificationEnabled: false,
+                  phoneSignupReloginAfterBindEmailEnabled: false,
+                },
+                plus: {
+                  plusModeEnabled: true,
+                  plusPaymentMethod: 'paypal',
+                  hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+                  hostedCheckoutSmsPoolUsage: {
+                    '4155555678----https://example.com/verify': {
+                      useCount: 2,
+                      lastError: 'timeout',
+                    },
+                    stale: {
+                      useCount: 9,
+                      lastError: 'stale',
+                    },
+                  },
+                  hostedCheckoutCurrentSmsEntry: {
+                    key: '14155555678----https://example.com/verify?t=2',
+                    phone: '4155555678',
+                    verificationUrl: 'https://example.com/verify?t=9',
+                  },
+                },
+                autoRun: {
+                  stepExecutionRange: { enabled: false, fromStep: 1, toStep: 11 },
+                },
+              },
+            },
+          },
+        };
+      },
+    },
+  },
+};
+`);
+
+  const state = await api.getPersistedSettings();
+
+  assert.equal(state.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.deepEqual(state.hostedCheckoutSmsPoolUsage, {
+    '4155555678----https://example.com/verify': {
+      useCount: 2,
+      usedAt: 0,
+      lastAttemptAt: 0,
+      lastError: 'timeout',
+      enabled: true,
+      disabledReason: '',
+      disabledAt: 0,
+      failureCount: 0,
+    },
+  });
+  assert.deepEqual(state.hostedCheckoutCurrentSmsEntry, {
+    key: '4155555678----https://example.com/verify',
+    phone: '4155555678',
+    verificationUrl: 'https://example.com/verify',
+  });
+});
+
 test('setPersistentSettings materializes canonical schema keys for schema-only updates', async () => {
   const api = buildHarness(`
 const persistedWrites = [];
@@ -892,6 +1021,138 @@ function getRemovedKeys() {
   assert.equal(persisted.settingsState.services.email.provider, 'cloudflare-temp-email');
   assert.equal(write.settingsState.services.email.provider, 'cloudflare-temp-email');
   assert.equal(Object.prototype.hasOwnProperty.call(write, 'mailProvider'), false);
+});
+
+test('setPersistentSettings stores PayPal hosted sms pool in canonical settingsState only', async () => {
+  const api = buildHarness(`
+const persistedWrites = [];
+const removedKeys = [];
+const chrome = {
+  storage: {
+    local: {
+      async get() {
+        return {
+          settingsSchemaVersion: 4,
+          settingsState: {
+            activeFlowId: 'openai',
+            services: {
+              account: { customPassword: '' },
+              email: { provider: '163' },
+              proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+            },
+            flows: {
+              openai: {
+                integrationTargetId: 'cpa',
+                integrationTargets: {
+                  cpa: {
+                    vpsUrl: '',
+                    vpsPassword: '',
+                    localCpaStep9Mode: 'submit',
+                  },
+                  sub2api: {
+                    sub2apiUrl: '',
+                    sub2apiEmail: '',
+                    sub2apiPassword: '',
+                    sub2apiGroupName: 'codex',
+                    sub2apiGroupNames: ['codex', 'openai-plus'],
+                    sub2apiAccountPriority: 1,
+                    sub2apiDefaultProxyName: '',
+                  },
+                  codex2api: {
+                    codex2apiUrl: '',
+                    codex2apiAdminKey: '',
+                  },
+                },
+                signup: {
+                  signupMethod: 'email',
+                  phoneVerificationEnabled: false,
+                  phoneSignupReloginAfterBindEmailEnabled: false,
+                },
+                plus: {
+                  plusModeEnabled: true,
+                  plusPaymentMethod: 'paypal',
+                },
+                autoRun: {
+                  stepExecutionRange: { enabled: false, fromStep: 1, toStep: 11 },
+                },
+              },
+            },
+          },
+        };
+      },
+      async remove(keys) {
+        removedKeys.push(...(Array.isArray(keys) ? keys : [keys]));
+      },
+      async set(payload) {
+        persistedWrites.push(JSON.parse(JSON.stringify(payload)));
+      },
+    },
+  },
+};
+function getPersistedWrites() {
+  return persistedWrites;
+}
+function getRemovedKeys() {
+  return removedKeys;
+}
+`);
+
+  const persisted = await api.setPersistentSettings({
+    hostedCheckoutSmsPoolText: [
+      '14155555678----https://example.com/verify-a?t=1',
+      '4155555678----https://example.com/verify-a?t=9',
+      '4155559999----https://example.com/verify-b',
+    ].join('\n'),
+    hostedCheckoutSmsPoolUsage: {
+      '4155555678----https://example.com/verify-a': {
+        useCount: 2,
+        lastError: 'timeout',
+      },
+      stale: {
+        useCount: 9,
+        lastError: 'stale',
+      },
+    },
+    hostedCheckoutCurrentSmsEntry: {
+      key: '4155555678----https://example.com/verify-a',
+      phone: '4155555678',
+      verificationUrl: 'https://example.com/verify-a?t=5',
+    },
+  });
+  const write = api.getPersistedWrites().at(-1);
+
+  assert.equal(
+    persisted.hostedCheckoutSmsPoolText,
+    '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
+  );
+  assert.deepEqual(persisted.hostedCheckoutCurrentSmsEntry, {
+    key: '4155555678----https://example.com/verify-a',
+    phone: '4155555678',
+    verificationUrl: 'https://example.com/verify-a',
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(write, 'hostedCheckoutSmsPoolText'), false);
+  assert.equal(
+    write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolText,
+    '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
+  );
+  assert.deepEqual(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolUsage, {
+    '4155555678----https://example.com/verify-a': {
+      useCount: 2,
+      usedAt: 0,
+      lastAttemptAt: 0,
+      lastError: 'timeout',
+      enabled: true,
+      disabledReason: '',
+      disabledAt: 0,
+      failureCount: 0,
+    },
+  });
+  assert.deepEqual(write.settingsState.flows.openai.plus.hostedCheckoutCurrentSmsEntry, {
+    key: '4155555678----https://example.com/verify-a',
+    phone: '4155555678',
+    verificationUrl: 'https://example.com/verify-a',
+  });
+  assert.ok(api.getRemovedKeys().includes('hostedCheckoutSmsPoolText'));
 });
 
 test('setPersistentSettings mirrors flat schema updates without resetting other canonical settings', async () => {

@@ -546,13 +546,14 @@ test('Classic PayPal billing reuses an active checkout conversion proxy session 
 
     assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 2);
     assert.deepStrictEqual(proxyEvents.proxy, []);
+    assert.equal(events.logs.some((entry) => /复用已启用的支付转换代理/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
   } finally {
     Date.now = originalNow;
   }
 });
 
-test('Classic PayPal billing applies checkout conversion proxy before the first submit when configured', async () => {
+test('Classic PayPal billing falls back to applying checkout conversion proxy when step 6 did not', async () => {
   const proxyEvents = { proxy: [] };
   const { events, executor } = createExecutorHarness({
     frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
@@ -578,6 +579,8 @@ test('Classic PayPal billing applies checkout conversion proxy before the first 
 
   assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply']);
   assert.equal(proxyEvents.proxy[0].options.flowType, 'classic-paypal');
+  assert.equal(proxyEvents.proxy[0].options.appliedStepKey, 'plus-checkout-billing');
+  assert.equal(events.logs.some((entry) => /兜底启用支付转换代理/.test(entry.message)), true);
   assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 1);
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });

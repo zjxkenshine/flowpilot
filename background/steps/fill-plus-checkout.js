@@ -124,7 +124,7 @@
       return String(value || '').replace(/\s+/g, ' ').trim();
     }
 
-    async function applyClassicPaypalCheckoutConversionProxySession(state = {}) {
+    async function applyClassicPaypalCheckoutConversionProxySession(state = {}, options = {}) {
       if (!proxyManager?.applySessionFromState) {
         return null;
       }
@@ -140,7 +140,10 @@
       if (!session?.active) {
         return null;
       }
-      await addLog(`步骤 7：点击订阅前已启用支付转换代理 ${session.displayName}。`, 'info');
+      const fallbackLabel = options?.fallback
+        ? '步骤 7：未检测到第 6 步支付转换代理会话，已兜底启用'
+        : '步骤 7：已启用';
+      await addLog(`${fallbackLabel}支付转换代理 ${session.displayName}。`, 'info');
       return session;
     }
 
@@ -172,17 +175,14 @@
       if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
         return null;
       }
-      const proxyUrl = normalizeText(latestState?.plusCheckoutConversionProxyUrl || '');
-      if (!proxyUrl) {
-        return null;
-      }
       if (proxyManager?.getStoredSession) {
         const session = await proxyManager.getStoredSession(latestState);
         if (session?.active && session.flowType === 'classic-paypal') {
+          await addLog(`步骤 7：复用已启用的支付转换代理 ${session.displayName}。`, 'info');
           return session;
         }
       }
-      return applyClassicPaypalCheckoutConversionProxySession(latestState);
+      return applyClassicPaypalCheckoutConversionProxySession(latestState, { fallback: true });
     }
 
     function isGpcHelperCheckout(state = {}) {

@@ -95,6 +95,121 @@
       });
       return next;
     };
+    const normalizeBoundedInteger = (value, fallback, min, max) => {
+      const numeric = Number(value);
+      const resolved = Number.isFinite(numeric) ? numeric : fallback;
+      return Math.min(max, Math.max(min, Math.floor(resolved)));
+    };
+    const normalizeHostedCheckoutPhone = (value = '') => {
+      const digits = String(value || '').trim().replace(/\D+/g, '');
+      return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    };
+    const normalizeHostedCheckoutPoolUrl = (value = '') => {
+      const rawValue = String(value || '').trim();
+      if (!rawValue) {
+        return '';
+      }
+      try {
+        const parsed = new URL(rawValue);
+        parsed.searchParams.delete('t');
+        return parsed.toString();
+      } catch {
+        return rawValue
+          .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+          .replace(/[?&]$/g, '');
+      }
+    };
+    const parseHostedCheckoutSmsPoolEntries = (value = '') => {
+      const lines = String(value || '')
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+      const seen = new Set();
+      const entries = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const separatorIndex = line.indexOf('----');
+        const hasSeparator = separatorIndex > 0;
+        const phone = normalizeHostedCheckoutPhone(
+          hasSeparator ? line.slice(0, separatorIndex) : line
+        );
+        const verificationUrl = normalizeHostedCheckoutPoolUrl(
+          hasSeparator ? line.slice(separatorIndex + 4) : lines[index + 1] || ''
+        );
+        if (!hasSeparator && verificationUrl) {
+          index += 1;
+        }
+        const key = phone && verificationUrl ? `${phone}----${verificationUrl}` : '';
+        if (!key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        entries.push({ key, phone, verificationUrl });
+      }
+      return entries;
+    };
+    const normalizeHostedCheckoutSmsPoolText = (value = '') => parseHostedCheckoutSmsPoolEntries(value)
+      .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+      .join('\n');
+    const normalizeHostedCheckoutSmsPoolUsage = (value = {}, allowedKeys = null) => {
+      if (!isPlainObject(value)) {
+        return {};
+      }
+      const allowedKeySet = allowedKeys instanceof Set ? allowedKeys : null;
+      return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
+        const normalizedKey = String(entryKey || '').trim();
+        if (!normalizedKey || (allowedKeySet && !allowedKeySet.has(normalizedKey))) {
+          return null;
+        }
+        const usage = isPlainObject(item) ? item : {};
+        const legacyUsedCount = Number(usage.usedAt) > 0 ? 1 : 0;
+        const useCount = Math.max(0, Math.floor(Number(usage.useCount ?? usage.usageCount ?? legacyUsedCount) || 0));
+        return [normalizedKey, {
+          useCount,
+          usedAt: Math.max(0, Number(usage.usedAt) || 0),
+          lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+          lastError: String(usage.lastError || '').trim(),
+          enabled: usage.enabled !== false,
+          disabledReason: String(usage.disabledReason || '').trim(),
+          disabledAt: Math.max(0, Number(usage.disabledAt) || 0),
+          failureCount: Math.max(0, Math.floor(Number(usage.failureCount) || 0)),
+        }];
+      }).filter(Boolean));
+    };
+    const normalizeHostedCheckoutCurrentSmsEntry = (value = null, entries = []) => {
+      if (!isPlainObject(value)) {
+        return null;
+      }
+      const normalizedKeyFromFields = value.phone && value.verificationUrl
+        ? `${normalizeHostedCheckoutPhone(value.phone)}----${normalizeHostedCheckoutPoolUrl(value.verificationUrl)}`
+        : '';
+      const rawKey = String(value.key || '').trim();
+      const normalizedKeyFromRaw = (() => {
+        const separatorIndex = rawKey.indexOf('----');
+        if (separatorIndex <= 0) {
+          return rawKey;
+        }
+        const phone = normalizeHostedCheckoutPhone(rawKey.slice(0, separatorIndex));
+        const verificationUrl = normalizeHostedCheckoutPoolUrl(rawKey.slice(separatorIndex + 4));
+        return phone && verificationUrl ? `${phone}----${verificationUrl}` : rawKey;
+      })();
+      const candidateKeys = [rawKey, normalizedKeyFromRaw, normalizedKeyFromFields].filter(Boolean);
+      if (!candidateKeys.length) {
+        return null;
+      }
+      const matchedEntry = Array.isArray(entries)
+        ? entries.find((entry) => candidateKeys.includes(entry.key))
+        : null;
+      if (!matchedEntry) {
+        return null;
+      }
+      return {
+        key: matchedEntry.key,
+        phone: matchedEntry.phone,
+        verificationUrl: matchedEntry.verificationUrl,
+      };
+    };
 
     function buildDefaultSettingsState() {
       return {
@@ -152,8 +267,12 @@
               plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
               plusCheckoutConversionProxy711Region: '',
+              hostedCheckoutVerificationPopupDelaySeconds: 20,
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
+              hostedCheckoutSmsPoolText: '',
+              hostedCheckoutSmsPoolUsage: {},
+              hostedCheckoutCurrentSmsEntry: null,
               plusHostedCheckoutOauthDelaySeconds: 3,
               paypalGeneratedProfile: normalizePayPalGeneratedProfile(),
             },
@@ -353,6 +472,8 @@
               ),
             },
             plus: {
+              ...defaults.flows.openai.plus,
+              ...getIntegrationTargetValue(nested, (state) => state.flows?.openai?.plus),
               plusModeEnabled: Boolean(
                 input?.plusModeEnabled
                 ?? nested?.flows?.openai?.plus?.plusModeEnabled
@@ -418,6 +539,14 @@
                 ).trim().toUpperCase().replace(/[^A-Z]/g, '');
                 return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
               })(),
+              hostedCheckoutVerificationPopupDelaySeconds: normalizeBoundedInteger(
+                input?.hostedCheckoutVerificationPopupDelaySeconds
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationPopupDelaySeconds
+                  ?? defaults.flows.openai.plus.hostedCheckoutVerificationPopupDelaySeconds,
+                defaults.flows.openai.plus.hostedCheckoutVerificationPopupDelaySeconds,
+                0,
+                60
+              ),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -428,6 +557,42 @@
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutPhoneNumber
                 ?? defaults.flows.openai.plus.hostedCheckoutPhoneNumber
               ).trim(),
+              hostedCheckoutSmsPoolText: (() => {
+                const poolText = normalizeHostedCheckoutSmsPoolText(
+                  input?.hostedCheckoutSmsPoolText
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolText
+                    ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolText
+                );
+                return poolText;
+              })(),
+              hostedCheckoutSmsPoolUsage: (() => {
+                const poolText = normalizeHostedCheckoutSmsPoolText(
+                  input?.hostedCheckoutSmsPoolText
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolText
+                    ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolText
+                );
+                const entries = parseHostedCheckoutSmsPoolEntries(poolText);
+                return normalizeHostedCheckoutSmsPoolUsage(
+                  input?.hostedCheckoutSmsPoolUsage
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolUsage
+                    ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolUsage,
+                  new Set(entries.map((entry) => entry.key))
+                );
+              })(),
+              hostedCheckoutCurrentSmsEntry: (() => {
+                const poolText = normalizeHostedCheckoutSmsPoolText(
+                  input?.hostedCheckoutSmsPoolText
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolText
+                    ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolText
+                );
+                const entries = parseHostedCheckoutSmsPoolEntries(poolText);
+                return normalizeHostedCheckoutCurrentSmsEntry(
+                  input?.hostedCheckoutCurrentSmsEntry
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutCurrentSmsEntry
+                    ?? defaults.flows.openai.plus.hostedCheckoutCurrentSmsEntry,
+                  entries
+                );
+              })(),
               plusHostedCheckoutOauthDelaySeconds: (() => {
                 const numeric = Number(
                   input?.plusHostedCheckoutOauthDelaySeconds
@@ -597,8 +762,12 @@
       next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;
+      next.hostedCheckoutVerificationPopupDelaySeconds = openaiState.plus.hostedCheckoutVerificationPopupDelaySeconds;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
+      next.hostedCheckoutSmsPoolText = openaiState.plus.hostedCheckoutSmsPoolText;
+      next.hostedCheckoutSmsPoolUsage = cloneValue(openaiState.plus.hostedCheckoutSmsPoolUsage);
+      next.hostedCheckoutCurrentSmsEntry = cloneValue(openaiState.plus.hostedCheckoutCurrentSmsEntry);
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
       next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;

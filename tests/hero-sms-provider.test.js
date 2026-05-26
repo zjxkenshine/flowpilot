@@ -5,6 +5,14 @@ const fs = require('node:fs');
 const source = fs.readFileSync('phone-sms/providers/hero-sms.js', 'utf8');
 const api = new Function('self', `${source}; return self.PhoneSmsHeroSmsProvider;`)({});
 
+test('HeroSMS country fallback normalization keeps at most 10 countries', () => {
+  const countries = Array.from({ length: 12 }, (_, index) => ({ id: index + 1, label: `Country ${index + 1}` }));
+  assert.deepStrictEqual(
+    api.normalizeHeroSmsCountryFallback(countries).map((country) => country.id),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  );
+});
+
 test('HeroSMS provider merges multi-endpoint tiers by price and keeps max visible stock', () => {
   const plan = api.planPriceTiers({
     fetchResults: {

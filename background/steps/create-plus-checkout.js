@@ -438,6 +438,25 @@
       return proxyManager.testCheckoutConversionProxy(options);
     }
 
+    async function applyClassicPaypalCheckoutConversionProxySessionAfterOpen(state = {}, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
+      if (!proxyManager?.applySessionFromState) {
+        return null;
+      }
+      if (normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod) !== PLUS_PAYMENT_METHOD_PAYPAL) {
+        return null;
+      }
+      const session = await proxyManager.applySessionFromState(state, {
+        flowType: 'classic-paypal',
+        releaseNodeKey: 'paypal-approve',
+        appliedStepKey: 'plus-checkout-create',
+      });
+      if (!session?.active) {
+        return null;
+      }
+      await addLog(`步骤 6：Plus Checkout 页面打开后已启用支付转换代理 ${session.displayName}。`, 'info');
+      return session;
+    }
+
     async function applyHostedCheckoutConversionProxySession(state = {}, stepKey = PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT) {
       if (!proxyManager?.applySessionFromState) {
         return null;
@@ -3621,6 +3640,8 @@
       if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
         return;
       }
+
+      await applyClassicPaypalCheckoutConversionProxySessionAfterOpen(state, paymentMethod);
 
       await setState({
         plusCheckoutTabId: tabId,
