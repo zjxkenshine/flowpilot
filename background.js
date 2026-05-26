@@ -627,6 +627,8 @@ const SUB2API_STEP9_RESPONSE_TIMEOUT_MS = 120000;
 const DEFAULT_SUB2API_URL = '';
 const DEFAULT_CODEX2API_URL = 'http://localhost:8080/admin/accounts';
 const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const DEFAULT_SUB2API_GROUP_NAME = 'codex';
 const DEFAULT_SUB2API_PROXY_NAME = '';
 const DEFAULT_SUB2API_ACCOUNT_PRIORITY = 1;
@@ -1439,8 +1441,18 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutCreatePreWaitSeconds: DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
   plusCheckoutOpenStableWaitSeconds: DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
+  plusCheckoutCloudConversionEnabled: false,
+  plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
+  plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
   plusCheckoutConversionProxyUrl: '',
   hostedCheckoutVerificationPopupDelaySeconds: 20,
+  hostedCheckoutSmsPoolAutoDisableEnabled: false,
+  hostedCheckoutFirstDirectResendEnabled: false,
+  hostedCheckoutFirstResendWaitSeconds: 20,
+  hostedCheckoutSubsequentResendWaitSeconds: 25,
+  hostedCheckoutVerificationPollAttempts: 6,
+  hostedCheckoutVerificationPollIntervalSeconds: 5,
+  hostedCheckoutVerificationResendMaxAttempts: 1,
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
@@ -3483,6 +3495,22 @@ function normalizePersistentSettingValue(key, value) {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS)));
     }
+    case 'plusCheckoutCloudConversionEnabled':
+      return Boolean(value);
+    case 'plusCheckoutCloudConversionApiUrl':
+      try {
+        const rawValue = String(value || '').trim();
+        if (!rawValue) {
+          return '';
+        }
+        const parsed = new URL(rawValue);
+        parsed.hash = '';
+        return parsed.toString();
+      } catch {
+        return String(value || '').trim();
+      }
+    case 'plusCheckoutCloudConversionApiKey':
+      return String(value || '').trim();
     case 'plusCheckoutConversionProxyUrl': {
       const rawValue = String(value || '').trim();
       if (!rawValue) {
@@ -3512,6 +3540,30 @@ function normalizePersistentSettingValue(key, value) {
     case 'hostedCheckoutVerificationPopupDelaySeconds': {
       const numeric = Number(value);
       return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
+    case 'hostedCheckoutSmsPoolAutoDisableEnabled':
+      return Boolean(value);
+    case 'hostedCheckoutFirstDirectResendEnabled':
+      return Boolean(value);
+    case 'hostedCheckoutFirstResendWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(300, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
+    case 'hostedCheckoutSubsequentResendWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(300, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 25)));
+    }
+    case 'hostedCheckoutVerificationPollAttempts': {
+      const numeric = Number(value);
+      return Math.min(60, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 6)));
+    }
+    case 'hostedCheckoutVerificationPollIntervalSeconds': {
+      const numeric = Number(value);
+      return Math.min(60, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 5)));
+    }
+    case 'hostedCheckoutVerificationResendMaxAttempts': {
+      const numeric = Number(value);
+      return Math.min(10, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 1)));
     }
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
@@ -4048,6 +4100,12 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       normalizedInput.verificationResendCount = legacyVerificationResendCount;
     }
   }
+  if (
+    normalizedInput.hostedCheckoutFirstResendWaitSeconds === undefined
+    && normalizedInput.hostedCheckoutVerificationPopupDelaySeconds !== undefined
+  ) {
+    normalizedInput.hostedCheckoutFirstResendWaitSeconds = normalizedInput.hostedCheckoutVerificationPopupDelaySeconds;
+  }
 
   const isPlainObjectForSettingsSchema = typeof isPlainObjectValue === 'function'
     ? isPlainObjectValue
@@ -4063,6 +4121,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     } else if (fillDefaults) {
       payload[key] = normalizePersistentSettingValue(key, persistedSettingDefaults[key]);
     }
+  }
+  if (payload.hostedCheckoutFirstResendWaitSeconds !== undefined) {
+    payload.hostedCheckoutVerificationPopupDelaySeconds = payload.hostedCheckoutFirstResendWaitSeconds;
   }
 
   const hasPhoneSmsReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'phoneSmsReuseEnabled');
@@ -4492,6 +4553,13 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
   assignIfUpdated('hostedCheckoutVerificationPopupDelaySeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPopupDelaySeconds']);
+  assignIfUpdated('hostedCheckoutSmsPoolAutoDisableEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolAutoDisableEnabled']);
+  assignIfUpdated('hostedCheckoutFirstDirectResendEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutFirstDirectResendEnabled']);
+  assignIfUpdated('hostedCheckoutFirstResendWaitSeconds', ['flows', 'openai', 'plus', 'hostedCheckoutFirstResendWaitSeconds']);
+  assignIfUpdated('hostedCheckoutSubsequentResendWaitSeconds', ['flows', 'openai', 'plus', 'hostedCheckoutSubsequentResendWaitSeconds']);
+  assignIfUpdated('hostedCheckoutVerificationPollAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPollAttempts']);
+  assignIfUpdated('hostedCheckoutVerificationPollIntervalSeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPollIntervalSeconds']);
+  assignIfUpdated('hostedCheckoutVerificationResendMaxAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationResendMaxAttempts']);
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
@@ -10196,7 +10264,8 @@ function isPlusCheckoutRestartStep(step, stepExecutionKey = '', state = {}) {
 }
 
 function isPlusCheckoutRestartRequiredFailure(error) {
-  return !isPlusCheckoutNonFreeTrialFailure(error);
+  return !isPlusCheckoutNonFreeTrialFailure(error)
+    && !isCloudCheckoutAlreadyPaidFailure(error);
 }
 
 function getPhonePlusPaymentSegmentNodeIds(state = {}) {
@@ -10227,6 +10296,9 @@ function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '') {
     plusCheckoutCountry: 'DE',
     plusCheckoutCurrency: 'EUR',
     plusCheckoutSource: '',
+    plusCheckoutAlreadyPaid: false,
+    plusCheckoutAlreadyPaidAt: 0,
+    plusCheckoutAlreadyPaidDetail: '',
     plusBillingCountryText: '',
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
@@ -10491,6 +10563,9 @@ function getDownstreamStateResets(step, state = {}) {
     plusCheckoutCountry: 'DE',
     plusCheckoutCurrency: 'EUR',
     plusCheckoutSource: '',
+    plusCheckoutAlreadyPaid: false,
+    plusCheckoutAlreadyPaidAt: 0,
+    plusCheckoutAlreadyPaidDetail: '',
     plusBillingCountryText: '',
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
