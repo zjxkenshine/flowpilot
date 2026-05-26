@@ -86,6 +86,74 @@ test('tab runtime accepts canonical openai-auth readiness for queued signup-page
   assert.equal(Object.prototype.hasOwnProperty.call(currentState.tabRegistry, 'signup-page'), false);
 });
 
+test('tab runtime waits for static auth content script readiness before attempting dynamic reinjection', async () => {
+  const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const runtimeApi = new Function('self', `${runtimeSource}; return self.MultiPageBackgroundTabRuntime;`)({});
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+
+  const executeCalls = [];
+  const pingResponses = [
+    null,
+    { ok: true, source: 'openai-auth' },
+  ];
+  let currentState = {
+    tabRegistry: {},
+    sourceLastUrls: {},
+  };
+
+  const runtime = runtimeApi.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({
+          id: tabId,
+          windowId: 1,
+          url: 'https://auth.openai.com/create-account/password',
+          status: 'complete',
+        }),
+        query: async () => [],
+        sendMessage: async (_tabId, message) => {
+          if (message.type === 'PING') {
+            return pingResponses.shift() || null;
+          }
+          return { ok: true };
+        },
+      },
+      scripting: {
+        executeScript: async (payload) => {
+          executeCalls.push(payload);
+          return [];
+        },
+      },
+    },
+    getSourceLabel: (source) => source || 'unknown',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (source, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(source, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.ensureContentScriptReadyOnTab('signup-page', 77, {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+    timeoutMs: 100,
+    retryDelayMs: 1,
+    staticReadyGraceMs: 50,
+  });
+
+  assert.deepEqual(executeCalls, []);
+  assert.deepEqual(currentState.tabRegistry['openai-auth'], { tabId: 77, ready: true, windowId: 1 });
+});
+
 test('tab runtime caps per-attempt response timeout to the remaining resilient timeout budget', () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};
@@ -539,6 +607,78 @@ test('tab runtime force-new opens replacement before removing the active stale s
   assert.deepEqual(tabs, [
     { id: 2, active: true, windowId: 100, url: 'https://auth.openai.com/authorize' },
   ]);
+});
+
+test('tab runtime does not dynamically inject static auth bundles during force-new or same-url reuse', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+  const executeCalls = [];
+  let currentState = {
+    automationWindowId: 100,
+    tabRegistry: {
+      'openai-auth': { tabId: 1, ready: true, windowId: 100 },
+    },
+    sourceLastUrls: {
+      'openai-auth': 'https://auth.openai.com/create-account/password',
+    },
+  };
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async (payload) => ({ id: 2, windowId: payload.windowId, url: payload.url, status: 'complete', active: true }),
+        get: async (tabId) => (
+          tabId === 1
+            ? { id: 1, windowId: 100, url: 'https://auth.openai.com/create-account/password', status: 'complete', active: true }
+            : { id: 2, windowId: 100, url: 'https://auth.openai.com/create-account/password', status: 'complete', active: true }
+        ),
+        query: async () => [{ id: 1, windowId: 100, url: 'https://auth.openai.com/create-account/password', active: true }],
+        update: async (tabId, payload) => ({ id: tabId, windowId: 100, url: payload.url || 'https://auth.openai.com/create-account/password', status: 'complete', active: true }),
+        reload: async () => {},
+        remove: async () => {},
+        onUpdated: {
+          addListener: () => {},
+          removeListener: () => {},
+        },
+      },
+      scripting: {
+        executeScript: async (payload) => {
+          executeCalls.push(payload);
+          return [];
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (sourceName, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(sourceName, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/create-account/password', {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/create-account/password', {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+    forceNew: true,
+  });
+
+  assert.deepEqual(executeCalls, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(currentState.tabRegistry, 'signup-page'), false);
 });
 
 test('tab runtime scopes tab queries to the locked automation window', async () => {

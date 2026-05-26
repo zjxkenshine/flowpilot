@@ -736,6 +736,14 @@ async function clickHostedReviewConsent() {
 
 async function runPayPalHostedCheckoutStep(payload = {}) {
   const stage = detectPayPalHostedStage();
+  if (payload.resendVerificationCode && stage !== PAYPAL_HOSTED_STAGE_VERIFICATION) {
+    return {
+      stage,
+      submitted: false,
+      resendSkipped: true,
+      approveReady: Boolean(findApproveButton()),
+    };
+  }
   const expectedStage = String(payload.expectedStage || '').trim();
   if (expectedStage && stage !== expectedStage) {
     return {

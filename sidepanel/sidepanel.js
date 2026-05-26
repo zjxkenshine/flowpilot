@@ -271,6 +271,14 @@ const inputHostedCheckoutVerificationPopupDelaySeconds = document.getElementById
 const rowHostedCheckoutPhone = document.getElementById('row-hosted-checkout-phone');
 const inputHostedCheckoutPhone = document.getElementById('input-hosted-checkout-phone');
 const rowHostedCheckoutSmsPool = document.getElementById('row-hosted-checkout-sms-pool');
+const rowHostedCheckoutResendSettings = document.getElementById('row-hosted-checkout-resend-settings');
+const inputHostedCheckoutSmsPoolAutoDisableEnabled = document.getElementById('input-hosted-checkout-sms-pool-auto-disable-enabled');
+const inputHostedCheckoutFirstDirectResendEnabled = document.getElementById('input-hosted-checkout-first-direct-resend-enabled');
+const inputHostedCheckoutFirstResendWaitSeconds = document.getElementById('input-hosted-checkout-first-resend-wait-seconds');
+const inputHostedCheckoutSubsequentResendWaitSeconds = document.getElementById('input-hosted-checkout-subsequent-resend-wait-seconds');
+const inputHostedCheckoutVerificationPollAttempts = document.getElementById('input-hosted-checkout-verification-poll-attempts');
+const inputHostedCheckoutVerificationPollIntervalSeconds = document.getElementById('input-hosted-checkout-verification-poll-interval-seconds');
+const inputHostedCheckoutVerificationResendMaxAttempts = document.getElementById('input-hosted-checkout-verification-resend-max-attempts');
 const btnToggleHostedSmsPool = document.getElementById('btn-toggle-hosted-sms-pool');
 const hostedSmsPoolShell = document.getElementById('hosted-sms-pool-shell');
 const inputHostedCheckoutSmsPool = document.getElementById('input-hosted-checkout-sms-pool');
@@ -306,6 +314,11 @@ const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkou
 const inputPlusCheckoutConversionProxy = document.getElementById('input-plus-checkout-conversion-proxy');
 const rowPlusCheckoutConversionProxyTest = document.getElementById('row-plus-checkout-conversion-proxy-test');
 const btnPlusCheckoutConversionProxyTest = document.getElementById('btn-plus-checkout-conversion-proxy-test');
+const inputPlusCheckoutCloudConversionEnabled = document.getElementById('input-plus-checkout-cloud-conversion-enabled');
+const rowPlusCheckoutCloudConversionApiUrl = document.getElementById('row-plus-checkout-cloud-conversion-api-url');
+const inputPlusCheckoutCloudConversionApiUrl = document.getElementById('input-plus-checkout-cloud-conversion-api-url');
+const rowPlusCheckoutCloudConversionApiKey = document.getElementById('row-plus-checkout-cloud-conversion-api-key');
+const inputPlusCheckoutCloudConversionApiKey = document.getElementById('input-plus-checkout-cloud-conversion-api-key');
 const btnPlusCheckoutConversionProxySwitch = document.getElementById('btn-plus-checkout-conversion-proxy-switch');
 const btnPlusCheckoutConversionProxyCancel = document.getElementById('btn-plus-checkout-conversion-proxy-cancel');
 const displayPlusCheckoutConversionProxyTestResult = document.getElementById('display-plus-checkout-conversion-proxy-test-result');
@@ -558,6 +571,7 @@ const rowHeroSmsPreferredActivation = document.getElementById('row-hero-sms-pref
 const rowPhoneCodeSettingsGroup = document.getElementById('row-phone-code-settings-group');
 const rowPhoneVerificationResendCount = document.getElementById('row-phone-verification-resend-count');
 const rowPhoneReplacementLimit = document.getElementById('row-phone-replacement-limit');
+const rowPhoneActivationRetryRounds = document.getElementById('row-phone-activation-retry-rounds');
 const rowPhoneActivationTierUpgradeLimit = document.getElementById('row-phone-activation-tier-upgrade-limit');
 const rowPhoneCodeWaitSeconds = document.getElementById('row-phone-code-wait-seconds');
 const rowPhoneCodeTimeoutWindows = document.getElementById('row-phone-code-timeout-windows');
@@ -579,6 +593,7 @@ const inputHeroSmsMinPrice = document.getElementById('input-hero-sms-min-price')
 const inputHeroSmsMaxPrice = document.getElementById('input-hero-sms-max-price');
 const inputHeroSmsPreferredPrice = document.getElementById('input-hero-sms-preferred-price');
 const inputPhoneReplacementLimit = document.getElementById('input-phone-replacement-limit');
+const inputPhoneActivationRetryRounds = document.getElementById('input-phone-activation-retry-rounds');
 const inputPhoneActivationTierUpgradeLimit = document.getElementById('input-phone-activation-tier-upgrade-limit');
 const inputPhoneCodeWaitSeconds = document.getElementById('input-phone-code-wait-seconds');
 const inputPhoneCodeTimeoutWindows = document.getElementById('input-phone-code-timeout-windows');
@@ -737,6 +752,11 @@ const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MIN = 1;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MAX = 10;
+const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 2;
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
+const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
 const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
@@ -3391,6 +3411,42 @@ function normalizeHostedCheckoutVerificationPopupDelaySeconds(value) {
   return Math.min(60, Math.max(0, Math.floor(numeric)));
 }
 
+function normalizeHostedCheckoutResendWaitSecondsValue(value, fallback = 20) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.min(300, Math.max(0, Math.floor(Number(fallback) || 20)));
+  }
+  return Math.min(300, Math.max(0, parsed));
+}
+
+function normalizeHostedCheckoutVerificationPollAttemptsValue(value, fallback = 6) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.min(60, Math.max(1, Math.floor(Number(fallback) || 6)));
+  }
+  return Math.min(60, Math.max(1, parsed));
+}
+
+function normalizeHostedCheckoutVerificationPollIntervalSecondsValue(value, fallback = 5) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.min(60, Math.max(1, Math.floor(Number(fallback) || 5)));
+  }
+  return Math.min(60, Math.max(1, parsed));
+}
+
+function normalizeHostedCheckoutVerificationResendMaxAttemptsValue(value, fallback = 1) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.min(10, Math.max(0, Math.floor(Number(fallback) || 1)));
+  }
+  return Math.min(10, Math.max(0, parsed));
+}
+
 function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -3416,6 +3472,24 @@ function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   } catch {
     return rawValue;
   }
+}
+
+function normalizePlusCheckoutCloudConversionApiUrlValue(value = '') {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) {
+    return '';
+  }
+  try {
+    const parsed = new URL(rawValue);
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return rawValue;
+  }
+}
+
+function normalizePlusCheckoutCloudConversionApiKeyValue(value = '') {
+  return String(value || '').trim();
 }
 
 function normalizeHostedCheckoutVerificationUrlValue(value = '') {
@@ -4682,6 +4756,9 @@ function collectSettingsPayload() {
   const defaultPhoneCodeWaitSeconds = typeof DEFAULT_PHONE_CODE_WAIT_SECONDS !== 'undefined'
     ? DEFAULT_PHONE_CODE_WAIT_SECONDS
     : 60;
+  const defaultPhoneActivationRetryRounds = typeof DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS !== 'undefined'
+    ? DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS
+    : 2;
   const defaultPhoneActivationTierUpgradeLimit = typeof DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT !== 'undefined'
     ? DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT
     : 1;
@@ -4856,6 +4933,12 @@ function collectSettingsPayload() {
       latestState?.phoneVerificationReplacementLimit
     )
     : DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT;
+  const phoneActivationRetryRoundsValue = typeof inputPhoneActivationRetryRounds !== 'undefined' && inputPhoneActivationRetryRounds
+    ? normalizePhoneActivationRetryRoundsValue(
+      inputPhoneActivationRetryRounds.value,
+      latestState?.phoneActivationRetryRounds ?? latestState?.heroSmsActivationRetryRounds
+    )
+    : defaultPhoneActivationRetryRounds;
   const phoneActivationTierUpgradeLimitValue = typeof inputPhoneActivationTierUpgradeLimit !== 'undefined' && inputPhoneActivationTierUpgradeLimit
     ? normalizePhoneActivationTierUpgradeLimit(
       inputPhoneActivationTierUpgradeLimit.value,
@@ -5194,6 +5277,30 @@ function collectSettingsPayload() {
     hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
       ? normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
       : DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS,
+    hostedCheckoutSmsPoolAutoDisableEnabled: typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled
+      ? Boolean(inputHostedCheckoutSmsPoolAutoDisableEnabled.checked)
+      : Boolean(latestState?.hostedCheckoutSmsPoolAutoDisableEnabled),
+    hostedCheckoutFirstDirectResendEnabled: typeof inputHostedCheckoutFirstDirectResendEnabled !== 'undefined' && inputHostedCheckoutFirstDirectResendEnabled
+      ? Boolean(inputHostedCheckoutFirstDirectResendEnabled.checked)
+      : Boolean(latestState?.hostedCheckoutFirstDirectResendEnabled),
+    hostedCheckoutFirstResendWaitSeconds: typeof inputHostedCheckoutFirstResendWaitSeconds !== 'undefined' && inputHostedCheckoutFirstResendWaitSeconds
+      ? normalizeHostedCheckoutResendWaitSecondsValue(
+        inputHostedCheckoutFirstResendWaitSeconds.value,
+        latestState?.hostedCheckoutFirstResendWaitSeconds ?? latestState?.hostedCheckoutVerificationPopupDelaySeconds ?? 20
+      )
+      : normalizeHostedCheckoutResendWaitSecondsValue(latestState?.hostedCheckoutFirstResendWaitSeconds ?? latestState?.hostedCheckoutVerificationPopupDelaySeconds, 20),
+    hostedCheckoutSubsequentResendWaitSeconds: typeof inputHostedCheckoutSubsequentResendWaitSeconds !== 'undefined' && inputHostedCheckoutSubsequentResendWaitSeconds
+      ? normalizeHostedCheckoutResendWaitSecondsValue(inputHostedCheckoutSubsequentResendWaitSeconds.value, latestState?.hostedCheckoutSubsequentResendWaitSeconds ?? 25)
+      : normalizeHostedCheckoutResendWaitSecondsValue(latestState?.hostedCheckoutSubsequentResendWaitSeconds, 25),
+    hostedCheckoutVerificationPollAttempts: typeof inputHostedCheckoutVerificationPollAttempts !== 'undefined' && inputHostedCheckoutVerificationPollAttempts
+      ? normalizeHostedCheckoutVerificationPollAttemptsValue(inputHostedCheckoutVerificationPollAttempts.value, latestState?.hostedCheckoutVerificationPollAttempts ?? 6)
+      : normalizeHostedCheckoutVerificationPollAttemptsValue(latestState?.hostedCheckoutVerificationPollAttempts, 6),
+    hostedCheckoutVerificationPollIntervalSeconds: typeof inputHostedCheckoutVerificationPollIntervalSeconds !== 'undefined' && inputHostedCheckoutVerificationPollIntervalSeconds
+      ? normalizeHostedCheckoutVerificationPollIntervalSecondsValue(inputHostedCheckoutVerificationPollIntervalSeconds.value, latestState?.hostedCheckoutVerificationPollIntervalSeconds ?? 5)
+      : normalizeHostedCheckoutVerificationPollIntervalSecondsValue(latestState?.hostedCheckoutVerificationPollIntervalSeconds, 5),
+    hostedCheckoutVerificationResendMaxAttempts: typeof inputHostedCheckoutVerificationResendMaxAttempts !== 'undefined' && inputHostedCheckoutVerificationResendMaxAttempts
+      ? normalizeHostedCheckoutVerificationResendMaxAttemptsValue(inputHostedCheckoutVerificationResendMaxAttempts.value, latestState?.hostedCheckoutVerificationResendMaxAttempts ?? 1)
+      : normalizeHostedCheckoutVerificationResendMaxAttemptsValue(latestState?.hostedCheckoutVerificationResendMaxAttempts, 1),
     hostedCheckoutVerificationUrl: typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl
       ? normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl.value)
       : normalizeHostedCheckoutVerificationUrlValue(latestState?.hostedCheckoutVerificationUrl || ''),
@@ -5228,6 +5335,15 @@ function collectSettingsPayload() {
         ? inputPlusHostedCheckoutOauthDelaySeconds.value
         : latestState?.plusHostedCheckoutOauthDelaySeconds
     ),
+    plusCheckoutCloudConversionEnabled: typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled
+      ? Boolean(inputPlusCheckoutCloudConversionEnabled.checked)
+      : false,
+    plusCheckoutCloudConversionApiUrl: typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl
+      ? normalizePlusCheckoutCloudConversionApiUrlValue(inputPlusCheckoutCloudConversionApiUrl.value)
+      : BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
+    plusCheckoutCloudConversionApiKey: typeof inputPlusCheckoutCloudConversionApiKey !== 'undefined' && inputPlusCheckoutCloudConversionApiKey
+      ? normalizePlusCheckoutCloudConversionApiKeyValue(inputPlusCheckoutCloudConversionApiKey.value)
+      : BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
     plusCheckoutConversionProxyUrl: typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy
       ? normalizePlusCheckoutConversionProxyInput(inputPlusCheckoutConversionProxy.value)
       : normalizePlusCheckoutConversionProxyInput(latestState?.plusCheckoutConversionProxyUrl || ''),
@@ -5405,6 +5521,7 @@ function collectSettingsPayload() {
     smsPoolPreferredPrice: smsPoolPreferredPriceValue,
     phonePreferredActivation: phonePreferredActivationValue,
     phoneVerificationReplacementLimit: phoneVerificationReplacementLimitValue,
+    phoneActivationRetryRounds: phoneActivationRetryRoundsValue,
     phoneActivationTierUpgradeLimit: phoneActivationTierUpgradeLimitValue,
     phoneCodeWaitSeconds: phoneCodeWaitSecondsValue,
     phoneCodeTimeoutWindows: phoneCodeTimeoutWindowsValue,
@@ -6258,6 +6375,18 @@ function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PH
     );
   }
   return Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.min(PHONE_REPLACEMENT_LIMIT_MAX, parsed));
+}
+
+function normalizePhoneActivationRetryRoundsValue(value, fallback = DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS) {
+  const rawValue = String(value ?? '').trim();
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      PHONE_ACTIVATION_RETRY_ROUNDS_MIN,
+      Math.min(PHONE_ACTIVATION_RETRY_ROUNDS_MAX, Number(fallback) || DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS)
+    );
+  }
+  return Math.max(PHONE_ACTIVATION_RETRY_ROUNDS_MIN, Math.min(PHONE_ACTIVATION_RETRY_ROUNDS_MAX, parsed));
 }
 
 function normalizePhoneActivationTierUpgradeLimit(value, fallback = DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT) {
@@ -10152,6 +10281,7 @@ function updatePhoneVerificationSettingsUI() {
     typeof rowPhoneCodeSettingsGroup !== 'undefined' ? rowPhoneCodeSettingsGroup : null,
     typeof rowPhoneVerificationResendCount !== 'undefined' ? rowPhoneVerificationResendCount : null,
     typeof rowPhoneReplacementLimit !== 'undefined' ? rowPhoneReplacementLimit : null,
+    typeof rowPhoneActivationRetryRounds !== 'undefined' ? rowPhoneActivationRetryRounds : null,
     typeof rowPhoneActivationTierUpgradeLimit !== 'undefined' ? rowPhoneActivationTierUpgradeLimit : null,
     typeof rowPhoneCodeWaitSeconds !== 'undefined' ? rowPhoneCodeWaitSeconds : null,
     typeof rowPhoneCodeTimeoutWindows !== 'undefined' ? rowPhoneCodeTimeoutWindows : null,
@@ -10517,6 +10647,7 @@ function updatePlusModeUI() {
     }
     row.style.display = enabled ? '' : 'none';
   });
+  updatePlusCheckoutConversionModeUi();
   if (enabled) {
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   }
@@ -10615,6 +10746,7 @@ function updatePlusModeUI() {
     typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
     typeof rowHostedCheckoutPhone !== 'undefined' ? rowHostedCheckoutPhone : null,
     typeof rowHostedCheckoutSmsPool !== 'undefined' ? rowHostedCheckoutSmsPool : null,
+    typeof rowHostedCheckoutResendSettings !== 'undefined' ? rowHostedCheckoutResendSettings : null,
     typeof rowPlusHostedCheckoutOauthDelay !== 'undefined' ? rowPlusHostedCheckoutOauthDelay : null,
   ].forEach((row) => {
     if (!row) {
@@ -11821,7 +11953,43 @@ function applySettingsState(state) {
   }
   if (typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds) {
     inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
-      normalizeHostedCheckoutVerificationPopupDelaySeconds(state?.hostedCheckoutVerificationPopupDelaySeconds)
+      normalizeHostedCheckoutVerificationPopupDelaySeconds(
+        state?.hostedCheckoutFirstResendWaitSeconds ?? state?.hostedCheckoutVerificationPopupDelaySeconds
+      )
+    );
+  }
+  if (typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
+    inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(state?.hostedCheckoutSmsPoolAutoDisableEnabled);
+  }
+  if (typeof inputHostedCheckoutFirstDirectResendEnabled !== 'undefined' && inputHostedCheckoutFirstDirectResendEnabled) {
+    inputHostedCheckoutFirstDirectResendEnabled.checked = Boolean(state?.hostedCheckoutFirstDirectResendEnabled);
+  }
+  if (typeof inputHostedCheckoutFirstResendWaitSeconds !== 'undefined' && inputHostedCheckoutFirstResendWaitSeconds) {
+    inputHostedCheckoutFirstResendWaitSeconds.value = String(
+      normalizeHostedCheckoutResendWaitSecondsValue(
+        state?.hostedCheckoutFirstResendWaitSeconds ?? state?.hostedCheckoutVerificationPopupDelaySeconds,
+        20
+      )
+    );
+  }
+  if (typeof inputHostedCheckoutSubsequentResendWaitSeconds !== 'undefined' && inputHostedCheckoutSubsequentResendWaitSeconds) {
+    inputHostedCheckoutSubsequentResendWaitSeconds.value = String(
+      normalizeHostedCheckoutResendWaitSecondsValue(state?.hostedCheckoutSubsequentResendWaitSeconds, 25)
+    );
+  }
+  if (typeof inputHostedCheckoutVerificationPollAttempts !== 'undefined' && inputHostedCheckoutVerificationPollAttempts) {
+    inputHostedCheckoutVerificationPollAttempts.value = String(
+      normalizeHostedCheckoutVerificationPollAttemptsValue(state?.hostedCheckoutVerificationPollAttempts, 6)
+    );
+  }
+  if (typeof inputHostedCheckoutVerificationPollIntervalSeconds !== 'undefined' && inputHostedCheckoutVerificationPollIntervalSeconds) {
+    inputHostedCheckoutVerificationPollIntervalSeconds.value = String(
+      normalizeHostedCheckoutVerificationPollIntervalSecondsValue(state?.hostedCheckoutVerificationPollIntervalSeconds, 5)
+    );
+  }
+  if (typeof inputHostedCheckoutVerificationResendMaxAttempts !== 'undefined' && inputHostedCheckoutVerificationResendMaxAttempts) {
+    inputHostedCheckoutVerificationResendMaxAttempts.value = String(
+      normalizeHostedCheckoutVerificationResendMaxAttemptsValue(state?.hostedCheckoutVerificationResendMaxAttempts, 1)
     );
   }
   setHostedCheckoutManualCodeDisplay('未获取');
@@ -11854,10 +12022,20 @@ function applySettingsState(state) {
       normalizePlusCheckoutOpenStableWaitSeconds(state?.plusCheckoutOpenStableWaitSeconds)
     );
   }
+  if (typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled) {
+    inputPlusCheckoutCloudConversionEnabled.checked = Boolean(state?.plusCheckoutCloudConversionEnabled);
+  }
+  if (typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl) {
+    inputPlusCheckoutCloudConversionApiUrl.value = normalizePlusCheckoutCloudConversionApiUrlValue(state?.plusCheckoutCloudConversionApiUrl || '');
+  }
+  if (typeof inputPlusCheckoutCloudConversionApiKey !== 'undefined' && inputPlusCheckoutCloudConversionApiKey) {
+    inputPlusCheckoutCloudConversionApiKey.value = normalizePlusCheckoutCloudConversionApiKeyValue(state?.plusCheckoutCloudConversionApiKey || '');
+  }
   validateHostedCheckoutContactConfig();
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(state?.plusCheckoutConversionProxyUrl || '');
   }
+  updatePlusCheckoutConversionModeUi();
   renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
@@ -12305,6 +12483,14 @@ function applySettingsState(state) {
       normalizePhoneVerificationReplacementLimit(
         state?.phoneVerificationReplacementLimit,
         DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+      )
+    );
+  }
+  if (typeof inputPhoneActivationRetryRounds !== 'undefined' && inputPhoneActivationRetryRounds) {
+    inputPhoneActivationRetryRounds.value = String(
+      normalizePhoneActivationRetryRoundsValue(
+        state?.phoneActivationRetryRounds ?? state?.heroSmsActivationRetryRounds,
+        DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS
       )
     );
   }
@@ -16592,6 +16778,92 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
   }
 }
 
+function isPlusCheckoutCloudConversionEnabled() {
+  if (typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled) {
+    return Boolean(inputPlusCheckoutCloudConversionEnabled.checked);
+  }
+  return Boolean(latestState?.plusCheckoutCloudConversionEnabled);
+}
+
+function validatePlusCheckoutCloudConversionConfig() {
+  const method = normalizePlusPaymentMethod(
+    typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod
+      ? selectPlusPaymentMethod.value
+      : latestState?.plusPaymentMethod
+  );
+  if (method !== 'paypal' || !isPlusCheckoutCloudConversionEnabled()) {
+    return { valid: true, message: '' };
+  }
+
+  const normalizedApiUrl = normalizePlusCheckoutCloudConversionApiUrlValue(
+    typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl
+      ? inputPlusCheckoutCloudConversionApiUrl.value
+      : latestState?.plusCheckoutCloudConversionApiUrl
+  );
+  if (!normalizedApiUrl) {
+    return {
+      valid: false,
+      message: '云端支付转换服务地址未内置成功，请联系开发者检查扩展配置。',
+    };
+  }
+
+  try {
+    const parsed = new URL(normalizedApiUrl);
+    if (!/^https?:$/i.test(String(parsed.protocol || ''))) {
+      throw new Error('unsupported protocol');
+    }
+  } catch {
+    return {
+      valid: false,
+      message: '云端支付转换服务地址不是有效的 HTTP/HTTPS URL。',
+    };
+  }
+
+  return { valid: true, message: '' };
+}
+
+function updatePlusCheckoutConversionModeUi() {
+  const cloudEnabled = isPlusCheckoutCloudConversionEnabled();
+  const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : Boolean(latestState?.plusModeEnabled);
+  const selectedMethod = normalizePlusPaymentMethod(
+    typeof selectPlusPaymentMethod !== 'undefined' && selectPlusPaymentMethod
+      ? selectPlusPaymentMethod.value
+      : latestState?.plusPaymentMethod
+  );
+  const paypalMode = selectedMethod === 'paypal';
+  const cloudRowsVisible = plusModeEnabled && paypalMode && cloudEnabled;
+
+  if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
+    inputPlusCheckoutConversionProxy.disabled = cloudEnabled;
+    inputPlusCheckoutConversionProxy.readOnly = cloudEnabled;
+    inputPlusCheckoutConversionProxy.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof btnPlusCheckoutConversionProxyTest !== 'undefined' && btnPlusCheckoutConversionProxyTest) {
+    btnPlusCheckoutConversionProxyTest.disabled = cloudEnabled;
+    btnPlusCheckoutConversionProxyTest.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof rowPlusCheckoutCloudConversionApiUrl !== 'undefined' && rowPlusCheckoutCloudConversionApiUrl) {
+    rowPlusCheckoutCloudConversionApiUrl.style.display = cloudRowsVisible ? '' : 'none';
+  }
+  if (typeof rowPlusCheckoutCloudConversionApiKey !== 'undefined' && rowPlusCheckoutCloudConversionApiKey) {
+    rowPlusCheckoutCloudConversionApiKey.style.display = cloudRowsVisible ? '' : 'none';
+  }
+  if (typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl) {
+    inputPlusCheckoutCloudConversionApiUrl.disabled = !cloudEnabled;
+  }
+  if (typeof inputPlusCheckoutCloudConversionApiKey !== 'undefined' && inputPlusCheckoutCloudConversionApiKey) {
+    inputPlusCheckoutCloudConversionApiKey.disabled = !cloudEnabled;
+  }
+
+  if (cloudEnabled) {
+    setPlusCheckoutConversionProxyTestResult('云端模式', {
+      detail: '已启用云端支付转换，本地支付转换代理与代理测试已自动停用。',
+    });
+  }
+}
+
 async function handlePlusCheckoutConversionProxyTest() {
   if (!btnPlusCheckoutConversionProxyTest || !inputPlusCheckoutConversionProxy) {
     return;
@@ -16721,6 +16993,43 @@ inputHostedCheckoutVerificationPopupDelaySeconds?.addEventListener('blur', () =>
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputHostedCheckoutSmsPoolAutoDisableEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputHostedCheckoutFirstDirectResendEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+[
+  inputHostedCheckoutFirstResendWaitSeconds,
+  inputHostedCheckoutSubsequentResendWaitSeconds,
+  inputHostedCheckoutVerificationPollAttempts,
+  inputHostedCheckoutVerificationPollIntervalSeconds,
+  inputHostedCheckoutVerificationResendMaxAttempts,
+].filter(Boolean).forEach((input) => {
+  input.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input.addEventListener('blur', () => {
+    if (input === inputHostedCheckoutFirstResendWaitSeconds) {
+      input.value = String(normalizeHostedCheckoutResendWaitSecondsValue(input.value, 20));
+    } else if (input === inputHostedCheckoutSubsequentResendWaitSeconds) {
+      input.value = String(normalizeHostedCheckoutResendWaitSecondsValue(input.value, 25));
+    } else if (input === inputHostedCheckoutVerificationPollAttempts) {
+      input.value = String(normalizeHostedCheckoutVerificationPollAttemptsValue(input.value, 6));
+    } else if (input === inputHostedCheckoutVerificationPollIntervalSeconds) {
+      input.value = String(normalizeHostedCheckoutVerificationPollIntervalSecondsValue(input.value, 5));
+    } else if (input === inputHostedCheckoutVerificationResendMaxAttempts) {
+      input.value = String(normalizeHostedCheckoutVerificationResendMaxAttemptsValue(input.value, 1));
+    }
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 inputHostedCheckoutVerificationUrl?.addEventListener('input', () => {
   setHostedCheckoutManualCodeDisplay('未获取');
   validateHostedCheckoutContactConfig();
@@ -16763,6 +17072,35 @@ inputPlusCheckoutConversionProxy?.addEventListener('blur', () => {
   inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(inputPlusCheckoutConversionProxy.value);
   setPlusCheckoutConversionProxyTestResult('未测试');
   renderPlusCheckoutConversionProxyRuntimeStatus();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPlusCheckoutCloudConversionEnabled?.addEventListener('change', () => {
+  updatePlusCheckoutConversionModeUi();
+  validatePlusCheckoutCloudConversionConfig();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPlusCheckoutCloudConversionApiUrl?.addEventListener('input', () => {
+  validatePlusCheckoutCloudConversionConfig();
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputPlusCheckoutCloudConversionApiUrl?.addEventListener('blur', () => {
+  inputPlusCheckoutCloudConversionApiUrl.value = normalizePlusCheckoutCloudConversionApiUrlValue(inputPlusCheckoutCloudConversionApiUrl.value);
+  validatePlusCheckoutCloudConversionConfig();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPlusCheckoutCloudConversionApiKey?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+
+inputPlusCheckoutCloudConversionApiKey?.addEventListener('blur', () => {
+  inputPlusCheckoutCloudConversionApiKey.value = normalizePlusCheckoutCloudConversionApiKeyValue(inputPlusCheckoutCloudConversionApiKey.value);
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -18866,6 +19204,20 @@ inputPhoneReplacementLimit?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPhoneActivationRetryRounds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputPhoneActivationRetryRounds?.addEventListener('blur', () => {
+  inputPhoneActivationRetryRounds.value = String(
+    normalizePhoneActivationRetryRoundsValue(
+      inputPhoneActivationRetryRounds.value,
+      DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS
+    )
+  );
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputPhoneActivationTierUpgradeLimit?.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -19245,6 +19597,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.hostedCheckoutVerificationPopupDelaySeconds !== undefined && inputHostedCheckoutVerificationPopupDelaySeconds) {
         inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
           normalizeHostedCheckoutVerificationPopupDelaySeconds(message.payload.hostedCheckoutVerificationPopupDelaySeconds)
+        );
+      }
+      if (message.payload.hostedCheckoutSmsPoolAutoDisableEnabled !== undefined && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
+        inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(message.payload.hostedCheckoutSmsPoolAutoDisableEnabled);
+      }
+      if (message.payload.hostedCheckoutFirstDirectResendEnabled !== undefined && inputHostedCheckoutFirstDirectResendEnabled) {
+        inputHostedCheckoutFirstDirectResendEnabled.checked = Boolean(message.payload.hostedCheckoutFirstDirectResendEnabled);
+      }
+      if (message.payload.hostedCheckoutFirstResendWaitSeconds !== undefined && inputHostedCheckoutFirstResendWaitSeconds) {
+        inputHostedCheckoutFirstResendWaitSeconds.value = String(
+          normalizeHostedCheckoutResendWaitSecondsValue(message.payload.hostedCheckoutFirstResendWaitSeconds, 20)
+        );
+      }
+      if (message.payload.hostedCheckoutSubsequentResendWaitSeconds !== undefined && inputHostedCheckoutSubsequentResendWaitSeconds) {
+        inputHostedCheckoutSubsequentResendWaitSeconds.value = String(
+          normalizeHostedCheckoutResendWaitSecondsValue(message.payload.hostedCheckoutSubsequentResendWaitSeconds, 25)
+        );
+      }
+      if (message.payload.hostedCheckoutVerificationPollAttempts !== undefined && inputHostedCheckoutVerificationPollAttempts) {
+        inputHostedCheckoutVerificationPollAttempts.value = String(
+          normalizeHostedCheckoutVerificationPollAttemptsValue(message.payload.hostedCheckoutVerificationPollAttempts, 6)
+        );
+      }
+      if (message.payload.hostedCheckoutVerificationPollIntervalSeconds !== undefined && inputHostedCheckoutVerificationPollIntervalSeconds) {
+        inputHostedCheckoutVerificationPollIntervalSeconds.value = String(
+          normalizeHostedCheckoutVerificationPollIntervalSecondsValue(message.payload.hostedCheckoutVerificationPollIntervalSeconds, 5)
+        );
+      }
+      if (message.payload.hostedCheckoutVerificationResendMaxAttempts !== undefined && inputHostedCheckoutVerificationResendMaxAttempts) {
+        inputHostedCheckoutVerificationResendMaxAttempts.value = String(
+          normalizeHostedCheckoutVerificationResendMaxAttemptsValue(message.payload.hostedCheckoutVerificationResendMaxAttempts, 1)
         );
       }
       if (message.payload.plusCheckoutCreatePreWaitSeconds !== undefined && inputPlusCheckoutCreatePreWaitSeconds) {
@@ -19845,6 +20228,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePhoneVerificationReplacementLimit(
             message.payload.phoneVerificationReplacementLimit,
             DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT
+          )
+        );
+      }
+      if (message.payload.phoneActivationRetryRounds !== undefined && typeof inputPhoneActivationRetryRounds !== 'undefined' && inputPhoneActivationRetryRounds) {
+        inputPhoneActivationRetryRounds.value = String(
+          normalizePhoneActivationRetryRoundsValue(
+            message.payload.phoneActivationRetryRounds,
+            DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS
           )
         );
       }

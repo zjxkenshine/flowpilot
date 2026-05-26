@@ -85,7 +85,7 @@
     const DEFAULT_PHONE_NUMBER_REPLACEMENT_LIMIT = 3;
     const DEFAULT_PHONE_PRICE_LOOKUP_ATTEMPTS = 3;
     const MAX_PHONE_PRICE_CANDIDATES = 8;
-    const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 3;
+    const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 2;
     const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
     const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
     const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
@@ -446,6 +446,13 @@
         return DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS;
       }
       return Math.max(PHONE_ACTIVATION_RETRY_ROUNDS_MIN, Math.min(PHONE_ACTIVATION_RETRY_ROUNDS_MAX, parsed));
+    }
+
+    function resolvePhoneActivationRetryRounds(state = {}) {
+      if (state?.phoneActivationRetryRounds !== undefined && state?.phoneActivationRetryRounds !== null) {
+        return normalizePhoneActivationRetryRounds(state.phoneActivationRetryRounds);
+      }
+      return normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
     }
 
     function normalizePhoneActivationRetryDelayMs(value) {
@@ -3653,8 +3660,8 @@
         options?.countryPriceFloorByCountryId,
         (value) => normalizeFiveSimCountryCode(value, '')
       );
-      const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
-      const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
+      const configuredAcquireRounds = resolvePhoneActivationRetryRounds(state);
+      const maxAcquireRounds = configuredAcquireRounds;
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
       const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 
@@ -4142,8 +4149,8 @@
         options?.countryPriceFloorByCountryId,
         (value) => String(normalizeNexSmsCountryId(value, -1))
       );
-      const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
-      const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
+      const configuredAcquireRounds = resolvePhoneActivationRetryRounds(state);
+      const maxAcquireRounds = configuredAcquireRounds;
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
       const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 
@@ -4459,8 +4466,8 @@
         (value) => String(normalizeCountryId(value, 0))
       );
       const requestActions = ['getNumber', 'getNumberV2'];
-      const configuredAcquireRounds = normalizePhoneActivationRetryRounds(state?.heroSmsActivationRetryRounds);
-      const maxAcquireRounds = Math.max(2, configuredAcquireRounds);
+      const configuredAcquireRounds = resolvePhoneActivationRetryRounds(state);
+      const maxAcquireRounds = configuredAcquireRounds;
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
       const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
 

@@ -12,7 +12,7 @@
   const DEFAULT_MAX_USES = 3;
   const FIVE_SIM_RATE_LIMIT_ERROR_PREFIX = 'FIVE_SIM_RATE_LIMIT::';
   const MAX_PRICE_CANDIDATES = 8;
-  const DEFAULT_ACTIVATION_RETRY_ROUNDS = 3;
+  const DEFAULT_ACTIVATION_RETRY_ROUNDS = 2;
   const ACTIVATION_RETRY_ROUNDS_MIN = 1;
   const ACTIVATION_RETRY_ROUNDS_MAX = 10;
   const DEFAULT_ACTIVATION_RETRY_DELAY_MS = 2000;
@@ -254,6 +254,13 @@
       return DEFAULT_ACTIVATION_RETRY_ROUNDS;
     }
     return Math.max(ACTIVATION_RETRY_ROUNDS_MIN, Math.min(ACTIVATION_RETRY_ROUNDS_MAX, parsed));
+  }
+
+  function resolveActivationRetryRounds(state = {}) {
+    if (state?.phoneActivationRetryRounds !== undefined && state?.phoneActivationRetryRounds !== null) {
+      return normalizeActivationRetryRounds(state.phoneActivationRetryRounds);
+    }
+    return normalizeActivationRetryRounds(state?.heroSmsActivationRetryRounds);
   }
 
   function normalizeActivationRetryDelayMs(value) {
@@ -868,7 +875,7 @@
       attempt.pricePlan = attempt.pricePlan || await resolvePricePlan(state, attempt.countryConfig, deps);
     }
 
-    const retryRounds = Math.max(2, normalizeActivationRetryRounds(state.heroSmsActivationRetryRounds));
+    const retryRounds = resolveActivationRetryRounds(state);
     const retryDelayMs = normalizeActivationRetryDelayMs(state.heroSmsActivationRetryDelayMs);
     const tierUpgradeLimit = normalizeTierUpgradeLimit(state.phoneActivationTierUpgradeLimit);
     const preferredText = normalizeFiveSimMaxPrice(state.heroSmsPreferredPrice);

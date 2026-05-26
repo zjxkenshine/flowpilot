@@ -2,9 +2,16 @@
 // Injected on: auth0.openai.com, auth.openai.com, accounts.openai.com
 // Dynamically injected on: chatgpt.com
 
-console.log('[MultiPage:signup-page] Content script loaded on', location.href);
+if (globalThis.__MULTIPAGE_SIGNUP_PAGE_INITIALIZED__) {
+  if (!globalThis.__MULTIPAGE_SIGNUP_PAGE_DUPLICATE_LOGGED__) {
+    globalThis.__MULTIPAGE_SIGNUP_PAGE_DUPLICATE_LOGGED__ = true;
+    console.log('[MultiPage:signup-page] script already initialized, skip duplicate execution');
+  }
+} else {
+  globalThis.__MULTIPAGE_SIGNUP_PAGE_INITIALIZED__ = true;
+  console.log('[MultiPage:signup-page] Content script loaded on', location.href);
 
-const SIGNUP_PAGE_LISTENER_SENTINEL = 'data-multipage-signup-page-listener';
+  const SIGNUP_PAGE_LISTENER_SENTINEL = 'data-multipage-signup-page-listener';
 
 function getOperationDelayRunner() {
   const rootScope = typeof window !== 'undefined' ? window : globalThis;
@@ -7458,4 +7465,5 @@ async function step5_fillNameBirthday(payload) {
     cleanupNavigationReporter();
     throw error;
   }
+}
 }

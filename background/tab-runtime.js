@@ -43,6 +43,43 @@
       return keys[0] || String(source || '').trim();
     }
 
+    function parseUrlSafely(rawUrl) {
+      if (sourceRegistry?.parseUrlSafely) {
+        return sourceRegistry.parseUrlSafely(rawUrl);
+      }
+      if (!rawUrl) return null;
+      try {
+        return new URL(rawUrl);
+      } catch {
+        return null;
+      }
+    }
+
+    function isSignupPageHost(hostname = '') {
+      if (sourceRegistry?.isSignupPageHost) {
+        return sourceRegistry.isSignupPageHost(hostname);
+      }
+      const normalized = String(hostname || '').trim().toLowerCase();
+      return normalized === 'auth0.openai.com'
+        || normalized === 'auth.openai.com'
+        || normalized === 'accounts.openai.com';
+    }
+
+    function isStaticAuthContentScriptUrl(source, rawUrl = '') {
+      if (resolveCanonicalSource(source) !== 'openai-auth') {
+        return false;
+      }
+      const parsed = parseUrlSafely(rawUrl);
+      return Boolean(parsed && isSignupPageHost(parsed.hostname));
+    }
+
+    function shouldInjectContentScriptForUrl(source, rawUrl = '', inject = null) {
+      if (!Array.isArray(inject) || !inject.length) {
+        return false;
+      }
+      return !isStaticAuthContentScriptUrl(source, rawUrl);
+    }
+
     function sourcesMatch(leftSource, rightSource) {
       const left = resolveCanonicalSource(leftSource);
       const right = resolveCanonicalSource(rightSource);
@@ -518,6 +555,7 @@
         logMessage = '',
         logStep = null,
         logStepKey = '',
+        staticReadyGraceMs = 2500,
       } = options;
 
       const start = Date.now();
@@ -532,6 +570,14 @@
 
       while (Date.now() - start < timeoutMs) {
         attempt += 1;
+        let currentTab = null;
+        try {
+          currentTab = await chrome.tabs.get(tabId);
+        } catch {
+          currentTab = null;
+        }
+        const currentUrl = String(currentTab?.url || '');
+        const preferStaticAuthReady = isStaticAuthContentScriptUrl(source, currentUrl);
         const pong = await pingContentScriptOnTab(tabId);
         if (pong?.ok && (!pong.source || sourcesMatch(pong.source, source))) {
           console.log(LOG_PREFIX, `[ensureContentScriptReadyOnTab] ready ${source} tab=${tabId} on attempt ${attempt} after ${Date.now() - start}ms`);
@@ -541,6 +587,15 @@
 
         if (!inject || !inject.length) {
           throw new Error(`${getSourceLabel(source)} 内容脚本未就绪，且未提供可用的注入文件。`);
+        }
+
+        if (preferStaticAuthReady && Date.now() - start < staticReadyGraceMs) {
+          const waitMs = Math.min(
+            retryDelayMs,
+            Math.max(50, staticReadyGraceMs - (Date.now() - start))
+          );
+          await sleepOrStop(waitMs);
+          continue;
         }
 
         let registry = await getTabRegistry();
@@ -554,20 +609,22 @@
         }
 
         try {
-          if (injectSource) {
+          if (shouldInjectContentScriptForUrl(source, currentUrl, inject)) {
+            if (injectSource) {
+              await chrome.scripting.executeScript({
+                target: { tabId },
+                func: (injectedSource) => {
+                  window.__MULTIPAGE_SOURCE = injectedSource;
+                },
+                args: [injectSource],
+              });
+            }
+
             await chrome.scripting.executeScript({
               target: { tabId },
-              func: (injectedSource) => {
-                window.__MULTIPAGE_SOURCE = injectedSource;
-              },
-              args: [injectSource],
+              files: inject,
             });
           }
-
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            files: inject,
-          });
         } catch (err) {
           lastError = err;
           console.warn(LOG_PREFIX, `[ensureContentScriptReadyOnTab] inject attempt ${attempt} failed for ${source} tab=${tabId}: ${err?.message || err}`);
@@ -738,7 +795,7 @@
           preserveActiveTab: false,
         });
 
-        if (options.inject) {
+        if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
           await waitForTabUpdateComplete(tab.id);
           if (options.injectSource) {
             await chrome.scripting.executeScript({
@@ -786,7 +843,7 @@
             await waitForTabUpdateComplete(tabId);
           }
 
-          if (options.inject) {
+          if (shouldInjectContentScriptForUrl(source, currentTab.url, options.inject)) {
             if (sourceEntry) {
               registry = setSourceMapValue(registry, source, {
                 ...sourceEntry,
@@ -825,7 +882,7 @@
 
         await waitForTabUpdateComplete(tabId);
 
-        if (options.inject) {
+        if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
           if (options.injectSource) {
             await chrome.scripting.executeScript({
               target: { tabId },
@@ -852,7 +909,7 @@
         preserveActiveTab: false,
       });
 
-      if (options.inject) {
+      if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
         await waitForTabUpdateComplete(tab.id);
         if (options.injectSource) {
           await chrome.scripting.executeScript({

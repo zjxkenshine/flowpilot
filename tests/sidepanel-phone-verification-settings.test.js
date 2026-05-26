@@ -78,6 +78,8 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /data-signup-method="email"/);
   assert.match(html, /data-signup-method="phone"/);
   assert.match(html, /id="row-phone-sms-provider"/);
+  assert.match(html, /id="row-phone-activation-retry-rounds"/);
+  assert.match(html, /id="input-phone-activation-retry-rounds"/);
   assert.match(html, /id="row-phone-activation-tier-upgrade-limit"/);
   assert.match(html, /id="input-phone-activation-tier-upgrade-limit"/);
   assert.match(html, /id="select-phone-sms-provider"/);
@@ -1017,6 +1019,7 @@ const inputHeroSmsMaxPrice = { value: '0.12' };
 const inputHeroSmsMinPrice = { value: '0.03' };
 const inputHeroSmsPreferredPrice = { value: '0.0512' };
 const inputPhoneReplacementLimit = { value: '5' };
+const inputPhoneActivationRetryRounds = { value: '4' };
 const inputPhoneActivationTierUpgradeLimit = { value: '2' };
 const inputPhoneCodeWaitSeconds = { value: '75' };
 const inputPhoneCodeTimeoutWindows = { value: '3' };
@@ -1025,6 +1028,9 @@ const inputPhoneCodePollMaxRounds = { value: '18' };
 const inputAccountRunHistoryHelperBaseUrl = { value: 'http://127.0.0.1:17373' };
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MIN = 1;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MAX = 10;
+const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 2;
 const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
@@ -1124,6 +1130,7 @@ ${extractFunction('normalizePhoneSmsMaxPriceValue')}
 ${extractFunction('normalizePhoneSmsMinPriceValue')}
 ${extractFunction('normalizeHeroSmsMaxPriceValue')}
 ${extractFunction('normalizePhoneVerificationReplacementLimit')}
+${extractFunction('normalizePhoneActivationRetryRoundsValue')}
 ${extractFunction('normalizePhoneActivationTierUpgradeLimit')}
 ${extractFunction('normalizePhoneCodeWaitSecondsValue')}
 ${extractFunction('normalizePhoneCodeTimeoutWindowsValue')}
@@ -1192,6 +1199,7 @@ return { collectSettingsPayload };
     maxUses: 3,
   });
   assert.equal(payload.phoneVerificationReplacementLimit, 5);
+  assert.equal(payload.phoneActivationRetryRounds, 4);
   assert.equal(payload.phoneActivationTierUpgradeLimit, 2);
   assert.equal(payload.phoneCodeWaitSeconds, 75);
   assert.equal(payload.phoneCodeTimeoutWindows, 3);

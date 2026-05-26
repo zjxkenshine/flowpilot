@@ -714,6 +714,9 @@ const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MIN = 1;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MAX = 10;
+const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 2;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
 const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
@@ -1531,6 +1534,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   phoneSmsProviderOrder: [],
   verificationResendCount: DEFAULT_VERIFICATION_RESEND_COUNT,
   phoneVerificationReplacementLimit: DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT,
+  phoneActivationRetryRounds: DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS,
   phoneActivationTierUpgradeLimit: DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT,
   phoneCodeWaitSeconds: DEFAULT_PHONE_CODE_WAIT_SECONDS,
   phoneCodeTimeoutWindows: DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS,
@@ -1559,6 +1563,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   hotmailServiceMode: HOTMAIL_SERVICE_MODE_LOCAL,
   hotmailRemoteBaseUrl: DEFAULT_HOTMAIL_REMOTE_BASE_URL,
   hotmailLocalBaseUrl: DEFAULT_HOTMAIL_LOCAL_BASE_URL,
+  plusCheckoutAlreadyPaid: false,
+  plusCheckoutAlreadyPaidAt: 0,
+  plusCheckoutAlreadyPaidDetail: '',
   luckmailApiKey: '',
   luckmailBaseUrl: DEFAULT_LUCKMAIL_BASE_URL,
   luckmailEmailType: DEFAULT_LUCKMAIL_EMAIL_TYPE,
@@ -1866,6 +1873,21 @@ function normalizePhoneVerificationReplacementLimit(value, fallback = DEFAULT_PH
   return Math.min(
     PHONE_REPLACEMENT_LIMIT_MAX,
     Math.max(PHONE_REPLACEMENT_LIMIT_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizePhoneActivationRetryRounds(value, fallback = DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS) {
+  const rawValue = String(value ?? '').trim();
+  const numeric = Number(rawValue);
+  if (!rawValue || !Number.isFinite(numeric)) {
+    return Math.min(
+      PHONE_ACTIVATION_RETRY_ROUNDS_MAX,
+      Math.max(PHONE_ACTIVATION_RETRY_ROUNDS_MIN, Math.floor(Number(fallback) || DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS))
+    );
+  }
+  return Math.min(
+    PHONE_ACTIVATION_RETRY_ROUNDS_MAX,
+    Math.max(PHONE_ACTIVATION_RETRY_ROUNDS_MIN, Math.floor(numeric))
   );
 }
 
@@ -3807,6 +3829,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
       return normalizePhoneVerificationReplacementLimit(value, DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT);
+    case 'phoneActivationRetryRounds':
+      return normalizePhoneActivationRetryRounds(value, DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS);
     case 'phoneActivationTierUpgradeLimit':
       return normalizePhoneActivationTierUpgradeLimit(value, DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT);
     case 'phoneCodeWaitSeconds':
@@ -4099,6 +4123,12 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     if (legacyVerificationResendCount !== undefined) {
       normalizedInput.verificationResendCount = legacyVerificationResendCount;
     }
+  }
+  if (
+    normalizedInput.phoneActivationRetryRounds === undefined
+    && normalizedInput.heroSmsActivationRetryRounds !== undefined
+  ) {
+    normalizedInput.phoneActivationRetryRounds = normalizedInput.heroSmsActivationRetryRounds;
   }
   if (
     normalizedInput.hostedCheckoutFirstResendWaitSeconds === undefined
@@ -10220,6 +10250,11 @@ function isHostedCheckoutVerificationResendLimitFailure(error) {
   return /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::|PayPal 验证码自动 Resend 重试已达到上限|请尝试在页面手动获取验证码并填入/i.test(message);
 }
 
+function isCloudCheckoutAlreadyPaidFailure(error) {
+  const message = getErrorMessage(error);
+  return /\buser\s+is\s+already\s+paid\b|already\s+(?:paid|subscribed)|already\s+has\s+(?:an?\s+)?(?:active\s+)?subscription|(?:账号|账户)[\s\S]*(?:已|已经)[\s\S]*(?:付费|订阅|开通)|该账号已经开通过\s*ChatGPT\s*订阅套餐/i.test(message);
+}
+
 function isHostedCheckoutGenericErrorFailure(error) {
   const message = getErrorMessage(error);
   return /HOSTED_CHECKOUT_GENERIC_ERROR::|Things\s+don[’']?t\s+appear\s+to\s+be\s+working\s+at\s+the\s+moment|Sorry,\s*something\s+went\s+wrong\.?\s*Please\s+try\s+again|PayPal\s+isn[’']?t\s+available\s+at\s+this\s+time|choose\s+another\s+way\s+to\s+pay/i.test(message);
@@ -13892,6 +13927,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   getStopRequested: () => stopRequested,
   hasSavedNodeProgress,
   isAddPhoneAuthFailure,
+  isCloudCheckoutAlreadyPaidFailure,
   isPhoneSmsPlatformRateLimitFailure,
   isPlusCheckoutNonFreeTrialFailure,
   isGpcTaskEndedFailure,

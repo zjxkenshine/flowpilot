@@ -325,7 +325,7 @@ test('5sim provider retries the same tier before upgrading to the next price tie
     fiveSimCountryId: 'vietnam',
     fiveSimCountryLabel: '越南 (Vietnam)',
     fiveSimOperator: 'any',
-    heroSmsActivationRetryRounds: 1,
+    phoneActivationRetryRounds: 1,
     phoneActivationTierUpgradeLimit: 1,
   });
 
@@ -333,7 +333,7 @@ test('5sim provider retries the same tier before upgrading to the next price tie
   const buyPrices = requests
     .filter((entry) => entry.url.pathname.includes('/buy/activation'))
     .map((entry) => entry.url.searchParams.get('maxPrice'));
-  assert.deepStrictEqual(buyPrices, ['0.05', '0.05', '0.08']);
+  assert.deepStrictEqual(buyPrices, ['0.05', '0.08']);
 });
 
 test('5sim provider falls back from preferred tier and counts the upgrade', async () => {
@@ -375,7 +375,7 @@ test('5sim provider falls back from preferred tier and counts the upgrade', asyn
     fiveSimCountryLabel: '越南 (Vietnam)',
     fiveSimOperator: 'any',
     heroSmsPreferredPrice: '0.08',
-    heroSmsActivationRetryRounds: 1,
+    phoneActivationRetryRounds: 1,
     phoneActivationTierUpgradeLimit: 1,
   });
 
@@ -383,7 +383,7 @@ test('5sim provider falls back from preferred tier and counts the upgrade', asyn
   const buyPrices = requests
     .filter((entry) => entry.url.pathname.includes('/buy/activation'))
     .map((entry) => entry.url.searchParams.get('maxPrice'));
-  assert.deepStrictEqual(buyPrices, ['0.08', '0.08', '0.05']);
+  assert.deepStrictEqual(buyPrices, ['0.08', '0.05']);
 });
 
 test('5sim provider does not climb above configured max price', async () => {
@@ -426,7 +426,7 @@ test('5sim provider does not climb above configured max price', async () => {
       fiveSimCountryLabel: '瓒婂崡 (Vietnam)',
       fiveSimOperator: 'any',
       fiveSimMaxPrice: '0.08',
-      heroSmsActivationRetryRounds: 1,
+      phoneActivationRetryRounds: 1,
       phoneActivationTierUpgradeLimit: 1,
     }),
     /5sim/
@@ -435,7 +435,7 @@ test('5sim provider does not climb above configured max price', async () => {
   const buyPrices = requests
     .filter((entry) => entry.url.pathname.includes('/buy/activation'))
     .map((entry) => entry.url.searchParams.get('maxPrice'));
-  assert.deepStrictEqual(buyPrices, ['0.08', '0.08']);
+  assert.deepStrictEqual(buyPrices, ['0.08']);
   assert.equal(buyPrices.includes('0.12'), false);
   assert.equal(buyPrices.includes(null), false);
 });

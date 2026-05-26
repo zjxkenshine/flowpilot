@@ -2168,7 +2168,7 @@ test('hosted checkout pool failure records lastError without incrementing useCou
 
   await assert.rejects(
     () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
-    /6/
+    /有效验证码|响应预览|No code available yet/i
   );
 
   const usageUpdate = events.find((event) => event.type === 'set-state' && event.payload.hostedCheckoutSmsPoolUsage);
@@ -2213,7 +2213,7 @@ test('hosted checkout runtime prefers per-run state over stale persisted state w
   });
 
   assert.equal(result.verificationUrl, 'http://fresh.test/api/sms');
-  assert.equal(events.find((event) => event.type === 'fetch')?.url?.startsWith('http://fresh.test/api/sms?t='), true);
+  assert.equal(events.find((event) => event.type === 'fetch')?.url?.startsWith('http://fresh.test/api/sms'), true);
 });
 
 test('hosted checkout strict pool mode rejects unparsable non-empty sms pool text', async () => {
@@ -2243,5 +2243,86 @@ test('hosted checkout manual mode rejects incomplete manual config when pool is 
   await assert.rejects(
     () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
     /接码配置不完整|手机号和验证码接口/i
+  );
+});
+
+test('hosted checkout manual fetch falls back to hidden tab text when fetch payload has no valid code', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        create: async ({ url }) => {
+          events.push({ type: 'tab-create', url });
+          return { id: 91 };
+        },
+        remove: async (tabId) => {
+          events.push({ type: 'tab-remove', tabId });
+        },
+      },
+      scripting: {
+        executeScript: async () => ([{
+          result: "PayPal: 456789 is your security code. Don't share it.",
+        }]),
+      },
+    },
+    createAutomationTab: async ({ url, active }) => {
+      events.push({ type: 'automation-tab', url, active });
+      return { id: 91 };
+    },
+    fetch: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        data: {
+          message: 'No code available yet',
+        },
+      }),
+    }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  const result = await executor.fetchHostedCheckoutVerificationCodeManually({
+    verificationUrl: 'http://example.test/api/sms',
+  });
+
+  assert.equal(result.code, '456789');
+  assert.equal(events.some((event) => event.type === 'automation-tab' && event.url === 'http://example.test/api/sms'), true);
+  assert.equal(events.some((event) => event.type === 'tab-remove' && event.tabId === 91), true);
+});
+
+test('hosted checkout manual fetch treats PayPal confirmation text as non-code content', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 92 }),
+        remove: async () => {},
+      },
+      scripting: {
+        executeScript: async () => ([{
+          result: 'PayPal: Thanks for confirming your phone number. Log in or get the app to get transaction alerts.',
+        }]),
+      },
+    },
+    createAutomationTab: async () => ({ id: 92 }),
+    fetch: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        data: {
+          message: 'PayPal: Thanks for confirming your phone number. Log in or get the app to get transaction alerts.',
+        },
+      }),
+    }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.fetchHostedCheckoutVerificationCodeManually({
+      verificationUrl: 'http://example.test/api/sms',
+    }),
+    /非验证码内容|暂未返回有效验证码/i
   );
 });

@@ -67,6 +67,7 @@ test('background account history settings are normalized independently from hotm
     extractFunction('normalizeNexSmsServiceCode'),
     extractFunction('normalizePhonePreferredActivation'),
     extractFunction('normalizePhoneVerificationReplacementLimit'),
+    extractFunction('normalizePhoneActivationRetryRounds'),
     extractFunction('normalizePhoneActivationTierUpgradeLimit'),
     extractFunction('normalizePhoneCodeWaitSeconds'),
     extractFunction('normalizePhoneCodeTimeoutWindows'),
@@ -97,6 +98,9 @@ const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
 const DEFAULT_PHONE_VERIFICATION_REPLACEMENT_LIMIT = 3;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MIN = 1;
+const PHONE_ACTIVATION_RETRY_ROUNDS_MAX = 10;
+const DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS = 2;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MIN = 0;
 const PHONE_ACTIVATION_TIER_UPGRADE_LIMIT_MAX = 20;
 const DEFAULT_PHONE_ACTIVATION_TIER_UPGRADE_LIMIT = 1;
@@ -195,6 +199,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
   gopayHelperApiUrl: 'https://gpc.qlhazycoder.top',
   mailProvider: '163',
+  phoneActivationRetryRounds: 2,
   heroSmsMinPrice: '',
   fiveSimMinPrice: '',
 };
@@ -285,6 +290,10 @@ return {
   assert.equal(api.normalizePersistentSettingValue('verificationResendCount', '-1'), 0);
   assert.equal(api.normalizePersistentSettingValue('phoneVerificationReplacementLimit', '9'), 9);
   assert.equal(api.normalizePersistentSettingValue('phoneVerificationReplacementLimit', '-1'), 1);
+  assert.equal(api.normalizePersistentSettingValue('phoneActivationRetryRounds', undefined), 2);
+  assert.equal(api.normalizePersistentSettingValue('phoneActivationRetryRounds', '1'), 1);
+  assert.equal(api.normalizePersistentSettingValue('phoneActivationRetryRounds', '99'), 10);
+  assert.equal(api.normalizePersistentSettingValue('phoneActivationRetryRounds', '-1'), 1);
   assert.equal(api.normalizePersistentSettingValue('phoneActivationTierUpgradeLimit', undefined), 1);
   assert.equal(api.normalizePersistentSettingValue('phoneActivationTierUpgradeLimit', '0'), 0);
   assert.equal(api.normalizePersistentSettingValue('phoneActivationTierUpgradeLimit', '99'), 20);
@@ -443,4 +452,13 @@ return {
   });
   assert.equal(newReusePayload.phoneSmsReuseEnabled, false);
   assert.equal(newReusePayload.heroSmsReuseEnabled, false);
+  const legacyRetryRoundsPayload = api.buildPersistentSettingsPayload({
+    heroSmsActivationRetryRounds: 5,
+  });
+  assert.equal(legacyRetryRoundsPayload.phoneActivationRetryRounds, 5);
+  const explicitRetryRoundsPayload = api.buildPersistentSettingsPayload({
+    heroSmsActivationRetryRounds: 5,
+    phoneActivationRetryRounds: 3,
+  });
+  assert.equal(explicitRetryRoundsPayload.phoneActivationRetryRounds, 3);
 });

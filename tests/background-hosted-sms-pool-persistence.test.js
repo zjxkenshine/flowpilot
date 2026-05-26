@@ -49,11 +49,13 @@ function extractFunction(name) {
 }
 
 test('buildPersistentSettingsPayload keeps hosted current sms entry only when it belongs to the pool', () => {
-  const api = new Function(`
+const api = new Function(`
 const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutSmsPoolText: '',
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
+  hostedCheckoutFirstResendWaitSeconds: 20,
+  hostedCheckoutVerificationPopupDelaySeconds: 20,
 };
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
 const DEFAULT_SUB2API_GROUP_NAMES = ['codex'];
@@ -74,8 +76,20 @@ function normalizePersistentSettingValue(key, value) {
           usedAt: Math.max(0, Number(usage.usedAt) || 0),
           lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
           lastError: String(usage.lastError || '').trim(),
+          enabled: usage.enabled !== false,
+          disabledReason: String(usage.disabledReason || '').trim(),
+          disabledAt: Math.max(0, Number(usage.disabledAt) || 0),
+          failureCount: Math.max(0, Math.floor(Number(usage.failureCount) || 0)),
         }];
       }).filter(([entryKey]) => Boolean(entryKey)));
+    case 'hostedCheckoutFirstResendWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(300, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
+    case 'hostedCheckoutVerificationPopupDelaySeconds': {
+      const numeric = Number(value);
+      return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
     case 'hostedCheckoutCurrentSmsEntry': {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
       const normalizedPhone = String(value.phone || '').trim().replace(/\\D+/g, '');
@@ -139,6 +153,10 @@ return { buildPersistentSettingsPayload };
       usedAt: 0,
       lastAttemptAt: 0,
       lastError: 'timeout',
+      enabled: true,
+      disabledReason: '',
+      disabledAt: 0,
+      failureCount: 0,
     },
   });
 
@@ -152,6 +170,48 @@ return { buildPersistentSettingsPayload };
   });
 
   assert.equal(cleared.hostedCheckoutCurrentSmsEntry, null);
+});
+
+test('buildPersistentSettingsPayload maps legacy popup delay into hosted checkout first resend wait seconds', () => {
+  const api = new Function(`
+const PERSISTED_SETTING_DEFAULTS = {
+  hostedCheckoutFirstResendWaitSeconds: 20,
+  hostedCheckoutVerificationPopupDelaySeconds: 20,
+};
+const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
+function normalizePersistentSettingValue(key, value) {
+  switch (key) {
+    case 'hostedCheckoutFirstResendWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(300, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
+    case 'hostedCheckoutVerificationPopupDelaySeconds': {
+      const numeric = Number(value);
+      return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
+    }
+    default:
+      return value;
+  }
+}
+function resolveLegacyAutoStepDelaySeconds() {}
+function normalizeCloudflareDomains(value) { return value; }
+function normalizeCloudflareTempEmailDomains(value) { return value; }
+function normalizeCloudMailDomains(value) { return value; }
+function normalizeSub2ApiGroupNames(value) { return Array.isArray(value) ? value.filter(Boolean) : []; }
+function validateModeSwitchState() { return { ok: true, normalizedUpdates: {} }; }
+function resolveSignupMethod(state = {}) { return state.signupMethod || 'email'; }
+function isPlainObjectValue(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function mergeSettingsStatePatch(base, patch) { return { ...(base || {}), ...(patch || {}) }; }
+${extractFunction('buildPersistentSettingsPayload')}
+return { buildPersistentSettingsPayload };
+`)();
+
+  const payload = api.buildPersistentSettingsPayload({
+    hostedCheckoutVerificationPopupDelaySeconds: 18,
+  });
+
+  assert.equal(payload.hostedCheckoutFirstResendWaitSeconds, 18);
+  assert.equal(payload.hostedCheckoutVerificationPopupDelaySeconds, 18);
 });
 
 test('exportSettingsBundle serializes normalized hosted sms pool state into settings bundle', async () => {

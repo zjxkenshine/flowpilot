@@ -24,6 +24,7 @@
       getState,
       hasSavedNodeProgress,
       isAddPhoneAuthFailure,
+      isCloudCheckoutAlreadyPaidFailure,
       isGpcTaskEndedFailure,
       isHostedCheckoutGenericErrorFailure,
       isHostedCheckoutVerificationResendLimitFailure,
@@ -735,6 +736,9 @@
             const blockedByHostedCheckoutVerificationResendLimit = typeof isHostedCheckoutVerificationResendLimitFailure === 'function'
               ? isHostedCheckoutVerificationResendLimitFailure(err)
               : /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::/i.test(err?.message || String(err || ''));
+            const blockedByCloudCheckoutAlreadyPaid = typeof isCloudCheckoutAlreadyPaidFailure === 'function'
+              ? isCloudCheckoutAlreadyPaidFailure(err)
+              : /\buser\s+is\s+already\s+paid\b|already\s+(?:paid|subscribed)|already\s+has\s+(?:an?\s+)?(?:active\s+)?subscription/i.test(err?.message || String(err || ''));
             const retryableHostedCheckoutGenericError = blockedByHostedCheckoutGenericError
               && autoRunRetryPaypalCallback
               && attemptRun < maxAttemptsForRound;
@@ -751,6 +755,7 @@
               && !blockedByGpcTaskEnded
               && !blockedByHostedCheckoutGenericError
               && !blockedByHostedCheckoutVerificationResendLimit
+              && !blockedByCloudCheckoutAlreadyPaid
               && !blockedBySignupUserAlreadyExists
               && !blockedByStep4Route405
               && !blockedByKiroProxy
@@ -1004,6 +1009,29 @@
               await broadcastStopToContentScripts();
               await addLog(
                 `第 ${targetRun}/${totalRuns} 轮 PayPal 验证码自动 Resend 已达到上限，当前自动运行已停止；请尝试在页面手动获取验证码并填入。`,
+                'warn'
+              );
+              stoppedEarly = true;
+              await broadcastAutoRunStatus('stopped', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId: 0,
+              });
+              break;
+            }
+
+            if (blockedByCloudCheckoutAlreadyPaid) {
+              roundSummary.status = 'failed';
+              roundSummary.finalFailureReason = reason;
+              await setState({
+                autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+              });
+              await appendRoundRecordIfNeeded('failed', reason, err);
+              cancelPendingCommands('当前轮因云端确认账号已开通 Plus，已停止自动重试。');
+              await broadcastStopToContentScripts();
+              await addLog(
+                `第 ${targetRun}/${totalRuns} 轮云端返回 User is already paid，当前自动运行已停止，请检查 PLUS 是否已经开通。`,
                 'warn'
               );
               stoppedEarly = true;

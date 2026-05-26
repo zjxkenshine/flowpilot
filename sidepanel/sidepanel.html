@@ -377,10 +377,28 @@
         <span class="data-label" aria-hidden="true"></span>
         <div class="data-inline data-value-actions plus-checkout-conversion-proxy-test-inline">
           <button id="btn-plus-checkout-conversion-proxy-test" class="btn btn-outline btn-sm data-inline-btn" type="button">测试代理</button>
+          <label class="toggle-switch" for="input-plus-checkout-cloud-conversion-enabled"
+            title="启用后由云端服务接收 accessToken 并生成支付链接；本地支付转换代理将自动停用">
+            <input type="checkbox" id="input-plus-checkout-cloud-conversion-enabled" />
+            <span class="toggle-switch-track" aria-hidden="true">
+              <span class="toggle-switch-thumb"></span>
+            </span>
+          </label>
+          <span class="setting-caption">云端支付转换</span>
           <button id="btn-plus-checkout-conversion-proxy-switch" class="btn btn-outline btn-sm data-inline-btn" type="button">切换代理</button>
           <button id="btn-plus-checkout-conversion-proxy-cancel" class="btn btn-outline btn-sm data-inline-btn" type="button">取消代理</button>
           <span id="display-plus-checkout-conversion-proxy-test-result" class="data-value mono plus-checkout-conversion-proxy-test-result">未测试</span>
         </div>
+      </div>
+      <div class="data-row" id="row-plus-checkout-cloud-conversion-api-url" style="display:none;">
+        <span class="data-label">云端转换地址</span>
+        <input type="text" id="input-plus-checkout-cloud-conversion-api-url" class="data-input mono"
+          placeholder="https://gujumpgate.zg.fyi/api/checkout" autocomplete="off" />
+      </div>
+      <div class="data-row" id="row-plus-checkout-cloud-conversion-api-key" style="display:none;">
+        <span class="data-label">云端转换密钥</span>
+        <input type="text" id="input-plus-checkout-cloud-conversion-api-key" class="data-input mono"
+          placeholder="可留空或填写 API Key" autocomplete="off" />
       </div>
       <div class="data-row" id="row-plus-checkout-conversion-proxy-runtime" style="display:none;">
         <span class="data-label" aria-hidden="true"></span>
@@ -473,6 +491,54 @@
               <div id="hosted-sms-pool-list" class="luckmail-list"></div>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="data-row" id="row-hosted-checkout-resend-settings" style="display:none;">
+        <span class="data-label">PayPal 接码</span>
+        <div class="data-inline data-value-actions hosted-checkout-resend-settings-inline">
+          <label class="hosted-checkout-setting-toggle hosted-sms-pool-auto-disable-toggle" title="开启后，PayPal 接码池号码连续接码失败会被自动禁用，后续选号自动跳过；默认关闭">
+            <span class="setting-caption">自动禁用</span>
+            <span class="toggle-switch">
+              <input type="checkbox" id="input-hosted-checkout-sms-pool-auto-disable-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </span>
+          </label>
+          <label class="hosted-checkout-setting-toggle" title="开启后检测到 PayPal 验证码弹窗 1 秒后先点击 Resend，再进入首次等码窗口">
+            <span class="setting-caption">首次直接重发</span>
+            <span class="toggle-switch">
+              <input type="checkbox" id="input-hosted-checkout-first-direct-resend-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </span>
+          </label>
+          <label class="hosted-checkout-setting-field">
+            <span class="setting-caption">首次等码秒</span>
+            <input type="number" id="input-hosted-checkout-first-resend-wait-seconds" class="data-input auto-delay-input"
+              value="20" min="0" max="300" step="1" title="第一次检测到验证码弹窗后，最多等码多少秒；窗口内按轮询设置请求接口" />
+          </label>
+          <label class="hosted-checkout-setting-field">
+            <span class="setting-caption">后续等码秒</span>
+            <input type="number" id="input-hosted-checkout-subsequent-resend-wait-seconds" class="data-input auto-delay-input"
+              value="25" min="0" max="300" step="1" title="每次 Resend 后，最多等码多少秒；窗口内按轮询设置请求接口" />
+          </label>
+          <label class="hosted-checkout-setting-field">
+            <span class="setting-caption">轮询次数</span>
+            <input type="number" id="input-hosted-checkout-verification-poll-attempts" class="data-input auto-delay-input"
+              value="6" min="1" max="60" step="1" title="每个等码窗口内最多请求验证码接口几次" />
+          </label>
+          <label class="hosted-checkout-setting-field">
+            <span class="setting-caption">轮询间隔秒</span>
+            <input type="number" id="input-hosted-checkout-verification-poll-interval-seconds" class="data-input auto-delay-input"
+              value="5" min="1" max="60" step="1" title="每个等码窗口内请求验证码接口的间隔秒数" />
+          </label>
+          <label class="hosted-checkout-setting-field">
+            <span class="setting-caption">重发上限</span>
+            <input type="number" id="input-hosted-checkout-verification-resend-max-attempts" class="data-input auto-delay-input"
+              value="1" min="0" max="10" step="1" title="PayPal 验证码 Resend 最多点击几次" />
+          </label>
         </div>
       </div>
       <div class="data-row" id="row-plus-hosted-checkout-oauth-delay" style="display:none;">
@@ -1941,6 +2007,13 @@
                   <div class="setting-controls">
                     <input type="number" id="input-phone-replacement-limit" class="data-input auto-delay-input" value="3" min="1" max="20" step="1" title="步骤 9 内部允许更换号码的最大次数" />
                     <span class="data-unit">次</span>
+                  </div>
+                </div>
+                <div id="row-phone-activation-retry-rounds" class="hero-sms-settings-cell" style="display:none;">
+                  <span class="hero-sms-settings-caption">每档位重试轮数</span>
+                  <div class="setting-controls">
+                    <input type="number" id="input-phone-activation-retry-rounds" class="data-input auto-delay-input" value="2" min="1" max="10" step="1" title="当前档位无号时连续尝试几轮，再决定是否升档；1 表示无号一次后即可升档" />
+                    <span class="data-unit">轮</span>
                   </div>
                 </div>
                 <div id="row-phone-activation-tier-upgrade-limit" class="hero-sms-settings-cell" style="display:none;">
