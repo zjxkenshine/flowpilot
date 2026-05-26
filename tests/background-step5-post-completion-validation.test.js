@@ -111,6 +111,7 @@ ${extractFunction('parseUrlSafely')}
 ${extractFunction('isSignupEntryHost')}
 ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
 ${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('isStep5PhoneSignupCompletionPayload')}
 ${extractFunction('recoverStep5SubmitRetryPageOnTab')}
 ${extractFunction('validateStep5PostCompletion')}
 
@@ -136,5 +137,119 @@ return {
   assert.equal(
     snapshot.logs.some(({ message }) => /检测到认证重试页/.test(message)),
     true
+  );
+});
+
+test('step 5 post-completion validation accepts phone signup callback error landing', async () => {
+  const api = new Function(`
+const messages = [];
+
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/oauth/callback?error=server_error' };
+    },
+  },
+};
+
+async function sendToContentScriptResilient(source, message) {
+  messages.push({ source, type: message.type, payload: message.payload });
+  if (message.type === 'GET_STEP5_SUBMIT_STATE') {
+    return {
+      retryPage: false,
+      retryEnabled: false,
+      maxCheckAttemptsBlocked: false,
+      userAlreadyExistsBlocked: false,
+      successState: 'callback_error_landing',
+      profileVisible: false,
+      errorText: '',
+      unknownAuthPage: false,
+      url: 'https://auth.openai.com/oauth/callback?error=server_error',
+    };
+  }
+  throw new Error('unexpected message type: ' + message.type);
+}
+
+async function addLog() {}
+async function waitForTabStableComplete() {}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('isStep5PhoneSignupCompletionPayload')}
+${extractFunction('recoverStep5SubmitRetryPageOnTab')}
+${extractFunction('validateStep5PostCompletion')}
+
+return {
+  async run() {
+    return validateStep5PostCompletion(99, {
+      signupMethod: 'phone',
+      accountIdentifierType: 'phone',
+      phoneNumber: '+15551234567',
+    });
+  },
+  snapshot() {
+    return { messages };
+  },
+};
+`)();
+
+  const result = await api.run();
+  assert.equal(result.successState, 'callback_error_landing');
+  assert.equal(api.snapshot().messages[0].payload.signupMethod, 'phone');
+});
+
+test('step 5 post-completion validation rejects callback error landing without phone signup context', async () => {
+  const api = new Function(`
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/oauth/callback?error=server_error' };
+    },
+  },
+};
+
+async function sendToContentScriptResilient(_source, message) {
+  if (message.type === 'GET_STEP5_SUBMIT_STATE') {
+    return {
+      retryPage: false,
+      retryEnabled: false,
+      maxCheckAttemptsBlocked: false,
+      userAlreadyExistsBlocked: false,
+      successState: 'callback_error_landing',
+      profileVisible: false,
+      errorText: '',
+      unknownAuthPage: false,
+      url: 'https://auth.openai.com/oauth/callback?error=server_error',
+    };
+  }
+  throw new Error('unexpected message type: ' + message.type);
+}
+
+async function addLog() {}
+async function waitForTabStableComplete() {}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('isStep5PhoneSignupCompletionPayload')}
+${extractFunction('recoverStep5SubmitRetryPageOnTab')}
+${extractFunction('validateStep5PostCompletion')}
+
+return {
+  run() {
+    return validateStep5PostCompletion(99, {
+      signupMethod: 'email',
+      accountIdentifierType: 'email',
+    });
+  },
+};
+`)();
+
+  await assert.rejects(
+    () => api.run(),
+    /不是手机号注册上下文/
   );
 });

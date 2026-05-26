@@ -142,6 +142,12 @@ let currentState = {
   signupPhoneCompletedActivation: { activationId: 'signup-completed', phoneNumber: '+6612345' },
   signupPhoneVerificationRequestedAt: 123456,
   signupPhoneVerificationPurpose: 'signup',
+  phoneNoSupplyFailureStreak: 2,
+  heroSmsLastPriceTiers: [0.05, 0.08],
+  heroSmsLastPriceCountryId: 52,
+  heroSmsLastPriceCountryLabel: 'Thailand',
+  heroSmsLastPriceUserLimit: '0.08',
+  heroSmsLastPriceAt: 123456789,
   mailProvider: '163',
   emailGenerator: 'duck',
   gmailBaseEmail: 'demo@gmail.com',
@@ -430,6 +436,12 @@ return {
   assert.strictEqual(snapshot.currentState.signupPhoneCompletedActivation, null, 'completed signup phone activation should be runtime-only');
   assert.strictEqual(snapshot.currentState.signupPhoneVerificationRequestedAt, null, 'signup phone request time should be runtime-only');
   assert.strictEqual(snapshot.currentState.signupPhoneVerificationPurpose, '', 'signup phone purpose should be runtime-only');
+  assert.strictEqual(snapshot.currentState.phoneNoSupplyFailureStreak, 0, 'no-supply streak should not survive a fresh-attempt reset');
+  assert.deepStrictEqual(snapshot.currentState.heroSmsLastPriceTiers, [], 'price snapshot should not survive a fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.heroSmsLastPriceCountryId, 0, 'price snapshot country should be cleared on reset');
+  assert.strictEqual(snapshot.currentState.heroSmsLastPriceCountryLabel, '', 'price snapshot label should be cleared on reset');
+  assert.strictEqual(snapshot.currentState.heroSmsLastPriceUserLimit, '', 'price snapshot user limit should be cleared on reset');
+  assert.strictEqual(snapshot.currentState.heroSmsLastPriceAt, 0, 'price snapshot timestamp should be cleared on reset');
   assert.deepStrictEqual(
     snapshot.currentState.reusablePhoneActivation,
     {

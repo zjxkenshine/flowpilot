@@ -15277,6 +15277,7 @@ const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
   addLog,
   generateRandomBirthday,
   generateRandomName,
+  resolveSignupMethod,
   sendToContentScript,
 });
 const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
@@ -16541,7 +16542,7 @@ async function getStep5SubmitStateFromContent(options = {}) {
     {
       type: 'GET_STEP5_SUBMIT_STATE',
       source: 'background',
-      payload: {},
+      payload: options.payload || {},
     },
     {
       timeoutMs: options.timeoutMs ?? 15000,
@@ -16558,6 +16559,13 @@ async function getStep5SubmitStateFromContent(options = {}) {
   }
 
   return result || {};
+}
+
+function isStep5PhoneSignupCompletionPayload(payload = {}) {
+  const signupMethod = String(payload?.signupMethod || '').trim().toLowerCase();
+  const accountIdentifierType = String(payload?.accountIdentifierType || '').trim().toLowerCase();
+  const phoneNumber = String(payload?.phoneNumber || payload?.signupPhoneNumber || '').trim();
+  return signupMethod === 'phone' || accountIdentifierType === 'phone' || Boolean(phoneNumber);
 }
 
 async function recoverStep5SubmitRetryPageOnTab(options = {}) {
@@ -16594,6 +16602,7 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
   }
 
   const maxAuthRetryRecoveries = Math.max(1, Number(completionPayload?.maxAuthRetryRecoveries) || 2);
+  const isPhoneSignupCompletion = isStep5PhoneSignupCompletionPayload(completionPayload);
   let authRetryRecoveryCount = 0;
 
   while (true) {
@@ -16607,6 +16616,7 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
     }
 
     const pageState = await getStep5SubmitStateFromContent({
+      payload: completionPayload,
       timeoutMs: 15000,
       responseTimeoutMs: 15000,
       retryDelayMs: 500,
@@ -16643,8 +16653,17 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
       continue;
     }
 
-    if (pageState.successState === 'logged_in_home' || pageState.successState === 'oauth_consent' || pageState.successState === 'add_phone') {
+    if (
+      pageState.successState === 'logged_in_home'
+      || pageState.successState === 'oauth_consent'
+      || pageState.successState === 'add_phone'
+      || (pageState.successState === 'callback_error_landing' && isPhoneSignupCompletion)
+    ) {
       return pageState;
+    }
+
+    if (pageState.successState === 'callback_error_landing' && !isPhoneSignupCompletion) {
+      throw new Error(`步骤 5：资料提交后进入 callback/error 错误页，但当前不是手机号注册上下文，无法确认成功。URL: ${pageState.url || currentUrl || 'unknown'}`);
     }
 
     if (pageState.errorText) {

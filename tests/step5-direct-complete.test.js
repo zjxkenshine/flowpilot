@@ -53,6 +53,11 @@ function extractFunction(name) {
 
 function getStep5OutcomeBundle() {
   return [
+    extractFunction('normalizeStep5SignupContext'),
+    extractFunction('isStep5PhoneSignupContext'),
+    extractFunction('getStep5CallbackErrorLandingText'),
+    extractFunction('isStep5CallbackErrorLandingUrl'),
+    extractFunction('isStep5CallbackErrorLanding'),
     extractFunction('getStep5ProfilePathPatterns'),
     extractFunction('getStep5AuthRetryPathPatterns'),
     extractFunction('isStep5ProfilePageUrl'),
@@ -72,6 +77,7 @@ function getStep5Bundle() {
     extractFunction('isSignupProfilePageUrl'),
     getStep5OutcomeBundle(),
     extractFunction('getStep5DirectCompletionPayload'),
+    extractFunction('getStep5DirectAdoptableSuccessState'),
     extractFunction('isStep5AllConsentText'),
     extractFunction('findStep5AllConsentCheckbox'),
     extractFunction('isStep5CheckboxChecked'),
@@ -1057,11 +1063,149 @@ function isOAuthConsentPage() { return false; }
 function isAddPhonePageReady() { return false; }
 function isStep5ProfileStillVisible() { return false; }
 
+${extractFunction('normalizeStep5SignupContext')}
+${extractFunction('isStep5PhoneSignupContext')}
+${extractFunction('getStep5CallbackErrorLandingText')}
+${extractFunction('isStep5CallbackErrorLandingUrl')}
+${extractFunction('isStep5CallbackErrorLanding')}
 ${extractFunction('getStep5PostSubmitSuccessState')}
 
 return {
   run() {
     return getStep5PostSubmitSuccessState();
+  },
+};
+`)();
+
+  assert.equal(api.run(), null);
+});
+
+test('step 5 treats phone signup callback error landing as success', async () => {
+  const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/oauth/callback?error=server_error',
+};
+const document = {
+  title: 'Something went wrong',
+  body: {
+    innerText: 'Error: failed to redirect after account creation.',
+    textContent: 'Error: failed to redirect after account creation.',
+  },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+};
+
+function throwIfStopped() {}
+function log() {}
+async function sleep() {}
+async function humanPause() {}
+function simulateClick() {}
+function isVisibleElement() { return true; }
+function isActionEnabled() { return true; }
+function getActionText(el) { return el?.textContent || ''; }
+function getSignupAuthRetryPathPatterns() { return []; }
+function getAuthTimeoutErrorPageState() { return null; }
+async function recoverCurrentAuthRetryPage() { throw new Error('should not recover retry page'); }
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function createAuthMaxCheckAttemptsError() { return new Error('max_check_attempts'); }
+function getStep5ErrorText() { return ''; }
+function isStep5Ready() { return false; }
+function isLikelyLoggedInChatgptHomeUrl() { return false; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+
+${extractFunction('isSignupProfilePageUrl')}
+${getStep5OutcomeBundle()}
+
+return {
+  run() {
+    return waitForStep5SubmitOutcome({
+      timeoutMs: 1000,
+      signupContext: {
+        signupMethod: 'phone',
+        accountIdentifierType: 'phone',
+        phoneNumber: '+15551234567',
+      },
+    });
+  },
+};
+`)();
+
+  assert.deepStrictEqual(await api.run(), {
+    state: 'callback_error_landing',
+    url: 'https://auth.openai.com/oauth/callback?error=server_error',
+  });
+});
+
+test('step 5 does not treat non-phone callback error landing as success', () => {
+  const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/oauth/callback?error=server_error',
+};
+const document = {
+  title: 'Something went wrong',
+  body: {
+    innerText: 'Error: failed to redirect after account creation.',
+    textContent: 'Error: failed to redirect after account creation.',
+  },
+};
+
+function getStep5AuthRetryPageState() { return null; }
+function isLikelyLoggedInChatgptHomeUrl() { return false; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+function isStep5ProfileStillVisible() { return false; }
+
+${extractFunction('normalizeStep5SignupContext')}
+${extractFunction('isStep5PhoneSignupContext')}
+${extractFunction('getStep5CallbackErrorLandingText')}
+${extractFunction('isStep5CallbackErrorLandingUrl')}
+${extractFunction('isStep5CallbackErrorLanding')}
+${extractFunction('getStep5PostSubmitSuccessState')}
+
+return {
+  run() {
+    return getStep5PostSubmitSuccessState({ signupMethod: 'email', accountIdentifierType: 'email' });
+  },
+};
+`)();
+
+  assert.equal(api.run(), null);
+});
+
+test('step 5 callback url without error text is not callback error success', () => {
+  const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/oauth/callback?state=ok',
+};
+const document = {
+  title: 'Redirecting',
+  body: {
+    innerText: 'Please wait while we redirect you.',
+    textContent: 'Please wait while we redirect you.',
+  },
+};
+
+function getStep5AuthRetryPageState() { return null; }
+function isLikelyLoggedInChatgptHomeUrl() { return false; }
+function isOAuthConsentPage() { return false; }
+function isAddPhonePageReady() { return false; }
+function isStep5ProfileStillVisible() { return false; }
+
+${extractFunction('normalizeStep5SignupContext')}
+${extractFunction('isStep5PhoneSignupContext')}
+${extractFunction('getStep5CallbackErrorLandingText')}
+${extractFunction('isStep5CallbackErrorLandingUrl')}
+${extractFunction('isStep5CallbackErrorLanding')}
+${extractFunction('getStep5PostSubmitSuccessState')}
+
+return {
+  run() {
+    return getStep5PostSubmitSuccessState({
+      signupMethod: 'phone',
+      accountIdentifierType: 'phone',
+      phoneNumber: '+15551234567',
+    });
   },
 };
 `)();

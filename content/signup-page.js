@@ -144,7 +144,7 @@ async function handleCommand(message) {
     case 'SUBMIT_ADD_EMAIL':
       return await submitAddEmailAndContinue(message.payload);
     case 'GET_STEP5_SUBMIT_STATE':
-      return getStep5SubmitState();
+      return getStep5SubmitState(message.payload || {});
     case 'PREPARE_SIGNUP_VERIFICATION':
       return await prepareSignupVerificationFlow(message.payload);
     case 'RECOVER_AUTH_RETRY_PAGE':
@@ -6734,11 +6734,21 @@ function getSerializableRect(el) {
 // Step 5: Fill Name & Birthday / Age
 // ============================================================
 
-function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted = false, outcome = null } = {}) {
+function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted = false, outcome = null, signupContext = null } = {}) {
   const payload = {
     profileSubmitted: true,
     postSubmitChecked: true,
   };
+  const normalizedSignupContext = normalizeStep5SignupContext(signupContext);
+  if (normalizedSignupContext.signupMethod) {
+    payload.signupMethod = normalizedSignupContext.signupMethod;
+  }
+  if (normalizedSignupContext.accountIdentifierType) {
+    payload.accountIdentifierType = normalizedSignupContext.accountIdentifierType;
+  }
+  if (normalizedSignupContext.phoneNumber) {
+    payload.phoneNumber = normalizedSignupContext.phoneNumber;
+  }
   if (isAgeMode) {
     payload.ageMode = true;
   }
@@ -6754,13 +6764,74 @@ function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted 
   return payload;
 }
 
-function getStep5DirectAdoptableSuccessState() {
-  const successState = getStep5PostSubmitSuccessState();
+function normalizeStep5SignupContext(value = {}) {
+  const signupMethod = String(value?.signupMethod || '').trim().toLowerCase() === 'phone'
+    ? 'phone'
+    : (String(value?.signupMethod || '').trim().toLowerCase() === 'email' ? 'email' : '');
+  const accountIdentifierType = String(value?.accountIdentifierType || '').trim().toLowerCase() === 'phone'
+    ? 'phone'
+    : (String(value?.accountIdentifierType || '').trim().toLowerCase() === 'email' ? 'email' : '');
+  const phoneNumber = String(value?.phoneNumber || value?.signupPhoneNumber || '').trim();
+
+  return {
+    signupMethod: signupMethod || (accountIdentifierType === 'phone' || phoneNumber ? 'phone' : ''),
+    accountIdentifierType: accountIdentifierType || (phoneNumber ? 'phone' : ''),
+    phoneNumber,
+  };
+}
+
+function isStep5PhoneSignupContext(value = {}) {
+  const context = normalizeStep5SignupContext(value);
+  return context.signupMethod === 'phone'
+    || context.accountIdentifierType === 'phone'
+    || Boolean(context.phoneNumber);
+}
+
+function getStep5CallbackErrorLandingText() {
+  const candidates = [
+    document?.title,
+    document?.body?.innerText,
+    document?.body?.textContent,
+  ];
+  return candidates
+    .map((text) => String(text || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function isStep5CallbackErrorLandingUrl(rawUrl = location.href) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    const target = `${parsed.pathname || ''} ${parsed.search || ''} ${parsed.hash || ''}`;
+    return /callback|error/i.test(target);
+  } catch {
+    return /callback|error/i.test(String(rawUrl || ''));
+  }
+}
+
+function isStep5CallbackErrorLanding(signupContext = {}) {
+  if (!isStep5PhoneSignupContext(signupContext) || isStep5ProfileStillVisible()) {
+    return false;
+  }
+
+  if (!isStep5CallbackErrorLandingUrl()) {
+    return false;
+  }
+
+  const text = getStep5CallbackErrorLandingText();
+  return /error|failed|failure|something\s+went\s+wrong|oops|出错|错误|失败|異常|エラー|失敗/i.test(text);
+}
+
+function getStep5DirectAdoptableSuccessState(signupContext = {}) {
+  const successState = getStep5PostSubmitSuccessState(signupContext);
   if (successState) {
     return successState;
   }
 
-  const step4State = getStep4PostVerificationState({ ignoreVerificationVisibility: true });
+  const step4State = typeof getStep4PostVerificationState === 'function'
+    ? getStep4PostVerificationState({ ignoreVerificationVisibility: true })
+    : null;
   if (step4State?.state === 'logged_in_home') {
     return {
       state: 'logged_in_home',
@@ -6963,12 +7034,12 @@ function isStep5ProfileStillVisible() {
   return typeof isStep5Ready === 'function' ? isStep5Ready() : false;
 }
 
-function getStep5PostSubmitSuccessState() {
+function getStep5PostSubmitSuccessState(signupContext = {}) {
   if (getStep5AuthRetryPageState()) {
     return null;
   }
 
-  if (isLikelyLoggedInChatgptHomeUrl()) {
+  if (typeof isLikelyLoggedInChatgptHomeUrl === 'function' && isLikelyLoggedInChatgptHomeUrl()) {
     return {
       state: 'logged_in_home',
       url: location.href,
@@ -6985,6 +7056,13 @@ function getStep5PostSubmitSuccessState() {
   if (typeof isAddPhonePageReady === 'function' && isAddPhonePageReady()) {
     return {
       state: 'add_phone',
+      url: location.href,
+    };
+  }
+
+  if (isStep5CallbackErrorLanding(signupContext)) {
+    return {
+      state: 'callback_error_landing',
       url: location.href,
     };
   }
@@ -7008,9 +7086,9 @@ function getStep5PostSubmitSuccessState() {
   return null;
 }
 
-function getStep5SubmitState() {
+function getStep5SubmitState(payload = {}) {
   const retryState = getStep5AuthRetryPageState();
-  const successState = getStep5PostSubmitSuccessState();
+  const successState = getStep5PostSubmitSuccessState(payload);
   const errorText = typeof getStep5ErrorText === 'function' ? getStep5ErrorText() : '';
   let signupAuthHost = false;
   try {
@@ -7081,6 +7159,7 @@ async function waitForStep5SubmitOutcome(options = {}) {
     maxAuthRetryRecoveries = 2,
     maxSubmitClicks = 3,
     retryClickIntervalMs = 3500,
+    signupContext = {},
   } = options;
   const start = Date.now();
   let authRetryRecoveryCount = 0;
@@ -7116,7 +7195,7 @@ async function waitForStep5SubmitOutcome(options = {}) {
       continue;
     }
 
-    const successState = getStep5PostSubmitSuccessState();
+    const successState = getStep5PostSubmitSuccessState(signupContext);
     if (successState) {
       return successState;
     }
@@ -7157,7 +7236,7 @@ async function waitForStep5SubmitOutcome(options = {}) {
     throw new Error(`步骤 5：资料提交后仍停留在认证重试页，自动恢复未完成。URL: ${location.href}`);
   }
 
-  const finalSuccessState = getStep5PostSubmitSuccessState();
+  const finalSuccessState = getStep5PostSubmitSuccessState(signupContext);
   if (finalSuccessState) {
     return finalSuccessState;
   }
@@ -7172,6 +7251,7 @@ async function waitForStep5SubmitOutcome(options = {}) {
 
 async function step5_fillNameBirthday(payload) {
   const { firstName, lastName, age, year, month, day, prefillOnly = false } = payload;
+  const signupContext = normalizeStep5SignupContext(payload);
   if (!firstName || !lastName) throw new Error('未提供姓名数据。');
   const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
     ? getOperationDelayRunner()
@@ -7187,10 +7267,11 @@ async function step5_fillNameBirthday(payload) {
     throw new Error('未提供生日或年龄数据。');
   }
 
-  const adoptableSuccessState = getStep5DirectAdoptableSuccessState();
+  const adoptableSuccessState = getStep5DirectAdoptableSuccessState(signupContext);
   if (adoptableSuccessState) {
     const completionPayload = getStep5DirectCompletionPayload({
       outcome: adoptableSuccessState,
+      signupContext,
     });
     reportComplete(5, completionPayload);
     log(`步骤 5：检测到当前页面已进入 ${adoptableSuccessState.state}，本步骤按已完成处理。`, 'ok');
@@ -7440,6 +7521,7 @@ async function step5_fillNameBirthday(payload) {
       isAgeMode,
       navigationStarted: Boolean(extra.navigationStarted),
       outcome: extra.outcome || null,
+      signupContext,
     });
     reportedCompletionPayload = completionPayload;
     reportComplete(5, completionPayload);
@@ -7455,7 +7537,7 @@ async function step5_fillNameBirthday(payload) {
   log('步骤 5：已点击“完成帐户创建”，正在等待页面跳转、重试页或提交结果。');
 
   try {
-    const outcome = await waitForStep5SubmitOutcome();
+    const outcome = await waitForStep5SubmitOutcome({ signupContext });
     cleanupNavigationReporter();
 
     const completionPayload = completeStep5Once({ outcome });

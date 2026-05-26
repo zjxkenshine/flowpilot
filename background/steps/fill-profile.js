@@ -6,12 +6,37 @@
       addLog,
       generateRandomBirthday,
       generateRandomName,
+      resolveSignupMethod = () => 'email',
       sendToContentScript,
     } = deps;
 
-    async function executeStep5() {
+    function resolveStep5SignupContext(state = {}) {
+      const signupMethod = String(resolveSignupMethod(state) || state?.resolvedSignupMethod || state?.signupMethod || '')
+        .trim()
+        .toLowerCase() === 'phone'
+        ? 'phone'
+        : 'email';
+      const rawAccountIdentifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+      const phoneNumber = String(
+        state?.signupPhoneNumber
+        || (rawAccountIdentifierType === 'phone' ? state?.accountIdentifier : '')
+        || ''
+      ).trim();
+      const accountIdentifierType = signupMethod === 'phone' || rawAccountIdentifierType === 'phone' || phoneNumber
+        ? 'phone'
+        : 'email';
+
+      return {
+        signupMethod,
+        accountIdentifierType,
+        phoneNumber,
+      };
+    }
+
+    async function executeStep5(state = {}) {
       const { firstName, lastName } = generateRandomName();
       const { year, month, day } = generateRandomBirthday();
+      const signupContext = resolveStep5SignupContext(state);
 
       await addLog(`步骤 5：已生成姓名 ${firstName} ${lastName}，生日 ${year}-${month}-${day}`);
 
@@ -21,6 +46,7 @@
         step: 5,
         source: 'background',
         payload: {
+          ...signupContext,
           firstName,
           lastName,
           year,

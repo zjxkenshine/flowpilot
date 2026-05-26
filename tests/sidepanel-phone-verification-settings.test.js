@@ -82,6 +82,9 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="input-phone-activation-retry-rounds"/);
   assert.match(html, /id="row-phone-activation-tier-upgrade-limit"/);
   assert.match(html, /id="input-phone-activation-tier-upgrade-limit"/);
+  assert.match(html, /单次取号升档预算/);
+  assert.match(html, /预算按每次取号请求重新计算；多国家、多档位共用同一份预算；不按跑批轮次累计；0 表示不切换后续候选档位/);
+  assert.match(html, /当前候选档位无号时连续尝试几轮，再决定是否切换到本次取号中的下一候选档位；需与“单次取号升档预算”配合生效/);
   assert.match(html, /id="select-phone-sms-provider"/);
   assert.match(html, /id="row-phone-sms-provider-order"/);
   assert.match(html, /id="select-phone-sms-provider-order"[^>]*multiple/);

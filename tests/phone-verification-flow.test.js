@@ -1749,7 +1749,7 @@ test('phone verification helper ignores HeroSMS virtual-only stock when physical
 
   await assert.rejects(
     helpers.requestPhoneActivation({ heroSmsApiKey: 'demo-key', heroSmsActivationRetryRounds: 1 }),
-    /HeroSMS 升档次数已用尽/
+    /HeroSMS 单次取号升档预算已用尽/
   );
 
   const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
@@ -2563,7 +2563,7 @@ test('signup phone helper preserves HeroSMS tier exhaustion details in aggregate
     helpers.prepareSignupPhoneActivation(currentState),
     (error) => {
       assert.match(error.message, /所有接码平台候选均未获取到手机号/);
-      assert.match(error.message, /HeroSMS：升档次数已用尽（1 次）/);
+      assert.match(error.message, /HeroSMS：单次取号升档预算已用尽（1 次）/);
       assert.match(error.message, /已尝试 2 个候选档位/);
       assert.match(error.message, /价格档位 0\.08/);
       assert.match(error.message, /价格档位 0\.12/);
@@ -2612,16 +2612,16 @@ test('phone verification helper logs when HeroSMS has no next tier to upgrade to
       heroSmsActivationRetryRounds: 1,
       phoneActivationTierUpgradeLimit: 1,
     }),
-    /HeroSMS 升档次数已用尽（1 次）/
+    /HeroSMS 单次取号升档预算已用尽（1 次）/
   );
 
   assert.equal(logs.some(({ message }) => String(message).includes('本轮候选价格：0.05')), true);
   assert.equal(
-    logs.some(({ message }) => /升档诊断.*本轮候选档位数=1.*无后续候选档位/.test(String(message))),
+    logs.some(({ message }) => /单次取号预算诊断.*候选档位总数=1.*预算作用域=单次取号请求/.test(String(message))),
     true
   );
   assert.equal(
-    logs.some(({ message }) => String(message).includes('只有 1 个候选档位，无后续候选档位，未触发升档')),
+    logs.some(({ message }) => String(message).includes('只有 1 个候选档位，无后续候选档位，未触发本次取号内的候选档位切换')),
     true
   );
 });
@@ -2725,6 +2725,86 @@ test('phone verification helper merges HeroSMS tiers from multiple price endpoin
   );
   const priceSnapshot = stateUpdates.find((entry) => Array.isArray(entry?.heroSmsLastPriceTiers));
   assert.deepStrictEqual(priceSnapshot?.heroSmsLastPriceTiers, [0.05, 0.08, 0.09, 0.1, 0.12]);
+});
+
+test('phone verification helper shares one single acquire budget across multiple country candidates in a request', async () => {
+  const requests = [];
+  const logs = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async (message, level = 'info', options = {}) => {
+      logs.push({ message, level, options });
+    },
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const country = parsedUrl.searchParams.get('country');
+      if (action === 'getPrices') {
+        if (country === '52') {
+          return {
+            ok: true,
+            text: async () => JSON.stringify({
+              52: {
+                dr: {
+                  low: { cost: 0.05, count: 10 },
+                },
+              },
+            }),
+          };
+        }
+        if (country === '10') {
+          return {
+            ok: true,
+            text: async () => JSON.stringify({
+              10: {
+                dr: {
+                  low: { cost: 0.08, count: 10 },
+                },
+              },
+            }),
+          };
+        }
+      }
+      if (action === 'getNumber' || action === 'getNumberV2') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ ${country || 'no-country'}`);
+    },
+    getState: async () => ({
+      heroSmsApiKey: 'demo-key',
+      heroSmsCountryId: 52,
+      heroSmsCountryLabel: 'Thailand',
+      heroSmsCountryFallback: [{ id: 10, label: 'Vietnam' }],
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    helpers.requestPhoneActivation({
+      heroSmsApiKey: 'demo-key',
+      heroSmsActivationRetryRounds: 1,
+      phoneActivationTierUpgradeLimit: 1,
+    }),
+    /HeroSMS 单次取号升档预算已用尽（1 次）/
+  );
+
+  const getNumberRequests = requests.filter((requestUrl) => requestUrl.searchParams.get('action') === 'getNumber');
+  assert.deepStrictEqual(
+    getNumberRequests.map((requestUrl) => requestUrl.searchParams.get('country')),
+    ['52', '10']
+  );
+  assert.equal(
+    logs.some(({ message }) => String(message).includes('单次取号预算诊断：参与国家数=2')),
+    true
+  );
+  assert.equal(
+    logs.some(({ message }) => String(message).includes('本次最多尝试档位数=2')),
+    true
+  );
 });
 
 test('phone verification helper explains HeroSMS single-tier result after range filtering and operator-only purchase preference', async () => {
@@ -2832,7 +2912,7 @@ test('phone verification helper explains HeroSMS single-tier result after fallba
   assert.equal(logs.some(({ message }) => String(message).includes('回退价格下限过滤后只剩 1 档')), true);
 });
 
-test('phone verification helper falls back from preferred HeroSMS tier and consumes one upgrade', async () => {
+test('phone verification helper falls back from preferred HeroSMS tier and consumes one single-request upgrade budget slot', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
     addLog: async () => {},
@@ -2932,7 +3012,7 @@ test('phone verification helper does not leave preferred HeroSMS tier when tier 
       heroSmsActivationRetryRounds: 1,
       phoneActivationTierUpgradeLimit: 0,
     }),
-    /HeroSMS 升档次数已用尽（0 次）/
+    /HeroSMS 单次取号升档预算已用尽（0 次）/
   );
 
   const actions = requests.map((requestUrl) => `${requestUrl.searchParams.get('action')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
@@ -2941,7 +3021,7 @@ test('phone verification helper does not leave preferred HeroSMS tier when tier 
     'getNumber:0.12',
     'getNumberV2:0.12',
   ]);
-  assert.equal(logs.some(({ message }) => String(message).includes('升档已禁用')), true);
+  assert.equal(logs.some(({ message }) => String(message).includes('单次取号候选档位切换已禁用')), true);
   assert.equal(logs.some(({ message }) => String(message).includes('候选档位未尝试')), true);
 });
 

@@ -229,7 +229,7 @@ test('5sim provider reports raw buy payload when HTTP 200 response has no activa
       fiveSimCountryLabel: '越南 (Vietnam)',
       fiveSimOperator: 'any',
     }),
-    /5sim 升档次数已用尽.*越南 \(Vietnam\): 价格档位 0\.08: no free phones/
+    /5sim 单次取号升档预算已用尽.*越南 \(Vietnam\): 价格档位 0\.08: no free phones/
   );
 });
 

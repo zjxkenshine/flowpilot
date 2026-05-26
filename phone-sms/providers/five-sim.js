@@ -940,12 +940,12 @@
       if (nextTier && typeof deps.addLog === 'function') {
         if (tier.source === 'preferred') {
           await deps.addLog(
-            `步骤 9：5sim 指定档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，回退自动档位并消耗 1 次升档。`,
+            `步骤 9：5sim 指定档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，回退自动档位并在本次取号内消耗 1 次候选档位切换预算。`,
             'warn'
           );
         }
         await deps.addLog(
-          `步骤 9：5sim 档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，正在升档到 ${nextTier.attempt.countryConfig.label}: 价格档位 ${formatTierPrice(nextTier.price)}（${tierIndex + 1}/${tierUpgradeLimit}）。`,
+          `步骤 9：5sim 档位 ${tierLabel} 跑满 ${retryRounds} 轮仍无号，正在于本次取号内切换到下一候选档位 ${nextTier.attempt.countryConfig.label}: 价格档位 ${formatTierPrice(nextTier.price)}（${tierIndex + 1}/${tierUpgradeLimit}）。`,
           'warn'
         );
       }
@@ -956,12 +956,12 @@
     }
     if (tierQueue.length > attemptedTiers.length && typeof deps.addLog === 'function') {
       await deps.addLog(
-        `步骤 9：5sim 升档次数已用尽（${tierUpgradeLimit} 次），仍有 ${tierQueue.length - attemptedTiers.length} 个候选档位未尝试。`,
+        `步骤 9：5sim 单次取号升档预算已用尽（${tierUpgradeLimit} 次），仍有 ${tierQueue.length - attemptedTiers.length} 个候选档位未尝试。`,
         'warn'
       );
     }
     if (noNumbersByTier.length) {
-      throw new Error(`5sim 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${attemptedTiers.length} 个候选档位，均无可用号码：${noNumbersByTier.join(' | ')}。`);
+      throw new Error(`5sim 单次取号升档预算已用尽（${tierUpgradeLimit} 次），已尝试 ${attemptedTiers.length} 个候选档位，均无可用号码：${noNumbersByTier.join(' | ')}。`);
     }
     throw new Error(`5sim 获取手机号失败，最后状态：${lastFailureText || '未知'}。`);
   }

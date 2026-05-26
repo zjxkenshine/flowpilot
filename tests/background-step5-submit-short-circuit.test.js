@@ -18,13 +18,18 @@ test('step 5 forwards generated profile data and relies on completion signal flo
     },
     generateRandomBirthday: () => ({ year: 2003, month: 6, day: 19 }),
     generateRandomName: () => ({ firstName: 'Test', lastName: 'User' }),
+    resolveSignupMethod: () => 'phone',
     sendToContentScript: async (source, message) => {
       events.messages.push({ source, message });
       return { accepted: true };
     },
   });
 
-  await executor.executeStep5();
+  await executor.executeStep5({
+    signupMethod: 'phone',
+    accountIdentifierType: 'phone',
+    signupPhoneNumber: '+15551234567',
+  });
 
   assert.deepStrictEqual(events.messages, [
     {
@@ -35,6 +40,9 @@ test('step 5 forwards generated profile data and relies on completion signal flo
         step: 5,
         source: 'background',
         payload: {
+          signupMethod: 'phone',
+          accountIdentifierType: 'phone',
+          phoneNumber: '+15551234567',
           firstName: 'Test',
           lastName: 'User',
           year: 2003,

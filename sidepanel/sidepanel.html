@@ -2025,14 +2025,14 @@
                 <div id="row-phone-activation-retry-rounds" class="hero-sms-settings-cell" style="display:none;">
                   <span class="hero-sms-settings-caption">每档位重试轮数</span>
                   <div class="setting-controls">
-                    <input type="number" id="input-phone-activation-retry-rounds" class="data-input auto-delay-input" value="2" min="1" max="10" step="1" title="当前档位无号时连续尝试几轮，再决定是否升档；1 表示无号一次后即可升档" />
+                    <input type="number" id="input-phone-activation-retry-rounds" class="data-input auto-delay-input" value="2" min="1" max="10" step="1" title="当前候选档位无号时连续尝试几轮，再决定是否切换到本次取号中的下一候选档位；需与“单次取号升档预算”配合生效" />
                     <span class="data-unit">轮</span>
                   </div>
                 </div>
                 <div id="row-phone-activation-tier-upgrade-limit" class="hero-sms-settings-cell" style="display:none;">
-                  <span class="hero-sms-settings-caption">升档次数</span>
+                  <span class="hero-sms-settings-caption">单次取号升档预算</span>
                   <div class="setting-controls">
-                    <input type="number" id="input-phone-activation-tier-upgrade-limit" class="data-input auto-delay-input" value="1" min="0" max="20" step="1" title="同一档位跑满取号轮次仍无号后，最多切换到后续候选档位的次数；0 表示不升档" />
+                    <input type="number" id="input-phone-activation-tier-upgrade-limit" class="data-input auto-delay-input" value="1" min="0" max="20" step="1" title="预算按每次取号请求重新计算；多国家、多档位共用同一份预算；不按跑批轮次累计；0 表示不切换后续候选档位" />
                     <span class="data-unit">次</span>
                   </div>
                 </div>

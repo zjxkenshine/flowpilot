@@ -992,6 +992,12 @@
       return queue;
     }
 
+    function formatAttemptedTierCount(maxTierCount, eligibleQueueLength) {
+      const maxCount = Math.max(1, Math.floor(Number(maxTierCount) || 1));
+      const queueCount = Math.max(0, Math.floor(Number(eligibleQueueLength) || 0));
+      return Math.min(maxCount, queueCount);
+    }
+
     async function runPhoneActivationTierQueue(options = {}) {
       const {
         providerLabel = '接码平台',
@@ -1014,6 +1020,16 @@
           lastFailureText: '',
         };
       }
+
+      const candidateCountryCount = new Set(
+        eligibleQueue
+          .map((tier) => String(tier?.countryId ?? '').trim())
+          .filter(Boolean)
+      ).size;
+      await addLog(
+        `步骤 9：${providerLabel} 单次取号预算诊断：参与国家数=${candidateCountryCount}，候选档位总数=${eligibleQueue.length}，本次最多尝试档位数=${formatAttemptedTierCount(maxTierCount, eligibleQueue.length)}；预算作用域=单次取号请求，不按跑批轮次累计。`,
+        'info'
+      );
 
       const tierFailures = [];
       const attemptedTiers = eligibleQueue.slice(0, maxTierCount);
@@ -1066,12 +1082,12 @@
         if (nextTier) {
           if (tier.source === 'preferred') {
             await addLog(
-              `步骤 9：${providerLabel} 指定档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，回退自动档位并消耗 1 次升档。`,
+              `步骤 9：${providerLabel} 指定档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，回退自动档位并在本次取号内消耗 1 次候选档位切换预算。`,
               'warn'
             );
           }
           await addLog(
-            `步骤 9：${providerLabel} 档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，正在升档到 ${getTierLabel(nextTier)}（${tierIndex + 1}/${safeUpgradeLimit}）。`,
+            `步骤 9：${providerLabel} 档位 ${tierLabel} 跑满 ${safeRounds} 轮仍无号，正在于本次取号内切换到下一候选档位 ${getTierLabel(nextTier)}（${tierIndex + 1}/${safeUpgradeLimit}）。`,
             'warn'
           );
         }
@@ -1081,18 +1097,18 @@
       if (remainingTiers > 0) {
         if (safeUpgradeLimit <= 0) {
           await addLog(
-            `步骤 9：${providerLabel} 升档已禁用（升档次数=0），仍有 ${remainingTiers} 个候选档位未尝试。`,
+            `步骤 9：${providerLabel} 单次取号候选档位切换已禁用（预算=0），仍有 ${remainingTiers} 个候选档位未尝试。`,
             'warn'
           );
         } else {
           await addLog(
-            `步骤 9：${providerLabel} 升档次数已用尽（${safeUpgradeLimit} 次），仍有 ${remainingTiers} 个候选档位未尝试。`,
+            `步骤 9：${providerLabel} 单次取号升档预算已用尽（${safeUpgradeLimit} 次），仍有 ${remainingTiers} 个候选档位未尝试。`,
             'warn'
           );
         }
       } else if (tierFailures.length && eligibleQueue.length <= 1) {
         await addLog(
-          `步骤 9：${providerLabel} 只有 ${eligibleQueue.length} 个候选档位，无后续候选档位，未触发升档。`,
+          `步骤 9：${providerLabel} 只有 ${eligibleQueue.length} 个候选档位，无后续候选档位，未触发本次取号内的候选档位切换。`,
           'warn'
         );
       }
@@ -1479,7 +1495,7 @@
         return '未知错误';
       }
       text = text.replace(/^Step\s+\d+\s*[:：]\s*/i, '').trim();
-      if (/升档次数已用尽|已尝试\s*\d+\s*个候选档位|候选档位未尝试|tier\s+upgrade/i.test(text)) {
+      if (/升档次数已用尽|单次取号升档预算已用尽|已尝试\s*\d+\s*个候选档位|候选档位未尝试|tier\s+upgrade/i.test(text)) {
         return text
           .replace(/^(?:HeroSMS|5sim|NexSMS)\s*[：:]\s*/i, '')
           .replace(/^(?:HeroSMS|5sim|NexSMS)\s+/i, '')
@@ -3960,7 +3976,7 @@
       const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
       if (failureDetails.length) {
         throw new Error(
-          `5sim 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
+          `5sim 单次取号升档预算已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
       if (lastError) {
@@ -4398,7 +4414,7 @@
       const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
       if (failureDetails.length) {
         throw new Error(
-          `NexSMS 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
+          `NexSMS 单次取号升档预算已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
       if (lastError) {
@@ -4921,7 +4937,7 @@
       const failureDetails = [...noNumbersByCountry, ...tierFailures].filter(Boolean);
       if (failureDetails.length) {
         throw new Error(
-          `HeroSMS 升档次数已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
+          `HeroSMS 单次取号升档预算已用尽（${tierUpgradeLimit} 次），已尝试 ${Math.min(tierQueue.length, tierUpgradeLimit + 1)} 个候选档位，均无可用号码：${failureDetails.join(' | ')}。`
         );
       }
       throw new Error('HeroSMS 获取手机号失败。');
