@@ -15122,6 +15122,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
   readAuthTabSnapshot,
   ensureStep8SignupPageReady,
+  upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
   refreshAuthContactVerificationTab: async (tabId, options = {}) => {
     const visibleStep = Math.floor(Number(options.visibleStep || options.step) || 0) || 4;
     const requestedTimeoutMs = Number(options.timeoutMs);

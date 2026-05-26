@@ -629,6 +629,172 @@ test('signup phone helper completes signup SMS verification without touching add
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
 
+test('signup phone helper writes account book entry immediately after phone verification succeeds', async () => {
+  const accountBookCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    password: 'secret',
+    ipProxyAppliedExitIp: '203.0.113.88',
+    ipProxyAppliedExitRegion: 'th',
+    signupPhoneActivation: {
+      activationId: 'signup-account-book-1',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return {
+          ok: true,
+          text: async () => 'STATUS_OK:112233',
+        };
+      }
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_READY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return { success: true };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    upsertAccountBookEntry: async (stage, stateOverride) => {
+      accountBookCalls.push({ stage, stateOverride });
+      return { ok: true };
+    },
+  });
+
+  await helpers.completeSignupPhoneVerificationFlow(77, { state: currentState });
+
+  assert.equal(accountBookCalls.length, 1);
+  assert.equal(accountBookCalls[0].stage, 'phone_verification_passed');
+  assert.equal(accountBookCalls[0].stateOverride.signupPhoneNumber, '66959916439');
+  assert.equal(accountBookCalls[0].stateOverride.accountIdentifierType, 'phone');
+  assert.equal(accountBookCalls[0].stateOverride.accountIdentifier, '66959916439');
+  assert.equal(accountBookCalls[0].stateOverride.password, 'secret');
+  assert.equal(accountBookCalls[0].stateOverride.ipProxyAppliedExitIp, '203.0.113.88');
+  assert.equal(accountBookCalls[0].stateOverride.ipProxyAppliedExitRegion, 'th');
+  assert.deepStrictEqual(accountBookCalls[0].stateOverride.signupPhoneCompletedActivation, {
+    activationId: 'signup-account-book-1',
+    phoneNumber: '66959916439',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 52,
+    successfulUses: 1,
+    maxUses: 3,
+  });
+});
+
+test('signup phone helper writes account book entry before email-verification handoff continues', async () => {
+  const accountBookCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    customPassword: 'secret-2',
+    signupPhoneActivation: {
+      activationId: 'signup-account-book-2',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return {
+          ok: true,
+          text: async () => 'STATUS_OK:445566',
+        };
+      }
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_READY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return {
+          success: true,
+          emailVerificationRequired: true,
+          emailVerificationPage: true,
+          url: 'https://auth.openai.com/email-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+    upsertAccountBookEntry: async (stage, stateOverride) => {
+      accountBookCalls.push({ stage, stateOverride });
+      return { ok: true };
+    },
+  });
+
+  const result = await helpers.completeSignupPhoneVerificationFlow(77, { state: currentState });
+
+  assert.equal(result.emailVerificationRequired, true);
+  assert.equal(result.emailVerificationPage, true);
+  assert.equal(accountBookCalls.length, 1);
+  assert.equal(accountBookCalls[0].stage, 'phone_verification_passed');
+  assert.equal(accountBookCalls[0].stateOverride.customPassword, 'secret-2');
+  assert.equal(accountBookCalls[0].stateOverride.signupPhoneCompletedActivation.activationId, 'signup-account-book-2');
+});
+
 test('signup phone helper refreshes bad contact-verification once before SMS polling', async () => {
   const contentMessages = [];
   const refreshCalls = [];

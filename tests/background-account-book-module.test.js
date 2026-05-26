@@ -178,6 +178,121 @@ test('account book helper supports phone-only records and upgrades them when ema
   assert.equal(storedEntries[0].recordId, 'bound@example.com');
 });
 
+test('account book helper supports phone_verification_passed stage and upgrades through later stages', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: '',
+      signupPhoneNumber: '+66 98765',
+      customPassword: ' phone-pass ',
+      accountIdentifierType: 'phone',
+      accountIdentifier: '+66 98765',
+      activeFlowId: 'openai',
+      panelMode: 'cpa',
+      ipProxyAppliedExitIp: '203.0.113.66',
+      ipProxyAppliedExitRegion: 'th',
+    }),
+  });
+
+  const phoneVerifiedEntry = await helpers.upsertAccountBookEntry('phone_verification_passed');
+  assert.equal(phoneVerifiedEntry.recordId, 'phone:6698765');
+  assert.equal(phoneVerifiedEntry.phoneNumber, '+66 98765');
+  assert.equal(phoneVerifiedEntry.captureStage, 'phone_verification_passed');
+  assert.equal(phoneVerifiedEntry.signupIp, '203.0.113.66');
+  assert.equal(phoneVerifiedEntry.signupRegion, 'TH');
+
+  const registrationSuccessEntry = await helpers.upsertAccountBookEntry('registration_success', {
+    email: '',
+    signupPhoneNumber: '+66 98765',
+    customPassword: 'phone-pass',
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+  });
+  assert.equal(registrationSuccessEntry.captureStage, 'registration_success');
+
+  const flowCompletedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'later@example.com',
+    signupPhoneNumber: '+66 98765',
+    password: 'phone-pass',
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+  });
+  assert.equal(flowCompletedEntry.recordId, 'later@example.com');
+  assert.equal(flowCompletedEntry.captureStage, 'flow_completed');
+  assert.equal(storedEntries.length, 1);
+  assert.equal(storedEntries[0].captureStage, 'flow_completed');
+});
+
+test('account book helper does not downgrade higher capture stages when phone_verification_passed is written later', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'upgrade@example.com',
+      signupPhoneNumber: '+44 7000 111222',
+      password: 'secret',
+      activeFlowId: 'openai',
+      panelMode: 'sub2api',
+    }),
+  });
+
+  await helpers.upsertAccountBookEntry('registration_success');
+  const downgradedAttempt = await helpers.upsertAccountBookEntry('phone_verification_passed', {
+    email: 'upgrade@example.com',
+    signupPhoneNumber: '+44 7000 111222',
+    password: 'secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(downgradedAttempt.captureStage, 'registration_success');
+
+  await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'upgrade@example.com',
+    signupPhoneNumber: '+44 7000 111222',
+    password: 'secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  const secondDowngradedAttempt = await helpers.upsertAccountBookEntry('phone_verification_passed', {
+    email: 'upgrade@example.com',
+    signupPhoneNumber: '+44 7000 111222',
+    password: 'secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(secondDowngradedAttempt.captureStage, 'flow_completed');
+  assert.equal(storedEntries[0].captureStage, 'flow_completed');
+});
+
 test('account book helper backfills missing signup IP on flow completion and normalizes invalid regions', async () => {
   const source = fs.readFileSync('background/account-book.js', 'utf8');
   const globalScope = {};

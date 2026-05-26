@@ -10,6 +10,7 @@
       generateRandomName,
       getOAuthFlowStepTimeoutMs,
       getState,
+      upsertAccountBookEntry = null,
       requestStop = null,
       readAuthTabSnapshot = null,
       sendToContentScript,
@@ -7143,6 +7144,22 @@
       return normalizedActivation;
     }
 
+    async function captureSignupPhoneVerificationAccountBookEntry() {
+      if (typeof upsertAccountBookEntry !== 'function') {
+        return null;
+      }
+      try {
+        const latestState = await getState();
+        return await upsertAccountBookEntry('phone_verification_passed', latestState);
+      } catch (error) {
+        await addLog(`步骤 4：账号簿提前写入失败，已跳过且不影响后续流程。${error?.message || error}`, 'warn', {
+          step: 4,
+          stepKey: 'fetch-signup-code',
+        });
+        return null;
+      }
+    }
+
     async function cancelSignupPhoneActivation(state = {}, activation = null) {
       const normalizedActivation = normalizeActivation(activation || state?.signupPhoneActivation);
       if (normalizedActivation) {
@@ -7328,6 +7345,7 @@
               signupPhoneVerificationRequestedAt: null,
               signupPhoneVerificationPurpose: '',
             });
+            await captureSignupPhoneVerificationAccountBookEntry();
             await addLog('步骤 4：手机验证码已通过，继续进入资料填写。', 'ok', {
               step: 4,
               stepKey: 'fetch-signup-code',

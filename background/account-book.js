@@ -44,7 +44,23 @@
       if (normalized === 'flow_completed') {
         return 'flow_completed';
       }
-      return normalized === 'registration_success' ? 'registration_success' : '';
+      if (normalized === 'registration_success') {
+        return 'registration_success';
+      }
+      return normalized === 'phone_verification_passed' ? 'phone_verification_passed' : '';
+    }
+
+    function getCaptureStageRank(value = '') {
+      switch (normalizeCaptureStage(value)) {
+        case 'phone_verification_passed':
+          return 1;
+        case 'registration_success':
+          return 2;
+        case 'flow_completed':
+          return 3;
+        default:
+          return 0;
+      }
     }
 
     function normalizeTimestamp(value = '') {
@@ -75,7 +91,7 @@
         ? normalizeString(state.accountIdentifier)
         : '';
 
-      if (stage === 'registration_success') {
+      if (stage === 'phone_verification_passed' || stage === 'registration_success') {
         return normalizeString(
           state.signupPhoneNumber
           || phoneIdentifier
@@ -223,8 +239,8 @@
       }
 
       const updatedAt = normalizedDraft.updatedAt || new Date().toISOString();
-      const captureStage = normalizedDraft.captureStage === 'flow_completed'
-        ? 'flow_completed'
+      const captureStage = getCaptureStageRank(normalizedDraft.captureStage) >= getCaptureStageRank(normalizedExisting.captureStage)
+        ? normalizedDraft.captureStage
         : normalizedExisting.captureStage;
       const finalFlowCompletedAt = captureStage === 'flow_completed'
         ? normalizeTimestamp(

@@ -313,6 +313,7 @@ test('step 4 phone signup email-verification handoff polls mailbox instead of co
   const mailConfigCalls = [];
   const resolvedCalls = [];
   const tabReuses = [];
+  let earlyPhoneCaptureRan = 0;
 
   const executor = api.createStep4Executor({
     addLog: async () => {},
@@ -343,6 +344,7 @@ test('step 4 phone signup email-verification handoff polls mailbox instead of co
     phoneVerificationHelpers: {
       completeSignupPhoneVerificationFlow: async (tabId, options) => {
         phoneCalls.push({ tabId, options });
+        earlyPhoneCaptureRan += 1;
         return {
           success: true,
           code: '123456',
@@ -378,6 +380,7 @@ test('step 4 phone signup email-verification handoff polls mailbox instead of co
   assert.equal(phoneCalls.length, 1);
   assert.equal(mailConfigCalls.length, 1);
   assert.equal(resolvedCalls.length, 1);
+  assert.equal(earlyPhoneCaptureRan, 1);
   assert.deepStrictEqual(completions, []);
   assert.deepStrictEqual(tabReuses, [
     { source: 'mail-163', url: 'https://mail.163.com' },
