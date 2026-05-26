@@ -13,6 +13,9 @@
     const EMPTY_PROFILE = {
       email: '',
       phone: '',
+      cardNumber: '',
+      cardExpiry: '',
+      cardCvv: '',
       password: '',
       firstName: '',
       lastName: '',
@@ -29,6 +32,9 @@
     const FIELD_ORDER = [
       'email',
       'phone',
+      'cardNumber',
+      'cardExpiry',
+      'cardCvv',
       'password',
       'firstName',
       'lastName',
@@ -45,6 +51,9 @@
     const PROFILE_COPY_LINES = [
       ['邮箱', 'email'],
       ['电话', 'phone'],
+      ['卡号', 'cardNumber'],
+      ['有效期', 'cardExpiry'],
+      ['CVV', 'cardCvv'],
       ['密码', 'password'],
       ['名字', 'firstName'],
       ['姓氏', 'lastName'],
@@ -130,6 +139,33 @@
         value += alphabet[Math.floor(Math.random() * alphabet.length)];
       }
       return value;
+    }
+
+    function buildVisaCard() {
+      const digits = [4, 1, 4, 7];
+      while (digits.length < 15) {
+        digits.push(Math.floor(Math.random() * 10));
+      }
+      const reversed = digits.slice().reverse();
+      let sum = 0;
+      for (let index = 0; index < reversed.length; index += 1) {
+        let digit = reversed[index];
+        if (index % 2 === 0) {
+          digit *= 2;
+          if (digit > 9) {
+            digit -= 9;
+          }
+        }
+        sum += digit;
+      }
+      digits.push((10 - (sum % 10)) % 10);
+      const month = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+      const year = (new Date().getFullYear() % 100) + 3;
+      return {
+        number: digits.join(''),
+        expiry: `${month} / ${year}`,
+        cvv: String(Math.floor(100 + Math.random() * 900)),
+      };
     }
 
     function buildBirthdayString(birthday = null) {
@@ -227,10 +263,14 @@
         || currentState?.customPassword
         || buildPassword()
       ).trim();
+      const card = buildVisaCard();
 
       return normalizeProfile({
         email,
         phone,
+        cardNumber: card.number,
+        cardExpiry: card.expiry,
+        cardCvv: card.cvv,
         password,
         firstName: String(name?.firstName || '').trim(),
         lastName: String(name?.lastName || '').trim(),
@@ -274,6 +314,9 @@
       const fields = [
         ['邮箱', 'email'],
         ['电话', 'phone'],
+        ['卡号', 'cardNumber'],
+        ['有效期', 'cardExpiry'],
+        ['CVV', 'cardCvv'],
         ['密码', 'password'],
         ['名字', 'firstName'],
         ['姓氏', 'lastName'],
@@ -316,6 +359,7 @@
         dom.btnGenerateProfile.disabled = actionInFlight;
         dom.btnGenerateProfile.textContent = actionInFlight ? '生成中...' : '生成 PayPal 资料';
       }
+      syncCollapseState();
       renderProfileDetails(profile);
     }
 
@@ -357,6 +401,9 @@
       const label = {
         email: '邮箱',
         phone: '电话',
+        cardNumber: '卡号',
+        cardExpiry: '有效期',
+        cardCvv: 'CVV',
         password: '密码',
         firstName: '名字',
         lastName: '姓氏',
@@ -381,6 +428,30 @@
       const text = buildProfileCopyText(profile);
       await helpers.copyTextToClipboard(text);
       helpers.showToast('PayPal 资料已复制', 'success', 1800);
+    }
+
+    function isProfileCollapsed() {
+      if (!dom.profileShell?.classList?.contains) {
+        return false;
+      }
+      return dom.profileShell.classList.contains('is-collapsed');
+    }
+
+    function syncCollapseState() {
+      const collapsed = isProfileCollapsed();
+      if (dom.profileDetails) {
+        dom.profileDetails.hidden = collapsed;
+      }
+      if (dom.btnToggleProfile) {
+        dom.btnToggleProfile.textContent = collapsed ? '展开' : '收起';
+        dom.btnToggleProfile.setAttribute?.('aria-expanded', String(!collapsed));
+      }
+    }
+
+    function toggleProfileDetails() {
+      const nextCollapsed = !isProfileCollapsed();
+      dom.profileShell?.classList?.toggle?.('is-collapsed', nextCollapsed);
+      syncCollapseState();
     }
 
     async function handleGenerateProfile() {
@@ -411,6 +482,10 @@
           helpers.showToast(error?.message || '复制 PayPal 资料失败。', 'error');
         });
       });
+      dom.btnToggleProfile?.addEventListener('click', () => {
+        toggleProfileDetails();
+      });
+      syncCollapseState();
     }
 
     return {
@@ -420,6 +495,8 @@
       normalizeProfile,
       renderPayPalProfile: renderProfile,
       resolveProfileCountryCode,
+      syncCollapseState,
+      toggleProfileDetails,
     };
   }
 

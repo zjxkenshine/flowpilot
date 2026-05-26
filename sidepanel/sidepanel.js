@@ -262,8 +262,10 @@ const payPalAccountCurrent = document.getElementById('paypal-account-current');
 const payPalAccountMenu = document.getElementById('paypal-account-menu');
 const btnAddPayPalAccount = document.getElementById('btn-add-paypal-account');
 const rowPayPalProfileGenerator = document.getElementById('row-paypal-profile-generator');
+const payPalProfileGeneratorShell = document.getElementById('paypal-profile-generator-shell');
 const btnGeneratePayPalProfile = document.getElementById('btn-generate-paypal-profile');
 const btnCopyPayPalProfile = document.getElementById('btn-copy-paypal-profile');
+const btnTogglePayPalProfile = document.getElementById('btn-toggle-paypal-profile');
 const payPalProfileSummary = document.getElementById('paypal-profile-summary');
 const payPalProfileDetails = document.getElementById('paypal-profile-details');
 const rowHostedCheckoutVerificationUrl = document.getElementById('row-hosted-checkout-verification-url');
@@ -15590,8 +15592,10 @@ const payPalProfileGenerator = window.SidepanelPayPalProfileGenerator?.createPay
     syncLatestState,
   },
   dom: {
+    profileShell: payPalProfileGeneratorShell,
     btnGenerateProfile: btnGeneratePayPalProfile,
     btnCopyProfile: btnCopyPayPalProfile,
+    btnToggleProfile: btnTogglePayPalProfile,
     profileSummary: payPalProfileSummary,
     profileDetails: payPalProfileDetails,
   },

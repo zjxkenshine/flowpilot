@@ -48,8 +48,10 @@ test('sidepanel html contains paypal select and GoPay controls', () => {
   assert.match(html, /id="row-paypal-profile-generator"/);
   assert.match(html, /id="btn-generate-paypal-profile"/);
   assert.match(html, /id="btn-copy-paypal-profile"/);
+  assert.match(html, /id="btn-toggle-paypal-profile"/);
+  assert.match(html, /id="paypal-profile-generator-shell" class="paypal-profile-generator-shell is-collapsed"/);
   assert.match(html, /id="paypal-profile-summary"/);
-  assert.match(html, /id="paypal-profile-details"/);
+  assert.match(html, /id="paypal-profile-details" class="paypal-profile-details" hidden/);
   assert.ok(html.indexOf('id="row-paypal-account"') < html.indexOf('id="row-paypal-profile-generator"'));
   assert.ok(html.indexOf('id="row-paypal-profile-generator"') < html.indexOf('id="row-hosted-checkout-verification-url"'));
   assert.match(html, /id="row-gopay-phone"/);

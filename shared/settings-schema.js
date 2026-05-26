@@ -60,6 +60,9 @@
     const defaultPayPalGeneratedProfile = Object.freeze({
       email: '',
       phone: '',
+      cardNumber: '',
+      cardExpiry: '',
+      cardCvv: '',
       password: '',
       firstName: '',
       lastName: '',

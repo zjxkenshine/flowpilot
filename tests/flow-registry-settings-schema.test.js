@@ -210,6 +210,9 @@ test('settings schema preserves normalized PayPal generated profile in canonical
     paypalGeneratedProfile: {
       email: ' user@example.com ',
       phone: ' +1 555 0100 ',
+      cardNumber: ' 4147200000000000 ',
+      cardExpiry: ' 12 / 29 ',
+      cardCvv: ' 123 ',
       password: ' Secret123! ',
       firstName: ' Ada ',
       lastName: ' Lovelace ',
@@ -229,6 +232,9 @@ test('settings schema preserves normalized PayPal generated profile in canonical
   const expected = {
     email: 'user@example.com',
     phone: '+1 555 0100',
+    cardNumber: '4147200000000000',
+    cardExpiry: '12 / 29',
+    cardCvv: '123',
     password: 'Secret123!',
     firstName: 'Ada',
     lastName: 'Lovelace',

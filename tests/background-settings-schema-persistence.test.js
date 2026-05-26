@@ -113,6 +113,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   paypalGeneratedProfile: {
     email: '',
     phone: '',
+    cardNumber: '',
+    cardExpiry: '',
+    cardCvv: '',
     password: '',
     firstName: '',
     lastName: '',
@@ -389,6 +392,9 @@ test('buildPersistentSettingsPayload persists PayPal generated profile into sett
     paypalGeneratedProfile: {
       email: ' user@example.com ',
       phone: ' +1 555 0100 ',
+      cardNumber: ' 4147200000000000 ',
+      cardExpiry: ' 12 / 29 ',
+      cardCvv: ' 123 ',
       password: ' Secret123! ',
       firstName: ' Ada ',
       lastName: ' Lovelace ',
@@ -406,6 +412,9 @@ test('buildPersistentSettingsPayload persists PayPal generated profile into sett
   const expected = {
     email: 'user@example.com',
     phone: '+1 555 0100',
+    cardNumber: '4147200000000000',
+    cardExpiry: '12 / 29',
+    cardCvv: '123',
     password: 'Secret123!',
     firstName: 'Ada',
     lastName: 'Lovelace',

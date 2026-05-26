@@ -12,10 +12,17 @@ function loadApi() {
 function createButton() {
   const handlers = {};
   return {
+    attributes: {},
     disabled: false,
     textContent: '',
     addEventListener(type, handler) {
       handlers[type] = handler;
+    },
+    getAttribute(name) {
+      return this.attributes[name];
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
     },
     async click() {
       await handlers.click?.();
@@ -23,8 +30,27 @@ function createButton() {
   };
 }
 
+function createClassList(initial = []) {
+  const values = new Set(initial);
+  return {
+    contains(name) {
+      return values.has(name);
+    },
+    toggle(name, force) {
+      const enabled = force === undefined ? !values.has(name) : Boolean(force);
+      if (enabled) {
+        values.add(name);
+      } else {
+        values.delete(name);
+      }
+      return enabled;
+    },
+  };
+}
+
 function createProfileDetails() {
   return {
+    hidden: false,
     innerHTML: '',
     querySelectorAll() {
       return [];
@@ -44,6 +70,10 @@ function createGenerator(overrides = {}) {
   const events = [];
   const btnGenerateProfile = createButton();
   const btnCopyProfile = createButton();
+  const btnToggleProfile = createButton();
+  const profileShell = {
+    classList: createClassList(overrides.initialCollapsed === false ? [] : ['is-collapsed']),
+  };
   const profileSummary = { textContent: '' };
   const profileDetails = createProfileDetails();
   const generator = api.createPayPalProfileGenerator({
@@ -54,8 +84,10 @@ function createGenerator(overrides = {}) {
       },
     },
     dom: {
+      profileShell,
       btnGenerateProfile,
       btnCopyProfile,
+      btnToggleProfile,
       profileSummary,
       profileDetails,
     },
@@ -100,12 +132,30 @@ function createGenerator(overrides = {}) {
   return {
     btnCopyProfile,
     btnGenerateProfile,
+    btnToggleProfile,
     events,
     generator,
     getLatestState: () => latestState,
+    profileShell,
     profileDetails,
     profileSummary,
   };
+}
+
+function assertLuhn(number) {
+  const digits = String(number || '').split('').map((digit) => Number(digit));
+  let sum = 0;
+  let doubleDigit = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = digits[index];
+    if (doubleDigit) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    doubleDigit = !doubleDigit;
+  }
+  assert.equal(sum % 10, 0);
 }
 
 test('PayPal profile generator binds current email, phone, proxy country, and local address seed', () => {
@@ -126,6 +176,10 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
 
   assert.equal(profile.email, 'draft@example.com');
   assert.equal(profile.phone, '+819012345678');
+  assert.match(profile.cardNumber, /^4147\d{12}$/);
+  assertLuhn(profile.cardNumber);
+  assert.match(profile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
+  assert.match(profile.cardCvv, /^\d{3}$/);
   assert.equal(profile.password.length >= 14, true);
   assert.equal(profile.firstName, 'Ada');
   assert.equal(profile.lastName, 'Lovelace');
@@ -186,11 +240,14 @@ test('PayPal profile generator persists generated profile and copies full profil
   assert.equal(saveMessage.type, 'SAVE_SETTING');
   assert.equal(saveMessage.payload.paypalGeneratedProfile.email, 'user@example.com');
   assert.equal(getLatestState().paypalGeneratedProfile.password, 'CustomSecret123!');
+  assert.match(saveMessage.payload.paypalGeneratedProfile.cardNumber, /^4147\d{12}$/);
+  assert.match(saveMessage.payload.paypalGeneratedProfile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
+  assert.match(saveMessage.payload.paypalGeneratedProfile.cardCvv, /^\d{3}$/);
 
   await btnCopyProfile.click();
   const copied = events.filter((event) => event.type === 'copy').at(-1)?.text;
 
-  assert.match(copied, /^邮箱：user@example\.com\n电话：\+4915123456789\n密码：CustomSecret123!\n名字：Ada\n姓氏：Lovelace\n生日：2001-02-03\n国家：DE\n地址：Marunouchi 1-1\n城市：Chiyoda-ku\n州省：Tokyo\n邮编：100-0005$/);
+  assert.match(copied, /^邮箱：user@example\.com\n电话：\+4915123456789\n卡号：4147\d{12}\n有效期：(0[1-9]|1[0-2]) \/ \d{2}\nCVV：\d{3}\n密码：CustomSecret123!\n名字：Ada\n姓氏：Lovelace\n生日：2001-02-03\n国家：DE\n地址：Marunouchi 1-1\n城市：Chiyoda-ku\n州省：Tokyo\n邮编：100-0005$/);
 });
 
 test('PayPal profile generator reports toast error when copying empty profile', async () => {
@@ -205,6 +262,31 @@ test('PayPal profile generator reports toast error when copying empty profile', 
   assert.equal(events.some((event) => event.type === 'copy'), false);
 });
 
+test('PayPal profile generator keeps profile details collapsed by default and toggles visibility', () => {
+  const { btnToggleProfile, generator, profileDetails, profileShell } = createGenerator();
+  generator.bindPayPalProfileEvents();
+  generator.renderPayPalProfile();
+
+  assert.equal(profileShell.classList.contains('is-collapsed'), true);
+  assert.equal(profileDetails.hidden, true);
+  assert.equal(btnToggleProfile.textContent, '展开');
+  assert.equal(btnToggleProfile.getAttribute('aria-expanded'), 'false');
+
+  btnToggleProfile.click();
+
+  assert.equal(profileShell.classList.contains('is-collapsed'), false);
+  assert.equal(profileDetails.hidden, false);
+  assert.equal(btnToggleProfile.textContent, '收起');
+  assert.equal(btnToggleProfile.getAttribute('aria-expanded'), 'true');
+
+  btnToggleProfile.click();
+
+  assert.equal(profileShell.classList.contains('is-collapsed'), true);
+  assert.equal(profileDetails.hidden, true);
+  assert.equal(btnToggleProfile.textContent, '展开');
+  assert.equal(btnToggleProfile.getAttribute('aria-expanded'), 'false');
+});
+
 test('PayPal profile generator normalizes persisted profile shape', () => {
   const { generator } = createGenerator();
 
@@ -217,6 +299,9 @@ test('PayPal profile generator normalizes persisted profile shape', () => {
   }), {
     email: 'user@example.com',
     phone: '+1 555',
+    cardNumber: '',
+    cardExpiry: '',
+    cardCvv: '',
     password: '',
     firstName: '',
     lastName: '',
@@ -230,4 +315,3 @@ test('PayPal profile generator normalizes persisted profile shape', () => {
     generatedAt: 123,
   });
 });
-

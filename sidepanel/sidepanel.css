@@ -2331,10 +2331,18 @@ header {
   justify-content: flex-end;
 }
 
+.paypal-profile-generator-shell.is-collapsed {
+  gap: 0;
+}
+
 .paypal-profile-details {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.paypal-profile-details[hidden] {
+  display: none !important;
 }
 
 .paypal-profile-empty {

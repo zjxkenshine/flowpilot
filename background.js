@@ -493,6 +493,9 @@ const DEFAULT_PLUS_PAYMENT_EMAIL_STATE = Object.freeze({
 const DEFAULT_PAYPAL_GENERATED_PROFILE = Object.freeze({
   email: '',
   phone: '',
+  cardNumber: '',
+  cardExpiry: '',
+  cardCvv: '',
   password: '',
   firstName: '',
   lastName: '',

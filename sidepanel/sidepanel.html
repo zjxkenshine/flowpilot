@@ -437,7 +437,7 @@
       </div>
       <div class="data-row" id="row-paypal-profile-generator" style="display:none;">
         <span class="data-label">PayPal 资料</span>
-        <div class="paypal-profile-generator-shell">
+        <div id="paypal-profile-generator-shell" class="paypal-profile-generator-shell is-collapsed">
           <div class="section-mini-header paypal-profile-generator-header">
             <div class="section-mini-copy">
               <span class="section-label">PayPal 注册资料生成</span>
@@ -446,9 +446,11 @@
             <div class="section-mini-actions paypal-profile-generator-actions">
               <button id="btn-generate-paypal-profile" class="btn btn-outline btn-sm data-inline-btn" type="button">生成 PayPal 资料</button>
               <button id="btn-copy-paypal-profile" class="btn btn-outline btn-sm data-inline-btn" type="button" disabled>复制整份</button>
+              <button id="btn-toggle-paypal-profile" class="btn btn-ghost btn-xs" type="button"
+                aria-expanded="false" aria-controls="paypal-profile-details">展开</button>
             </div>
           </div>
-          <div id="paypal-profile-details" class="paypal-profile-details">
+          <div id="paypal-profile-details" class="paypal-profile-details" hidden>
             <div class="paypal-profile-empty">点击“生成 PayPal 资料”后在这里展示结果。</div>
           </div>
         </div>
