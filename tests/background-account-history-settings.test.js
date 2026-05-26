@@ -140,6 +140,16 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_sessio
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
+const DEFAULT_SMSBOWER_BASE_URL = 'https://smsbower.page/stubs/handler_api.php';
+const DEFAULT_SMSBOWER_SERVICE_CODE = 'dr';
+const DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api';
+const DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'wa';
+const DEFAULT_GRIZZLY_SMS_BASE_URL = 'https://api.grizzlysms.com/stubs/handler_api.php';
+const DEFAULT_GRIZZLY_SMS_SERVICE_CODE = 'dr';
+const DEFAULT_SMSPOOL_BASE_URL = 'https://api.smspool.net/stubs/handler_api.php?setting=smspool';
+const DEFAULT_SMSPOOL_SERVICE_CODE = '671';
+const DEFAULT_SMSPOOL_COUNTRY_ID = 1;
+const DEFAULT_SMSPOOL_COUNTRY_LABEL = 'United States';
 const DEFAULT_NEX_SMS_SERVICE_CODE = 'ot';
 const FIVE_SIM_COUNTRY_ID = 'vietnam';
 const FIVE_SIM_COUNTRY_LABEL = '越南 (Vietnam)';
@@ -406,6 +416,38 @@ return {
     [1, 6]
   );
   assert.equal(api.normalizePersistentSettingValue('nexSmsServiceCode', ' OT! '), 'ot');
+  assert.equal(
+    api.normalizePersistentSettingValue('smsBowerBaseUrl', ''),
+    'https://smsbower.page/stubs/handler_api.php'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('smsBowerBaseUrl', 'not a url'),
+    'https://smsbower.page/stubs/handler_api.php'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('smsVerificationNumberBaseUrl', ''),
+    'https://sms-verification-number.com/stubs/handler_api'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('smsVerificationNumberBaseUrl', 'bad url'),
+    'https://sms-verification-number.com/stubs/handler_api'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('grizzlySmsBaseUrl', ''),
+    'https://api.grizzlysms.com/stubs/handler_api.php'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('grizzlySmsBaseUrl', '://broken'),
+    'https://api.grizzlysms.com/stubs/handler_api.php'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('smsPoolBaseUrl', ''),
+    'https://api.smspool.net/stubs/handler_api.php?setting=smspool'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('smsPoolBaseUrl', 'not a valid url'),
+    'https://api.smspool.net/stubs/handler_api.php?setting=smspool'
+  );
   const rangePayload = api.buildPersistentSettingsPayload({
     heroSmsMinPrice: '0.023456',
     fiveSimMinPrice: '0.0789',

@@ -3398,6 +3398,17 @@ function normalizeStepExecutionRangeByFlow(value = {}) {
 }
 
 function normalizePersistentSettingValue(key, value) {
+  const normalizeSmsProviderBaseUrl = (rawValue, fallback) => {
+    const trimmed = String(rawValue || '').trim();
+    if (!trimmed) {
+      return fallback;
+    }
+    try {
+      return new URL(trimmed).toString();
+    } catch {
+      return fallback;
+    }
+  };
   switch (key) {
     case 'panelMode':
       return normalizePanelMode(value);
@@ -4007,7 +4018,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'smsBowerApiKey':
       return String(value || '');
     case 'smsBowerBaseUrl':
-      return normalizeUrl(value, DEFAULT_SMSBOWER_BASE_URL);
+      return normalizeSmsProviderBaseUrl(value, DEFAULT_SMSBOWER_BASE_URL);
     case 'smsBowerServiceCode':
       return normalizeNexSmsServiceCode(value, DEFAULT_SMSBOWER_SERVICE_CODE);
     case 'smsBowerCountryId': {
@@ -4028,7 +4039,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'smsVerificationNumberApiKey':
       return String(value || '');
     case 'smsVerificationNumberBaseUrl':
-      return normalizeUrl(value, DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL);
+      return normalizeSmsProviderBaseUrl(value, DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL);
     case 'smsVerificationNumberServiceCode':
       return normalizeNexSmsServiceCode(value, DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE);
     case 'smsVerificationNumberCountryId': {
@@ -4049,7 +4060,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'grizzlySmsApiKey':
       return String(value || '');
     case 'grizzlySmsBaseUrl':
-      return normalizeUrl(value, DEFAULT_GRIZZLY_SMS_BASE_URL);
+      return normalizeSmsProviderBaseUrl(value, DEFAULT_GRIZZLY_SMS_BASE_URL);
     case 'grizzlySmsServiceCode':
       return normalizeNexSmsServiceCode(value, DEFAULT_GRIZZLY_SMS_SERVICE_CODE);
     case 'grizzlySmsCountryId': {
@@ -4070,7 +4081,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'smsPoolApiKey':
       return String(value || '');
     case 'smsPoolBaseUrl':
-      return normalizeUrl(value, DEFAULT_SMSPOOL_BASE_URL);
+      return normalizeSmsProviderBaseUrl(value, DEFAULT_SMSPOOL_BASE_URL);
     case 'smsPoolServiceCode':
       return normalizeNexSmsServiceCode(value, DEFAULT_SMSPOOL_SERVICE_CODE);
     case 'smsPoolCountryId': {

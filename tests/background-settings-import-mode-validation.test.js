@@ -370,3 +370,297 @@ return {
   assert.equal(api.getBroadcastPayload().hostedCheckoutVerificationPopupDelaySeconds, 22);
   assert.equal(result.hostedCheckoutFirstResendWaitSeconds, 22);
 });
+
+test('importSettingsBundle accepts legacy settings files and backfills newer phone provider defaults', async () => {
+  const api = new Function(`
+const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
+const DEFAULT_REGISTRATION_EMAIL_STATE = { emailHistory: [] };
+const DEFAULT_SMSBOWER_BASE_URL = 'https://smsbower.page/stubs/handler_api.php';
+const DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL = 'https://sms-verification-number.com/stubs/handler_api';
+const DEFAULT_GRIZZLY_SMS_BASE_URL = 'https://api.grizzlysms.com/stubs/handler_api.php';
+const DEFAULT_SMSPOOL_BASE_URL = 'https://api.smspool.net/stubs/handler_api.php?setting=smspool';
+const DEFAULT_SMSBOWER_SERVICE_CODE = 'dr';
+const DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE = 'wa';
+const DEFAULT_GRIZZLY_SMS_SERVICE_CODE = 'dr';
+const DEFAULT_SMSPOOL_SERVICE_CODE = '671';
+const DEFAULT_SMSPOOL_COUNTRY_ID = 1;
+const DEFAULT_SMSPOOL_COUNTRY_LABEL = 'United States';
+const DEFAULT_FIVE_SIM_PRODUCT = 'openai';
+const FIVE_SIM_COUNTRY_ID = 'vietnam';
+const FIVE_SIM_COUNTRY_LABEL = 'Vietnam';
+const FIVE_SIM_OPERATOR = 'any';
+const DEFAULT_NEX_SMS_COUNTRY_ORDER = [1];
+const DEFAULT_NEX_SMS_SERVICE_CODE = 'ot';
+const DEFAULT_FIVE_SIM_COUNTRY_ORDER = ['vietnam'];
+const HERO_SMS_COUNTRY_ID = 52;
+const HERO_SMS_COUNTRY_LABEL = 'Thailand';
+const DEFAULT_PHONE_SMS_PROVIDER = 'hero-sms';
+const DEFAULT_HERO_SMS_REUSE_ENABLED = true;
+const DEFAULT_HERO_SMS_ACQUIRE_PRIORITY = 'price';
+const PERSISTED_SETTING_DEFAULTS = {
+  panelMode: 'cpa',
+  signupMethod: 'email',
+  phoneSmsProvider: DEFAULT_PHONE_SMS_PROVIDER,
+  fiveSimProduct: DEFAULT_FIVE_SIM_PRODUCT,
+  fiveSimCountryId: FIVE_SIM_COUNTRY_ID,
+  fiveSimCountryLabel: FIVE_SIM_COUNTRY_LABEL,
+  fiveSimCountryFallback: [],
+  fiveSimCountryOrder: [...DEFAULT_FIVE_SIM_COUNTRY_ORDER],
+  fiveSimMinPrice: '',
+  fiveSimMaxPrice: '',
+  fiveSimOperator: FIVE_SIM_OPERATOR,
+  nexSmsApiKey: '',
+  nexSmsCountryOrder: [...DEFAULT_NEX_SMS_COUNTRY_ORDER],
+  nexSmsServiceCode: DEFAULT_NEX_SMS_SERVICE_CODE,
+  smsBowerApiKey: '',
+  smsBowerBaseUrl: DEFAULT_SMSBOWER_BASE_URL,
+  smsBowerServiceCode: DEFAULT_SMSBOWER_SERVICE_CODE,
+  smsBowerCountryId: HERO_SMS_COUNTRY_ID,
+  smsBowerCountryLabel: HERO_SMS_COUNTRY_LABEL,
+  smsBowerCountryFallback: [],
+  smsBowerMinPrice: '',
+  smsBowerMaxPrice: '',
+  smsBowerPreferredPrice: '',
+  smsVerificationNumberApiKey: '',
+  smsVerificationNumberBaseUrl: DEFAULT_SMS_VERIFICATION_NUMBER_BASE_URL,
+  smsVerificationNumberServiceCode: DEFAULT_SMS_VERIFICATION_NUMBER_SERVICE_CODE,
+  smsVerificationNumberCountryId: 33,
+  smsVerificationNumberCountryLabel: 'Colombia',
+  smsVerificationNumberCountryFallback: [],
+  smsVerificationNumberMinPrice: '',
+  smsVerificationNumberMaxPrice: '',
+  smsVerificationNumberPreferredPrice: '',
+  grizzlySmsApiKey: '',
+  grizzlySmsBaseUrl: DEFAULT_GRIZZLY_SMS_BASE_URL,
+  grizzlySmsServiceCode: DEFAULT_GRIZZLY_SMS_SERVICE_CODE,
+  grizzlySmsCountryId: 52,
+  grizzlySmsCountryLabel: 'Thailand',
+  grizzlySmsCountryFallback: [],
+  grizzlySmsMinPrice: '',
+  grizzlySmsMaxPrice: '',
+  grizzlySmsPreferredPrice: '',
+  smsPoolApiKey: '',
+  smsPoolBaseUrl: DEFAULT_SMSPOOL_BASE_URL,
+  smsPoolServiceCode: DEFAULT_SMSPOOL_SERVICE_CODE,
+  smsPoolCountryId: DEFAULT_SMSPOOL_COUNTRY_ID,
+  smsPoolCountryLabel: DEFAULT_SMSPOOL_COUNTRY_LABEL,
+  smsPoolCountryFallback: [],
+  smsPoolMinPrice: '',
+  smsPoolMaxPrice: '',
+  smsPoolPreferredPrice: '',
+  phonePreferredActivation: null,
+  heroSmsApiKey: '',
+  heroSmsReuseEnabled: DEFAULT_HERO_SMS_REUSE_ENABLED,
+  heroSmsAcquirePriority: DEFAULT_HERO_SMS_ACQUIRE_PRIORITY,
+  heroSmsMinPrice: '',
+  heroSmsMaxPrice: '',
+  heroSmsPreferredPrice: '',
+  heroSmsCountryId: HERO_SMS_COUNTRY_ID,
+  heroSmsCountryLabel: HERO_SMS_COUNTRY_LABEL,
+  heroSmsCountryFallback: [],
+  heroSmsOperatorByCountry: {},
+};
+const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
+const DEFAULT_SUB2API_GROUP_NAMES = ['codex'];
+const SIGNUP_METHOD_PHONE = 'phone';
+const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
+let persistedUpdates = null;
+let stateUpdates = null;
+let broadcastPayload = null;
+let currentState = {
+  activeFlowId: 'openai',
+  signupMethod: 'email',
+  nodeStatuses: {},
+};
+async function ensureManualInteractionAllowed() {
+  return currentState;
+}
+function normalizePanelMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'sub2api' || normalized === 'codex2api' ? normalized : 'cpa';
+}
+function normalizeSignupMethod(value = '') {
+  return String(value || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email';
+}
+function normalizePhoneSmsProvider(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === '5sim' || normalized === 'nexsms' ? normalized : DEFAULT_PHONE_SMS_PROVIDER;
+}
+function normalizePhoneSmsProviderOrder(value) {
+  return Array.isArray(value) ? value : [];
+}
+function normalizeAutoRunFallbackThreadIntervalMinutes(value) { return Number(value) || 0; }
+function normalizeAutoRunDelayMinutes(value) { return Number(value) || 30; }
+function normalizeAutoStepDelaySeconds(value) { return value == null || value === '' ? null : Number(value); }
+function normalizeVerificationResendCount(value, fallback = 4) {
+  const numeric = Number(value);
+  return Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneVerificationReplacementLimit(value, fallback = 3) {
+  const numeric = Number(value);
+  return Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneActivationRetryRounds(value, fallback = 2) {
+  const numeric = Number(value);
+  return Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneActivationTierUpgradeLimit(value, fallback = 1) {
+  const numeric = Number(value);
+  return Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneCodeWaitSeconds(value, fallback = 60) {
+  const numeric = Number(value);
+  return Math.max(15, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneCodeTimeoutWindows(value, fallback = 2) {
+  const numeric = Number(value);
+  return Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneCodePollIntervalSeconds(value, fallback = 5) {
+  const numeric = Number(value);
+  return Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizePhoneCodePollMaxRounds(value, fallback = 4) {
+  const numeric = Number(value);
+  return Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : fallback));
+}
+function normalizeMailProvider(value = '') { return String(value || '').trim().toLowerCase() || '163'; }
+function normalizeMail2925Mode(value = '') { return String(value || '').trim().toLowerCase() || 'provide'; }
+function normalizeEmailGenerator(value = '') { return String(value || '').trim().toLowerCase() || 'duck'; }
+function normalizeCustomEmailPool(value) { return Array.isArray(value) ? value : []; }
+function normalizeCustomEmailPoolEntryObjects(value) { return Array.isArray(value) ? value : []; }
+function normalizeIcloudHost(value = '') { return String(value || '').trim().toLowerCase() || 'auto'; }
+function normalizeIcloudTargetMailboxType(value = '') { return String(value || '').trim() || 'icloud-inbox'; }
+function normalizeIcloudForwardMailProvider(value = '') { return String(value || '').trim() || 'qq'; }
+function normalizeIcloudFetchMode(value = '') { return String(value || '').trim() || 'reuse_existing'; }
+function normalizeAccountRunHistoryHelperBaseUrl(value = '') { return String(value || '').trim() || 'http://127.0.0.1:17373'; }
+function normalizeHotmailServiceMode(value = '') { return String(value || '').trim().toLowerCase() === 'remote' ? 'remote' : 'local'; }
+function normalizeHotmailRemoteBaseUrl(value = '') { return String(value || '').trim(); }
+function normalizeHotmailLocalBaseUrl(value = '') { return String(value || '').trim() || 'http://127.0.0.1:17373'; }
+function normalizeLuckmailBaseUrl(value = '') { return String(value || '').trim(); }
+function normalizeLuckmailEmailType(value = '') { return String(value || '').trim(); }
+function normalizeLuckmailUsedPurchases(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+function normalizeCloudflareDomain(value = '') { return String(value || '').trim(); }
+function normalizeCloudflareDomains(value) { return Array.isArray(value) ? value : []; }
+function normalizeCloudflareTempEmailBaseUrl(value = '') { return String(value || '').trim(); }
+function normalizeCloudflareTempEmailLookupMode(value = '') { return String(value || '').trim() || 'latest'; }
+function normalizeCloudflareTempEmailReceiveMailbox(value = '') { return String(value || '').trim(); }
+function normalizeCloudflareTempEmailDomain(value = '') { return String(value || '').trim(); }
+function normalizeCloudflareTempEmailDomains(value) { return Array.isArray(value) ? value : []; }
+function normalizeCloudMailBaseUrl(value = '') { return String(value || '').trim(); }
+function normalizeCloudMailReceiveMailbox(value = '') { return String(value || '').trim(); }
+function normalizeCloudMailDomain(value = '') { return String(value || '').trim(); }
+function normalizeCloudMailDomains(value) { return Array.isArray(value) ? value : []; }
+function normalizeYydsMailApiKey(value = '') { return String(value || '').trim(); }
+function normalizeYydsMailBaseUrl(value = '') { return String(value || '').trim(); }
+function normalizeHotmailAccounts(value) { return Array.isArray(value) ? value : []; }
+function normalizeMail2925Accounts(value) { return Array.isArray(value) ? value : []; }
+function normalizePayPalAccounts(value) { return Array.isArray(value) ? value : []; }
+function normalizeHeroSmsAcquirePriority(value = '') { return String(value || '').trim().toLowerCase() || DEFAULT_HERO_SMS_ACQUIRE_PRIORITY; }
+function normalizeHeroSmsMaxPrice(value = '') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return String(Math.round(numeric * 10000) / 10000);
+}
+function normalizeHeroSmsCountryFallback(value) { return Array.isArray(value) ? value : []; }
+function normalizeHeroSmsOperatorByCountry(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+function normalizeFiveSimCountryCode(value = '', fallback = DEFAULT_FIVE_SIM_PRODUCT) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '') || fallback;
+}
+function normalizeFiveSimCountryId(value = '') {
+  return normalizeFiveSimCountryCode(value, FIVE_SIM_COUNTRY_ID);
+}
+function normalizeFiveSimCountryLabel(value = '', fallback = FIVE_SIM_COUNTRY_LABEL) {
+  return String(value || '').trim() || fallback;
+}
+function normalizeFiveSimCountryFallback(value) { return Array.isArray(value) ? value : []; }
+function normalizeFiveSimCountryOrder(value = []) {
+  return Array.isArray(value) ? value.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean) : [];
+}
+function normalizeFiveSimMaxPrice(value = '') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return String(Math.round(numeric * 10000) / 10000);
+}
+function normalizeFiveSimOperator(value = '', fallback = FIVE_SIM_OPERATOR) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '') || fallback;
+}
+function normalizeNexSmsCountryId(value, fallback = 0) {
+  const parsed = Math.floor(Number(value));
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return Math.max(0, Math.floor(Number(fallback) || 0));
+}
+function normalizeNexSmsCountryOrder(value = []) {
+  return Array.isArray(value) ? value.map((entry) => normalizeNexSmsCountryId(entry, -1)).filter((entry) => entry >= 0) : [];
+}
+function normalizeNexSmsServiceCode(value = '', fallback = DEFAULT_NEX_SMS_SERVICE_CODE) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || fallback;
+}
+function normalizePhonePreferredActivation(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+function resolveLegacyAutoStepDelaySeconds() {}
+function normalizeSub2ApiGroupNames(value) { return Array.isArray(value) ? value.filter(Boolean) : []; }
+function validateModeSwitchState() {
+  return { ok: true, errors: [], normalizedUpdates: {} };
+}
+function resolveSignupMethod(state = {}) {
+  return String(state?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email';
+}
+function isPlainObjectValue(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function mergeSettingsStatePatch(base, patch) { return { ...(base || {}), ...(patch || {}) }; }
+async function setPersistentSettings(updates) {
+  persistedUpdates = { ...updates };
+  return { ...updates };
+}
+async function setState(updates) {
+  stateUpdates = { ...updates };
+  currentState = { ...currentState, ...updates };
+}
+function broadcastDataUpdate(payload) {
+  broadcastPayload = { ...payload };
+}
+async function getState() {
+  return { ...currentState };
+}
+${extractFunction('buildPersistentSettingsPayload')}
+${extractFunction('normalizePersistentSettingValue')}
+${extractFunction('importSettingsBundle')}
+return {
+  importSettingsBundle,
+  getPersistedUpdates: () => persistedUpdates,
+  getStateUpdates: () => stateUpdates,
+  getBroadcastPayload: () => broadcastPayload,
+};
+`)();
+
+  const legacyConfig = {
+    schemaVersion: 1,
+    settings: {
+      panelMode: 'cpa',
+      signupMethod: 'email',
+      heroSmsApiKey: 'hero-key',
+    },
+  };
+
+  const result = await api.importSettingsBundle(legacyConfig);
+
+  assert.equal(api.getPersistedUpdates().heroSmsApiKey, 'hero-key');
+  assert.equal(api.getPersistedUpdates().smsBowerBaseUrl, 'https://smsbower.page/stubs/handler_api.php');
+  assert.equal(
+    api.getPersistedUpdates().smsVerificationNumberBaseUrl,
+    'https://sms-verification-number.com/stubs/handler_api'
+  );
+  assert.equal(api.getPersistedUpdates().fiveSimProduct, 'openai');
+  assert.deepEqual(api.getPersistedUpdates().nexSmsCountryOrder, [1]);
+  assert.equal(api.getPersistedUpdates().phonePreferredActivation, null);
+  assert.equal(api.getStateUpdates().smsPoolCountryLabel, 'United States');
+  assert.equal(api.getBroadcastPayload().grizzlySmsCountryLabel, 'Thailand');
+  assert.equal(result.smsPoolServiceCode, '671');
+});
