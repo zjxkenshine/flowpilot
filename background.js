@@ -2135,7 +2135,7 @@ function normalizeHeroSmsCountryFallback(value = []) {
       id: countryId,
       label: countryLabel || `Country #${countryId}`,
     });
-    if (normalized.length >= 10) {
+    if (normalized.length >= 20) {
       break;
     }
   }
@@ -2608,7 +2608,7 @@ function normalizeFiveSimCountryFallback(value = []) {
       id: countryId,
       label: countryLabel || normalizeFiveSimCountryLabel('', countryId),
     });
-    if (normalized.length >= 10) {
+    if (normalized.length >= 20) {
       break;
     }
   }

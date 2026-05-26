@@ -5907,7 +5907,7 @@ function normalizeFiveSimCountryFallbackList(value = []) {
     normalized.push({ id, label: label || formatFiveSimCountryDisplayLabel(id, id, id) });
   });
 
-  return normalized.slice(0, 10);
+  return normalized;
 }
 
 function normalizeHeroSmsCountryId(value, fallback = DEFAULT_HERO_SMS_COUNTRY_ID) {
@@ -6339,7 +6339,7 @@ function normalizeFiveSimCountryFallbackList(value = []) {
       label: label || code,
     });
   });
-  return normalized.slice(0, 10);
+  return normalized;
 }
 
 function normalizeNexSmsCountryLabel(value = '', fallback = '') {
@@ -6373,7 +6373,7 @@ function normalizeNexSmsCountryFallbackList(value = []) {
       label: label || `Country #${countryId}`,
     });
   });
-  return normalized.slice(0, 10);
+  return normalized;
 }
 
 function getFiveSimCountryDisplayNameByIso(isoCode = '') {
@@ -6594,7 +6594,7 @@ function normalizeHeroSmsCountryFallbackList(value = []) {
     });
   });
 
-  return normalized.slice(0, 10);
+  return normalized;
 }
 
 function syncHeroSmsOperatorSelectionState(value = {}) {

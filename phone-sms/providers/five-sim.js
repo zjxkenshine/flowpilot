@@ -321,7 +321,7 @@
         id,
         label: label || formatFiveSimCountryLabel(id, id, id),
       });
-      if (normalized.length >= 10) {
+      if (normalized.length >= 20) {
         break;
       }
     }

@@ -55,7 +55,7 @@
       }
       seen.add(id);
       normalized.push({ id, label: label || `Country #${id}` });
-      if (normalized.length >= 10) {
+      if (normalized.length >= 20) {
         break;
       }
     }

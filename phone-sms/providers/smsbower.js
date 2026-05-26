@@ -48,7 +48,7 @@
       if (!id || seen.has(id)) continue;
       seen.add(id);
       normalized.push({ id, label: label || `Country #${id}` });
-      if (normalized.length >= 10) break;
+      if (normalized.length >= 20) break;
     }
     return normalized;
   }

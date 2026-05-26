@@ -354,20 +354,6 @@ return {
     [{ id: 16, label: 'United Kingdom' }, { id: 52, label: 'Country #52' }]
   );
   assert.deepStrictEqual(
-    api.normalizePersistentSettingValue(
-      'heroSmsCountryFallback',
-      Array.from({ length: 12 }, (_, index) => ({ id: index + 1, label: `Country ${index + 1}` }))
-    ).map((country) => country.id),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  );
-  assert.deepStrictEqual(
-    api.normalizePersistentSettingValue(
-      'fiveSimCountryFallback',
-      Array.from({ length: 12 }, (_, index) => `country${index + 1}:Country ${index + 1}`)
-    ).map((country) => country.id),
-    ['country1', 'country2', 'country3', 'country4', 'country5', 'country6', 'country7', 'country8', 'country9', 'country10']
-  );
-  assert.deepStrictEqual(
     api.normalizePersistentSettingValue('heroSmsOperatorByCountry', {
       52: ' AIS ',
       16: '',

@@ -520,46 +520,70 @@ return { btnHeroSmsCountryMenu, updateHeroSmsCountryMenuSummary };
   assert.equal(api.btnHeroSmsCountryMenu.textContent, '\u672a\u9009\u62e9 (0/10)');
 });
 
-test('phone sms country fallback helpers keep at most 10 countries', () => {
+test('phone sms country selection sync keeps at most 10 selected countries', () => {
 const api = new Function(`
-const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
-const DEFAULT_FIVE_SIM_COUNTRY_LABEL = '越南 (Vietnam)';
+let heroSmsCountrySelectionOrder = Array.from({ length: 12 }, (_, index) => index + 1);
+const selectHeroSmsCountry = {
+  multiple: true,
+  options: Array.from({ length: 12 }, (_, index) => ({ value: String(index + 1), selected: true })),
+};
+const selectHeroSmsCountryFallback = null;
 const DEFAULT_HERO_SMS_COUNTRY_ID = 52;
 const DEFAULT_HERO_SMS_COUNTRY_LABEL = 'Thailand';
-${extractFunction('normalizeFiveSimCountryId')}
-${extractFunction('normalizeFiveSimCountryLabel')}
-${extractFunction('formatFiveSimCountryDisplayLabel')}
-${extractFunction('normalizeFiveSimCountryCode')}
-${extractFunction('normalizeNexSmsCountryIdValue')}
-${extractFunction('normalizeNexSmsCountryLabel')}
+const HERO_SMS_COUNTRY_SELECTION_MAX = 10;
+const displayHeroSmsCountryFallbackOrder = { textContent: '', appendChild: () => {} };
+const btnHeroSmsCountryMenu = { textContent: '' };
+const heroSmsCountryMenu = null;
+const document = {
+  createElement: () => ({
+    className: '',
+    textContent: '',
+    title: '',
+    type: '',
+    appendChild: () => {},
+    addEventListener: () => {},
+    setAttribute: () => {},
+  }),
+};
+function isFiveSimProviderSelected() { return false; }
+function getSelectedPhoneSmsProvider() { return 'hero-sms'; }
+function normalizePhoneSmsCountryId(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
 ${extractFunction('normalizeHeroSmsCountryId')}
 ${extractFunction('normalizeHeroSmsCountryLabel')}
-${extractFunction('normalizeFiveSimCountryFallbackList')}
-${extractFunction('normalizeNexSmsCountryFallbackList')}
-${extractFunction('normalizeHeroSmsCountryFallbackList')}
+function getHeroSmsCountryLabelById(id) { return 'Country #' + id; }
+function normalizeFiveSimCountryFallbackList(value = []) { return Array.isArray(value) ? value : []; }
+function normalizeHeroSmsCountryFallbackList(value = []) { return Array.isArray(value) ? value : []; }
+function renderHeroSmsCountryChoiceButtons() {}
+${extractFunction('updateHeroSmsCountryMenuSummary')}
+${extractFunction('renderHeroSmsCountryFallbackOrder')}
+${extractFunction('syncHeroSmsFallbackSelectionOrderFromSelect')}
 return {
-  normalizeFiveSimCountryFallbackList,
-  normalizeNexSmsCountryFallbackList,
-  normalizeHeroSmsCountryFallbackList,
+  selectHeroSmsCountry,
+  syncHeroSmsFallbackSelectionOrderFromSelect,
+  getHeroSmsCountrySelectionOrder: () => [...heroSmsCountrySelectionOrder],
 };
 `)();
 
-  const heroCountries = Array.from({ length: 12 }, (_, index) => ({ id: index + 1, label: `Country ${index + 1}` }));
-  const fiveSimCountries = Array.from({ length: 12 }, (_, index) => `country${index + 1}:Country ${index + 1}`);
-  const nexSmsCountries = Array.from({ length: 12 }, (_, index) => index + 1);
+  const selectedCountries = api.syncHeroSmsFallbackSelectionOrderFromSelect({
+    enforceMax: true,
+    ensureDefault: false,
+    showLimitToast: false,
+  });
 
   assert.deepStrictEqual(
-    api.normalizeHeroSmsCountryFallbackList(heroCountries).map((country) => country.id),
+    selectedCountries.map((country) => country.id),
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   );
   assert.deepStrictEqual(
-    api.normalizeFiveSimCountryFallbackList(fiveSimCountries).map((country) => country.id),
-    ['country1', 'country2', 'country3', 'country4', 'country5', 'country6', 'country7', 'country8', 'country9', 'country10']
-  );
-  assert.deepStrictEqual(
-    api.normalizeNexSmsCountryFallbackList(nexSmsCountries).map((country) => country.id),
+    api.getHeroSmsCountrySelectionOrder(),
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   );
+  assert.equal(api.selectHeroSmsCountry.options[9].selected, true);
+  assert.equal(api.selectHeroSmsCountry.options[10].selected, false);
+  assert.equal(api.selectHeroSmsCountry.options[11].selected, false);
 });
 
 test('live phone country sources are not hard-filtered down to the reduced country whitelist', () => {
