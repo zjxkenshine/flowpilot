@@ -356,10 +356,8 @@
 
     function getStep6PhoneEmailSourceValue(state = {}) {
       return String(
-        state?.signupPhoneNumber
+        state?.signupVerifiedPhoneNumber
         || state?.signupPhoneCompletedActivation?.phoneNumber
-        || state?.signupPhoneActivation?.phoneNumber
-        || state?.accountIdentifier
         || ''
       ).trim();
     }
@@ -407,7 +405,30 @@
       }
       const localPart = buildStep6PhoneEmailLocalPart(latestState);
       if (!localPart) {
-        throw new Error('步骤 6：手机号注册成功后无法提取可用手机号数字，无法生成手机号前缀 Cloudflare Temp Email。');
+        if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
+          const helperEmail = await ensurePhonePrefixedCloudflareTempEmail(latestState);
+          if (helperEmail) {
+            return helperEmail;
+          }
+        }
+        if (typeof fetchCloudflareTempEmailAddress !== 'function') {
+          throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
+        }
+        await addLog('步骤 6：未读取到已验证手机号，改用 Cloudflare Temp Email 原随机生成模式。', 'warn');
+        const fallbackEmail = String(await fetchCloudflareTempEmailAddress(latestState, {
+          preserveAccountIdentity: true,
+          source: 'generated:cloudflare-temp-email:fallback',
+        }) || '').trim().toLowerCase();
+        if (!fallbackEmail) {
+          throw new Error('步骤 6：Cloudflare Temp Email 未返回可用邮箱。');
+        }
+        if (typeof setPlusPaymentEmailState === 'function') {
+          await setPlusPaymentEmailState(fallbackEmail, {
+            source: 'registration:cloudflare-temp-email:fallback',
+          });
+        }
+        await addLog(`步骤 6：本轮后续邮箱已回退为 ${fallbackEmail}。`, 'ok');
+        return fallbackEmail;
       }
 
       const existingEmail = getExistingStep6PhonePrefixedEmail(latestState, localPart);

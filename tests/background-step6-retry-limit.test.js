@@ -300,6 +300,7 @@ test('step 6 generates phone-prefixed Cloudflare Temp Email for phone signup and
     signupMethod: 'phone',
     emailGenerator: 'cloudflare-temp-email',
     signupPhoneNumber: '+86 138-1234-5678',
+    signupVerifiedPhoneNumber: '+86 138-1234-5678',
     accountIdentifierType: 'phone',
     accountIdentifier: '+86 138-1234-5678',
     signupPhoneCompletedActivation: {
@@ -370,6 +371,7 @@ test('step 6 does not duplicate registration persistence when Cloudflare generat
     signupMethod: 'phone',
     emailGenerator: 'cloudflare-temp-email',
     signupPhoneNumber: '+66 95 991 6439',
+    signupVerifiedPhoneNumber: '+66 95 991 6439',
     accountIdentifierType: 'phone',
     accountIdentifier: '+66 95 991 6439',
   };
@@ -430,6 +432,7 @@ test('step 6 reuses existing phone-prefixed Cloudflare Temp Email without creati
     signupMethod: 'phone',
     emailGenerator: 'cloudflare-temp-email',
     signupPhoneNumber: '+86 138-1234-5678',
+    signupVerifiedPhoneNumber: '+86 138-1234-5678',
     accountIdentifierType: 'phone',
     accountIdentifier: '+86 138-1234-5678',
     email: '8613812345678@mail.example.com',
@@ -474,6 +477,68 @@ test('step 6 reuses existing phone-prefixed Cloudflare Temp Email without creati
   assert.deepStrictEqual(events.paymentCalls, [{
     email: '8613812345678@mail.example.com',
     options: { source: 'registration:phone-prefix-cloudflare-temp-email' },
+  }]);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
+});
+
+test('step 6 falls back to generated Cloudflare Temp Email when verified phone cache is missing', async () => {
+  const api = createStep6Api();
+  const events = {
+    fetchCalls: [],
+    persistCalls: [],
+    paymentCalls: [],
+    completions: [],
+  };
+  let state = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    signupPhoneNumber: '+86 138-1234-5678',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+86 138-1234-5678',
+  };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    fetchCloudflareTempEmailAddress: async (callState, options) => {
+      events.fetchCalls.push({ state: callState, options });
+      const email = 'random-prefix@mail.example.com';
+      state = {
+        ...state,
+        email,
+        registrationEmailState: {
+          current: email,
+          previous: email,
+          source: options.source,
+          updatedAt: 789,
+        },
+      };
+      return email;
+    },
+    getState: async () => state,
+    persistRegistrationEmailState: async (callState, email, options) => {
+      events.persistCalls.push({ state: callState, email, options });
+    },
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(state);
+
+  assert.equal(events.fetchCalls.length, 1);
+  assert.equal(events.fetchCalls[0].options.localPart, undefined);
+  assert.equal(events.fetchCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(events.fetchCalls[0].options.source, 'generated:cloudflare-temp-email:fallback');
+  assert.deepStrictEqual(events.persistCalls, []);
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: 'random-prefix@mail.example.com',
+    options: { source: 'registration:cloudflare-temp-email:fallback' },
   }]);
   assert.deepStrictEqual(events.completions, ['wait-registration-success']);
 });
@@ -525,10 +590,11 @@ test('step 6 skips phone-prefixed email generation outside phone Cloudflare Temp
   });
 });
 
-test('step 6 fails before completion when phone Cloudflare mode lacks a usable phone prefix', async () => {
+test('step 6 falls back before completion when phone Cloudflare mode lacks a usable verified phone prefix', async () => {
   const api = createStep6Api();
   const events = {
-    fetchCalls: 0,
+    fetchCalls: [],
+    paymentCalls: [],
     completions: [],
   };
   const state = {
@@ -544,22 +610,28 @@ test('step 6 fails before completion when phone Cloudflare mode lacks a usable p
     completeNodeFromBackground: async (step) => {
       events.completions.push(step);
     },
-    fetchCloudflareTempEmailAddress: async () => {
-      events.fetchCalls += 1;
-      return 'should-not-create@example.com';
+    fetchCloudflareTempEmailAddress: async (_callState, options) => {
+      events.fetchCalls.push(options);
+      return 'fallback@example.com';
     },
     getState: async () => state,
     registrationSuccessWaitMs: 0,
     resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
     sleepWithStop: async () => {},
   });
 
-  await assert.rejects(
-    () => executor.executeStep6(state),
-    /无法提取可用手机号数字/
-  );
-  assert.equal(events.fetchCalls, 0);
-  assert.deepStrictEqual(events.completions, []);
+  await executor.executeStep6(state);
+
+  assert.equal(events.fetchCalls.length, 1);
+  assert.equal(events.fetchCalls[0].localPart, undefined);
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: 'fallback@example.com',
+    options: { source: 'registration:cloudflare-temp-email:fallback' },
+  }]);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
 });
 
 test('step 7 retries up to configured limit and then fails', async () => {

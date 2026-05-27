@@ -365,6 +365,7 @@ test('signup phone helper finalizes or cancels signup activation without clearin
   const setStateCalls = [];
   const statusActions = [];
   const phoneEmailCalls = [];
+  const cachedPhones = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
     heroSmsReuseEnabled: false,
@@ -403,6 +404,14 @@ test('signup phone helper finalizes or cancels signup activation without clearin
       throw new Error(`Unexpected HeroSMS action: ${action}`);
     },
     getState: async () => currentState,
+    cacheSignupVerifiedPhoneNumber: async (phoneNumber, options) => {
+      cachedPhones.push({ phoneNumber, options });
+      currentState = {
+        ...currentState,
+        signupVerifiedPhoneNumber: phoneNumber,
+        signupVerifiedPhoneCachedAt: 456,
+      };
+    },
     ensurePhonePrefixedCloudflareTempEmail: async (state, options) => {
       phoneEmailCalls.push({ state, options });
       currentState = {
@@ -441,6 +450,23 @@ test('signup phone helper finalizes or cancels signup activation without clearin
     maxUses: 3,
   });
   assert.equal(currentState.signupPhoneVerificationPurpose, '');
+  assert.equal(currentState.signupVerifiedPhoneNumber, '66959916439');
+  assert.equal(currentState.signupVerifiedPhoneCachedAt, 456);
+  assert.deepStrictEqual(cachedPhones, [{
+    phoneNumber: '66959916439',
+    options: {
+      activation: {
+        activationId: 'signup-123',
+        phoneNumber: '66959916439',
+        provider: 'hero-sms',
+        serviceCode: 'dr',
+        countryId: 52,
+        successfulUses: 1,
+        maxUses: 3,
+      },
+      source: 'signup-phone-verification',
+    },
+  }]);
   assert.equal(currentState.accountIdentifierType, 'phone');
   assert.equal(currentState.accountIdentifier, '66959916439');
   assert.equal(currentState.currentPhoneActivation.activationId, 'add-phone-activation');

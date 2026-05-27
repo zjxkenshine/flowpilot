@@ -100,6 +100,7 @@
       createAutomationTab = null,
       ensureHotmailAccountForFlow = null,
       ensureLuckmailPurchaseForFlow = null,
+      ensurePhonePrefixedCloudflareTempEmail = null,
       fetchCloudMailAddress = null,
       fetchGeneratedEmail = null,
       fetchYydsMailAddress = null,
@@ -355,6 +356,29 @@
     }
 
     function getPhonePlusExistingPaymentEmailCandidate(state = {}) {
+      const preferredPhonePrefixEmail = String(
+        state?.registrationEmailState?.current
+        || state?.email
+        || ''
+      ).trim().toLowerCase();
+      const phonePrefixLocalPart = String(
+        state?.signupVerifiedPhoneNumber
+        || state?.signupPhoneCompletedActivation?.phoneNumber
+        || ''
+      ).replace(/\D+/g, '');
+      if (
+        phonePrefixLocalPart
+        && preferredPhonePrefixEmail
+        && preferredPhonePrefixEmail.includes('@')
+        && preferredPhonePrefixEmail.split('@')[0] === phonePrefixLocalPart
+      ) {
+        return {
+          email: preferredPhonePrefixEmail,
+          source: 'registration:phone-prefix-cloudflare-temp-email',
+          reused: true,
+        };
+      }
+
       const paymentEmailState = getPlusPaymentEmailStateLocal(state);
       if (paymentEmailState.current) {
         return {
@@ -613,6 +637,26 @@
         return resolveHostedCheckoutPaymentEmail(state);
       }
       const latestState = await getLatestHostedState(state);
+      if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
+        const fixedEmail = String(await ensurePhonePrefixedCloudflareTempEmail(latestState, {
+          fallbackToGenerated: false,
+        }) || '').trim().toLowerCase();
+        if (fixedEmail) {
+          await persistPhonePlusPaymentEmail(fixedEmail, {
+            source: 'registration:phone-prefix-cloudflare-temp-email',
+          });
+          await addHostedStepLog(
+            PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+            `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已复用 ${fixedEmail}（来源：registration:phone-prefix-cloudflare-temp-email）。`,
+            'info'
+          );
+          return {
+            email: fixedEmail,
+            source: 'registration:phone-prefix-cloudflare-temp-email',
+            reused: true,
+          };
+        }
+      }
       const existing = getPhonePlusExistingPaymentEmailCandidate(latestState);
       if (existing?.email) {
         await persistPhonePlusPaymentEmail(existing.email, { source: existing.source });
@@ -3181,6 +3225,43 @@
       const retryStage = currentStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
         ? PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
         : PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
+      const previousProfile = context?.profile && typeof context.profile === 'object' && !Array.isArray(context.profile)
+        ? context.profile
+        : {};
+      const previousState = context?.state && typeof context.state === 'object' && !Array.isArray(context.state)
+        ? context.state
+        : {};
+
+      if (retries > 0 && context?.addressSuggestionFallbackUsed !== true) {
+        const fallbackPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+          ? {
+            ...previousProfile,
+            expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+            phone: previousProfile.phone,
+            useAddressSuggestionFallback: true,
+          }
+          : {
+            expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+            address: previousProfile.address,
+            useAddressSuggestionFallback: true,
+          };
+        await addHostedStepLog(
+          stepKey,
+          `Step ${stepNumber}: PayPal ${retryStage} still reports an invalid address after a fresh address retry; selecting the first PayPal address suggestion before continuing. Error: ${errorMessage}`,
+          'warn'
+        );
+        await runHostedPayPalStep(tabId, fallbackPayload, { stepKey });
+        await sleepWithStop(1000);
+        return {
+          handled: true,
+          retries,
+          profile: previousProfile,
+          state: previousState,
+          address: previousProfile.address || null,
+          stage: retryStage,
+          addressSuggestionFallbackUsed: true,
+        };
+      }
 
       if (retries >= HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS) {
         throw new Error(`Step ${stepNumber}: PayPal ${retryStage} address validation failed after ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} retries: ${errorMessage}`);
@@ -3188,9 +3269,6 @@
 
       const nextRetries = retries + 1;
       const retryAddress = await fetchHostedCheckoutAddress();
-      const previousProfile = context?.profile && typeof context.profile === 'object' && !Array.isArray(context.profile)
-        ? context.profile
-        : {};
       const nextProfile = {
         ...previousProfile,
         address: retryAddress,
@@ -3199,9 +3277,6 @@
       const profile = persistedProfile && typeof persistedProfile === 'object' && !Array.isArray(persistedProfile)
         ? persistedProfile
         : nextProfile;
-      const previousState = context?.state && typeof context.state === 'object' && !Array.isArray(context.state)
-        ? context.state
-        : {};
       const nextState = {
         ...previousState,
         plusHostedCheckoutGuestProfile: profile,
@@ -3232,6 +3307,7 @@
         state: nextState,
         address: retryAddress,
         stage: retryStage,
+        addressSuggestionFallbackUsed: Boolean(context?.addressSuggestionFallbackUsed),
       };
     }
 
@@ -3926,6 +4002,7 @@
         let profile = refreshedProfile;
         let hostedProfileSubmitted = false;
         let hostedPayPalAddressRetries = 0;
+        let hostedPayPalAddressSuggestionFallbackUsed = false;
         if (await completeHostedStepIfSuccessful(stepKey, tabId, refreshedState)) {
           return;
         }
@@ -4002,9 +4079,11 @@
                 retries: hostedPayPalAddressRetries,
                 profile,
                 state: refreshedState,
+                addressSuggestionFallbackUsed: hostedPayPalAddressSuggestionFallbackUsed,
               });
               if (addressRetryResult.handled) {
                 hostedPayPalAddressRetries = addressRetryResult.retries;
+                hostedPayPalAddressSuggestionFallbackUsed = Boolean(addressRetryResult.addressSuggestionFallbackUsed);
                 profile = addressRetryResult.profile;
                 refreshedState = addressRetryResult.state;
                 hostedProfileSubmitted = true;
@@ -4037,9 +4116,11 @@
           retries: hostedPayPalAddressRetries,
           profile,
           state: refreshedState,
+          addressSuggestionFallbackUsed: hostedPayPalAddressSuggestionFallbackUsed,
         });
         if (initialAddressRetryResult.handled) {
           hostedPayPalAddressRetries = initialAddressRetryResult.retries;
+          hostedPayPalAddressSuggestionFallbackUsed = Boolean(initialAddressRetryResult.addressSuggestionFallbackUsed);
           profile = initialAddressRetryResult.profile;
           refreshedState = initialAddressRetryResult.state;
           hostedProfileSubmitted = true;
@@ -4101,9 +4182,11 @@
               retries: hostedPayPalAddressRetries,
               profile,
               state: refreshedState,
+              addressSuggestionFallbackUsed: hostedPayPalAddressSuggestionFallbackUsed,
             });
             if (addressRetryResult.handled) {
               hostedPayPalAddressRetries = addressRetryResult.retries;
+              hostedPayPalAddressSuggestionFallbackUsed = Boolean(addressRetryResult.addressSuggestionFallbackUsed);
               profile = addressRetryResult.profile;
               refreshedState = addressRetryResult.state;
               hostedProfileSubmitted = true;
@@ -4254,6 +4337,7 @@
       let createAccountState = await getLatestHostedState(state);
       let profile = getHostedProfileFromState(createAccountState) || {};
       let hostedCreateAccountAddressRetries = 0;
+      let hostedCreateAccountAddressSuggestionFallbackUsed = false;
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
@@ -4328,9 +4412,11 @@
             profile,
             state: createAccountState,
             expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+            addressSuggestionFallbackUsed: hostedCreateAccountAddressSuggestionFallbackUsed,
           });
           if (addressRetryResult.handled) {
             hostedCreateAccountAddressRetries = addressRetryResult.retries;
+            hostedCreateAccountAddressSuggestionFallbackUsed = Boolean(addressRetryResult.addressSuggestionFallbackUsed);
             profile = addressRetryResult.profile;
             createAccountState = addressRetryResult.state;
             return false;

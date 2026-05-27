@@ -502,6 +502,25 @@ function createHostedPayPalHarness(options = {}) {
       'data-testid': 'page-level-error-message',
     },
   });
+  const createAccountSuggestionContainer = createDomElement({
+    tagName: 'DIV',
+    id: 'addressSuggestionContainer',
+    attrs: { 'data-dd-action-name': '[Auto-suggested address]' },
+  });
+  const createAccountSuggestionList = createDomElement({
+    tagName: 'UL',
+    id: 'suggestedAddressList',
+  });
+  const createAccountSuggestionButton0 = createDomElement({
+    tagName: 'BUTTON',
+    id: 'addressIndex0',
+    text: '2307 Spring Hill Road Petaluma, CA, USA',
+  });
+  const createAccountSuggestionButton1 = createDomElement({
+    tagName: 'BUTTON',
+    id: 'addressIndex1',
+    text: '2307 Spring Forest Road Raleigh, NC, USA',
+  });
   const nextButton = createDomElement({
     tagName: 'BUTTON',
     id: 'btnNext',
@@ -543,7 +562,7 @@ function createHostedPayPalHarness(options = {}) {
     });
   }
 
-  function showGuestCheckout() {
+  function showGuestCheckout(options = {}) {
     location.href = 'https://www.paypal.com/checkoutweb/signup';
     location.host = 'www.paypal.com';
     location.pathname = '/checkoutweb/signup';
@@ -563,6 +582,7 @@ function createHostedPayPalHarness(options = {}) {
       billingCityInput,
       billingPostalCodeInput,
       billingStateSelect,
+      ...(options.addressSuggestions ? [createAccountSuggestionContainer, createAccountSuggestionList, createAccountSuggestionButton0, createAccountSuggestionButton1] : []),
       submitButton,
     ]);
   }
@@ -581,6 +601,7 @@ function createHostedPayPalHarness(options = {}) {
       createAccountBillingPostalCodeInput,
       createAccountBillingStateSelect,
       ...(options.invalidAddress ? [createAccountAddressErrorContainer, createAccountAddressErrorMessage] : []),
+      ...(options.addressSuggestions ? [createAccountSuggestionContainer, createAccountSuggestionList, createAccountSuggestionButton0, createAccountSuggestionButton1] : []),
       createAccountButton,
     ]);
   }
@@ -724,6 +745,19 @@ function createHostedPayPalHarness(options = {}) {
         }
         if (text.includes('inputmode') && text.includes('tel')) {
           return elements.filter((element) => element.tagName === 'INPUT' && /^tel$/i.test(element.getAttribute('inputmode') || ''));
+        }
+        if (text.includes('addressSuggestionContainer') || text.includes('suggestedAddressList') || text.includes('Auto-suggested address')) {
+          return elements.filter((element) => (
+            element.id === 'addressSuggestionContainer'
+            || element.id === 'suggestedAddressList'
+            || /^addressIndex/.test(element.id || '')
+          ));
+        }
+        if (text.includes('button[id^="addressIndex"]') || text === 'li button') {
+          return elements.filter((element) => element.tagName === 'BUTTON' && /^addressIndex/.test(element.id || ''));
+        }
+        if (text.includes('[role="option"]')) {
+          return elements.filter((element) => element.getAttribute('role') === 'option');
         }
         if (text === '#captcha-standalone') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
         if (text === '.captcha-overlay') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
@@ -1304,6 +1338,92 @@ test('PayPal hosted create account step refills address before retry click', asy
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '73301'), true);
   assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'billingState' && event.event === 'change' && event.value === 'TX'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), true);
+});
+
+test('PayPal hosted create account selects first address suggestion when fallback is requested', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showCreateAccount({ invalidAddress: true, addressSuggestions: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'create_account',
+      useAddressSuggestionFallback: true,
+      address: {
+        street: '2307 Spring Hill Road',
+        city: 'Petaluma',
+        state: 'California',
+        zip: '94952',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.addressSuggestionFallbackAttempted, true);
+  assert.equal(result.addressSuggestionSelected, true);
+  assert.match(result.addressSuggestionSelectedText, /Petaluma/);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '2307 Spring Hill Roa'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'addressIndex0'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), true);
+});
+
+test('PayPal hosted create account restores address when suggestion fallback has no options', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showCreateAccount({ invalidAddress: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'create_account',
+      useAddressSuggestionFallback: true,
+      address: {
+        street: '8 Retry Ave',
+        city: 'Austin',
+        state: 'Texas',
+        zip: '73301',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.addressSuggestionFallbackAttempted, true);
+  assert.equal(result.addressSuggestionSelected, false);
+  assert.match(result.addressSuggestionError, /suggestions/i);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '8 Retry Av'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '8 Retry Ave'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), true);
+});
+
+test('PayPal hosted guest checkout selects first address suggestion without breaking phone check', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestCheckout({ addressSuggestions: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      useAddressSuggestionFallback: true,
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: {
+        street: '2307 Spring Hill Road',
+        city: 'Petaluma',
+        state: 'California',
+        zip: '94952',
+      },
+      phonePostFillCheckDelayMs: 0,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.phoneMatched, true);
+  assert.equal(result.addressSuggestionFallbackAttempted, true);
+  assert.equal(result.addressSuggestionSelected, true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'addressIndex0'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
 });
 
 test('PayPal hosted verification page exposes invalid-code and resend state', async () => {

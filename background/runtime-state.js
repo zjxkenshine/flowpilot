@@ -113,6 +113,8 @@
         'signupPhoneNumber',
         'signupPhoneActivation',
         'signupPhoneCompletedActivation',
+        'signupVerifiedPhoneNumber',
+        'signupVerifiedPhoneCachedAt',
         'signupPhoneVerificationRequestedAt',
         'signupPhoneVerificationPurpose',
       ]),

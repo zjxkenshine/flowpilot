@@ -725,6 +725,129 @@ function fillFirstHostedInputByIds(ids = [], value = '') {
   return false;
 }
 
+const PAYPAL_HOSTED_ADDRESS_LINE1_IDS = [
+  'billingLine1',
+  'billingAddressLine1',
+  'addressLine1',
+  'address',
+  'line1',
+];
+
+function findHostedAddressLine1Input() {
+  for (const id of PAYPAL_HOSTED_ADDRESS_LINE1_IDS) {
+    const input = document.getElementById(id);
+    if (input && isVisibleElement(input) && isEnabledControl(input)) {
+      return input;
+    }
+  }
+  const selectors = [
+    'input[name="billingLine1"]',
+    'input[name="billingAddressLine1"]',
+    'input[name="addressLine1"]',
+    'input[name="address"]',
+    'input[name="line1"]',
+    'input[autocomplete*="address-line1" i]',
+  ];
+  for (const selector of selectors) {
+    const input = document.querySelector(selector);
+    if (input && isVisibleElement(input) && isEnabledControl(input)) {
+      return input;
+    }
+  }
+  return null;
+}
+
+function getHostedAddressSuggestionCandidates() {
+  const selectors = [
+    '#addressSuggestionContainer button[id^="addressIndex"]',
+    '#suggestedAddressList button[id^="addressIndex"]',
+    '[data-dd-action-name*="Auto-suggested address" i] button',
+    'button[id^="addressIndex"]',
+    '#addressSuggestionContainer [role="option"]',
+    '#suggestedAddressList [role="option"]',
+    '[role="listbox"] [role="option"]',
+    '[role="option"]',
+    '#addressSuggestionContainer li button',
+    '#suggestedAddressList li button',
+    'li button',
+  ];
+  const seen = new Set();
+  const candidates = [];
+  for (const selector of selectors) {
+    let matches = [];
+    try {
+      matches = Array.from(document.querySelectorAll(selector) || []);
+    } catch {
+      matches = [];
+    }
+    for (const node of matches) {
+      if (!node || seen.has(node) || !isVisibleElement(node) || !isEnabledControl(node)) {
+        continue;
+      }
+      const text = normalizeText(node.textContent || node.getAttribute?.('aria-label') || '');
+      if (!text) {
+        continue;
+      }
+      seen.add(node);
+      candidates.push(node);
+    }
+  }
+  return candidates;
+}
+
+async function selectHostedAddressSuggestionFallback() {
+  const input = findHostedAddressLine1Input();
+  if (!input) {
+    return {
+      addressSuggestionFallbackAttempted: true,
+      addressSuggestionSelected: false,
+      addressSuggestionSelectedText: '',
+      addressSuggestionError: 'address line 1 input not found',
+    };
+  }
+  const originalValue = String(input.value || '');
+  const shortenedValue = originalValue.length > 0 ? originalValue.slice(0, -1) : originalValue;
+  try {
+    if (typeof input.focus === 'function') {
+      input.focus();
+    }
+    fillInput(input, shortenedValue);
+    await sleep(500);
+    const suggestions = await waitUntil(() => {
+      const candidates = getHostedAddressSuggestionCandidates();
+      return candidates.length ? candidates : null;
+    }, {
+      intervalMs: 250,
+      timeoutMs: 6000,
+      timeoutMessage: 'PayPal hosted checkout address suggestions did not appear.',
+    });
+    const target = suggestions[0];
+    const selectedText = normalizeText(target.textContent || target.getAttribute?.('aria-label') || '');
+    await performPayPalOperationWithDelay({
+      stepKey: getHostedStepKey(PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT),
+      kind: 'select',
+      label: 'hosted-paypal-address-suggestion',
+    }, async () => {
+      simulateClick(target);
+    });
+    await sleep(1200);
+    return {
+      addressSuggestionFallbackAttempted: true,
+      addressSuggestionSelected: true,
+      addressSuggestionSelectedText: selectedText,
+      addressSuggestionError: '',
+    };
+  } catch (error) {
+    fillInput(input, originalValue);
+    return {
+      addressSuggestionFallbackAttempted: true,
+      addressSuggestionSelected: false,
+      addressSuggestionSelectedText: '',
+      addressSuggestionError: error?.message || String(error || 'address suggestion fallback failed'),
+    };
+  }
+}
+
 function selectFirstHostedOptionByIdText(ids = [], value = '') {
   for (const id of ids) {
     if (selectHostedOptionByIdText(id, value)) {
@@ -1075,6 +1198,14 @@ async function clickHostedCreateAccount(payload = {}) {
   const addressFillResult = payload.address && typeof payload.address === 'object'
     ? fillHostedAddressFields(payload.address)
     : null;
+  const addressSuggestionResult = payload.useAddressSuggestionFallback === true
+    ? await selectHostedAddressSuggestionFallback()
+    : {
+      addressSuggestionFallbackAttempted: false,
+      addressSuggestionSelected: false,
+      addressSuggestionSelectedText: '',
+      addressSuggestionError: '',
+    };
   const button = await waitUntil(() => {
     const candidate = findHostedCreateAccountButton();
     return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
@@ -1097,6 +1228,7 @@ async function clickHostedCreateAccount(payload = {}) {
     buttonText: getActionText(button),
     addressRefilled: Boolean(addressFillResult?.filledAny),
     addressFillResult,
+    ...addressSuggestionResult,
   };
 }
 
@@ -1237,6 +1369,14 @@ async function fillHostedGuestCheckout(payload = {}) {
       `${PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX}PayPal 无卡直绑资料页 phone 输入框在 ${phoneEmptyRefillMaxRetries} 次重填后仍为空。`
     );
   }
+  const addressSuggestionResult = payload.useAddressSuggestionFallback === true
+    ? await selectHostedAddressSuggestionFallback()
+    : {
+      addressSuggestionFallbackAttempted: false,
+      addressSuggestionSelected: false,
+      addressSuggestionSelectedText: '',
+      addressSuggestionError: '',
+    };
   const phoneCheck = verifyHostedPhoneBeforeSubmit(values.phone);
   const clickResult = await clickHostedSubmitButton({
     stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
@@ -1251,6 +1391,7 @@ async function fillHostedGuestCheckout(payload = {}) {
     phonePostFillCheckDelayMs,
     phoneInputDescriptor: phoneCheck.phoneInputDescriptor || phoneInputDescriptor,
     phoneValueReady,
+    ...addressSuggestionResult,
     ...phoneCheck,
   };
 }

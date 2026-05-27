@@ -11,6 +11,7 @@
       getOAuthFlowStepTimeoutMs,
       getState,
       ensurePhonePrefixedCloudflareTempEmail = null,
+      cacheSignupVerifiedPhoneNumber = null,
       upsertAccountBookEntry = null,
       requestStop = null,
       readAuthTabSnapshot = null,
@@ -7233,6 +7234,17 @@
         accountIdentifierType: 'phone',
         accountIdentifier: normalizedActivation.phoneNumber,
       });
+      if (typeof cacheSignupVerifiedPhoneNumber === 'function') {
+        await cacheSignupVerifiedPhoneNumber(normalizedActivation.phoneNumber, {
+          activation: buildCompletedActivationSnapshot(normalizedActivation),
+          source: 'signup-phone-verification',
+        });
+      } else {
+        await setPhoneRuntimeState({
+          signupVerifiedPhoneNumber: normalizedActivation.phoneNumber,
+          signupVerifiedPhoneCachedAt: Date.now(),
+        });
+      }
       if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
         const latestState = typeof getState === 'function'
           ? await getState().catch(() => state)

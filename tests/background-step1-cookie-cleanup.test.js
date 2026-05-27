@@ -26,6 +26,7 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
     browsingDataCalls: [],
     openedSteps: [],
     completedNodes: [],
+    cacheClears: 0,
   };
 
   const chromeApi = {
@@ -76,6 +77,9 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
   const executor = api.createStep1Executor({
     addLog: async () => {},
     chrome: chromeApi,
+    clearSignupVerifiedPhoneCache: async () => {
+      events.cacheClears += 1;
+    },
     openSignupEntryTab: async (step) => {
       events.openedSteps.push(step);
     },
@@ -86,6 +90,7 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
 
   await executor.executeStep1();
 
+  assert.equal(events.cacheClears, 1);
   assert.ok(events.getAllCalls.length > 0, 'should query cookies at least once');
   assert.ok(events.getAllCalls.every((entry) => typeof entry?.domain === 'string' && entry.domain.length > 0));
   assert.deepStrictEqual(events.removedCookies, [

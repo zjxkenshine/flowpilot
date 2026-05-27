@@ -5481,6 +5481,29 @@ async function setPasswordState(password) {
   broadcastDataUpdate({ password });
 }
 
+async function clearSignupVerifiedPhoneCache() {
+  const updates = {
+    signupVerifiedPhoneNumber: '',
+    signupVerifiedPhoneCachedAt: 0,
+  };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+}
+
+async function cacheSignupVerifiedPhoneNumber(phoneNumber, options = {}) {
+  const normalizedPhone = String(phoneNumber || '').trim();
+  const updates = {
+    signupVerifiedPhoneNumber: normalizedPhone,
+    signupVerifiedPhoneCachedAt: normalizedPhone ? Date.now() : 0,
+  };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  return {
+    ...updates,
+    source: String(options?.source || '').trim(),
+  };
+}
+
 function buildAccountContributionState(enabled, persistedSettings = {}, currentState = {}, options = {}) {
   const currentContributionState = {};
   for (const key of CONTRIBUTION_RUNTIME_KEYS) {
@@ -13567,21 +13590,22 @@ async function fetchCloudflareTempEmailAddress(state, options = {}) {
   return generatedEmailHelpers.fetchCloudflareTempEmailAddress(state, options);
 }
 
-function getPhonePrefixedCloudflareTempEmailSourceValue(state = {}, options = {}) {
-  const accountIdentifierType = String(state?.accountIdentifierType || '').trim().toLowerCase();
+function getVerifiedPhonePrefixedCloudflareTempEmailSourceValue(state = {}, options = {}) {
   return String(
     options?.phoneNumber
-    || options?.localPart
-    || state?.signupPhoneNumber
+    || state?.signupVerifiedPhoneNumber
     || state?.signupPhoneCompletedActivation?.phoneNumber
-    || state?.signupPhoneActivation?.phoneNumber
-    || (accountIdentifierType === 'phone' ? state?.accountIdentifier : '')
     || ''
   ).trim();
 }
 
+function getPhonePrefixedCloudflareTempEmailSourceValue(state = {}, options = {}) {
+  return getVerifiedPhonePrefixedCloudflareTempEmailSourceValue(state, options);
+}
+
 function buildPhonePrefixedCloudflareTempEmailLocalPart(state = {}, options = {}) {
-  return getPhonePrefixedCloudflareTempEmailSourceValue(state, options).replace(/\D+/g, '');
+  return String(options?.localPart || '').trim().replace(/\D+/g, '')
+    || getPhonePrefixedCloudflareTempEmailSourceValue(state, options).replace(/\D+/g, '');
 }
 
 function isPhonePrefixedCloudflareTempEmailMode(state = {}) {
@@ -13615,7 +13639,7 @@ function getExistingPhonePrefixedRegistrationEmail(state = {}, localPart = '') {
   return '';
 }
 
-async function syncPhonePrefixedCloudflarePaymentEmail(email) {
+async function syncPhonePrefixedCloudflarePaymentEmail(email, options = {}) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!normalizedEmail) {
     return;
@@ -13626,7 +13650,7 @@ async function syncPhonePrefixedCloudflarePaymentEmail(email) {
     return;
   }
   await setPlusPaymentEmailState(normalizedEmail, {
-    source: 'registration:phone-prefix-cloudflare-temp-email',
+    source: String(options?.source || '').trim() || 'registration:phone-prefix-cloudflare-temp-email',
   });
 }
 
@@ -13642,7 +13666,20 @@ async function ensurePhonePrefixedCloudflareTempEmail(state = {}, options = {}) 
 
   const localPart = buildPhonePrefixedCloudflareTempEmailLocalPart(mergedState, options);
   if (!localPart) {
-    throw new Error('Cloudflare Temp Email phone-prefix generation failed: phone number has no usable digits.');
+    if (options?.fallbackToGenerated === false) {
+      return null;
+    }
+    await addLog('Cloudflare Temp Email: verified signup phone is not available; falling back to generated mailbox.', 'warn');
+    const fallbackEmail = String(await fetchCloudflareTempEmailAddress(mergedState, {
+      preserveAccountIdentity: true,
+      source: 'generated:cloudflare-temp-email:fallback',
+    }) || '').trim().toLowerCase();
+    if (fallbackEmail) {
+      await syncPhonePrefixedCloudflarePaymentEmail(fallbackEmail, {
+        source: 'registration:cloudflare-temp-email:fallback',
+      });
+    }
+    return fallbackEmail || null;
   }
 
   const existingEmail = getExistingPhonePrefixedRegistrationEmail(mergedState, localPart);
@@ -13682,6 +13719,18 @@ async function ensurePhonePrefixedCloudflareTempEmail(state = {}, options = {}) 
   return email;
 }
 
+async function ensureCloudflareTempEmailForPhoneSignup(state = {}, options = {}) {
+  const latestState = await getState().catch(() => state || {});
+  const mergedState = {
+    ...(state || {}),
+    ...(latestState && typeof latestState === 'object' && !Array.isArray(latestState) ? latestState : {}),
+  };
+  if (!isPhonePrefixedCloudflareTempEmailMode(mergedState)) {
+    return null;
+  }
+  return ensurePhonePrefixedCloudflareTempEmail(mergedState, options);
+}
+
 async function fetchDuckEmail(options = {}) {
   return generatedEmailHelpers.fetchDuckEmail(options);
 }
@@ -13704,6 +13753,16 @@ async function fetchGeneratedEmail(state, options = {}) {
   }
   if (generator === CLOUD_MAIL_GENERATOR) {
     return fetchCloudMailAddress(currentState, options);
+  }
+  if (
+    generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR
+    && isPhonePrefixedCloudflareTempEmailMode(currentState)
+    && !String(options?.localPart || options?.name || '').trim()
+  ) {
+    const email = await ensureCloudflareTempEmailForPhoneSignup(currentState, options);
+    if (email) {
+      return email;
+    }
   }
   return generatedEmailHelpers.fetchGeneratedEmail(state, options);
 }
@@ -15565,6 +15624,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   getOAuthFlowStepTimeoutMs,
   getState,
   ensurePhonePrefixedCloudflareTempEmail,
+  cacheSignupVerifiedPhoneNumber,
   HERO_SMS_COUNTRY_ID,
   HERO_SMS_COUNTRY_LABEL,
   HERO_SMS_SERVICE_CODE,
@@ -15578,6 +15638,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
 });
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
+  clearSignupVerifiedPhoneCache,
   completeNodeFromBackground,
   ensureBrowserFingerprintForProxyExit: browserFingerprintManager?.ensureBrowserFingerprintForProxyExit,
   getState,
@@ -15763,6 +15824,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   createAutomationTab,
   ensureHotmailAccountForFlow,
   ensureLuckmailPurchaseForFlow,
+  ensurePhonePrefixedCloudflareTempEmail,
   fetchCloudMailAddress,
   fetchGeneratedEmail,
   fetchYydsMailAddress,
@@ -16387,8 +16449,23 @@ async function ensureSignupPostEmailPageReadyInTab(tabId, step = 2, options = {}
   return signupFlowHelpers.ensureSignupPostEmailPageReadyInTab(tabId, step, options);
 }
 
-async function resolveSignupEmailForFlow(state) {
-  return signupFlowHelpers.resolveSignupEmailForFlow(state);
+async function resolveSignupEmailForFlow(state, options = {}) {
+  const currentState = state && typeof state === 'object' && !Array.isArray(state)
+    ? state
+    : await getState();
+  if (
+    normalizeEmailGenerator(currentState?.emailGenerator) === CLOUDFLARE_TEMP_EMAIL_GENERATOR
+    && isPhonePrefixedCloudflareTempEmailMode(currentState)
+  ) {
+    const email = await ensureCloudflareTempEmailForPhoneSignup(currentState, {
+      ...options,
+      preserveAccountIdentity: true,
+    });
+    if (email) {
+      return email;
+    }
+  }
+  return signupFlowHelpers.resolveSignupEmailForFlow(currentState, options);
 }
 
 // ============================================================

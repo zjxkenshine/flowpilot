@@ -144,6 +144,7 @@
       addLog,
       chrome: chromeApi = globalThis.chrome,
       completeNodeFromBackground,
+      clearSignupVerifiedPhoneCache = null,
       ensureBrowserFingerprintForProxyExit,
       getState,
       openSignupEntryTab,
@@ -335,6 +336,10 @@
     }
 
     async function clearOpenAiCookiesBeforeStep1() {
+      if (typeof clearSignupVerifiedPhoneCache === 'function') {
+        await clearSignupVerifiedPhoneCache();
+      }
+
       if (!chromeApi?.cookies?.getAll || !chromeApi.cookies?.remove) {
         await addLog('步骤 1：当前浏览器不支持 cookies API，跳过打开官网前 cookie 清理。', 'warn');
         return;

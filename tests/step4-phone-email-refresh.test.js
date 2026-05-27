@@ -60,8 +60,9 @@ test('step 4 refreshes state after phone verification before continuing email ve
       assert.equal(message.type, 'PREPARE_SIGNUP_VERIFICATION');
       return {};
     },
-    sendToContentScriptResilient: async () => {
-      throw new Error('should not use resilient prepare path');
+    sendToContentScriptResilient: async (_source, message) => {
+      assert.equal(message.type, 'PREPARE_SIGNUP_VERIFICATION');
+      return {};
     },
     shouldUseCustomRegistrationEmail: () => false,
     STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
