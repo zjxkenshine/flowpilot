@@ -348,11 +348,15 @@ function createHostedPayPalHarness(options = {}) {
       hidden: false,
       options: selectOptions,
       parentElement: null,
+      parentNode: null,
+      nextSibling: null,
+      isConnected: false,
       style: { display: 'block', visibility: 'visible', opacity: '1' },
       getAttribute(key) {
         if (key === 'id') return this.id;
         if (key === 'type') return this.type;
         if (key === 'name') return this.name;
+        if (key === 'class') return attrMap.get('class') || '';
         if (key === 'placeholder') return attrMap.get('placeholder') || '';
         return attrMap.has(key) ? attrMap.get(key) : null;
       },
@@ -366,6 +370,16 @@ function createHostedPayPalHarness(options = {}) {
       blur() {},
       click() {
         events.push({ type: 'native-click', id: this.id, text: this.textContent });
+      },
+      remove() {
+        events.push({ type: 'remove', id: this.id });
+        const index = elements.indexOf(this);
+        if (index >= 0) {
+          elements.splice(index, 1);
+        }
+        this.parentElement = null;
+        this.parentNode = null;
+        this.isConnected = false;
       },
       getBoundingClientRect() {
         return { left: 10, top: 10, width: 180, height: 44 };
@@ -430,13 +444,40 @@ function createHostedPayPalHarness(options = {}) {
     id: 'btnNext',
     text: '下一页',
   });
+  const captchaOverlay = createDomElement({
+    tagName: 'DIV',
+    id: 'captcha-standalone',
+    text: 'PayPal 安全问题 recaptcha',
+    attrs: {
+      class: 'container-fluid captcha-overlay captcha-container',
+      'data-app': 'authchallenge_response',
+      'data-captcha-type': 'recaptcha',
+    },
+  });
+  const captchaFrame = createDomElement({
+    tagName: 'IFRAME',
+    attrs: {
+      src: 'https://www.paypalobjects.com/web/res/test/recaptcha/recaptcha_v2.html?siteKey=test',
+    },
+  });
+  captchaFrame.src = captchaFrame.getAttribute('src');
 
   function setElements(nextElements) {
     elements = nextElements;
     elementsById.clear();
     for (const element of nextElements) {
+      element.parentElement = null;
+      element.parentNode = null;
+      element.nextSibling = null;
+      element.isConnected = false;
       if (element.id) elementsById.set(element.id, element);
     }
+    nextElements.forEach((element, index) => {
+      element.parentElement = body;
+      element.parentNode = body;
+      element.nextSibling = nextElements[index + 1] || null;
+      element.isConnected = true;
+    });
   }
 
   function showGuestCheckout() {
@@ -511,7 +552,35 @@ function createHostedPayPalHarness(options = {}) {
     location.pathname = '/checkoutweb/blocked';
     body.innerText = 'You have been blocked. We couldn\'t load the security challenge.';
     body.textContent = body.innerText;
-    setElements([submitButton]);
+    setElements([]);
+  }
+
+  function showCaptchaOverlay() {
+    location.href = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+    location.host = 'www.paypal.com';
+    location.pathname = '/checkoutweb/signup';
+    body.innerText = 'Pay with debit or credit card. PayPal 安全问题 recaptcha';
+    body.textContent = body.innerText;
+    setElements([
+      captchaOverlay,
+      countrySelect,
+      emailInput,
+      phoneInput,
+      cardNumberInput,
+      cardExpiryInput,
+      cardCvvInput,
+      passwordInput,
+      firstNameInput,
+      lastNameInput,
+      billingLine1Input,
+      billingCityInput,
+      billingPostalCodeInput,
+      billingStateSelect,
+      submitButton,
+    ]);
+    captchaFrame.parentElement = captchaOverlay;
+    captchaFrame.parentNode = captchaOverlay;
+    captchaFrame.isConnected = true;
   }
 
   function showGuestCardError() {
@@ -543,12 +612,18 @@ function createHostedPayPalHarness(options = {}) {
         setAttribute(name, nextValue) {
           attrs.set(name, String(nextValue));
         },
+        contains(node) {
+          return elements.includes(node);
+        },
       },
       getElementById(id) {
         return elementsById.get(id) || null;
       },
       querySelector(selector) {
         const text = String(selector || '');
+        if (text === '#captcha-standalone') {
+          return elements.includes(captchaOverlay) ? captchaOverlay : null;
+        }
         if (text.includes('resend-link')) {
           return elements.includes(verificationResendButton) ? verificationResendButton : null;
         }
@@ -565,6 +640,12 @@ function createHostedPayPalHarness(options = {}) {
         if (text === 'input') return elements.filter((element) => element.tagName === 'INPUT');
         if (text === 'input[type="email"]') return elements.filter((element) => element.type === 'email');
         if (text === 'input[type="password"]') return elements.filter((element) => element.type === 'password');
+        if (text === '#captcha-standalone') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
+        if (text === '.captcha-overlay') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
+        if (text === '.captcha-container') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
+        if (text.includes('data-app') && text.includes('authchallenge')) return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
+        if (text.includes('data-captcha-type')) return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
+        if (text.includes('iframe') && text.includes('recaptcha')) return elements.includes(captchaFrame) ? [captchaFrame] : [];
         if (text.includes('button') || text.includes('[role="button"]')) {
           return elements.filter((element) => element.tagName === 'BUTTON');
         }
@@ -607,6 +688,38 @@ function createHostedPayPalHarness(options = {}) {
       events.push({ type: 'click', id: element.id, text: element.textContent });
     },
   };
+  body.appendChild = (node) => {
+    events.push({ type: 'append-child', id: node.id });
+    if (!elements.includes(node)) {
+      elements.push(node);
+    }
+    setElements(elements.slice());
+    return node;
+  };
+  body.insertBefore = (node, referenceNode) => {
+    events.push({ type: 'insert-before', id: node.id, before: referenceNode?.id || '' });
+    const withoutNode = elements.filter((element) => element !== node);
+    const index = referenceNode ? withoutNode.indexOf(referenceNode) : -1;
+    if (index >= 0) {
+      withoutNode.splice(index, 0, node);
+    } else {
+      withoutNode.push(node);
+    }
+    setElements(withoutNode);
+    return node;
+  };
+  body.removeChild = (node) => {
+    events.push({ type: 'remove-child', id: node.id });
+    const index = elements.indexOf(node);
+    if (index >= 0) {
+      elements.splice(index, 1);
+    }
+    node.parentElement = null;
+    node.parentNode = null;
+    node.isConnected = false;
+    setElements(elements.slice());
+    return node;
+  };
   context.window = context;
   context.window.getComputedStyle = (element) => element?.style || { display: 'block', visibility: 'visible', opacity: '1' };
 
@@ -624,6 +737,7 @@ function createHostedPayPalHarness(options = {}) {
     events,
     send,
     showBlockedPage,
+    showCaptchaOverlay,
     showGuestCardError,
     showPayEmail,
     showCreateAccount,
@@ -907,7 +1021,7 @@ test('PayPal hosted genericError URL is exposed as generic_error stage', async (
   assert.match(state.hostedGenericErrorMessage, /Things don'?t appear/);
 });
 
-test('PayPal hosted blocked page is exposed and does not click submit', async () => {
+test('PayPal hosted blocked page is treated as non-blocking unknown state', async () => {
   const harness = createHostedPayPalHarness();
   harness.showBlockedPage();
 
@@ -918,9 +1032,10 @@ test('PayPal hosted blocked page is exposed and does not click submit', async ()
   });
 
   assert.equal(state.ok, true);
-  assert.equal(state.hostedStage, 'blocked');
-  assert.equal(state.hostedBlocked, true);
-  assert.match(state.hostedBlockedMessage, /blocked|security challenge/i);
+  assert.equal(state.hostedStage, 'unknown');
+  assert.equal(state.hostedBlocked, false);
+  assert.equal(state.hostedSecurityChallengeVisible, true);
+  assert.equal(state.hostedSecurityChallengeSelector, 'body-text');
 
   const result = await harness.send({
     type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
@@ -929,10 +1044,62 @@ test('PayPal hosted blocked page is exposed and does not click submit', async ()
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.stage, 'blocked');
-  assert.equal(result.hostedBlocked, true);
+  assert.equal(result.stage, 'unknown');
   assert.equal(result.submitted, false);
   assert.equal(harness.events.some((event) => event.type === 'click'), false);
+});
+
+test('PayPal hosted captcha overlay is removed and checkout flow continues', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showCaptchaOverlay();
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'guest_checkout');
+  assert.equal(state.hostedBlocked, false);
+  assert.equal(state.hostedSecurityChallengeVisible, true);
+  assert.equal(state.hostedSecurityChallengeSelector, '#captcha-standalone');
+  assert.equal(state.hostedSecurityChallengeRemovable, true);
+  assert.equal(state.hostedSecurityChallengeRemoved, true);
+  assert.equal(state.hostedSecurityChallengeRestored, false);
+  assert.equal(harness.events.some((event) => event.type === 'remove' && event.id === 'captcha-standalone'), true);
+  assert.equal(harness.events.some((event) => event.type === 'insert-before' && event.id === 'captcha-standalone'), false);
+  assert.equal(harness.events.some((event) => event.type === 'append-child' && event.id === 'captcha-standalone'), false);
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      firstName: 'James',
+      lastName: 'Smith',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'guest_checkout');
+  assert.equal(result.submitted, true);
+  assert.equal(result.phoneMatched, true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
 });
 
 test('PayPal hosted guest checkout exposes card and phone errors', async () => {

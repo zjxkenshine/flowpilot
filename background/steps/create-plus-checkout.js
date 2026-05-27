@@ -2480,7 +2480,10 @@
           };
         }
       }
-      return pageState;
+      if (pageState?.hostedSecurityChallengeVisible) {
+        await logHostedSecurityChallengeProbeResult(options.stepKey || '', pageState);
+      }
+      return normalizeHostedSecurityChallengeState(pageState, options);
     }
 
     async function runHostedPayPalStep(tabId, payload = {}, options = {}) {
@@ -2512,7 +2515,13 @@
           };
         }
       }
-      return stepResult;
+      if (stepResult?.hostedSecurityChallengeVisible) {
+        await logHostedSecurityChallengeProbeResult(options.stepKey || stepResult.stepKey || '', stepResult);
+      }
+      return normalizeHostedSecurityChallengeState(stepResult, {
+        ...options,
+        expectedStage: payload.expectedStage || options.expectedStage || '',
+      });
     }
 
     function buildHostedVerificationResendLimitError() {
@@ -2676,8 +2685,55 @@
     }
 
     function isHostedCheckoutBlockedState(pageState = {}) {
-      return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_BLOCKED
-        || pageState?.hostedBlocked === true;
+      return (pageState?.hostedStage === PAYPAL_HOSTED_STAGE_BLOCKED || pageState?.hostedBlocked === true)
+        && !pageState?.hostedSecurityChallengeVisible;
+    }
+
+    async function logHostedSecurityChallengeProbeResult(stepKey, pageState = {}) {
+      if (!pageState?.hostedSecurityChallengeVisible) {
+        return;
+      }
+      const stepNumber = getHostedStepNumber(stepKey);
+      const selector = String(pageState.hostedSecurityChallengeSelector || 'unknown').trim();
+      const resultText = pageState.hostedSecurityChallengeRemoved
+        ? '已删除'
+        : (pageState.hostedSecurityChallengeRemovable ? '已尝试删除' : '删除失败或无可删除容器');
+      const errorText = String(pageState.hostedSecurityChallengeError || '').trim();
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${stepNumber}：检测到 PayPal 安全挑战（${selector}），${resultText}，流程继续${errorText ? `。异常：${errorText}` : ''}。`,
+        'warn'
+      );
+    }
+
+    function getHostedStageForStepKey(stepKey = '') {
+      switch (String(stepKey || '').trim()) {
+        case PAYPAL_HOSTED_STEP_EMAIL:
+          return PAYPAL_HOSTED_STAGE_LOGIN;
+        case PAYPAL_HOSTED_STEP_CARD:
+          return PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
+        case PAYPAL_HOSTED_STEP_CREATE_ACCOUNT:
+          return PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
+        case PAYPAL_HOSTED_STEP_REVIEW:
+          return PAYPAL_HOSTED_STAGE_REVIEW;
+        default:
+          return '';
+      }
+    }
+
+    function normalizeHostedSecurityChallengeState(pageState = {}, options = {}) {
+      if (!pageState?.hostedSecurityChallengeVisible) {
+        return pageState || {};
+      }
+      const normalizedStage = pageState.hostedStage === PAYPAL_HOSTED_STAGE_BLOCKED
+        ? String(options.expectedStage || getHostedStageForStepKey(options.stepKey) || PAYPAL_HOSTED_STAGE_UNKNOWN).trim()
+        : pageState.hostedStage;
+      return {
+        ...pageState,
+        hostedStage: normalizedStage,
+        hostedBlocked: false,
+        hostedBlockedMessage: '',
+      };
     }
 
     function buildHostedCheckoutBlockedError(pageState = {}) {
@@ -2908,7 +2964,7 @@
         }
         let pageState = null;
         try {
-          pageState = await getHostedPayPalState(tabId);
+          pageState = await getHostedPayPalState(tabId, options);
           if (isHostedCheckoutPlusActivationResolved(pageState)) {
             return pageState;
           }
@@ -2954,6 +3010,7 @@
         ? options.predicate
         : (stateInfo) => stateInfo?.hostedStage && stateInfo.hostedStage !== normalizedPreviousStage;
       const stageChangePromise = waitForHostedPayPalStage(tabId, predicate, {
+        ...options,
         label,
         timeoutMs: options.timeoutMs || HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS,
         intervalMs: options.intervalMs || 500,
@@ -2961,7 +3018,7 @@
         (nextState) => ({ type: 'stage-change', nextState }),
         (error) => ({ type: 'stage-error', error })
       );
-      const actionPromise = runHostedPayPalStep(tabId, payload).then(
+      const actionPromise = runHostedPayPalStep(tabId, payload, options).then(
         (result) => ({ type: 'action', result }),
         (error) => ({ type: 'action-error', error })
       );
@@ -3169,7 +3226,7 @@
         return;
       }
 
-      const pageState = await getHostedPayPalState(tabId);
+      const pageState = await getHostedPayPalState(tabId, { stepKey });
       if (isHostedCheckoutPlusActivationResolved(pageState)) {
         return;
       }
@@ -3189,7 +3246,7 @@
       const { nextState, completedByStageChange } = await runHostedPayPalStepAndWaitForStageChange(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_LOGIN,
         email: profile.email,
-      }, PAYPAL_HOSTED_STAGE_LOGIN, { label: `步骤 ${stepNumber}：等待 PayPal 邮箱页跳转` });
+      }, PAYPAL_HOSTED_STAGE_LOGIN, { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 邮箱页跳转` });
       if (completedByStageChange) {
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：已检测到 PayPal 进入后续页面（${nextState.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN}），邮箱节点直接完成。`, 'info');
       }
@@ -3229,6 +3286,7 @@
         }
 
         let pageState = await getHostedPayPalState(tabId, {
+          stepKey,
           completionPayload: {
             plusHostedCheckoutLastStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
           },
@@ -3245,6 +3303,7 @@
             : `手动手机号 ${maskHostedPhoneForLog(reviewConfig.phone)}`,
         });
         if (isHostedCheckoutBlockedState(pageState)) {
+          await logHostedSecurityChallengeProbeResult(stepKey, pageState);
           throw buildHostedCheckoutBlockedError(pageState);
         }
         if (pageState.hostedGuestPhoneError) {
@@ -3261,6 +3320,7 @@
           };
           hostedProfileSubmitted = true;
           pageState = await getHostedPayPalState(tabId, {
+            stepKey,
             completionPayload: {
               plusHostedCheckoutLastStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
             },
@@ -3269,6 +3329,7 @@
             return;
           }
           if (isHostedCheckoutBlockedState(pageState)) {
+            await logHostedSecurityChallengeProbeResult(stepKey, pageState);
             throw buildHostedCheckoutBlockedError(pageState);
           }
         }
@@ -3284,7 +3345,7 @@
               }
               return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
             },
-            { label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
+            { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
           );
           if (isHostedCheckoutPlusActivationResolved(nextState)) {
             return;
@@ -3313,7 +3374,7 @@
             ...profile,
             expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
             phone: profile.phone,
-          });
+          }, { stepKey });
         if (cardResult?.phoneMatched) {
           await addHostedStepLog(
             stepKey,
@@ -3330,6 +3391,7 @@
               return true;
             }
             if (isHostedCheckoutBlockedState(stateInfo)) {
+              await logHostedSecurityChallengeProbeResult(stepKey, stateInfo);
               throw buildHostedCheckoutBlockedError(stateInfo);
             }
             if (stateInfo?.hostedGuestPhoneError) {
@@ -3373,7 +3435,7 @@
                 ...profile,
                 expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
                 phone: profile.phone,
-              });
+              }, { stepKey });
               hostedProfileSubmitted = true;
               hostedGuestCardErrorRetrySettlingUntil = Date.now() + HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS;
               return false;
@@ -3383,7 +3445,7 @@
             }
             return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
           },
-          { label: `步骤 ${stepNumber}：等待 PayPal 资料页跳转` }
+          { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 资料页跳转` }
         );
         if (isHostedCheckoutPlusActivationResolved(nextState)) {
           return;
@@ -3414,7 +3476,7 @@
         return;
       }
 
-      const pageState = await getHostedPayPalState(tabId);
+      const pageState = await getHostedPayPalState(tabId, { stepKey });
       if (isHostedCheckoutPlusActivationResolved(pageState)) {
         return;
       }
@@ -3430,7 +3492,7 @@
             }
             return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
           },
-          { label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
+          { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
         );
         await completeHostedStep(stepKey, tabId, {
           plusHostedCheckoutLastStage: nextState.hostedStage || '',
@@ -3452,7 +3514,7 @@
       await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在确认创建 PayPal 账号。`, 'info');
       await runHostedPayPalStep(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
-      });
+      }, { stepKey });
       const nextState = await waitForHostedPayPalStage(
         tabId,
         async (stateInfo) => {
@@ -3464,7 +3526,7 @@
           }
           return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
         },
-        { label: `步骤 ${stepNumber}：等待 PayPal 创建确认页跳转` }
+        { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 创建确认页跳转` }
       );
       if (isHostedCheckoutPlusActivationResolved(nextState)) {
         return;
@@ -3491,7 +3553,7 @@
         return;
       }
 
-      const pageState = await getHostedPayPalState(tabId);
+      const pageState = await getHostedPayPalState(tabId, { stepKey });
       if (isHostedCheckoutPlusActivationResolved(pageState)) {
         return;
       }
@@ -3513,7 +3575,7 @@
       await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在确认 PayPal 授权复核页。`, 'info');
       await runHostedPayPalStep(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_REVIEW,
-      });
+      }, { stepKey });
       await waitForHostedPayPalStage(
         tabId,
         async (stateInfo) => {
@@ -3525,7 +3587,7 @@
           }
           return Boolean(stateInfo?.successUrl || stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_OUTSIDE);
         },
-        { label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
+        { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
       );
       if (!await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
         throw new Error(`步骤 ${stepNumber}：PayPal 授权后未检测到 ChatGPT 支付成功页。`);

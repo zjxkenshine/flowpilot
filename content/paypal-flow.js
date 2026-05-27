@@ -10,7 +10,6 @@ const PAYPAL_HOSTED_STAGE_VERIFICATION = 'verification';
 const PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT = 'create_account';
 const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
 const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
-const PAYPAL_HOSTED_STAGE_BLOCKED = 'blocked';
 const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
 const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
 const PAYPAL_HOSTED_STEP_KEYS = {
@@ -19,6 +18,16 @@ const PAYPAL_HOSTED_STEP_KEYS = {
   [PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT]: 'paypal-hosted-create-account',
   [PAYPAL_HOSTED_STAGE_REVIEW]: 'paypal-hosted-review',
 };
+const PAYPAL_HOSTED_SECURITY_CHALLENGE_SELECTORS = [
+  '#captcha-standalone',
+  '.captcha-overlay',
+  '.captcha-container',
+  '[data-app*="authchallenge"]',
+  '[data-captcha-type]',
+  'iframe[src*="recaptcha"]',
+];
+const paypalHostedSecurityChallengeProbeResults = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+let paypalHostedSecurityChallengeLastProbeResult = null;
 
 if (document.documentElement.getAttribute(PAYPAL_FLOW_LISTENER_SENTINEL) !== '1') {
   document.documentElement.setAttribute(PAYPAL_FLOW_LISTENER_SENTINEL, '1');
@@ -317,21 +326,185 @@ function hasPayPalHostedGuestPhoneError() {
   return Boolean(getPayPalHostedGuestPhoneErrorMessage());
 }
 
-function getPayPalHostedBlockedMessage() {
+function getPayPalHostedSecurityChallengeText() {
   const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
-  const match = bodyText.match(
-    /You\s+have\s+been\s+blocked\.?|We\s+couldn['\u2019]?t\s+load\s+the\s+security\s+challenge\.?|security\s+challenge\s+(?:couldn['\u2019]?t|could\s+not)\s+load/i
+  const directMatch = bodyText.match(
+    /安全问题|security\s+challenge|You\s+have\s+been\s+blocked\.?|We\s+couldn['\u2019]?t\s+load\s+the\s+security\s+challenge\.?/i
   );
-  return match ? match[0] : '';
+  if (directMatch) {
+    return directMatch[0];
+  }
+  const captchaMatch = bodyText.match(/captcha|recaptcha/i);
+  const challengeContextMatch = bodyText.match(/challenge|security|authchallenge|安全|验证/i);
+  return captchaMatch && challengeContextMatch ? captchaMatch[0] : '';
 }
 
-function isPayPalHostedBlockedPage() {
-  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
-  return Boolean(getPayPalHostedBlockedMessage())
-    || (
-      /you\s+have\s+been\s+blocked/i.test(bodyText)
-      && /security\s+challenge/i.test(bodyText)
-    );
+function isPayPalHostedSecurityChallengeElement(el) {
+  if (!el || el.nodeType !== 1) {
+    return false;
+  }
+  const id = String(el.id || el.getAttribute?.('id') || '').trim();
+  const className = String(el.className || el.getAttribute?.('class') || '').trim();
+  const dataApp = String(el.getAttribute?.('data-app') || '').trim();
+  const captchaType = String(el.getAttribute?.('data-captcha-type') || '').trim();
+  const tagName = String(el.tagName || '').trim().toLowerCase();
+  const src = String(el.src || el.getAttribute?.('src') || '').trim();
+  return id === 'captcha-standalone'
+    || /\bcaptcha-overlay\b/i.test(className)
+    || /\bcaptcha-container\b/i.test(className)
+    || /authchallenge/i.test(dataApp)
+    || Boolean(captchaType)
+    || (tagName === 'iframe' && /recaptcha/i.test(src));
+}
+
+function describePayPalHostedSecurityChallengeSelector(el, fallbackSelector = '') {
+  if (!el || el.nodeType !== 1) {
+    return String(fallbackSelector || '').trim();
+  }
+  const id = String(el.id || el.getAttribute?.('id') || '').trim();
+  const className = String(el.className || el.getAttribute?.('class') || '').trim();
+  const tagName = String(el.tagName || '').trim().toLowerCase();
+  const src = String(el.src || el.getAttribute?.('src') || '').trim();
+  if (id) {
+    return `#${id}`;
+  }
+  if (/\bcaptcha-overlay\b/i.test(className)) {
+    return '.captcha-overlay';
+  }
+  if (/\bcaptcha-container\b/i.test(className)) {
+    return '.captcha-container';
+  }
+  if (/authchallenge/i.test(String(el.getAttribute?.('data-app') || ''))) {
+    return '[data-app*="authchallenge"]';
+  }
+  if (el.getAttribute?.('data-captcha-type')) {
+    return '[data-captcha-type]';
+  }
+  if (tagName === 'iframe' && /recaptcha/i.test(src)) {
+    return 'iframe[src*="recaptcha"]';
+  }
+  return String(fallbackSelector || '').trim() || tagName || 'unknown';
+}
+
+function resolvePayPalHostedSecurityChallengeRoot(el) {
+  let node = el;
+  while (node && node.nodeType === 1 && node !== document.body) {
+    if (
+      isPayPalHostedSecurityChallengeElement(node)
+      && String(node.tagName || '').trim().toLowerCase() !== 'iframe'
+    ) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return el;
+}
+
+function findPayPalHostedSecurityChallengeOverlay() {
+  for (const selector of PAYPAL_HOSTED_SECURITY_CHALLENGE_SELECTORS) {
+    let matches = [];
+    try {
+      matches = Array.from(document.querySelectorAll(selector) || []);
+    } catch {
+      matches = [];
+    }
+    const visibleMatch = matches.find((node) => isPayPalHostedSecurityChallengeElement(node) && isVisibleElement(node));
+    if (visibleMatch) {
+      const root = resolvePayPalHostedSecurityChallengeRoot(visibleMatch);
+      return {
+        element: root,
+        selector: describePayPalHostedSecurityChallengeSelector(root, selector),
+      };
+    }
+  }
+  return null;
+}
+
+function isPayPalHostedSecurityChallengeNodeConnected(node) {
+  if (!node) {
+    return false;
+  }
+  if (typeof node.isConnected === 'boolean') {
+    return node.isConnected;
+  }
+  if (document.documentElement && typeof document.documentElement.contains === 'function') {
+    return document.documentElement.contains(node);
+  }
+  let current = node;
+  while (current) {
+    if (current === document.body || current === document.documentElement) {
+      return true;
+    }
+    current = current.parentNode || current.parentElement;
+  }
+  return false;
+}
+
+function buildPayPalHostedSecurityChallengeProbeDefaults(overrides = {}) {
+  return {
+    hostedSecurityChallengeVisible: false,
+    hostedSecurityChallengeSelector: '',
+    hostedSecurityChallengeRestored: false,
+    hostedSecurityChallengeRemovable: false,
+    hostedSecurityChallengeRemoved: false,
+    hostedSecurityChallengeError: '',
+    ...overrides,
+  };
+}
+
+function probePayPalHostedSecurityChallengeOverlay() {
+  const target = findPayPalHostedSecurityChallengeOverlay();
+  if (!target?.element) {
+    const textSignal = getPayPalHostedSecurityChallengeText();
+    if (textSignal) {
+      const previousResult = paypalHostedSecurityChallengeLastProbeResult || {};
+      return buildPayPalHostedSecurityChallengeProbeDefaults({
+        hostedSecurityChallengeVisible: true,
+        hostedSecurityChallengeSelector: previousResult.hostedSecurityChallengeSelector || 'body-text',
+        hostedSecurityChallengeRemovable: Boolean(previousResult.hostedSecurityChallengeRemovable),
+        hostedSecurityChallengeRemoved: Boolean(previousResult.hostedSecurityChallengeRemoved),
+        hostedSecurityChallengeError: previousResult.hostedSecurityChallengeError || '检测到安全挑战文本，但未找到可探测的安全层容器。',
+      });
+    }
+    return buildPayPalHostedSecurityChallengeProbeDefaults();
+  }
+
+  const node = target.element;
+  if (paypalHostedSecurityChallengeProbeResults?.has(node)) {
+    return paypalHostedSecurityChallengeProbeResults.get(node);
+  }
+
+  const selector = target.selector || describePayPalHostedSecurityChallengeSelector(node);
+  const parent = node.parentNode || node.parentElement;
+  let removable = false;
+  let removed = false;
+  let error = '';
+
+  try {
+    if (typeof node.remove === 'function') {
+      node.remove();
+    } else if (parent && typeof parent.removeChild === 'function') {
+      parent.removeChild(node);
+    } else {
+      throw new Error('当前页面不支持删除安全层容器。');
+    }
+    removed = !isPayPalHostedSecurityChallengeNodeConnected(node);
+    removable = removed;
+  } catch (err) {
+    error = err?.message || String(err || '安全层删除失败。');
+  }
+
+  const result = buildPayPalHostedSecurityChallengeProbeDefaults({
+    hostedSecurityChallengeVisible: true,
+    hostedSecurityChallengeSelector: selector,
+    hostedSecurityChallengeRestored: false,
+    hostedSecurityChallengeRemovable: removable,
+    hostedSecurityChallengeRemoved: removed,
+    hostedSecurityChallengeError: error,
+  });
+  paypalHostedSecurityChallengeProbeResults?.set(node, result);
+  paypalHostedSecurityChallengeLastProbeResult = result;
+  return result;
 }
 
 function findHostedVerificationInputs() {
@@ -409,11 +582,9 @@ function detectPayPalHostedStage() {
   if (!/paypal\./i.test(String(location?.host || ''))) {
     return PAYPAL_HOSTED_STAGE_OUTSIDE;
   }
+  probePayPalHostedSecurityChallengeOverlay();
   if (hasHostedVerificationInputs()) {
     return PAYPAL_HOSTED_STAGE_VERIFICATION;
-  }
-  if (isPayPalHostedBlockedPage()) {
-    return PAYPAL_HOSTED_STAGE_BLOCKED;
   }
   if (isPayPalHostedGenericErrorPage()) {
     return PAYPAL_HOSTED_STAGE_GENERIC_ERROR;
@@ -781,18 +952,6 @@ async function clickHostedReviewConsent() {
 
 async function runPayPalHostedCheckoutStep(payload = {}) {
   const stage = detectPayPalHostedStage();
-  if (stage === PAYPAL_HOSTED_STAGE_BLOCKED) {
-    return {
-      stage,
-      submitted: false,
-      hostedBlocked: true,
-      hostedBlockedMessage: getPayPalHostedBlockedMessage(),
-      hostedGuestCardError: hasPayPalHostedGuestCardError(),
-      hostedGuestCardErrorMessage: getPayPalHostedGuestCardErrorMessage(),
-      hostedGuestPhoneError: hasPayPalHostedGuestPhoneError(),
-      hostedGuestPhoneErrorMessage: getPayPalHostedGuestPhoneErrorMessage(),
-    };
-  }
   if (stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR) {
     return {
       stage,
@@ -854,6 +1013,7 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
 function inspectPayPalHostedState() {
   const stage = detectPayPalHostedStage();
   const createAccountButton = findHostedCreateAccountButton();
+  const securityChallengeProbe = probePayPalHostedSecurityChallengeOverlay();
   return {
     url: location.href,
     readyState: document.readyState,
@@ -865,8 +1025,9 @@ function inspectPayPalHostedState() {
     hostedVerificationInvalidCode: hasHostedInvalidVerificationCodeError(),
     hostedVerificationErrorText: getHostedVerificationErrorText(),
     hostedVerificationResendReady: Boolean(findHostedVerificationResendButton()),
-    hostedBlocked: stage === PAYPAL_HOSTED_STAGE_BLOCKED,
-    hostedBlockedMessage: getPayPalHostedBlockedMessage(),
+    hostedBlocked: false,
+    hostedBlockedMessage: '',
+    ...securityChallengeProbe,
     hostedGenericError: stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
     hostedGenericErrorMessage: getPayPalHostedGenericErrorMessage(),
     hostedGuestCardError: hasPayPalHostedGuestCardError(),
