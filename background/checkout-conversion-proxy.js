@@ -438,6 +438,63 @@ function FindProxyForURL(url, host) {
       await clearCheckoutProxySettings();
     }
 
+    function build711TemporaryPoolDirectRouteError(error, details = {}) {
+      const baseMessage = error?.message || String(error || '711 temporary pool API request failed');
+      const directMessage = details.directApplied
+        ? '711 temporary pool API request used Chrome direct.'
+        : '711 temporary pool API request did not reach Chrome direct before failing.';
+      const restoreMessage = details.restoreError
+        ? `Proxy restore failed: ${details.restoreError?.message || String(details.restoreError)}.`
+        : 'Proxy restore succeeded.';
+      const wrapped = new Error(`${baseMessage} ${directMessage} ${restoreMessage}`);
+      try {
+        wrapped.cause = error;
+      } catch {
+        // cause is best-effort for older runtimes.
+      }
+      return wrapped;
+    }
+
+    async function pull711TemporaryPoolFromApiDirect(poolState = {}, options = {}) {
+      const previousProxySettings = await getCheckoutProxySettings({ incognito: false }).catch((error) => {
+        throw build711TemporaryPoolDirectRouteError(error, {
+          directApplied: false,
+          restoreError: null,
+        });
+      });
+      let directApplied = false;
+      let operationError = null;
+      let pool = null;
+
+      try {
+        await setCheckoutProxySettings({ mode: 'direct' });
+        directApplied = true;
+        pool = await pullIpProxyPoolFromApi(poolState, options);
+      } catch (error) {
+        operationError = error;
+      }
+
+      let restoreError = null;
+      try {
+        await restoreCheckoutProxySettingsFromSnapshot(previousProxySettings);
+      } catch (error) {
+        restoreError = error;
+      }
+
+      if (operationError) {
+        throw build711TemporaryPoolDirectRouteError(operationError, {
+          directApplied,
+          restoreError,
+        });
+      }
+      if (restoreError) {
+        throw new Error(
+          `711 temporary pool API request used Chrome direct and succeeded, but proxy restore failed: ${restoreError?.message || String(restoreError)}`
+        );
+      }
+      return pool;
+    }
+
     async function defaultApplyCheckoutScopedProxyFromUrl(proxyUrl) {
       const entry = parseCheckoutConversionProxyUrl(proxyUrl);
       if (!entry) {
@@ -877,7 +934,7 @@ function FindProxyForURL(url, host) {
         ipProxyMode: 'api',
         ipProxyApiUrl: temporaryPoolState.apiUrl,
       };
-      const pool = await pullIpProxyPoolFromApi(poolState, {
+      const pool = await pull711TemporaryPoolFromApiDirect(poolState, {
         maxItems: Number(options?.maxItems) || 100,
         timeoutMs: options?.timeoutMs,
       });
@@ -1199,7 +1256,7 @@ function FindProxyForURL(url, host) {
           ipProxyMode: 'api',
           ipProxyApiUrl: temporaryPoolState.apiUrl,
         };
-        const pool = await pullIpProxyPoolFromApi(poolState, {
+        const pool = await pull711TemporaryPoolFromApiDirect(poolState, {
           maxItems: Number(options?.maxItems) || 100,
           timeoutMs: options?.timeoutMs,
         });

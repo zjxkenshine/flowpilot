@@ -479,7 +479,7 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
   assert.equal(events.some((event) => event.type === 'proxy-apply'), false);
 });
 
-test('Classic PayPal checkout create applies conversion proxy after checkout page is ready', async () => {
+test('Classic PayPal checkout create applies conversion proxy before opening checkout link', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info') => {
@@ -556,6 +556,9 @@ test('Classic PayPal checkout create applies conversion proxy after checkout pag
   });
 
   const updateIndex = events.findIndex((event) => event.type === 'tab-update');
+  const createCheckoutIndex = events.findIndex((event) => (
+    event.type === 'tab-message' && event.message?.type === 'CREATE_PLUS_CHECKOUT'
+  ));
   const readyIndexes = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => event.type === 'ready')
@@ -568,17 +571,20 @@ test('Classic PayPal checkout create applies conversion proxy after checkout pag
   const completeIndex = events.findIndex((event) => event.type === 'complete');
 
   assert.ok(updateIndex > -1);
+  assert.ok(createCheckoutIndex > -1);
   assert.ok(readyIndexes.length >= 2);
+  assert.ok(applyIndex > createCheckoutIndex);
+  assert.ok(applyIndex < updateIndex);
   assert.ok(amountCheckIndex > readyIndexes[readyIndexes.length - 1]);
-  assert.ok(applyIndex > amountCheckIndex);
-  assert.ok(setStateIndex > applyIndex);
+  assert.ok(amountCheckIndex > updateIndex);
+  assert.ok(setStateIndex > amountCheckIndex);
   assert.ok(completeIndex > setStateIndex);
   assert.equal(events[applyIndex].proxyUrl, 'http://proxy.example:8080');
   assert.equal(events[applyIndex].options.flowType, 'classic-paypal');
   assert.equal(events[applyIndex].options.releaseNodeKey, 'paypal-approve');
   assert.equal(events[applyIndex].options.appliedStepKey, 'plus-checkout-create');
   assert.equal(
-    events.some((event) => event.type === 'log' && /Plus Checkout 页面打开后已启用支付转换代理/.test(event.message)),
+    events.some((event) => event.type === 'log' && /跳转 Plus Checkout 链接前已启用支付转换代理/.test(event.message)),
     true
   );
 });
@@ -1028,6 +1034,7 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
     pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
   };
   const poolCalls = [];
+  const proxyModeWrites = [];
   const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
     chrome: {
       runtime: {},
@@ -1039,6 +1046,7 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
           }),
           set: (details, callback) => {
             currentProxyValue = details.value;
+            proxyModeWrites.push(details.value?.mode || '');
             callback();
           },
           clear: (_details, callback) => {
@@ -1065,6 +1073,7 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
     validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
     build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
     pullIpProxyPoolFromApi: async (poolState) => {
+      assert.equal(currentProxyValue.mode, 'direct');
       poolCalls.push(poolState);
       return [{
         protocol: 'http',
@@ -1108,6 +1117,7 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
   assert.equal(poolCalls.length, 1);
   assert.equal(poolCalls[0].ipProxyService, '711proxy');
   assert.match(poolCalls[0].ipProxyApiUrl, /region=US/);
+  assert.deepStrictEqual(proxyModeWrites.slice(0, 3), ['direct', 'pac_script', 'fixed_servers']);
 
   const cancelResult = await manager.cancelManualSession(state);
   assert.equal(cancelResult.cancelled, true);
@@ -1122,6 +1132,238 @@ test('checkout conversion proxy 711 temporary pool manual switch pulls fresh poo
     username: 'baseline-user',
     password: 'baseline-pass',
   });
+});
+
+test('checkout conversion proxy 711 temporary pool refresh uses direct and restores fixed servers before applying candidate', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    ipProxyAutoRefreshPoolOnExhausted: true,
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=US&proto=http&stype=text',
+      },
+    },
+    plusCheckoutConversionProxyManualSession: {
+      active: true,
+      mode: 'manual',
+      source: '711proxy_pool',
+      provider: '711proxy',
+      proxyUrl: 'http://old-user:old-pass@proxy-old.example:8001',
+      displayName: 'http://proxy-old.example:8001',
+      requestedRegion: 'US',
+      resolvedRegion: 'US',
+      selectedEntryDisplayName: 'http://proxy-old.example:8001',
+      entry: {
+        protocol: 'http',
+        host: 'proxy-old.example',
+        port: 8001,
+        username: 'old-user',
+        password: 'old-pass',
+      },
+      pool: [{
+        protocol: 'http',
+        host: 'proxy-old.example',
+        port: 8001,
+        username: 'old-user',
+        password: 'old-pass',
+      }],
+      candidateIndex: 0,
+      poolSize: 1,
+      exitIp: '203.0.113.10',
+      exitRegion: 'US',
+      baseSnapshot: {
+        applied: true,
+        entry: {
+          protocol: 'http',
+          host: 'proxy-old.example',
+          port: 8001,
+          username: 'old-user',
+          password: 'old-pass',
+        },
+        previousProxySettings: {
+          value: {
+            mode: 'direct',
+          },
+        },
+        previousAuthEntry: null,
+      },
+      appliedAt: 100,
+      lastSwitchedAt: 100,
+    },
+  };
+  let authEntry = {
+    host: 'proxy-old.example',
+    port: 8001,
+    username: 'old-user',
+    password: 'old-pass',
+  };
+  let currentProxyValue = {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'http',
+        host: 'proxy-old.example',
+        port: 8001,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  };
+  const proxyWrites = [];
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            proxyWrites.push(details.value);
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            proxyWrites.push(null);
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    installIpProxyAuthListener: () => {},
+    installIpProxyErrorListener: () => {},
+    getCurrentIpProxyAuthEntry: () => authEntry,
+    setCurrentIpProxyAuthEntry: (entry) => {
+      authEntry = entry;
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async () => {
+      assert.equal(currentProxyValue.mode, 'direct');
+      return [{
+        protocol: 'http',
+        host: 'proxy-fresh.example',
+        port: 8002,
+        username: 'fresh-user',
+        password: 'fresh-pass',
+      }];
+    },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '203.0.113.20',
+      region: 'US',
+      source: 'page_context',
+      endpoint: 'https://chatgpt.com/cdn-cgi/trace',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'page_context',
+    }),
+  });
+
+  const result = await manager.switchManualSessionToNext711Proxy({
+    state,
+    source: '711proxy_pool',
+    proxy711Region: 'US',
+  });
+
+  assert.equal(result.switched, true);
+  assert.equal(result.session.entry.host, 'proxy-fresh.example');
+  assert.equal(proxyWrites[0].mode, 'direct');
+  assert.equal(proxyWrites[1].mode, 'fixed_servers');
+  assert.equal(proxyWrites[1].rules.singleProxy.host, 'proxy-old.example');
+  assert.equal(proxyWrites[2].mode, 'fixed_servers');
+  assert.equal(proxyWrites[2].rules.singleProxy.host, 'proxy-fresh.example');
+});
+
+test('checkout conversion proxy 711 temporary pool pull failure restores proxy and reports direct route diagnostics', async () => {
+  let state = {
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'US',
+    plusCheckoutConversionProxyManualSession: null,
+    ipProxyServiceProfiles: {
+      '711proxy': {
+        mode: 'api',
+        apiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=2&region=US&proto=http&stype=text',
+      },
+    },
+  };
+  let currentProxyValue = {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: {
+        scheme: 'http',
+        host: 'proxy-active.example',
+        port: 8001,
+      },
+      bypassList: ['<local>', 'localhost', '127.0.0.1'],
+    },
+  };
+  const proxyWrites = [];
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: currentProxyValue,
+          }),
+          set: (details, callback) => {
+            proxyWrites.push(details.value);
+            currentProxyValue = details.value;
+            callback();
+          },
+          clear: (_details, callback) => {
+            proxyWrites.push(null);
+            currentProxyValue = null;
+            callback();
+          },
+        },
+      },
+    },
+    getState: async () => ({ ...state }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    normalizeIpProxyServiceProfiles: (profiles) => profiles,
+    normalizeIpProxyServiceProfile: (profile) => profile,
+    buildIpProxyServiceProfileFromState: (input) => input.ipProxyServiceProfiles?.['711proxy'] || {},
+    normalizeIpProxyCountryCode: (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+    validate711ProxyApiConfig: ({ apiUrl }) => ({ valid: true, config: { apiUrl, region: 'US' } }),
+    build711ProxyApiUrl: (_apiUrl, config = {}) => `http://global.rotgbapi.711proxy.com:8089/gen?region=${config.region || ''}`,
+    pullIpProxyPoolFromApi: async () => {
+      assert.equal(currentProxyValue.mode, 'direct');
+      throw new Error('711 upstream denied');
+    },
+  });
+
+  await assert.rejects(
+    () => manager.switchManualSession({ state, source: '711proxy_pool', proxy711Region: 'US' }),
+    (error) => {
+      assert.match(error.message, /711 upstream denied/);
+      assert.match(error.message, /Chrome direct/);
+      assert.match(error.message, /Proxy restore succeeded/);
+      return true;
+    }
+  );
+
+  assert.equal(proxyWrites[0].mode, 'direct');
+  assert.equal(proxyWrites[1].mode, 'fixed_servers');
+  assert.equal(proxyWrites[1].rules.singleProxy.host, 'proxy-active.example');
+  assert.equal(currentProxyValue.mode, 'fixed_servers');
+  assert.equal(currentProxyValue.rules.singleProxy.host, 'proxy-active.example');
 });
 
 test('checkout conversion proxy 711 next switches stored pool index and preserves base snapshot', async () => {
