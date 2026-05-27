@@ -47,6 +47,7 @@
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_DEFAULT = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
   const HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
+  const HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
   const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
@@ -3004,8 +3005,8 @@
           continue;
         }
         if (isHostedCheckoutOpenAiAddressErrorState(pageState)) {
-          if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS) {
-            throw new Error(`Step 6: hosted checkout address validation failed ${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`);
+          if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS) {
+            throw new Error(`Step 6: hosted checkout address validation failed ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`);
           }
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
@@ -3015,7 +3016,7 @@
             address: retryAddress,
           };
           await addLog(
-            `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
+            `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
             'warn'
           );
           await persistHostedGuestProfile(currentProfile);
