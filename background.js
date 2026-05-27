@@ -1475,6 +1475,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
+  plusCheckoutConversionProxyExitCheck: null,
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutSmsPoolAutoDisableEnabled: false,
   hostedCheckoutFirstDirectResendEnabled: false,
@@ -10441,6 +10442,11 @@ function isHostedCheckoutVerificationResendLimitFailure(error) {
   return /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::|PayPal 验证码自动 Resend 重试已达到上限|请尝试在页面手动获取验证码并填入/i.test(message);
 }
 
+function isHostedCheckoutCardFallbackFailure(error) {
+  const message = getErrorMessage(error);
+  return /HOSTED_CHECKOUT_CARD_FALLBACK::|hosted checkout[\s\S]*(?:\u843d\u5230|\u8fdb\u5165|entered)[\s\S]*(?:\u94f6\u884c\u5361|card)[\s\S]*(?:\u5206\u652f|branch|payment)|\u672a\u8fdb\u5165\s*PayPal|\u672a\u8df3\u8f6c\u5230\s*PayPal|instead\s+of\s+PayPal/i.test(message);
+}
+
 function isCloudCheckoutAlreadyPaidFailure(error) {
   const message = getErrorMessage(error);
   return /\buser\s+is\s+already\s+paid\b|already\s+(?:paid|subscribed)|already\s+has\s+(?:an?\s+)?(?:active\s+)?subscription|(?:账号|账户)[\s\S]*(?:已|已经)[\s\S]*(?:付费|订阅|开通)|该账号已经开通过\s*ChatGPT\s*订阅套餐/i.test(message);
@@ -14127,6 +14133,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   hasSavedNodeProgress,
   isAddPhoneAuthFailure,
   isCloudCheckoutAlreadyPaidFailure,
+  isHostedCheckoutCardFallbackFailure,
   isPhoneSmsPlatformRateLimitFailure,
   isPlusCheckoutNonFreeTrialFailure,
   isGpcTaskEndedFailure,
@@ -15476,6 +15483,7 @@ const checkoutConversionProxyManager = self.MultiPageBackgroundCheckoutConversio
   chrome,
   getState,
   setState,
+  broadcastDataUpdate,
   detectProxyExitInfoByPageContext,
   detectProxyExitInfoByBackgroundFetch,
   detectIpProxyTargetReachabilityByPageContext,

@@ -657,6 +657,8 @@ test('sidepanel checkout conversion proxy next button sends 711 message and sync
     extractFunction('getSelectedPlusCheckoutConversionProxySource'),
     extractFunction('getCurrentPlusCheckoutConversionProxy711Region'),
     extractFunction('setPlusCheckoutConversionProxyTestResult'),
+    extractFunction('formatPlusCheckoutConversionProxyExitCheckTime'),
+    extractFunction('renderPlusCheckoutConversionProxyExitCheck'),
     extractFunction('setPlusCheckoutConversionProxyButtonsBusy'),
     extractFunction('renderPlusCheckoutConversionProxyRuntimeStatus'),
     extractFunction('handlePlusCheckoutConversionProxyNext711'),
@@ -688,6 +690,15 @@ const displayPlusCheckoutConversionProxyRuntimeStatus = {
   title: '',
   classList: { remove() {}, add() {} },
 };
+const displayPlusCheckoutConversionProxyExitCheck = {
+  textContent: '',
+  title: '',
+  classes: new Set(),
+  classList: {
+    remove(...items) { items.forEach((item) => displayPlusCheckoutConversionProxyExitCheck.classes.delete(item)); },
+    add(item) { displayPlusCheckoutConversionProxyExitCheck.classes.add(item); },
+  },
+};
 function normalizePlusCheckoutConversionProxyUrlValue(value = '') { return String(value || '').trim(); }
 function buildCurrentIpProxyActionStateOverride() { return { ipProxyAutoRefreshPoolOnExhausted: true }; }
 function syncLatestState(patch) { latestState = { ...latestState, ...patch }; }
@@ -707,6 +718,13 @@ async function sendRuntimeMessageWithTimeout(message) {
       displayName: 'http://proxy-b.example:8002',
       requestedRegion: 'US',
     },
+    plusCheckoutConversionProxyExitCheck: {
+      status: 'success',
+      exitIp: '203.0.113.20',
+      exitRegion: 'US',
+      exitSource: 'page_context',
+      checkedAt: 1700000000000,
+    },
   };
 }
 ${bundle}
@@ -717,6 +735,7 @@ return {
   getState: () => latestState,
   getResultText: () => displayPlusCheckoutConversionProxyTestResult.textContent,
   getRuntimeText: () => displayPlusCheckoutConversionProxyRuntimeStatus.textContent,
+  getExitText: () => displayPlusCheckoutConversionProxyExitCheck.textContent,
 };
 `)();
 
@@ -728,8 +747,64 @@ return {
   assert.equal(api.messages[0].payload.ipProxyStateOverride.ipProxyAutoRefreshPoolOnExhausted, true);
   assert.equal(api.getState().plusCheckoutConversionProxyManualSession.displayName, 'http://proxy-b.example:8002');
   assert.equal(api.getRuntimeText(), '当前生效：http://proxy-b.example:8002');
+  assert.match(api.getExitText(), /203\.0\.113\.20 \[US\]/);
   assert.equal(api.getResultText(), '当前代理：http://proxy-b.example:8002');
   assert.match(api.toasts.at(-1).message, /真实出口已变化/);
+});
+
+test('sidepanel renders checkout conversion proxy exit check states', () => {
+  const bundle = [
+    extractFunction('formatPlusCheckoutConversionProxyExitCheckTime'),
+    extractFunction('renderPlusCheckoutConversionProxyExitCheck'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {};
+const displayPlusCheckoutConversionProxyExitCheck = {
+  textContent: '',
+  title: '',
+  classes: new Set(),
+  classList: {
+    remove(...items) { items.forEach((item) => displayPlusCheckoutConversionProxyExitCheck.classes.delete(item)); },
+    add(item) { displayPlusCheckoutConversionProxyExitCheck.classes.add(item); },
+  },
+};
+${bundle}
+return {
+  renderPlusCheckoutConversionProxyExitCheck,
+  display: displayPlusCheckoutConversionProxyExitCheck,
+};
+`)();
+
+  api.renderPlusCheckoutConversionProxyExitCheck({
+    plusCheckoutConversionProxyExitCheck: {
+      status: 'running',
+      displayName: 'http://proxy.example:8080',
+    },
+  });
+  assert.equal(api.display.textContent, '检测中...');
+  assert.equal(api.display.classes.has('status-running'), true);
+
+  api.renderPlusCheckoutConversionProxyExitCheck({
+    plusCheckoutConversionProxyExitCheck: {
+      status: 'success',
+      exitIp: '203.0.113.9',
+      exitRegion: 'US',
+      exitSource: 'page_context',
+      checkedAt: 1700000000000,
+    },
+  });
+  assert.match(api.display.textContent, /203\.0\.113\.9 \[US\] · page_context/);
+  assert.equal(api.display.classes.has('status-success'), true);
+
+  api.renderPlusCheckoutConversionProxyExitCheck({
+    plusCheckoutConversionProxyExitCheck: {
+      status: 'error',
+      diagnostics: '未检测到支付转换代理出口 IP。',
+    },
+  });
+  assert.match(api.display.textContent, /检测失败：未检测到支付转换代理出口 IP/);
+  assert.equal(api.display.classes.has('status-error'), true);
 });
 
 test('sidepanel normalizes Plus checkout wait settings to bounded integer seconds', () => {

@@ -33,9 +33,12 @@
   const HOSTED_CHECKOUT_PAYPAL_BLOCKED_ERROR_PREFIX = 'HOSTED_CHECKOUT_PAYPAL_BLOCKED::';
   const HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX = 'HOSTED_CHECKOUT_GENERIC_ERROR::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
+  const HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_FALLBACK::';
+  const HOSTED_CHECKOUT_CARD_DECLINED_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_DECLINED::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_DEFAULT = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
+  const HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
@@ -556,6 +559,12 @@
         return null;
       }
       await addLog(`步骤 6：跳转 Plus Checkout 链接前已启用支付转换代理 ${session.displayName}。`, 'info');
+      if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
+        await proxyManager.checkCheckoutConversionProxySessionExit(session, {
+          context: 'classic-paypal',
+          requireExit: true,
+        });
+      }
       return session;
     }
 
@@ -578,6 +587,12 @@
         `步骤 ${stepNumber}：已在提交 OpenAI hosted checkout 前启用支付转换代理 ${session.displayName}。`,
         'info'
       );
+      if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
+        await proxyManager.checkCheckoutConversionProxySessionExit(session, {
+          context: 'paypal-hosted',
+          requireExit: true,
+        });
+      }
       return session;
     }
 
@@ -2306,12 +2321,16 @@
         injectSource: PLUS_CHECKOUT_SOURCE,
         logMessage: '步骤 6：正在等待 OpenAI hosted checkout 脚本就绪...',
       });
+      let currentProfile = profile && typeof profile === 'object' ? profile : {};
+      const hostedCheckoutEmail = String(currentProfile.email || '').trim();
+      let hostedOpenAiAddressRetries = 0;
+      let hostedOpenAiCardDeclinedRetries = 0;
       const firstResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
         type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
         source: 'background',
         payload: {
-          email: profile.email,
-          address: profile.address,
+          email: hostedCheckoutEmail,
+          address: currentProfile.address,
         },
       });
       if (firstResult?.error) {
@@ -2341,6 +2360,79 @@
         });
         if (pageState?.error) {
           throw new Error(pageState.error);
+        }
+        if (pageState?.hostedCardFallback) {
+          throw new Error(
+            `${HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX}Step 6: hosted checkout entered the card branch instead of PayPal. ${String(pageState?.hostedCardFallbackReason || '').trim() || 'Only card payment is visible.'}`
+          );
+        }
+        if (isHostedCheckoutOpenAiCardDeclinedState(pageState)) {
+          if (hostedOpenAiCardDeclinedRetries >= HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS) {
+            throw new Error(
+              `${HOSTED_CHECKOUT_CARD_DECLINED_ERROR_PREFIX}Step 6: hosted checkout reported card declined ${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedCardDeclinedErrorMessage || 'Try another card.'}`
+            );
+          }
+          hostedOpenAiCardDeclinedRetries += 1;
+          verificationSubmitted = false;
+          const retryAddress = await fetchHostedCheckoutAddress();
+          currentProfile = {
+            ...currentProfile,
+            address: retryAddress,
+          };
+          await addLog(
+            `Step 6: hosted checkout reported card declined; retrying with a fresh address (${hostedOpenAiCardDeclinedRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedCardDeclinedErrorMessage || 'Try another card.'}`,
+            'warn'
+          );
+          await setState({
+            plusHostedCheckoutGuestProfile: currentProfile,
+            hostedCheckoutGuestProfile: currentProfile,
+          });
+          const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
+            type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+            source: 'background',
+            payload: {
+              email: hostedCheckoutEmail,
+              address: currentProfile.address,
+            },
+          });
+          if (retryResult?.error) {
+            throw new Error(retryResult.error);
+          }
+          await sleepWithStop(1000);
+          continue;
+        }
+        if (isHostedCheckoutOpenAiAddressErrorState(pageState)) {
+          if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS) {
+            throw new Error(`Step 6: hosted checkout address validation failed ${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`);
+          }
+          hostedOpenAiAddressRetries += 1;
+          verificationSubmitted = false;
+          const retryAddress = await fetchHostedCheckoutAddress();
+          currentProfile = {
+            ...currentProfile,
+            address: retryAddress,
+          };
+          await addLog(
+            `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
+            'warn'
+          );
+          await setState({
+            plusHostedCheckoutGuestProfile: currentProfile,
+            hostedCheckoutGuestProfile: currentProfile,
+          });
+          const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
+            type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+            source: 'background',
+            payload: {
+              email: hostedCheckoutEmail,
+              address: currentProfile.address,
+            },
+          });
+          if (retryResult?.error) {
+            throw new Error(retryResult.error);
+          }
+          await sleepWithStop(1000);
+          continue;
         }
         if (pageState?.hostedVerificationVisible && !verificationSubmitted) {
           const verificationCode = await pollHostedVerificationCode(config.verificationUrl);
@@ -2564,6 +2656,18 @@
     function isHostedCheckoutGenericErrorState(pageState = {}) {
       return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR
         || pageState?.hostedGenericError === true;
+    }
+
+    function isHostedCheckoutOpenAiAddressErrorState(state = {}) {
+      const message = String(state?.hostedAddressErrorMessage || state?.error || '').trim();
+      return Boolean(state?.hostedAddressError)
+        || /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i.test(message);
+    }
+
+    function isHostedCheckoutOpenAiCardDeclinedState(state = {}) {
+      const message = String(state?.hostedCardDeclinedErrorMessage || state?.error || '').trim();
+      return Boolean(state?.hostedCardDeclinedError)
+        || /(?:bank\s*)?card\s+(?:was\s+)?declined|try\s+another\s+card|payment\s+method\s+was\s+declined|payment\s+declined|card\s+decline|\u94f6\u884c\u5361.*\u62d2\u7edd|\u5361.*\u88ab\u62d2\u7edd|\u8bf7\u5c1d\u8bd5.*(?:\u53e6\u4e00\u5f20|\u5176\u4ed6).*(?:\u5361|\u94f6\u884c\u5361)/i.test(message);
     }
 
     function isHostedCheckoutGenericError(error) {

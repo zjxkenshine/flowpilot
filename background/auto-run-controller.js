@@ -25,6 +25,7 @@
       hasSavedNodeProgress,
       isAddPhoneAuthFailure,
       isCloudCheckoutAlreadyPaidFailure,
+      isHostedCheckoutCardFallbackFailure,
       isGpcTaskEndedFailure,
       isHostedCheckoutGenericErrorFailure,
       isHostedCheckoutVerificationResendLimitFailure,
@@ -566,9 +567,12 @@
         let reuseExistingProgress = resumingCurrentRound;
         const currentRoundState = await getState();
         const keepSameEmailUntilAddPhone = autoRunSkipFailures && shouldKeepCustomMailProviderPoolEmail(currentRoundState);
-        const maxAttemptsForRound = autoRunSkipFailures || autoRunRetryPaypalCallback
+        let maxAttemptsForRound = autoRunSkipFailures || autoRunRetryPaypalCallback
           ? (keepSameEmailUntilAddPhone ? Number.MAX_SAFE_INTEGER : AUTO_RUN_MAX_RETRIES_PER_ROUND + 1)
           : Math.max(1, attemptRun);
+        const maxAttemptsForHostedCheckoutCardFallback = keepSameEmailUntilAddPhone
+          ? Number.MAX_SAFE_INTEGER
+          : AUTO_RUN_MAX_RETRIES_PER_ROUND + 1;
 
         while (attemptRun <= maxAttemptsForRound) {
           runtime.set({
@@ -733,6 +737,9 @@
             const blockedByHostedCheckoutGenericError = typeof isHostedCheckoutGenericErrorFailure === 'function'
               ? isHostedCheckoutGenericErrorFailure(err)
               : /HOSTED_CHECKOUT_GENERIC_ERROR::/i.test(err?.message || String(err || ''));
+            const blockedByHostedCheckoutCardFallback = typeof isHostedCheckoutCardFallbackFailure === 'function'
+              ? isHostedCheckoutCardFallbackFailure(err)
+              : /HOSTED_CHECKOUT_CARD_FALLBACK::/i.test(err?.message || String(err || ''));
             const blockedByHostedCheckoutVerificationResendLimit = typeof isHostedCheckoutVerificationResendLimitFailure === 'function'
               ? isHostedCheckoutVerificationResendLimitFailure(err)
               : /HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::/i.test(err?.message || String(err || ''));
@@ -742,6 +749,8 @@
             const retryableHostedCheckoutGenericError = blockedByHostedCheckoutGenericError
               && autoRunRetryPaypalCallback
               && attemptRun < maxAttemptsForRound;
+            const retryableHostedCheckoutCardFallback = blockedByHostedCheckoutCardFallback
+              && attemptRun < maxAttemptsForHostedCheckoutCardFallback;
             const blockedBySignupUserAlreadyExists = typeof isSignupUserAlreadyExistsFailure === 'function'
               && !keepSameEmailUntilAddPhone
               && isSignupUserAlreadyExistsFailure(err);
@@ -754,6 +763,7 @@
               && !blockedByPlusNonFreeTrial
               && !blockedByGpcTaskEnded
               && !blockedByHostedCheckoutGenericError
+              && !blockedByHostedCheckoutCardFallback
               && !blockedByHostedCheckoutVerificationResendLimit
               && !blockedByCloudCheckoutAlreadyPaid
               && !blockedBySignupUserAlreadyExists
@@ -969,6 +979,70 @@
               continue;
             }
 
+            if (retryableHostedCheckoutCardFallback) {
+              const retryIndex = attemptRun;
+              await addLog(`Run ${targetRun}/${totalRuns} attempt ${attemptRun} entered hosted checkout card fallback: ${reason}`, 'warn');
+              cancelPendingCommands('Current attempt abandoned because hosted checkout entered card fallback.');
+              await broadcastStopToContentScripts();
+              await broadcastAutoRunStatus('retrying', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId,
+              });
+              forceFreshTabsNextRun = true;
+              await addLog(
+                `Hosted checkout card fallback retry: retrying run ${targetRun}/${totalRuns} attempt ${attemptRun + 1} after ${Math.round(AUTO_RUN_RETRY_DELAY_MS / 1000)} seconds (retry ${retryIndex}/${AUTO_RUN_MAX_RETRIES_PER_ROUND}).`,
+                'warn'
+              );
+              try {
+                await sleepWithStop(AUTO_RUN_RETRY_DELAY_MS);
+              } catch (sleepError) {
+                if (isStopError(sleepError)) {
+                  stoppedEarly = true;
+                  await appendRoundRecordIfNeeded('stopped', getErrorMessage(sleepError), sleepError);
+                  await addLog(`Run ${targetRun}/${totalRuns} was stopped by the user.`, 'warn');
+                  await broadcastAutoRunStatus('stopped', {
+                    currentRun: targetRun,
+                    totalRuns,
+                    attemptRun,
+                    sessionId: 0,
+                  });
+                  break;
+                }
+                throw sleepError;
+              }
+              try {
+                const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
+                  autoRunSkipFailures,
+                  autoRunRetryPaypalCallback,
+                  roundSummaries,
+                });
+                if (parkedForRetry) {
+                  parkedByTimer = true;
+                  break;
+                }
+              } catch (sleepError) {
+                if (isStopError(sleepError)) {
+                  stoppedEarly = true;
+                  await appendRoundRecordIfNeeded('stopped', getErrorMessage(sleepError), sleepError);
+                  await addLog(`Run ${targetRun}/${totalRuns} was stopped by the user.`, 'warn');
+                  await broadcastAutoRunStatus('stopped', {
+                    currentRun: targetRun,
+                    totalRuns,
+                    attemptRun,
+                    sessionId: 0,
+                  });
+                  break;
+                }
+                throw sleepError;
+              }
+              attemptRun += 1;
+              maxAttemptsForRound = Math.max(maxAttemptsForRound, maxAttemptsForHostedCheckoutCardFallback);
+              reuseExistingProgress = false;
+              continue;
+            }
+
             if (blockedByHostedCheckoutGenericError) {
               roundSummary.status = 'failed';
               roundSummary.finalFailureReason = reason;
@@ -986,6 +1060,29 @@
                 autoRunRetryPaypalCallback
                   ? `第 ${targetRun}/${totalRuns} 轮检测到 PayPal Checkout genericError，已达到 PAYPAL回调自动重试上限，当前自动运行将停止。`
                   : `第 ${targetRun}/${totalRuns} 轮检测到 PayPal Checkout genericError，当前自动运行已停止，请在弹窗中选择“检查”或“重试”。`,
+                'warn'
+              );
+              stoppedEarly = true;
+              await broadcastAutoRunStatus('stopped', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId: 0,
+              });
+              break;
+            }
+
+            if (blockedByHostedCheckoutCardFallback) {
+              roundSummary.status = 'failed';
+              roundSummary.finalFailureReason = reason;
+              await setState({
+                autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+              });
+              await appendRoundRecordIfNeeded('failed', reason, err);
+              cancelPendingCommands('Current round stopped after repeated hosted checkout card fallback.');
+              await broadcastStopToContentScripts();
+              await addLog(
+                `Run ${targetRun}/${totalRuns} reached the hosted checkout card fallback retry limit; auto-run will stop.`,
                 'warn'
               );
               stoppedEarly = true;

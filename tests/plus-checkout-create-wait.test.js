@@ -20,11 +20,13 @@ function createCheckoutContentHarness(options = {}) {
   const includeHostedEmailInput = options.includeHostedEmailInput !== false;
   const locationHref = options.locationHref || 'https://chatgpt.com/checkout/openai_ie/cs_test';
   const locationUrl = new URL(locationHref);
+  const omitHostedPayPalButton = Boolean(options.omitHostedPayPalButton);
 
-  function createElement({ tagName = 'DIV', text = '', attrs: initialAttrs = {}, id = '', type = '', value = '' } = {}) {
+  function createElement({ tagName = 'DIV', text = '', attrs: initialAttrs = {}, id = '', type = '', value = '', className = '' } = {}) {
     const attrMap = new Map(Object.entries(initialAttrs));
     if (id) attrMap.set('id', id);
     if (type) attrMap.set('type', type);
+    if (className) attrMap.set('class', className);
     const element = {
       nodeType: 1,
       tagName,
@@ -33,7 +35,7 @@ function createCheckoutContentHarness(options = {}) {
       value,
       textContent: text,
       innerText: text,
-      className: initialAttrs.class || '',
+      className: className || initialAttrs.class || '',
       checked: initialAttrs.checked === 'true',
       disabled: false,
       hidden: false,
@@ -53,6 +55,19 @@ function createCheckoutContentHarness(options = {}) {
       closest() {
         return null;
       },
+      matches(selector) {
+        const text = String(selector || '');
+        const role = this.getAttribute?.('role') || '';
+        if (text.includes('button') && this.tagName === 'BUTTON') return true;
+        if (text.includes('a') && this.tagName === 'A') return true;
+        if (text.includes('label') && this.tagName === 'LABEL') return true;
+        if (text.includes('[role="button"]') && role === 'button') return true;
+        if (text.includes('[role="radio"]') && role === 'radio') return true;
+        if (text.includes('[role="tab"]') && role === 'tab') return true;
+        if (text.includes('[tabindex]') && this.getAttribute?.('tabindex')) return true;
+        if (text.includes('input[type="radio"]') && this.tagName === 'INPUT' && this.type === 'radio') return true;
+        return false;
+      },
       querySelector() {
         return null;
       },
@@ -63,7 +78,12 @@ function createCheckoutContentHarness(options = {}) {
       },
       click() {},
       getBoundingClientRect() {
-        return { left: 10, top: 20, width: 180, height: 44 };
+        return {
+          left: 10,
+          top: 20,
+          width: Number(initialAttrs.width) || 180,
+          height: Number(initialAttrs.height) || 44,
+        };
       },
     };
     return element;
@@ -75,6 +95,23 @@ function createCheckoutContentHarness(options = {}) {
   const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
   const termsCheckbox = createElement({ tagName: 'INPUT', id: 'termsOfServiceConsentCheckbox', type: 'checkbox', attrs: { type: 'checkbox' } });
+  const hostedCardNumberInput = createElement({ tagName: 'INPUT', id: 'cardNumber', type: 'text', attrs: { name: 'cardNumber', placeholder: 'Card number' } });
+  const hostedCardAccordion = createElement({
+    tagName: 'BUTTON',
+    text: 'Card Card number CVC Expiry',
+    attrs: { 'data-testid': 'card-accordion-item-button', 'aria-selected': 'true' },
+    className: 'card-accordion-item selected',
+  });
+  const hostedPaypalDisabledFrame = createElement({
+    tagName: 'IFRAME',
+    attrs: { src: 'https://checkout.stripe.com/frame?paymentMethods][paypal]=never' },
+  });
+  hostedPaypalDisabledFrame.src = hostedPaypalDisabledFrame.getAttribute('src');
+  const hostedErrorAlert = createElement({
+    tagName: 'DIV',
+    text: options.hostedErrorText || '',
+    attrs: { role: 'alert', class: 'Error' },
+  });
   const fullNameInput = createElement({ tagName: 'INPUT', id: 'name', type: 'text', attrs: { name: 'billingName', placeholder: 'Full name' } });
   const addressInput = createElement({ tagName: 'INPUT', id: 'address', type: 'text', attrs: { name: 'addressLine1', placeholder: 'Address line 1' } });
   const cityInput = createElement({ tagName: 'INPUT', id: 'city', type: 'text', attrs: { name: 'locality', placeholder: 'City' } });
@@ -107,6 +144,15 @@ function createCheckoutContentHarness(options = {}) {
   if (includeHostedEmailInput) {
     elements.push(hostedEmailInput);
   }
+  if (options.includeHostedCardBranch) {
+    elements.push(hostedCardNumberInput, hostedCardAccordion);
+  }
+  if (options.includeHostedPaypalDisabledFrame) {
+    elements.push(hostedPaypalDisabledFrame);
+  }
+  if (options.hostedErrorText) {
+    elements.push(hostedErrorAlert);
+  }
 
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
@@ -137,7 +183,7 @@ function createCheckoutContentHarness(options = {}) {
       },
       querySelector(selector) {
         const text = String(selector || '');
-        if (text === '[data-testid="paypal-accordion-item-button"]') return paymentButton;
+        if (text === '[data-testid="paypal-accordion-item-button"]') return omitHostedPayPalButton ? null : paymentButton;
         if (text === '#email' || text === 'input[type="email"]' || text === 'input[name="email"]') {
           return includeHostedEmailInput ? hostedEmailInput : null;
         }
@@ -153,10 +199,52 @@ function createCheckoutContentHarness(options = {}) {
         const text = String(selector || '');
         if (text.includes('label[for=')) return [];
         if (text.includes('[role="option"]') || text.includes('.pac-item') || text === 'li') return [suggestionOption];
+      if (text === 'iframe') return options.includeHostedPaypalDisabledFrame ? [hostedPaypalDisabledFrame] : [];
+        if (
+          options.hostedErrorText
+          && (
+            text.includes('[role="alert"]')
+            || text.includes('[aria-live]')
+            || text.includes('[class*="error"]')
+            || text.includes('[class*="Error"]')
+            || text.includes('.Error')
+            || text.includes('.error')
+          )
+        ) {
+          return [hostedErrorAlert];
+        }
+        if (text.includes('[data-testid="card-accordion-item"]') || text.includes('.card-accordion-item')) {
+          return options.includeHostedCardBranch ? [hostedCardAccordion] : [];
+        }
         if (text === 'input, textarea') return elements.filter((element) => element.tagName === 'INPUT');
         if (text.includes('button[type="submit"]')) return [subscribeButton];
-        if (text.includes('button') || text.includes('[role=') || text.includes('[tabindex]') || text.includes('[data-testid]')) {
-          return elements.filter((element) => element.tagName === 'BUTTON');
+        if (
+          text.includes('button')
+          || text.includes('span')
+          || text.includes('div')
+          || text.includes('img')
+          || text.includes('svg')
+          || text.includes('[role=')
+          || text.includes('[tabindex]')
+          || text.includes('[data-testid]')
+          || text.includes('[aria-label]')
+          || text.includes('[title]')
+        ) {
+          return elements.filter((element) => {
+            if (omitHostedPayPalButton && element === paymentButton) return false;
+            const role = element.getAttribute?.('role') || '';
+            return element.tagName === 'BUTTON'
+              || element.tagName === 'A'
+              || element.tagName === 'LABEL'
+              || role === 'button'
+              || role === 'radio'
+              || role === 'tab'
+              || Boolean(element.getAttribute?.('tabindex'))
+              || Boolean(element.getAttribute?.('data-testid'))
+              || Boolean(element.getAttribute?.('aria-label'))
+              || Boolean(element.getAttribute?.('title'))
+              || ['DIV', 'SPAN', 'IMG', 'SVG'].includes(element.tagName);
+          });
         }
         if (text.includes('select') || text.includes('[aria-haspopup="listbox"]')) return [];
         return [];
@@ -437,6 +525,15 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
           snapshot: { applied: true },
         };
       },
+      checkCheckoutConversionProxySessionExit: async (session, options = {}) => {
+        events.push({ type: 'proxy-exit-check', session, options });
+        return {
+          status: 'success',
+          exitIp: '203.0.113.42',
+          exitRegion: 'US',
+          displayName: session.displayName,
+        };
+      },
     },
     chrome: {
       tabs: {
@@ -495,6 +592,15 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
           appliedStepKey: options.appliedStepKey,
           displayName: 'http://proxy.example:8080',
           snapshot: { applied: true },
+        };
+      },
+      checkCheckoutConversionProxySessionExit: async (session, options = {}) => {
+        events.push({ type: 'proxy-exit-check', session, options });
+        return {
+          status: 'success',
+          exitIp: '203.0.113.42',
+          exitRegion: 'US',
+          displayName: session.displayName,
         };
       },
     },
@@ -567,6 +673,7 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
     event.type === 'tab-message' && event.message?.type === 'PLUS_CHECKOUT_GET_STATE'
   ));
   const applyIndex = events.findIndex((event) => event.type === 'proxy-apply');
+  const exitCheckIndex = events.findIndex((event) => event.type === 'proxy-exit-check');
   const setStateIndex = events.findIndex((event) => event.type === 'set-state');
   const completeIndex = events.findIndex((event) => event.type === 'complete');
 
@@ -575,6 +682,8 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
   assert.ok(readyIndexes.length >= 2);
   assert.ok(applyIndex > createCheckoutIndex);
   assert.ok(applyIndex < updateIndex);
+  assert.ok(exitCheckIndex > applyIndex);
+  assert.ok(exitCheckIndex < updateIndex);
   assert.ok(amountCheckIndex > readyIndexes[readyIndexes.length - 1]);
   assert.ok(amountCheckIndex > updateIndex);
   assert.ok(setStateIndex > amountCheckIndex);
@@ -583,10 +692,69 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
   assert.equal(events[applyIndex].options.flowType, 'classic-paypal');
   assert.equal(events[applyIndex].options.releaseNodeKey, 'paypal-approve');
   assert.equal(events[applyIndex].options.appliedStepKey, 'plus-checkout-create');
+  assert.equal(events[exitCheckIndex].options.context, 'classic-paypal');
+  assert.equal(events[exitCheckIndex].options.requireExit, true);
   assert.equal(
     events.some((event) => event.type === 'log' && /跳转 Plus Checkout 链接前已启用支付转换代理/.test(event.message)),
     true
   );
+});
+
+test('Classic PayPal checkout create stops before opening checkout link when conversion proxy exit check fails', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    checkoutConversionProxyManager: {
+      applySessionFromState: async () => ({
+        active: true,
+        flowType: 'classic-paypal',
+        releaseNodeKey: 'paypal-approve',
+        appliedStepKey: 'plus-checkout-create',
+        displayName: 'http://proxy.example:8080',
+        snapshot: { applied: true },
+      }),
+      checkCheckoutConversionProxySessionExit: async () => {
+        throw new Error('未检测到支付转换代理出口 IP。');
+      },
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 123 }),
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: payload.url, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePlusCheckoutCreate({
+      plusPaymentMethod: 'paypal',
+      plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+      plusCheckoutOpenStableWaitSeconds: 0,
+    }),
+    /未检测到支付转换代理出口 IP/
+  );
+
+  assert.equal(events.some((event) => event.type === 'tab-update'), false);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
 });
 
 test('PayPal hosted checkout create applies conversion proxy before hosted payment conversion', async () => {
@@ -606,6 +774,15 @@ test('PayPal hosted checkout create applies conversion proxy before hosted payme
           appliedStepKey: options.appliedStepKey,
           displayName: 'socks5://proxy.example:1080',
           snapshot: { applied: true },
+        };
+      },
+      checkCheckoutConversionProxySessionExit: async (session, options = {}) => {
+        events.push({ type: 'proxy-exit-check', session, options });
+        return {
+          status: 'success',
+          exitIp: '198.51.100.8',
+          exitRegion: 'US',
+          displayName: session.displayName,
         };
       },
       getStoredSession: async () => ({
@@ -866,8 +1043,10 @@ test('checkout conversion proxy getStoredSession tolerates null runtime session'
 test('checkout conversion proxy manual switch persists base snapshot and cancel restores original settings', async () => {
   let state = {
     plusCheckoutConversionProxyManualSession: null,
+    plusCheckoutConversionProxyExitCheck: null,
     plusCheckoutConversionProxyUrl: '',
   };
+  const broadcasts = [];
   let authEntry = {
     host: 'baseline.proxy',
     port: 7890,
@@ -902,18 +1081,37 @@ test('checkout conversion proxy manual switch persists base snapshot and cancel 
     setState: async (updates) => {
       state = { ...state, ...updates };
     },
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
     installIpProxyAuthListener: () => {},
     installIpProxyErrorListener: () => {},
     getCurrentIpProxyAuthEntry: () => authEntry,
     setCurrentIpProxyAuthEntry: (entry) => {
       authEntry = entry;
     },
+    detectProxyExitInfoByPageContext: async () => ({
+      ip: '203.0.113.77',
+      region: 'US',
+      source: 'page_context',
+      endpoint: 'https://ipinfo.io/json',
+    }),
+    detectIpProxyTargetReachabilityByPageContext: async () => ({
+      reachable: true,
+      endpoint: 'https://chatgpt.com/',
+      source: 'target_page_context',
+    }),
   });
 
   const first = await manager.switchManualSession({ proxyUrl: 'socks5h://user:pass@proxy-a.example:1080' });
   assert.equal(first.switched, true);
   assert.equal(first.session.proxyUrl, 'socks5h://user:pass@proxy-a.example:1080');
   assert.equal(first.session.baseSnapshot.previousProxySettings.value.mode, 'pac_script');
+  assert.equal(first.exitCheck.status, 'success');
+  assert.equal(first.exitCheck.exitIp, '203.0.113.77');
+  assert.equal(state.plusCheckoutConversionProxyExitCheck.exitIp, '203.0.113.77');
+  assert.equal(
+    broadcasts.some((payload) => payload.plusCheckoutConversionProxyExitCheck?.exitIp === '203.0.113.77'),
+    true
+  );
 
   currentProxyValue = {
     mode: 'fixed_servers',
@@ -938,6 +1136,7 @@ test('checkout conversion proxy manual switch persists base snapshot and cancel 
   const cancelResult = await manager.cancelManualSession(state);
   assert.equal(cancelResult.cancelled, true);
   assert.equal(state.plusCheckoutConversionProxyManualSession, null);
+  assert.equal(state.plusCheckoutConversionProxyExitCheck, null);
   assert.deepStrictEqual(currentProxyValue, {
     mode: 'pac_script',
     pacScript: { data: 'function FindProxyForURL(){return "DIRECT";}' },
@@ -2249,6 +2448,264 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
   });
 });
 
+test('PayPal hosted OpenAI checkout retries with a fresh address after address validation failure', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';
+  let stateReads = 0;
+  let addressIndex = 0;
+  const addresses = [
+    {
+      Address: '8 Retry Ave',
+      City: 'Austin',
+      State: 'Texas',
+      Zip_Code: '73301',
+    },
+  ];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => {
+          events.push({ type: 'tab-get', tabId, url: currentUrl });
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      assert.equal(url, 'https://www.meiguodizhi.com/api/v1/dz');
+      const address = addresses[addressIndex] || addresses.at(-1);
+      addressIndex += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ address }),
+      };
+    },
+    getState: async () => ({
+      plusHostedCheckoutGuestProfile: {
+        email: 'payment@example.com',
+        phone: '2125550000',
+        address: {
+          street: '1 Main St',
+          city: 'New York',
+          state: 'New York',
+          zip: '10001',
+        },
+      },
+      hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        if (message.payload?.address?.street === '8 Retry Ave') {
+          currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
+        }
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        stateReads += 1;
+        if (stateReads === 1) {
+          return {
+            checkoutAmountSummary: {
+              hasTodayDue: true,
+              amount: 0,
+              isZero: true,
+              rawAmount: '$0.00',
+            },
+          };
+        }
+        if (stateReads === 2) {
+          return {
+            hostedAddressError: true,
+            hostedAddressErrorMessage: 'Customer location isn\'t recognized.',
+          };
+        }
+        currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
+        return { hostedVerificationVisible: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 55,
+    plusPaymentMethod: 'paypal-hosted',
+    plusHostedCheckoutGuestProfile: {
+      email: 'payment@example.com',
+      phone: '2125550000',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+    hostedCheckoutPhoneNumber: '2125550000',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
+  assert.equal(submitEvents.length, 2);
+  assert.equal(submitEvents[0].message.payload.address.street, '1 Main St');
+  assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(events.some((event) => event.type === 'fetch'), true);
+  assert.equal(events.find((event) => event.type === 'complete')?.step, 'paypal-hosted-openai-checkout');
+});
+
+test('PayPal hosted OpenAI checkout throws card declined prefix after retry limit', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';
+  let fetchCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => {
+      fetchCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          address: {
+            Address: `${fetchCount} Retry St`,
+            City: 'Austin',
+            State: 'Texas',
+            Zip_Code: '73301',
+          },
+        }),
+      };
+    },
+    getState: async () => ({
+      plusHostedCheckoutGuestProfile: {
+        email: 'payment@example.com',
+        phone: '2125550000',
+        address: {
+          street: '1 Main St',
+          city: 'New York',
+          state: 'New York',
+          zip: '10001',
+        },
+      },
+      hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          hostedCardDeclinedError: true,
+          hostedCardDeclinedErrorMessage: 'Your card was declined. Try another card.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedOpenAiCheckout({
+      plusCheckoutTabId: 55,
+      plusPaymentMethod: 'paypal-hosted',
+      hostedCheckoutPhoneNumber: '2125550000',
+      plusHostedCheckoutOauthDelaySeconds: 0,
+    }),
+    /HOSTED_CHECKOUT_CARD_DECLINED::/
+  );
+
+  assert.equal(fetchCount, 3);
+  assert.equal(events.filter((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP').length, 4);
+});
+
+test('PayPal hosted OpenAI checkout throws card fallback prefix without address retry', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://pay.openai.com/c/pay/cs_hosted', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          address: {
+            Address: '1 Main St',
+            City: 'New York',
+            State: 'New York',
+            Zip_Code: '10001',
+          },
+        }),
+      };
+    },
+    getState: async () => ({
+      plusHostedCheckoutGuestProfile: {
+        email: 'payment@example.com',
+        phone: '2125550000',
+        address: {
+          street: '1 Main St',
+          city: 'New York',
+          state: 'New York',
+          zip: '10001',
+        },
+      },
+      hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          hostedCardFallback: true,
+          hostedCardFallbackReason: 'card fields are visible',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedOpenAiCheckout({
+      plusCheckoutTabId: 55,
+      plusPaymentMethod: 'paypal-hosted',
+      hostedCheckoutPhoneNumber: '2125550000',
+      plusHostedCheckoutOauthDelaySeconds: 0,
+    }),
+    /HOSTED_CHECKOUT_CARD_FALLBACK::/
+  );
+
+  assert.equal(events.filter((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP').length, 1);
+});
+
 test('PayPal hosted email node completes when Next navigation drops the content response', async () => {
   const events = [];
   let currentUrl = 'https://www.paypal.com/checkoutweb/pay?token=EC-test';
@@ -3110,6 +3567,80 @@ test('OpenAI hosted checkout stops before PayPal selection when email input is m
   assert.match(result.error, /email|邮箱|郵箱/i);
   assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'paypal'), false);
   assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingAddressLine1'), false);
+});
+
+test('OpenAI hosted checkout reports card fallback state when PayPal is unavailable and card fields are visible', async () => {
+  const { send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    omitHostedPayPalButton: true,
+    includeHostedCardBranch: true,
+    includeHostedPaypalDisabledFrame: true,
+  });
+
+  const state = await send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedCardFallback, true);
+  assert.equal(state.hostedPaypalDisabledSignals, true);
+  assert.equal(state.hostedCardAccordionSelected, true);
+  assert.match(state.hostedCardFallbackReason, /card|PayPal/i);
+});
+
+test('OpenAI hosted checkout blocks submit when hosted page falls into card-only branch', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    omitHostedPayPalButton: true,
+    includeHostedCardBranch: true,
+    includeHostedPaypalDisabledFrame: true,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, undefined);
+  assert.match(result.error, /HOSTED_CHECKOUT_CARD_FALLBACK::/);
+  assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'subscribe'), false);
+});
+
+test('OpenAI hosted checkout exposes address and card declined errors from visible alerts', async () => {
+  const addressHarness = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: 'Customer location isn\'t recognized. Set a valid customer address.',
+  });
+  const addressState = await addressHarness.send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(addressState.hostedAddressError, true);
+  assert.match(addressState.hostedAddressErrorMessage, /customer location/i);
+
+  const declinedHarness = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: 'Your card was declined. Try another card.',
+  });
+  const declinedState = await declinedHarness.send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(declinedState.hostedCardDeclinedError, true);
+  assert.match(declinedState.hostedCardDeclinedErrorMessage, /declined/i);
 });
 
 test('GPC manual checkout injects Plus script before reading ChatGPT session token and sends X-API-Key', async () => {

@@ -1429,6 +1429,22 @@ header {
   color: var(--red);
 }
 
+.plus-checkout-conversion-proxy-exit-check {
+  color: var(--muted);
+}
+
+.plus-checkout-conversion-proxy-exit-check.status-running {
+  color: var(--amber);
+}
+
+.plus-checkout-conversion-proxy-exit-check.status-success {
+  color: var(--green);
+}
+
+.plus-checkout-conversion-proxy-exit-check.status-error {
+  color: var(--red);
+}
+
 .plus-checkout-conversion-proxy-runtime-status {
   color: var(--muted);
 }

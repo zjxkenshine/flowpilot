@@ -233,6 +233,7 @@ function createHostedGenericErrorAutoRunHarness(options = {}) {
     hasSavedNodeProgress: () => false,
     isAddPhoneAuthFailure: () => false,
     isGpcTaskEndedFailure: () => false,
+    isHostedCheckoutCardFallbackFailure: (error) => /HOSTED_CHECKOUT_CARD_FALLBACK::/i.test(error?.message || String(error || '')),
     isHostedCheckoutGenericErrorFailure: (error) => /HOSTED_CHECKOUT_GENERIC_ERROR::/i.test(error?.message || String(error || '')),
     isHostedCheckoutVerificationResendLimitFailure: () => false,
     isKiroProxyFailure: () => false,
@@ -259,7 +260,7 @@ function createHostedGenericErrorAutoRunHarness(options = {}) {
       runCalls += 1;
       events.push({ type: 'run', nodeId, context });
       if (runCalls <= (options.failuresBeforeSuccess ?? 1)) {
-        throw new Error('HOSTED_CHECKOUT_GENERIC_ERROR::Things don\'t appear to be working at the moment.');
+        throw new Error(options.errorMessage || 'HOSTED_CHECKOUT_GENERIC_ERROR::Things don\'t appear to be working at the moment.');
       }
     },
     runtime,
@@ -346,6 +347,52 @@ test('auto-run stops on PayPal hosted genericError when automatic retry is disab
   );
   assert.equal(
     harness.events.some((event) => event.type === 'log' && /请在弹窗中选择“检查”或“重试”/.test(event.message)),
+    true
+  );
+  assert.equal(harness.state.autoRunPhase, 'stopped');
+});
+
+test('auto-run retries hosted checkout card fallback with a fresh attempt by default', async () => {
+  const harness = createHostedGenericErrorAutoRunHarness({
+    autoRunRetryPaypalCallback: false,
+    failuresBeforeSuccess: 1,
+    errorMessage: 'HOSTED_CHECKOUT_CARD_FALLBACK::Step 6: hosted checkout entered the card branch instead of PayPal.',
+  });
+
+  await harness.controller.autoRunLoop(1, {
+    autoRunSkipFailures: false,
+    autoRunRetryPaypalCallback: false,
+    mode: 'restart',
+  });
+
+  assert.equal(harness.runCalls, 2);
+  assert.equal(harness.events.some((event) => event.type === 'status' && event.phase === 'retrying'), true);
+  assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 25), true);
+  assert.equal(
+    harness.events.filter((event) => event.type === 'run').map((event) => event.context.attemptRuns).join(','),
+    '1,2'
+  );
+  assert.equal(harness.state.autoRunPhase, 'complete');
+});
+
+test('auto-run stops hosted checkout card fallback after the retry limit', async () => {
+  const harness = createHostedGenericErrorAutoRunHarness({
+    autoRunRetryPaypalCallback: false,
+    failuresBeforeSuccess: 99,
+    errorMessage: 'HOSTED_CHECKOUT_CARD_FALLBACK::Step 6: hosted checkout entered the card branch instead of PayPal.',
+  });
+
+  await harness.controller.autoRunLoop(1, {
+    autoRunSkipFailures: false,
+    autoRunRetryPaypalCallback: false,
+    mode: 'restart',
+  });
+
+  assert.equal(harness.runCalls, 3);
+  assert.equal(harness.events.filter((event) => event.type === 'status' && event.phase === 'retrying').length, 2);
+  assert.equal(harness.events.some((event) => event.type === 'status' && event.phase === 'stopped'), true);
+  assert.equal(
+    harness.events.some((event) => event.type === 'cancelPendingCommands' && /银行卡分支|card/i.test(event.reason)),
     true
   );
   assert.equal(harness.state.autoRunPhase, 'stopped');

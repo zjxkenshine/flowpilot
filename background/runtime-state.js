@@ -53,6 +53,7 @@
         'plusCheckoutAlreadyPaidDetail',
         'plusCheckoutConversionProxySession',
         'plusCheckoutConversionProxyManualSession',
+        'plusCheckoutConversionProxyExitCheck',
         'plusBillingCountryText',
         'plusBillingAddress',
         'plusPaypalApprovedAt',

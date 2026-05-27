@@ -1919,6 +1919,7 @@
           });
           const patch = {
             plusCheckoutConversionProxyManualSession: result?.session || null,
+            plusCheckoutConversionProxyExitCheck: result?.exitCheck || null,
             plusCheckoutConversionProxySource: message.payload?.source ?? state?.plusCheckoutConversionProxySource ?? 'manual',
             plusCheckoutConversionProxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region ?? '',
           };
@@ -1933,6 +1934,7 @@
             switched: Boolean(result?.switched),
             alreadyActive: Boolean(result?.alreadyActive),
             plusCheckoutConversionProxyManualSession: result?.session || null,
+            plusCheckoutConversionProxyExitCheck: patch.plusCheckoutConversionProxyExitCheck,
             plusCheckoutConversionProxySource: patch.plusCheckoutConversionProxySource,
             plusCheckoutConversionProxyUrl: patch.plusCheckoutConversionProxyUrl,
             plusCheckoutConversionProxy711Region: patch.plusCheckoutConversionProxy711Region,
@@ -1956,6 +1958,7 @@
           });
           const patch = {
             plusCheckoutConversionProxyManualSession: result?.session || state?.plusCheckoutConversionProxyManualSession || null,
+            plusCheckoutConversionProxyExitCheck: result?.exitCheck || null,
             plusCheckoutConversionProxySource: '711proxy_pool',
             plusCheckoutConversionProxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region ?? '',
           };
@@ -1970,6 +1973,7 @@
             reason: String(result?.reason || result?.skippedReason || '').trim(),
             exitChanged: Boolean(result?.exitChanged),
             plusCheckoutConversionProxyManualSession: patch.plusCheckoutConversionProxyManualSession,
+            plusCheckoutConversionProxyExitCheck: patch.plusCheckoutConversionProxyExitCheck,
             plusCheckoutConversionProxySource: patch.plusCheckoutConversionProxySource,
             plusCheckoutConversionProxy711Region: patch.plusCheckoutConversionProxy711Region,
             displayName: String(result?.displayName || result?.session?.displayName || '').trim(),
@@ -1987,6 +1991,7 @@
           const result = await checkoutConversionProxyManager.cancelManualSession(state);
           const patch = {
             plusCheckoutConversionProxyManualSession: null,
+            plusCheckoutConversionProxyExitCheck: null,
           };
           if (typeof broadcastDataUpdate === 'function') {
             broadcastDataUpdate(patch);
@@ -1996,6 +2001,7 @@
             cancelled: Boolean(result?.cancelled),
             alreadyInactive: Boolean(result?.alreadyInactive),
             plusCheckoutConversionProxyManualSession: null,
+            plusCheckoutConversionProxyExitCheck: null,
             displayName: String(result?.session?.displayName || '').trim(),
           };
         }

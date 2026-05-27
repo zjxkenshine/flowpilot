@@ -33,6 +33,8 @@ const PLUS_CHECKOUT_CONFIGS = {
   },
 };
 const PAYPAL_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
+const HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_FALLBACK::';
+const HOSTED_CHECKOUT_CARD_DECLINED_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_DECLINED::';
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -261,6 +263,137 @@ function findHostedPayPalButton() {
     || findClickableByText([/paypal/i]);
 }
 
+function hasHostedOpenAiPaypalDisabledSignals() {
+  return Array.from(document.querySelectorAll('iframe')).some((frame) => {
+    const src = String(frame?.getAttribute?.('src') || frame?.src || '');
+    return src.includes('paymentMethods][paypal]=never')
+      || src.includes('wallets][paypal]=never');
+  });
+}
+
+function isHostedOpenAiCardAccordionSelected() {
+  const selectors = [
+    '[data-testid="card-accordion-item"]',
+    '.card-accordion-item',
+    '[data-testid="card-accordion-item-button"]',
+  ];
+  return selectors.some((selector) => Array.from(document.querySelectorAll(selector)).some((el) => {
+    if (!isVisibleElement(el) && !el.closest?.('[data-testid="card-accordion-item"]')) {
+      return false;
+    }
+    const text = getCombinedSearchText(el);
+    const className = String(el.className || el.getAttribute?.('class') || '');
+    const current = el.getAttribute?.('aria-current');
+    return /card|cardholder|cvc|cvv|expiry|expiration|security|\u94f6\u884c\u5361|\u5361\u53f7|\u6709\u6548\u671f|\u5b89\u5168\u7801/i.test(text)
+      || /\b(selected|checked|active)\b/i.test(className)
+      || current === 'true'
+      || current === 'page'
+      || hasPaymentMethodSelectionMarker(el);
+  }));
+}
+
+function getHostedOpenAiCardFallbackState() {
+  if (!isPayPalHostedOpenAiCheckoutPage()) {
+    return {
+      fallback: false,
+      reason: '',
+      reasons: [],
+    };
+  }
+
+  const hasPayPalButton = Boolean(findHostedPayPalButton());
+  const hasPayPalTarget = Boolean(findPayPalPaymentMethodTarget());
+  const hasGoPayTarget = Boolean(findGoPayPaymentMethodTarget());
+  const cardFieldsVisible = hasCreditCardFields();
+  const cardAccordionSelected = isHostedOpenAiCardAccordionSelected();
+  const paypalDisabledSignals = hasHostedOpenAiPaypalDisabledSignals();
+  const paymentTextPreview = getPaymentTextPreview(12);
+  const cardPreview = paymentTextPreview.find((text) => (
+    /card|cardholder|cvc|cvv|expiry|expiration|security|\u94f6\u884c\u5361|\u5361\u53f7|\u6709\u6548\u671f|\u5b89\u5168\u7801/i.test(text)
+  )) || '';
+  const reasons = [];
+
+  if (!hasPayPalButton) reasons.push('PayPal button not found');
+  if (!hasPayPalTarget) reasons.push('PayPal payment method not detected');
+  if (!hasGoPayTarget) reasons.push('GoPay payment method not detected');
+  if (cardFieldsVisible) reasons.push('card fields are visible');
+  if (cardAccordionSelected) reasons.push('card accordion is selected');
+  if (paypalDisabledSignals) reasons.push('page signals paypal=never');
+  if (cardPreview) reasons.push(`payment text includes "${cardPreview.slice(0, 40)}"`);
+
+  const fallback = !hasPayPalButton
+    && !hasPayPalTarget
+    && !hasGoPayTarget
+    && cardFieldsVisible
+    && (cardAccordionSelected || paypalDisabledSignals || Boolean(cardPreview));
+
+  return {
+    fallback,
+    reason: reasons.join('; '),
+    reasons,
+    hasPayPalButton,
+    hasPayPalTarget,
+    hasGoPayTarget,
+    cardFieldsVisible,
+    cardAccordionSelected,
+    paypalDisabledSignals,
+    cardPreview,
+  };
+}
+
+function getHostedOpenAiVisibleErrorText(pattern) {
+  if (!isPayPalHostedOpenAiCheckoutPage() || typeof document?.querySelectorAll !== 'function') {
+    return '';
+  }
+
+  const selectors = [
+    '[role="alert"]',
+    '[aria-live]',
+    '.Alert',
+    '.Error',
+    '.error',
+    '.FieldError',
+    '[class*="error"]',
+    '[class*="Error"]',
+    'div',
+    'span',
+    'p',
+  ];
+  const seen = new Set();
+  for (const element of Array.from(document.querySelectorAll(selectors.join(', ')))) {
+    if (!element || seen.has(element) || !isVisibleElement(element)) {
+      continue;
+    }
+    seen.add(element);
+    const text = normalizeText(element.innerText || element.textContent || '');
+    if (!text || !pattern.test(text)) {
+      continue;
+    }
+    return text.slice(0, 240);
+  }
+  return '';
+}
+
+function getHostedOpenAiAddressErrorState() {
+  const message = getHostedOpenAiVisibleErrorText(
+    /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i
+  );
+  return {
+    hasError: Boolean(message),
+    message,
+  };
+}
+
+function getHostedOpenAiCardDeclinedState() {
+  const message = getHostedOpenAiVisibleErrorText(
+    /(?:bank\s*)?card\s+(?:was\s+)?declined|try\s+another\s+card|payment\s+method\s+was\s+declined|payment\s+declined|card\s+decline|\u94f6\u884c\u5361.*\u62d2\u7edd|\u5361.*\u88ab\u62d2\u7edd|\u8bf7\u5c1d\u8bd5.*(?:\u53e6\u4e00\u5f20|\u5176\u4ed6).*(?:\u5361|\u94f6\u884c\u5361)/i
+  );
+  return {
+    hasError: Boolean(message),
+    message,
+  };
+}
+
 function findHostedSubmitButton() {
   return document.querySelector('button[data-testid="submit-button"]')
     || document.querySelector('button[data-testid="hosted-payment-submit-button"]')
@@ -331,6 +464,13 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     return fillHostedOpenAiVerificationCode(payload.verificationCode);
   }
 
+  const cardFallbackState = getHostedOpenAiCardFallbackState();
+  if (cardFallbackState.fallback) {
+    throw new Error(
+      `${HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX}Step 6: hosted checkout entered the card branch instead of PayPal. ${cardFallbackState.reason || 'Only card payment is visible.'}`
+    );
+  }
+
   const normalizedEmail = normalizeText(payload.email || '');
   await fillHostedEmailInput(normalizedEmail);
 
@@ -357,7 +497,16 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     await sleep(250);
   }
 
-  return clickHostedSubmitButton();
+  const clickResult = await clickHostedSubmitButton();
+  const hostedAddressError = getHostedOpenAiAddressErrorState();
+  const hostedCardDeclinedError = getHostedOpenAiCardDeclinedState();
+  return {
+    ...clickResult,
+    hostedAddressError: hostedAddressError.hasError,
+    hostedAddressErrorMessage: hostedAddressError.message,
+    hostedCardDeclinedError: hostedCardDeclinedError.hasError,
+    hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
+  };
 }
 
 function isVisibleElement(el) {
@@ -1919,6 +2068,9 @@ async function readChatGptSessionAccessToken() {
 async function inspectPlusCheckoutState(options = {}) {
   const structuredAddress = getStructuredAddressFields();
   const subscribeButtonState = getSubscribeButtonState(findSubscribeButton());
+  const hostedAddressError = getHostedOpenAiAddressErrorState();
+  const hostedCardDeclinedError = getHostedOpenAiCardDeclinedState();
+  const hostedCardFallback = getHostedOpenAiCardFallbackState();
   const state = {
     url: location.href,
     readyState: document.readyState,
@@ -1938,6 +2090,15 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedOpenAiPage: isPayPalHostedOpenAiCheckoutPage(),
     hostedVerificationVisible: hasHostedOpenAiVerificationDialog(),
     hostedPayPalButtonFound: Boolean(findHostedPayPalButton()),
+    hostedAddressError: hostedAddressError.hasError,
+    hostedAddressErrorMessage: hostedAddressError.message,
+    hostedCardDeclinedError: hostedCardDeclinedError.hasError,
+    hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
+    hostedCardFallback: hostedCardFallback.fallback,
+    hostedCardFallbackReason: hostedCardFallback.reason,
+    hostedCardFallbackReasons: hostedCardFallback.reasons,
+    hostedPaypalDisabledSignals: hostedCardFallback.paypalDisabledSignals,
+    hostedCardAccordionSelected: hostedCardFallback.cardAccordionSelected,
     checkoutAmountSummary: getCheckoutAmountSummary(),
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',

@@ -42,6 +42,7 @@
   const CHECKOUT_CONVERSION_PROXY_DIRECT_PAC_SENTINEL = 'MULTIPAGE_CHECKOUT_CONVERSION_DIRECT_V1';
   const CHECKOUT_CONVERSION_PROXY_SESSION_KEY = 'plusCheckoutConversionProxySession';
   const CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY = 'plusCheckoutConversionProxyManualSession';
+  const CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY = 'plusCheckoutConversionProxyExitCheck';
 
   function createCheckoutConversionProxyManager(deps = {}) {
     const {
@@ -49,6 +50,7 @@
       getState = null,
       setState = async () => {},
       addLog = async () => {},
+      broadcastDataUpdate = null,
       detectProxyExitInfoByPageContext = null,
       detectProxyExitInfoByBackgroundFetch = null,
       detectIpProxyTargetReachabilityByPageContext = null,
@@ -684,6 +686,54 @@ function FindProxyForURL(url, host) {
       return Math.max(0, Math.min(length - 1, numeric));
     }
 
+    function normalizeCheckoutConversionProxyExitCheckStatus(value = '') {
+      const normalized = String(value || '').trim().toLowerCase();
+      return ['idle', 'running', 'success', 'error'].includes(normalized) ? normalized : 'idle';
+    }
+
+    function buildCheckoutConversionProxyExitCheckPayload(value = {}) {
+      const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      const status = normalizeCheckoutConversionProxyExitCheckStatus(source.status);
+      const checkedAt = Math.max(0, Number(source.checkedAt) || Date.now());
+      return {
+        status,
+        exitIp: String(source.exitIp || '').trim(),
+        exitRegion: String(source.exitRegion || '').trim(),
+        exitSource: String(source.exitSource || '').trim(),
+        exitEndpoint: String(source.exitEndpoint || '').trim(),
+        diagnostics: String(source.diagnostics || source.error || '').trim(),
+        displayName: String(source.displayName || '').trim(),
+        checkedAt,
+        context: String(source.context || '').trim(),
+      };
+    }
+
+    function buildCheckoutConversionProxyExitCheckFromResult(result = {}, options = {}) {
+      const exitIp = String(result?.exitIp || '').trim();
+      const diagnostics = String(result?.diagnostics || result?.error || '').trim();
+      return buildCheckoutConversionProxyExitCheckPayload({
+        status: exitIp ? 'success' : 'error',
+        exitIp,
+        exitRegion: String(result?.exitRegion || '').trim(),
+        exitSource: String(result?.exitSource || '').trim(),
+        exitEndpoint: String(result?.exitEndpoint || '').trim(),
+        diagnostics: exitIp ? diagnostics : (diagnostics || '未检测到支付转换代理出口 IP。'),
+        displayName: options.displayName,
+        checkedAt: Date.now(),
+        context: options.context,
+      });
+    }
+
+    function buildCheckoutConversionProxyExitCheckFromError(error, options = {}) {
+      return buildCheckoutConversionProxyExitCheckPayload({
+        status: 'error',
+        diagnostics: error?.message || String(error || '支付转换代理出口检测失败。'),
+        displayName: options.displayName,
+        checkedAt: Date.now(),
+        context: options.context,
+      });
+    }
+
     function getCheckoutConversionProxySourceFromState(state = {}, options = {}) {
       return normalizeCheckoutConversionProxySource(
         options?.source
@@ -784,6 +834,11 @@ function FindProxyForURL(url, host) {
         requestedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.requestedRegion || ''),
         resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
         selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
+        exitIp: String(normalizedSession.exitIp || '').trim(),
+        exitRegion: String(normalizedSession.exitRegion || '').trim(),
+        exitSource: String(normalizedSession.exitSource || '').trim(),
+        exitEndpoint: String(normalizedSession.exitEndpoint || '').trim(),
+        diagnostics: String(normalizedSession.diagnostics || '').trim(),
         snapshot,
         appliedAt: Math.max(0, Number(normalizedSession.appliedAt) || Date.now()),
       };
@@ -834,8 +889,11 @@ function FindProxyForURL(url, host) {
             Number(normalizedSession.poolSize) || 0
           )
           : 0,
-        exitIp: source === '711proxy_pool' ? String(normalizedSession.exitIp || '').trim() : '',
-        exitRegion: source === '711proxy_pool' ? String(normalizedSession.exitRegion || '').trim() : '',
+        exitIp: String(normalizedSession.exitIp || '').trim(),
+        exitRegion: String(normalizedSession.exitRegion || '').trim(),
+        exitSource: String(normalizedSession.exitSource || '').trim(),
+        exitEndpoint: String(normalizedSession.exitEndpoint || '').trim(),
+        diagnostics: String(normalizedSession.diagnostics || '').trim(),
         baseSnapshot,
         appliedAt,
         lastSwitchedAt,
@@ -1001,6 +1059,39 @@ function FindProxyForURL(url, host) {
       });
     }
 
+    async function persistCheckoutConversionProxyExitCheck(exitCheck = {}) {
+      const payload = buildCheckoutConversionProxyExitCheckPayload(exitCheck);
+      await setState({
+        [CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY]: payload,
+      });
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate({
+          [CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY]: payload,
+        });
+      }
+      return payload;
+    }
+
+    async function clearCheckoutConversionProxyExitCheck() {
+      await setState({
+        [CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY]: null,
+      });
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate({
+          [CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY]: null,
+        });
+      }
+    }
+
+    async function markCheckoutConversionProxyExitCheckRunning(options = {}) {
+      return persistCheckoutConversionProxyExitCheck({
+        status: 'running',
+        displayName: options.displayName,
+        context: options.context,
+        checkedAt: Date.now(),
+      });
+    }
+
     async function persistSession(session = {}) {
       const payload = buildSessionPayload(session);
       if (!payload) {
@@ -1016,10 +1107,12 @@ function FindProxyForURL(url, host) {
       const normalizedSession = buildSessionPayload(session);
       if (!normalizedSession?.snapshot?.applied) {
         await clearStoredSession();
+        await clearCheckoutConversionProxyExitCheck();
         return false;
       }
       await defaultRestoreCheckoutScopedProxySnapshot(normalizedSession.snapshot);
       await clearStoredSession();
+      await clearCheckoutConversionProxyExitCheck();
       return true;
     }
 
@@ -1033,6 +1126,85 @@ function FindProxyForURL(url, host) {
       await setState({
         [CHECKOUT_CONVERSION_PROXY_MANUAL_SESSION_KEY]: null,
       });
+    }
+
+    async function checkCheckoutConversionProxySessionExit(session = null, options = {}) {
+      const normalizedSession = buildManualSessionPayload(session) || buildSessionPayload(session);
+      if (!normalizedSession?.active) {
+        return null;
+      }
+      const displayName = String(options?.displayName || normalizedSession.displayName || '').trim();
+      const context = String(
+        options?.context
+        || normalizedSession.flowType
+        || normalizedSession.mode
+        || normalizedSession.source
+        || 'checkout-conversion-proxy'
+      ).trim();
+      const requireExit = Boolean(options?.requireExit);
+      const shouldLog = options?.log !== false;
+      if (shouldLog) {
+        await addLog('支付转换代理已切换，正在检测支付出口...', 'info').catch(() => {});
+      }
+      if (options?.persistRunning !== false) {
+        await markCheckoutConversionProxyExitCheckRunning({ displayName, context }).catch(() => {});
+      }
+
+      try {
+        const existingExitIp = String(normalizedSession.exitIp || '').trim();
+        const result = existingExitIp
+          ? {
+            exitIp: existingExitIp,
+            exitRegion: String(normalizedSession.exitRegion || '').trim(),
+            exitSource: String(normalizedSession.exitSource || '').trim(),
+            exitEndpoint: String(normalizedSession.exitEndpoint || '').trim(),
+            diagnostics: String(normalizedSession.diagnostics || '').trim(),
+          }
+          : await validateCheckoutProxyCandidateWithSnapshot(
+            normalizedSession.snapshot || normalizedSession.baseSnapshot,
+            {
+              probeDiagnostics: [],
+              targetDiagnostics: [],
+            },
+            { allowMissingExit: !requireExit }
+          );
+        const exitCheck = buildCheckoutConversionProxyExitCheckFromResult(result, {
+          displayName,
+          context,
+        });
+        const persisted = await persistCheckoutConversionProxyExitCheck(exitCheck);
+        if (!persisted.exitIp && requireExit) {
+          const error = new Error(persisted.diagnostics || '支付转换代理出口检测未获取到出口 IP。');
+          error.exitCheck = persisted;
+          throw error;
+        }
+        if (shouldLog) {
+          if (persisted.exitIp) {
+            await addLog(
+              `支付转换代理出口检测成功：${persisted.exitIp}${persisted.exitRegion ? ` [${persisted.exitRegion}]` : ''}`,
+              'ok'
+            ).catch(() => {});
+          } else {
+            await addLog(`支付转换代理出口检测失败：${persisted.diagnostics || '未检测到出口 IP。'}`, 'warn').catch(() => {});
+          }
+        }
+        return persisted;
+      } catch (error) {
+        const exitCheck = error?.exitCheck || buildCheckoutConversionProxyExitCheckFromError(error, {
+          displayName,
+          context,
+        });
+        const persisted = await persistCheckoutConversionProxyExitCheck(exitCheck).catch(() => exitCheck);
+        if (shouldLog) {
+          await addLog(`支付转换代理出口检测失败：${persisted.diagnostics || error?.message || String(error)}`, 'warn').catch(() => {});
+        }
+        if (requireExit) {
+          const wrapped = new Error(persisted.diagnostics || error?.message || String(error || '支付转换代理出口检测失败。'));
+          wrapped.exitCheck = persisted;
+          throw wrapped;
+        }
+        return persisted;
+      }
     }
 
     async function persistManualSession(session = {}) {
@@ -1071,6 +1243,7 @@ function FindProxyForURL(url, host) {
           alreadyActive: true,
           session: existingSession,
           displayName: existingSession.displayName,
+          exitCheck: buildCheckoutConversionProxyExitCheckPayload(sourceState?.[CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY] || {}),
         };
       }
       let restoreSnapshot = null;
@@ -1120,17 +1293,25 @@ function FindProxyForURL(url, host) {
         pool: source === '711proxy_pool' ? resolved?.pool || [] : [],
         candidateIndex: source === '711proxy_pool' ? resolved?.candidateIndex ?? -1 : -1,
         poolSize: source === '711proxy_pool' ? resolved?.poolSize || 0 : 0,
-        exitIp: source === '711proxy_pool' ? resolved?.exitIp || '' : '',
-        exitRegion: source === '711proxy_pool' ? resolved?.exitRegion || '' : '',
+        exitIp: resolved?.exitIp || '',
+        exitRegion: resolved?.exitRegion || '',
+        exitSource: resolved?.exitSource || '',
+        exitEndpoint: resolved?.exitEndpoint || '',
+        diagnostics: resolved?.diagnostics || '',
         baseSnapshot: existingSession?.baseSnapshot || snapshot,
         appliedAt: existingSession?.appliedAt || Date.now(),
         lastSwitchedAt: Date.now(),
+      });
+      const exitCheck = await checkCheckoutConversionProxySessionExit(payload, {
+        context: 'manual-switch',
+        requireExit: false,
       });
       return {
         switched: true,
         alreadyActive: false,
         session: payload,
         displayName: payload.displayName,
+        exitCheck,
       };
     }
 
@@ -1321,6 +1502,7 @@ function FindProxyForURL(url, host) {
           exitChanged: false,
           session: existing711Session,
           displayName: String(existing711Session?.displayName || '').trim(),
+          exitCheck: buildCheckoutConversionProxyExitCheckPayload(sourceState?.[CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY] || {}),
         };
       }
 
@@ -1342,9 +1524,16 @@ function FindProxyForURL(url, host) {
         poolSize: resolved.poolSize || 0,
         exitIp: resolved.exitIp || '',
         exitRegion: resolved.exitRegion || '',
+        exitSource: resolved.exitSource || '',
+        exitEndpoint: resolved.exitEndpoint || '',
+        diagnostics: resolved.diagnostics || '',
         baseSnapshot: existing711Session?.baseSnapshot || existingSession?.baseSnapshot || resolved.snapshot,
         appliedAt: existing711Session?.appliedAt || existingSession?.appliedAt || Date.now(),
         lastSwitchedAt: Date.now(),
+      });
+      const exitCheck = await checkCheckoutConversionProxySessionExit(payload, {
+        context: 'manual-next-711',
+        requireExit: false,
       });
       return {
         switched: true,
@@ -1355,6 +1544,7 @@ function FindProxyForURL(url, host) {
         displayName: payload.displayName,
         skippedReason: finalSkippedReason,
         reason: finalSkippedReason,
+        exitCheck,
       };
     }
 
@@ -1370,6 +1560,7 @@ function FindProxyForURL(url, host) {
       }
       await defaultRestoreCheckoutScopedProxySnapshot(session.baseSnapshot);
       await clearStoredManualSession();
+      await clearCheckoutConversionProxyExitCheck();
       return {
         cancelled: true,
         alreadyInactive: false,
@@ -1436,6 +1627,11 @@ function FindProxyForURL(url, host) {
         requestedRegion: source === '711proxy_pool' ? resolved?.requestedRegion || proxy711Region : '',
         resolvedRegion: source === '711proxy_pool' ? resolved?.resolvedRegion || '' : '',
         selectedEntryDisplayName: source === '711proxy_pool' ? resolved?.selectedEntryDisplayName || displayName : '',
+        exitIp: resolved?.exitIp || '',
+        exitRegion: resolved?.exitRegion || '',
+        exitSource: resolved?.exitSource || '',
+        exitEndpoint: resolved?.exitEndpoint || '',
+        diagnostics: resolved?.diagnostics || '',
         snapshot,
         appliedAt: Date.now(),
       });
@@ -1537,6 +1733,7 @@ function FindProxyForURL(url, host) {
       cancelManualSession,
       cleanupResidualSession,
       applySessionFromState,
+      checkCheckoutConversionProxySessionExit,
       releaseSessionForNode,
       testCheckoutConversionProxy,
     };

@@ -326,6 +326,8 @@ const inputPlusCheckoutConversionProxy711Region = document.getElementById('input
 const rowPlusCheckoutConversionProxyTest = document.getElementById('row-plus-checkout-conversion-proxy-test');
 const btnPlusCheckoutConversionProxyTest = document.getElementById('btn-plus-checkout-conversion-proxy-test');
 const inputPlusCheckoutCloudConversionEnabled = document.getElementById('input-plus-checkout-cloud-conversion-enabled');
+const rowPlusCheckoutConversionProxyExit = document.getElementById('row-plus-checkout-conversion-proxy-exit');
+const displayPlusCheckoutConversionProxyExitCheck = document.getElementById('display-plus-checkout-conversion-proxy-exit-check');
 const rowPlusCheckoutCloudConversionApiUrl = document.getElementById('row-plus-checkout-cloud-conversion-api-url');
 const inputPlusCheckoutCloudConversionApiUrl = document.getElementById('input-plus-checkout-cloud-conversion-api-url');
 const rowPlusCheckoutCloudConversionApiKey = document.getElementById('row-plus-checkout-cloud-conversion-api-key');
@@ -10728,6 +10730,7 @@ function updatePlusModeUI() {
     typeof rowPlusCheckoutOpenStableWait !== 'undefined' ? rowPlusCheckoutOpenStableWait : null,
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
+    typeof rowPlusCheckoutConversionProxyExit !== 'undefined' ? rowPlusCheckoutConversionProxyExit : null,
     typeof rowPlusCheckoutConversionProxyRuntime !== 'undefined' ? rowPlusCheckoutConversionProxyRuntime : null,
   ].forEach((row) => {
     if (!row) {
@@ -10739,6 +10742,9 @@ function updatePlusModeUI() {
     updatePlusCheckoutConversionModeUi();
   }
   if (enabled) {
+    if (typeof renderPlusCheckoutConversionProxyExitCheck === 'function') {
+      renderPlusCheckoutConversionProxyExitCheck(latestState);
+    }
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
   }
   [
@@ -16878,6 +16884,68 @@ function setPlusCheckoutConversionProxyTestResult(message = '未测试', options
   }
 }
 
+function formatPlusCheckoutConversionProxyExitCheckTime(value = 0) {
+  const timestamp = Number(value) || 0;
+  if (!timestamp) {
+    return '';
+  }
+  try {
+    return new Date(timestamp).toLocaleTimeString('zh-CN', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function renderPlusCheckoutConversionProxyExitCheck(state = latestState) {
+  if (!displayPlusCheckoutConversionProxyExitCheck) {
+    return;
+  }
+  const exitCheck = state?.plusCheckoutConversionProxyExitCheck;
+  const status = String(exitCheck?.status || '').trim().toLowerCase();
+  let text = '未检测';
+  let title = text;
+  let statusClass = '';
+  if (status === 'running') {
+    text = '检测中...';
+    title = String(exitCheck?.displayName || '').trim()
+      ? `正在检测：${String(exitCheck.displayName).trim()}`
+      : text;
+    statusClass = 'status-running';
+  } else if (status === 'success') {
+    const exitIp = String(exitCheck?.exitIp || '').trim();
+    const exitRegion = String(exitCheck?.exitRegion || '').trim();
+    const exitSource = String(exitCheck?.exitSource || '').trim();
+    const checkedTime = formatPlusCheckoutConversionProxyExitCheckTime(exitCheck?.checkedAt);
+    text = [
+      exitIp ? `${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}` : '已检测',
+      exitSource,
+      checkedTime,
+    ].filter(Boolean).join(' · ');
+    title = [
+      String(exitCheck?.displayName || '').trim() ? `代理：${String(exitCheck.displayName).trim()}` : '',
+      String(exitCheck?.exitEndpoint || '').trim() ? `出口探测：${String(exitCheck.exitEndpoint).trim()}` : '',
+      String(exitCheck?.diagnostics || '').trim() ? `诊断：${String(exitCheck.diagnostics).trim()}` : '',
+    ].filter(Boolean).join(' | ') || text;
+    statusClass = 'status-success';
+  } else if (status === 'error') {
+    const diagnostics = String(exitCheck?.diagnostics || '').trim();
+    text = `检测失败：${diagnostics || '未获取到出口 IP'}`;
+    title = text;
+    statusClass = 'status-error';
+  }
+  displayPlusCheckoutConversionProxyExitCheck.textContent = text;
+  displayPlusCheckoutConversionProxyExitCheck.title = title;
+  displayPlusCheckoutConversionProxyExitCheck.classList.remove('status-running', 'status-success', 'status-error');
+  if (statusClass) {
+    displayPlusCheckoutConversionProxyExitCheck.classList.add(statusClass);
+  }
+}
+
 function getPlusCheckoutConversionProxyManualSession(state = latestState) {
   const session = state?.plusCheckoutConversionProxyManualSession;
   return session && typeof session === 'object' && !Array.isArray(session) && session.active
@@ -17308,10 +17376,12 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
     }
     syncLatestState({
       plusCheckoutConversionProxyManualSession: response?.plusCheckoutConversionProxyManualSession || null,
+      plusCheckoutConversionProxyExitCheck: response?.plusCheckoutConversionProxyExitCheck || null,
       plusCheckoutConversionProxySource: response?.plusCheckoutConversionProxySource ?? source,
       plusCheckoutConversionProxyUrl: response?.plusCheckoutConversionProxyUrl ?? proxyUrl,
       plusCheckoutConversionProxy711Region: response?.plusCheckoutConversionProxy711Region ?? proxy711Region,
     });
+    renderPlusCheckoutConversionProxyExitCheck(latestState);
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
     if (response?.alreadyActive) {
       showToast(
@@ -17364,9 +17434,11 @@ async function handlePlusCheckoutConversionProxyNext711() {
     }
     syncLatestState({
       plusCheckoutConversionProxyManualSession: response?.plusCheckoutConversionProxyManualSession || latestState?.plusCheckoutConversionProxyManualSession || null,
+      plusCheckoutConversionProxyExitCheck: response?.plusCheckoutConversionProxyExitCheck || latestState?.plusCheckoutConversionProxyExitCheck || null,
       plusCheckoutConversionProxySource: response?.plusCheckoutConversionProxySource ?? source,
       plusCheckoutConversionProxy711Region: response?.plusCheckoutConversionProxy711Region ?? proxy711Region,
     });
+    renderPlusCheckoutConversionProxyExitCheck(latestState);
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
     if (response?.switched) {
       const displayName = response?.displayName || '已选节点';
@@ -17402,7 +17474,9 @@ async function handlePlusCheckoutConversionProxyManualCancel() {
     }
     syncLatestState({
       plusCheckoutConversionProxyManualSession: null,
+      plusCheckoutConversionProxyExitCheck: null,
     });
+    renderPlusCheckoutConversionProxyExitCheck(latestState);
     renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
     if (response?.alreadyInactive) {
       showToast('当前没有手动开启的支付转换代理。', 'info', 2200);
@@ -20444,11 +20518,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (
         message.payload.plusCheckoutConversionProxyManualSession !== undefined
+        || message.payload.plusCheckoutConversionProxyExitCheck !== undefined
         || message.payload.plusCheckoutConversionProxySource !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
         || message.payload.plusCheckoutConversionProxy711Region !== undefined
       ) {
         updatePlusCheckoutConversionModeUi();
+        renderPlusCheckoutConversionProxyExitCheck(latestState);
         renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
       }
       if (message.payload.gopayHelperPhoneMode !== undefined && selectGpcHelperPhoneMode) {

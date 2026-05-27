@@ -1797,6 +1797,14 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
   const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
   const broadcasts = [];
   const calls = [];
+  const exitCheck = {
+    status: 'success',
+    exitIp: '203.0.113.66',
+    exitRegion: 'US',
+    displayName: 'socks5://proxy.example:1080',
+    checkedAt: 12345,
+    context: 'manual-switch',
+  };
 
   const router = api.createMessageRouter({
     broadcastDataUpdate: (payload) => broadcasts.push(payload),
@@ -1808,6 +1816,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
           switched: true,
           alreadyActive: false,
           displayName: 'socks5://proxy.example:1080',
+          exitCheck,
           session: {
             active: true,
             mode: 'manual',
@@ -1836,6 +1845,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
   assert.equal(response.ok, true);
   assert.equal(response.switched, true);
   assert.equal(response.displayName, 'socks5://proxy.example:1080');
+  assert.deepStrictEqual(response.plusCheckoutConversionProxyExitCheck, exitCheck);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].proxyUrl, 'socks5h://proxy.example:1080');
   assert.equal(calls[0].source, 'manual');
@@ -1847,6 +1857,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts manual session whe
       proxyUrl: 'socks5h://proxy.example:1080',
       displayName: 'socks5://proxy.example:1080',
     },
+    plusCheckoutConversionProxyExitCheck: exitCheck,
     plusCheckoutConversionProxySource: 'manual',
     plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
     plusCheckoutConversionProxy711Region: '',
@@ -1859,6 +1870,14 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts direct mode and pr
   const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
   const broadcasts = [];
   const calls = [];
+  const exitCheck = {
+    status: 'success',
+    exitIp: '198.51.100.5',
+    exitRegion: 'US',
+    displayName: '无代理模式',
+    checkedAt: 22345,
+    context: 'manual-switch',
+  };
 
   const router = api.createMessageRouter({
     broadcastDataUpdate: (payload) => broadcasts.push(payload),
@@ -1870,6 +1889,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts direct mode and pr
           switched: true,
           alreadyActive: false,
           displayName: '无代理模式',
+          exitCheck,
           session: {
             active: true,
             mode: 'manual',
@@ -1910,6 +1930,7 @@ test('SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL broadcasts direct mode and pr
       entry: null,
       baseSnapshot: { applied: true },
     },
+    plusCheckoutConversionProxyExitCheck: exitCheck,
     plusCheckoutConversionProxySource: 'direct',
     plusCheckoutConversionProxyUrl: '',
     plusCheckoutConversionProxy711Region: 'US',
@@ -1922,6 +1943,14 @@ test('NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711 broadcasts next manual session whe
   const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
   const broadcasts = [];
   const calls = [];
+  const exitCheck = {
+    status: 'success',
+    exitIp: '203.0.113.20',
+    exitRegion: 'US',
+    displayName: 'http://proxy-b.example:8002',
+    checkedAt: 32345,
+    context: 'manual-next-711',
+  };
   const nextSession = {
     active: true,
     mode: 'manual',
@@ -1949,6 +1978,7 @@ test('NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711 broadcasts next manual session whe
           skipped: false,
           exitChanged: true,
           displayName: nextSession.displayName,
+          exitCheck,
           session: nextSession,
         };
       },
@@ -1975,12 +2005,14 @@ test('NEXT_PLUS_CHECKOUT_CONVERSION_PROXY_711 broadcasts next manual session whe
   assert.equal(response.switched, true);
   assert.equal(response.exitChanged, true);
   assert.equal(response.displayName, 'http://proxy-b.example:8002');
+  assert.deepStrictEqual(response.plusCheckoutConversionProxyExitCheck, exitCheck);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].source, '711proxy_pool');
   assert.equal(calls[0].proxy711Region, 'US');
   assert.equal(calls[0].state.ipProxyAutoRefreshPoolOnExhausted, true);
   assert.deepStrictEqual(broadcasts[0], {
     plusCheckoutConversionProxyManualSession: nextSession,
+    plusCheckoutConversionProxyExitCheck: exitCheck,
     plusCheckoutConversionProxySource: '711proxy_pool',
     plusCheckoutConversionProxy711Region: 'US',
   });
