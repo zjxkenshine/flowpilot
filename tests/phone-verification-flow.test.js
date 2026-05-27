@@ -174,7 +174,9 @@ test('phone verification helper retries HeroSMS without operator in the same cou
   const getNumberCalls = requests.filter((entry) => entry.searchParams.get('action') === 'getNumber');
   assert.equal(getNumberCalls.length, 2);
   assert.equal(getNumberCalls[0].searchParams.get('operator'), 'ais');
+  assert.equal(getNumberCalls[0].searchParams.get('service'), 'dr');
   assert.equal(getNumberCalls[1].searchParams.get('operator'), null);
+  assert.equal(getNumberCalls[1].searchParams.get('service'), 'dr');
   assert.equal(activation.operator, undefined);
 });
 
@@ -362,6 +364,7 @@ test('signup phone helper polls signup SMS code and keeps activation purpose iso
 test('signup phone helper finalizes or cancels signup activation without clearing add-phone activation', async () => {
   const setStateCalls = [];
   const statusActions = [];
+  const phoneEmailCalls = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
     heroSmsReuseEnabled: false,
@@ -400,6 +403,20 @@ test('signup phone helper finalizes or cancels signup activation without clearin
       throw new Error(`Unexpected HeroSMS action: ${action}`);
     },
     getState: async () => currentState,
+    ensurePhonePrefixedCloudflareTempEmail: async (state, options) => {
+      phoneEmailCalls.push({ state, options });
+      currentState = {
+        ...currentState,
+        email: '66959916439@mail.example.com',
+        registrationEmailState: {
+          current: '66959916439@mail.example.com',
+          previous: '66959916439@mail.example.com',
+          source: 'generated:cloudflare-temp-email:phone-prefix',
+          updatedAt: 123,
+        },
+      };
+      return '66959916439@mail.example.com';
+    },
     sendToContentScriptResilient: async () => ({}),
     setState: async (updates) => {
       setStateCalls.push(updates);
@@ -427,6 +444,10 @@ test('signup phone helper finalizes or cancels signup activation without clearin
   assert.equal(currentState.accountIdentifierType, 'phone');
   assert.equal(currentState.accountIdentifier, '66959916439');
   assert.equal(currentState.currentPhoneActivation.activationId, 'add-phone-activation');
+  assert.equal(phoneEmailCalls.length, 1);
+  assert.equal(phoneEmailCalls[0].options.phoneNumber, '66959916439');
+  assert.equal(phoneEmailCalls[0].state.signupPhoneNumber, '66959916439');
+  assert.equal(currentState.email, '66959916439@mail.example.com');
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
 
@@ -714,6 +735,80 @@ test('signup phone helper writes account book entry immediately after phone veri
     successfulUses: 1,
     maxUses: 3,
   });
+});
+
+test('signup phone helper does not generate phone-prefixed email when code submit is rejected', async () => {
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    phoneCodeWaitSeconds: 15,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 2,
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-invalid-code',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  let phoneEmailCalls = 0;
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_OK:112233' };
+      }
+      if (action === 'setStatus') {
+        return { ok: true, text: async () => 'ACCESS_READY' };
+      }
+      if (action === 'cancel') {
+        return { ok: true, text: async () => 'ACCESS_CANCEL' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    ensurePhonePrefixedCloudflareTempEmail: async () => {
+      phoneEmailCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        return { invalidCode: true, errorText: 'invalid code' };
+      }
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        return {};
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => helpers.completeSignupPhoneVerificationFlow(77, { state: currentState }),
+    /invalid code/
+  );
+  assert.equal(phoneEmailCalls, 0);
 });
 
 test('signup phone helper writes account book entry before email-verification handoff continues', async () => {
@@ -1852,6 +1947,9 @@ test('phone verification helper falls back to plain getNumber only after HeroSMS
   assert.equal(requests[2].searchParams.get('country'), '52');
   assert.equal(requests[2].searchParams.get('api_key'), 'demo-key');
   assert.equal(requests[3].searchParams.get('action'), 'getNumber');
+  assert.equal(requests[3].searchParams.get('service'), 'dr');
+  assert.equal(requests[3].searchParams.get('country'), '52');
+  assert.equal(requests[3].searchParams.get('api_key'), 'demo-key');
   assert.equal(requests[3].searchParams.get('maxPrice'), null);
   assert.equal(requests[3].searchParams.get('fixedPrice'), null);
 });
@@ -1915,10 +2013,12 @@ test('phone verification helper retries with HeroSMS getNumberV2 when getNumber 
   assert.equal(requests[0].searchParams.get('action'), 'getPrices');
   assert.equal(requests[0].searchParams.get('country'), '16');
   assert.equal(requests[1].searchParams.get('action'), 'getNumber');
+  assert.equal(requests[1].searchParams.get('service'), 'dr');
   assert.equal(requests[1].searchParams.get('country'), '16');
   assert.equal(requests[1].searchParams.get('maxPrice'), '0.08');
   assert.equal(requests[1].searchParams.get('fixedPrice'), 'true');
   assert.equal(requests[2].searchParams.get('action'), 'getNumberV2');
+  assert.equal(requests[2].searchParams.get('service'), 'dr');
   assert.equal(requests[2].searchParams.get('country'), '16');
   assert.equal(requests[2].searchParams.get('maxPrice'), '0.08');
   assert.equal(requests[2].searchParams.get('fixedPrice'), 'true');

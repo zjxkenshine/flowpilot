@@ -257,6 +257,7 @@
       getErrorMessage = (error) => error?.message || String(error || '未知错误'),
       getState = null,
       getTabId = async () => null,
+      ensurePhonePrefixedCloudflareTempEmail = null,
       persistRegistrationEmailState = null,
       registrationSuccessWaitMs = DEFAULT_REGISTRATION_SUCCESS_WAIT_MS,
       resolveSignupMethod = null,
@@ -367,6 +368,28 @@
       return getStep6PhoneEmailSourceValue(state).replace(/\D+/g, '');
     }
 
+    function getExistingStep6PhonePrefixedEmail(state = {}, localPart = '') {
+      const normalizedLocalPart = String(localPart || '').trim().toLowerCase();
+      if (!normalizedLocalPart) {
+        return '';
+      }
+      const registrationEmailState = state?.registrationEmailState && typeof state.registrationEmailState === 'object'
+        ? state.registrationEmailState
+        : {};
+      const candidates = [
+        registrationEmailState.current,
+        state?.email,
+      ];
+      for (const candidate of candidates) {
+        const email = String(candidate || '').trim().toLowerCase();
+        const separatorIndex = email.indexOf('@');
+        if (separatorIndex > 0 && email.slice(0, separatorIndex) === normalizedLocalPart) {
+          return email;
+        }
+      }
+      return '';
+    }
+
     async function resolveLatestStep6State(state = {}) {
       if (typeof getState !== 'function') {
         return state || {};
@@ -382,13 +405,28 @@
       if (!isStep6PhoneCloudflareTempEmailEnabled(latestState)) {
         return null;
       }
-      if (typeof fetchCloudflareTempEmailAddress !== 'function') {
-        throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
-      }
-
       const localPart = buildStep6PhoneEmailLocalPart(latestState);
       if (!localPart) {
         throw new Error('步骤 6：手机号注册成功后无法提取可用手机号数字，无法生成手机号前缀 Cloudflare Temp Email。');
+      }
+
+      const existingEmail = getExistingStep6PhonePrefixedEmail(latestState, localPart);
+      if (existingEmail) {
+        if (typeof setPlusPaymentEmailState === 'function') {
+          await setPlusPaymentEmailState(existingEmail, {
+            source: 'registration:phone-prefix-cloudflare-temp-email',
+          });
+        }
+        await addLog(`步骤 6：本轮后续邮箱已固定为 ${existingEmail}。`, 'ok');
+        return existingEmail;
+      }
+
+      if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
+        return ensurePhonePrefixedCloudflareTempEmail(latestState, { localPart });
+      }
+
+      if (typeof fetchCloudflareTempEmailAddress !== 'function') {
+        throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
       }
 
       await addLog(`步骤 6：手机号注册成功，正在生成手机号前缀 Cloudflare Temp Email（${localPart}）...`, 'info');

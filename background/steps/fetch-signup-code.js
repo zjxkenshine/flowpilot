@@ -14,6 +14,7 @@
       ensureMail2925MailboxSession,
       ensureIcloudMailSession,
       getMailConfig,
+      getState = null,
       getTabId,
       HOTMAIL_PROVIDER,
       isTabAlive,
@@ -293,7 +294,10 @@
         const phoneResult = await executeSignupPhoneCodeStep(state, signupTabId);
         if (phoneResult?.emailVerificationRequired || phoneResult?.emailVerificationPage) {
           await addLog('步骤 4：手机验证码已通过，OpenAI 要求继续邮箱验证，切换到邮箱验证码轮询。', 'info');
-          return executeSignupEmailVerificationStep(state, stepStartedAt, verificationSessionKey);
+          const latestState = typeof getState === 'function'
+            ? await getState().catch(() => state)
+            : state;
+          return executeSignupEmailVerificationStep(latestState || state, stepStartedAt, verificationSessionKey);
         }
         return phoneResult;
       }

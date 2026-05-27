@@ -10,6 +10,7 @@
       generateRandomName,
       getOAuthFlowStepTimeoutMs,
       getState,
+      ensurePhonePrefixedCloudflareTempEmail = null,
       upsertAccountBookEntry = null,
       requestStop = null,
       readAuthTabSnapshot = null,
@@ -7232,6 +7233,15 @@
         accountIdentifierType: 'phone',
         accountIdentifier: normalizedActivation.phoneNumber,
       });
+      if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
+        const latestState = typeof getState === 'function'
+          ? await getState().catch(() => state)
+          : state;
+        await ensurePhonePrefixedCloudflareTempEmail(latestState, {
+          phoneNumber: normalizedActivation.phoneNumber,
+          activation: normalizedActivation,
+        });
+      }
       return normalizedActivation;
     }
 
@@ -7429,8 +7439,8 @@
               continue;
             }
 
-            await finalizeSignupPhoneActivationAfterSuccess(state, activation);
             shouldCancelActivation = false;
+            await finalizeSignupPhoneActivationAfterSuccess(state, activation);
             await setPhoneRuntimeState({
               [PHONE_VERIFICATION_CODE_STATE_KEY]: '',
               signupPhoneVerificationRequestedAt: null,
