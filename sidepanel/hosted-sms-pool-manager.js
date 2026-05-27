@@ -371,6 +371,18 @@
       }
     }
 
+    function getMaxUsesSummaryText() {
+      if (typeof state.getMaxUses !== 'function') {
+        return '';
+      }
+      const numeric = Number(state.getMaxUses());
+      if (!Number.isFinite(numeric)) {
+        return '';
+      }
+      const maxUses = Math.min(99, Math.max(1, Math.floor(numeric)));
+      return `每号最多 ${maxUses} 次`;
+    }
+
     function updateControls(entries = renderedEntries) {
       const entriesWithState = getEntriesWithState(entries);
       const usedCount = entriesWithState.filter((entry) => entry.useCount > 0).length;
@@ -404,7 +416,8 @@
       const usedCount = entriesWithState.filter((entry) => entry.useCount > 0).length;
       const disabledCount = entriesWithState.filter((entry) => !entry.enabled).length;
       const totalUseCount = entriesWithState.reduce((sum, entry) => sum + Math.max(0, Number(entry.useCount) || 0), 0);
-      dom.hostedSmsPoolSummary.textContent = `已加载 ${entriesWithState.length} 个号码，${usedCount} 个有使用记录，${disabledCount} 个已禁用，累计使用 ${totalUseCount} 次。`;
+      const maxUsesSummary = getMaxUsesSummaryText();
+      dom.hostedSmsPoolSummary.textContent = `已加载 ${entriesWithState.length} 个号码，${usedCount} 个有使用记录，${disabledCount} 个已禁用，累计使用 ${totalUseCount} 次${maxUsesSummary ? `，${maxUsesSummary}` : ''}。`;
 
       const visibleEntries = getFilteredEntries(renderedEntries);
       if (!visibleEntries.length) {

@@ -252,9 +252,15 @@
       addLog = async () => {},
       chrome: chromeApi = globalThis.chrome,
       completeNodeFromBackground,
+      CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email',
+      fetchCloudflareTempEmailAddress = null,
       getErrorMessage = (error) => error?.message || String(error || '未知错误'),
+      getState = null,
       getTabId = async () => null,
+      persistRegistrationEmailState = null,
       registrationSuccessWaitMs = DEFAULT_REGISTRATION_SUCCESS_WAIT_MS,
+      resolveSignupMethod = null,
+      setPlusPaymentEmailState = null,
       sleepWithStop = async (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0))),
     } = deps;
 
@@ -333,6 +339,89 @@
       }
     }
 
+    function resolveStep6SignupMethod(state = {}) {
+      if (typeof resolveSignupMethod === 'function') {
+        return String(resolveSignupMethod(state) || '').trim().toLowerCase();
+      }
+      return String(state?.resolvedSignupMethod || state?.signupMethod || '').trim().toLowerCase();
+    }
+
+    function isStep6PhoneCloudflareTempEmailEnabled(state = {}) {
+      const signupMethod = resolveStep6SignupMethod(state);
+      const generator = String(state?.emailGenerator || '').trim().toLowerCase();
+      const cloudflareTempEmailGenerator = String(CLOUDFLARE_TEMP_EMAIL_GENERATOR || 'cloudflare-temp-email').trim().toLowerCase();
+      return signupMethod === 'phone' && generator === cloudflareTempEmailGenerator;
+    }
+
+    function getStep6PhoneEmailSourceValue(state = {}) {
+      return String(
+        state?.signupPhoneNumber
+        || state?.signupPhoneCompletedActivation?.phoneNumber
+        || state?.signupPhoneActivation?.phoneNumber
+        || state?.accountIdentifier
+        || ''
+      ).trim();
+    }
+
+    function buildStep6PhoneEmailLocalPart(state = {}) {
+      return getStep6PhoneEmailSourceValue(state).replace(/\D+/g, '');
+    }
+
+    async function resolveLatestStep6State(state = {}) {
+      if (typeof getState !== 'function') {
+        return state || {};
+      }
+      const latestState = await getState().catch(() => null);
+      return latestState && typeof latestState === 'object' && !Array.isArray(latestState)
+        ? latestState
+        : (state || {});
+    }
+
+    async function ensurePhonePrefixedCloudflareTempEmailForStep6(state = {}) {
+      const latestState = await resolveLatestStep6State(state);
+      if (!isStep6PhoneCloudflareTempEmailEnabled(latestState)) {
+        return null;
+      }
+      if (typeof fetchCloudflareTempEmailAddress !== 'function') {
+        throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
+      }
+
+      const localPart = buildStep6PhoneEmailLocalPart(latestState);
+      if (!localPart) {
+        throw new Error('步骤 6：手机号注册成功后无法提取可用手机号数字，无法生成手机号前缀 Cloudflare Temp Email。');
+      }
+
+      await addLog(`步骤 6：手机号注册成功，正在生成手机号前缀 Cloudflare Temp Email（${localPart}）...`, 'info');
+      const email = String(await fetchCloudflareTempEmailAddress(latestState, {
+        localPart,
+        preserveAccountIdentity: true,
+        source: 'generated:cloudflare-temp-email:phone-prefix',
+      }) || '').trim().toLowerCase();
+      if (!email) {
+        throw new Error('步骤 6：Cloudflare Temp Email 未返回可用的手机号前缀邮箱。');
+      }
+
+      const postGenerateState = await resolveLatestStep6State(latestState);
+      const persistedEmail = String(
+        postGenerateState?.registrationEmailState?.current
+        || postGenerateState?.email
+        || ''
+      ).trim().toLowerCase();
+      if (typeof persistRegistrationEmailState === 'function' && persistedEmail !== email) {
+        await persistRegistrationEmailState(latestState, email, {
+          preserveAccountIdentity: true,
+          source: 'generated:cloudflare-temp-email:phone-prefix',
+        });
+      }
+      if (typeof setPlusPaymentEmailState === 'function') {
+        await setPlusPaymentEmailState(email, {
+          source: 'registration:phone-prefix-cloudflare-temp-email',
+        });
+      }
+      await addLog(`步骤 6：本轮后续邮箱已固定为 ${email}。`, 'ok');
+      return email;
+    }
+
     async function executeStep6(state = {}) {
       const waitMs = Math.max(0, Math.floor(Number(registrationSuccessWaitMs) || 0));
       if (waitMs > 0) {
@@ -343,6 +432,7 @@
       const freeStatus = normalizeStep6FreeStatus(freeStatusResult?.freeStatus);
       await addLog(`步骤 6：账号免费状态判断结果：${freeStatus}。`, 'info');
       await clearCookiesIfEnabled(state);
+      await ensurePhonePrefixedCloudflareTempEmailForStep6(state);
       await addLog('步骤 6：注册成功等待完成，准备继续获取 OAuth 链接并登录。', 'ok');
       await completeNodeFromBackground('wait-registration-success', {
         freeStatus,

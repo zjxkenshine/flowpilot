@@ -144,6 +144,7 @@
       addLog,
       chrome: chromeApi = globalThis.chrome,
       completeNodeFromBackground,
+      ensureBrowserFingerprintForProxyExit,
       getState,
       openSignupEntryTab,
       probeIpProxyExit,
@@ -174,6 +175,10 @@
         'disabled',
         'disabled_probe_only',
       ].includes(reason);
+    }
+
+    function hasReadyProxyExit(routing = {}) {
+      return isReadyProxyRouting(routing) && !routing?.skipped;
     }
 
     function formatProxyRoutingSummary(routing = {}) {
@@ -360,9 +365,31 @@
       await addLog(`步骤 1：已清理 ${removedCount} 个 ChatGPT / OpenAI cookies（耗时 ${elapsedMs}ms）。`, 'ok');
     }
 
+    async function ensureBrowserFingerprintAfterProxyExit(routing = {}) {
+      if (!hasReadyProxyExit(routing)) {
+        return null;
+      }
+      if (typeof ensureBrowserFingerprintForProxyExit !== 'function') {
+        throw new Error('浏览器指纹更新能力不可用。');
+      }
+      const latestState = typeof getState === 'function' ? await getState() : {};
+      const result = await ensureBrowserFingerprintForProxyExit(routing, {
+        state: latestState,
+      });
+      const region = String(
+        result?.profile?.exitRegion
+        || routing?.exitRegion
+        || latestState?.ipProxyAppliedExitRegion
+        || ''
+      ).trim() || 'US';
+      await addLog(`步骤 1：已根据代理出口 ${region} 生成并应用本轮浏览器指纹。`, 'ok');
+      return result;
+    }
+
     async function executeStep1() {
       await clearOpenAiCookiesBeforeStep1();
-      await ensureIpProxyExitReadyBeforeStep1();
+      const proxyRouting = await ensureIpProxyExitReadyBeforeStep1();
+      await ensureBrowserFingerprintAfterProxyExit(proxyRouting);
       await addLog('步骤 1：正在打开 ChatGPT 官网...');
       await openSignupEntryTab(1);
       await completeNodeFromBackground('open-chatgpt', {});

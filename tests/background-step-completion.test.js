@@ -113,6 +113,10 @@ async function appendAndBroadcastAccountRunRecord(status, state) {
 async function upsertAndBroadcastAccountBookEntry(stage, state) {
   events.push({ type: 'account-book', stage, state });
 }
+async function handlePhonePlusNonFreeTrialFallback(state, context) {
+  events.push({ type: 'fallback', state, context });
+  return { handled: true, nextNodeId: 'oauth-login', skippedNodeIds: ['plus-checkout-create'] };
+}
 ${extractFunction('runCompletedNodeSideEffects')}
 ${extractFunction('reportCompletedNodeSideEffectError')}
 ${extractFunction('completeNodeFromBackground')}
@@ -172,6 +176,68 @@ test('completeNodeFromBackground writes registration-success account book entry 
       freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
     },
   });
+});
+
+test('completeNodeFromBackground skips Phone Plus payment after non-free registration status', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      currentNodeId: 'wait-registration-success',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-email',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'unknown',
+    freeStatusDetection: { freeStatus: 'unknown', reason: 'subscription_action_missing' },
+  });
+
+  const accountBookIndex = events.findIndex((event) => event.type === 'account-book');
+  const fallbackIndex = events.findIndex((event) => event.type === 'fallback');
+  assert.ok(accountBookIndex >= 0);
+  assert.ok(fallbackIndex > accountBookIndex);
+  assert.equal(events[accountBookIndex].state.freeStatus, 'unknown');
+  assert.deepStrictEqual(events[fallbackIndex].context, {
+    reason: 'phone-plus-registration-non-free',
+    detail: 'freeStatus=unknown',
+    nodeId: 'wait-registration-success',
+  });
+  assert.equal(events[fallbackIndex].state.freeStatus, 'unknown');
+});
+
+test('completeNodeFromBackground keeps Phone Plus payment after free registration status', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      currentNodeId: 'wait-registration-success',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
+
+  assert.ok(events.some((event) => event.type === 'account-book' && event.state.freeStatus === 'free'));
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
 });
 
 test('completeNodeFromBackground writes flow-completed account book entry for final node', async () => {

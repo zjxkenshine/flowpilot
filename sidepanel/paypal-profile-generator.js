@@ -76,6 +76,20 @@
       return Math.max(0, Number(value) || 0);
     }
 
+    function isPlainObject(value) {
+      return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function firstNonEmpty(...values) {
+      for (const value of values) {
+        const normalized = String(value || '').trim();
+        if (normalized) {
+          return normalized;
+        }
+      }
+      return '';
+    }
+
     function normalizeProfile(input = {}) {
       const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
       const next = { ...EMPTY_PROFILE };
@@ -97,10 +111,6 @@
       return typeof state?.getLatestState === 'function'
         ? state.getLatestState()
         : {};
-    }
-
-    function getCurrentProfile(currentState = getLatestState()) {
-      return normalizeProfile(currentState?.paypalGeneratedProfile);
     }
 
     function formatTimestamp(timestamp) {
@@ -194,6 +204,84 @@
         .map((part) => String(part || '').trim())
         .filter(Boolean)
         .join(' ');
+    }
+
+    function normalizeHostedProfile(input = {}) {
+      const source = isPlainObject(input) ? input : {};
+      const address = isPlainObject(source.address) ? source.address : {};
+      const countryCode = normalizeCountryCode(firstNonEmpty(
+        source.countryCode,
+        address.countryCode,
+        source.generatedFromCountry,
+        address.country
+      ));
+      const address1 = firstNonEmpty(source.address1, address.address1, address.street);
+      const city = firstNonEmpty(source.city, address.city);
+      const region = firstNonEmpty(source.region, source.state, address.region, address.state);
+      const postalCode = firstNonEmpty(source.postalCode, source.zip, address.postalCode, address.zip);
+      const flatProfile = normalizeProfile({
+        email: source.email,
+        phone: source.phone,
+        cardNumber: source.cardNumber,
+        cardExpiry: source.cardExpiry,
+        cardCvv: source.cardCvv,
+        password: source.password,
+        firstName: source.firstName,
+        lastName: source.lastName,
+        birthday: source.birthday,
+        countryCode,
+        address1,
+        city,
+        region,
+        postalCode,
+        fullAddress: firstNonEmpty(
+          source.fullAddress,
+          buildFullAddress({ address1, city, region, postalCode, countryCode })
+        ),
+        generatedFromCountry: source.generatedFromCountry || countryCode,
+        generatedAt: source.generatedAt,
+      });
+      return flatProfile;
+    }
+
+    function getHostedProfileFromState(currentState = getLatestState()) {
+      const profile = currentState?.plusHostedCheckoutGuestProfile || currentState?.hostedCheckoutGuestProfile || null;
+      return isPlainObject(profile) ? profile : null;
+    }
+
+    function getCurrentProfile(currentState = getLatestState()) {
+      const hostedProfile = normalizeHostedProfile(getHostedProfileFromState(currentState));
+      if (hasRenderableProfile(hostedProfile)) {
+        return hostedProfile;
+      }
+      return normalizeProfile(currentState?.paypalGeneratedProfile);
+    }
+
+    function buildHostedProfileFromFlatProfile(profile = {}) {
+      const normalizedProfile = normalizeProfile(profile);
+      return {
+        email: normalizedProfile.email,
+        phone: normalizedProfile.phone,
+        cardNumber: normalizedProfile.cardNumber,
+        cardExpiry: normalizedProfile.cardExpiry,
+        cardCvv: normalizedProfile.cardCvv,
+        password: normalizedProfile.password,
+        firstName: normalizedProfile.firstName,
+        lastName: normalizedProfile.lastName,
+        birthday: normalizedProfile.birthday,
+        generatedAt: normalizedProfile.generatedAt,
+        address: {
+          street: normalizedProfile.address1,
+          address1: normalizedProfile.address1,
+          city: normalizedProfile.city,
+          state: normalizedProfile.region,
+          region: normalizedProfile.region,
+          zip: normalizedProfile.postalCode,
+          postalCode: normalizedProfile.postalCode,
+          countryCode: normalizedProfile.countryCode,
+          country: normalizedProfile.countryCode === 'US' ? 'United States' : normalizedProfile.countryCode,
+        },
+      };
     }
 
     function normalizeExitRegionToCountryCode(value = '') {
@@ -386,11 +474,14 @@
 
     async function persistProfile(profile) {
       const normalizedProfile = normalizeProfile(profile);
+      const hostedProfile = buildHostedProfileFromFlatProfile(normalizedProfile);
       const response = await runtime.sendMessage({
         type: 'SAVE_SETTING',
         source: 'sidepanel',
         payload: {
           paypalGeneratedProfile: normalizedProfile,
+          plusHostedCheckoutGuestProfile: hostedProfile,
+          hostedCheckoutGuestProfile: hostedProfile,
         },
       });
       if (response?.error) {
@@ -398,6 +489,8 @@
       }
       state.syncLatestState({
         paypalGeneratedProfile: normalizedProfile,
+        plusHostedCheckoutGuestProfile: hostedProfile,
+        hostedCheckoutGuestProfile: hostedProfile,
       });
       renderProfile(normalizedProfile);
       return normalizedProfile;

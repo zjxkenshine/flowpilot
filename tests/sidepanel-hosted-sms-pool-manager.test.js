@@ -79,6 +79,8 @@ test('sidepanel html exposes PayPal hosted sms pool export and file import contr
   assert.match(html, /id="btn-hosted-sms-pool-import-file"/);
   assert.match(html, /id="input-hosted-sms-pool-import-file"/);
   assert.match(html, /id="input-hosted-checkout-sms-pool-auto-disable-enabled"/);
+  assert.match(html, /id="input-hosted-checkout-sms-pool-max-uses"/);
+  assert.match(html, /单号最多/);
   assert.match(html, /<option value="enabled">启用中<\/option>/);
   assert.match(html, /<option value="disabled">已禁用<\/option>/);
   assert.match(html, /accept="\.txt,text\/plain"/);
@@ -169,6 +171,7 @@ test('hosted sms pool manager exports utf8 txt payload with meta and restores fr
       setCurrentEntry: (entry) => {
         latest.currentEntry = entry;
       },
+      getMaxUses: () => 5,
       isVisible: () => true,
     },
     actions: {
@@ -181,6 +184,8 @@ test('hosted sms pool manager exports utf8 txt payload with meta and restores fr
 
   manager.bindEvents();
   manager.render();
+
+  assert.match(dom.hostedSmsPoolSummary.textContent, /每号最多 5 次/);
 
   await dom.btnHostedSmsPoolExport.listeners.click();
   assert.equal(downloads.length, 1);

@@ -12,6 +12,9 @@ const PAYPAL_HOSTED_STAGE_REVIEW = 'review_consent';
 const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
 const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
 const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
+const PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX = 'PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL::';
+const PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS = 10000;
+const PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES = 3;
 const PAYPAL_HOSTED_STEP_KEYS = {
   [PAYPAL_HOSTED_STAGE_LOGIN]: 'paypal-hosted-email',
   [PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT]: 'paypal-hosted-card',
@@ -191,6 +194,19 @@ function findEmailInput() {
     ].filter(Boolean).join(' '));
     return type === 'password' || /password|pass|密码/i.test(metadataText);
   };
+  const isEmailCandidate = (input) => {
+    if (!input || isPasswordCandidate(input)) {
+      return false;
+    }
+    const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+    const autocomplete = String(input.getAttribute?.('autocomplete') || '').trim().toLowerCase();
+    const inputMode = String(input.getAttribute?.('inputmode') || '').trim().toLowerCase();
+    const metadataText = getActionText(input);
+    return type === 'email'
+      || autocomplete === 'username'
+      || inputMode === 'email'
+      || /(?:^|[\s_-])login[_-]?email(?:$|[\s_-])|email|e-mail|电子邮箱|邮箱|邮件地址|login|user|账号/i.test(metadataText);
+  };
   const inputs = getVisibleControls('input')
     .filter((input) => {
       const type = String(input.getAttribute('type') || input.type || '').trim().toLowerCase();
@@ -198,10 +214,15 @@ function findEmailInput() {
         && !['hidden', 'checkbox', 'radio', 'submit', 'button', 'file'].includes(type)
         && !isPasswordCandidate(input);
     });
-  return inputs.find((input) => [
-    /email|login|user|账号|邮箱/i,
-  ].some((pattern) => pattern.test(getActionText(input))))
-    || getVisibleControls('input[type="email"]').find((input) => isVisibleElement(input) && !isPasswordCandidate(input))
+  const direct = [
+    document.getElementById?.('email'),
+    document.getElementById?.('login_email'),
+    document.querySelector?.('input[name="login_email"]'),
+    document.querySelector?.('input[autocomplete="username"]'),
+    document.querySelector?.('input[type="email"]'),
+  ].find((input) => input && isVisibleElement(input) && isEnabledControl(input) && isEmailCandidate(input));
+  return direct
+    || inputs.find(isEmailCandidate)
     || null;
 }
 
@@ -263,13 +284,16 @@ function isHostedLoginPage() {
 }
 
 function isHostedGuestCheckoutPage() {
-  if (document.getElementById('cardNumber') || document.getElementById('billingLine1')) {
+  if (document.getElementById('cardNumber')) {
     return true;
   }
   const pageText = normalizeText(document.body?.innerText || document.body?.textContent || '');
   if (/create\s*(?:paypal\s*)?account|agree\s*(?:&|and)?\s*create|创建.*(?:账户|账号)/i.test(pageText)
     && findHostedCreateAccountButton()) {
     return false;
+  }
+  if (document.getElementById('billingLine1')) {
+    return true;
   }
   return /\/checkoutweb\//i.test(getPayPalPathname())
     && Boolean(document.getElementById('phone') || document.getElementById('email'));
@@ -324,6 +348,63 @@ function getPayPalHostedGuestPhoneErrorMessage() {
 
 function hasPayPalHostedGuestPhoneError() {
   return Boolean(getPayPalHostedGuestPhoneErrorMessage());
+}
+
+function isHostedCreateAccountAddressErrorText(text = '') {
+  return /pageLevelError\.invalidAddress|invalidAddress|check\s+the\s+address\s+you\s+entered\s+and\s+try\s+again\.?|invalid\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized|unrecognized)|(?:检查|核对).*地址|地址.*(?:无效|错误|无法识别|不被识别)/i
+    .test(String(text || ''));
+}
+
+function getPayPalHostedCreateAccountAddressErrorMessage() {
+  const selectors = [
+    '#page-level-error-message',
+    '[data-testid="page-level-error-message"]',
+    '[data-testid="page-level-error-container"]',
+    '[data-error-key]',
+    '[aria-live]',
+    '[role="alert"]',
+  ];
+  const candidates = [];
+  const seen = new Set();
+  for (const selector of selectors) {
+    let matches = [];
+    try {
+      matches = Array.from(document.querySelectorAll(selector) || []);
+    } catch {
+      matches = [];
+    }
+    for (const node of matches) {
+      if (!node || seen.has(node)) {
+        continue;
+      }
+      seen.add(node);
+      candidates.push(node);
+    }
+  }
+  for (const node of candidates) {
+    if (!isVisibleElement(node)) {
+      continue;
+    }
+    const text = normalizeText(node.textContent || node.innerText || '');
+    const signal = normalizeText([
+      node.id,
+      node.getAttribute?.('data-testid'),
+      node.getAttribute?.('data-error-key'),
+      node.getAttribute?.('aria-live'),
+      node.getAttribute?.('role'),
+      text,
+    ].filter(Boolean).join(' '));
+    if (isHostedCreateAccountAddressErrorText(signal)) {
+      return text || signal;
+    }
+  }
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  const bodyMatch = bodyText.match(/check\s+the\s+address\s+you\s+entered\s+and\s+try\s+again\.?|invalid\s+address|地址.*(?:无效|错误|无法识别|不被识别)/i);
+  return bodyMatch ? bodyMatch[0] : '';
+}
+
+function hasPayPalHostedCreateAccountAddressError() {
+  return Boolean(getPayPalHostedCreateAccountAddressErrorMessage());
 }
 
 function getPayPalHostedSecurityChallengeText() {
@@ -554,7 +635,7 @@ function isHostedCreateAccountPage() {
   if (isHostedLoginPage()) {
     return false;
   }
-  if (document.getElementById('cardNumber') || document.getElementById('billingLine1')) {
+  if (document.getElementById('cardNumber')) {
     return false;
   }
   const button = findHostedCreateAccountButton();
@@ -633,6 +714,66 @@ function selectHostedOptionByIdText(id, value) {
   select.dispatchEvent(new Event('input', { bubbles: true }));
   select.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
+}
+
+function fillFirstHostedInputByIds(ids = [], value = '') {
+  for (const id of ids) {
+    if (fillHostedInputById(id, value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function selectFirstHostedOptionByIdText(ids = [], value = '') {
+  for (const id of ids) {
+    if (selectHostedOptionByIdText(id, value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function fillHostedAddressFields(address = {}) {
+  const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+  const street = source.street || source.address1 || source.line1 || source.billingLine1 || '';
+  const city = source.city || source.locality || source.billingCity || '';
+  const zip = source.zip || source.postalCode || source.postcode || source.billingPostalCode || '';
+  const state = source.state || source.region || source.administrativeArea || source.billingState || '';
+  const filled = {
+    street: fillFirstHostedInputByIds([
+      'billingLine1',
+      'billingAddressLine1',
+      'addressLine1',
+      'address',
+      'line1',
+    ], street),
+    city: fillFirstHostedInputByIds([
+      'billingCity',
+      'billingLocality',
+      'city',
+      'locality',
+    ], city),
+    zip: fillFirstHostedInputByIds([
+      'billingPostalCode',
+      'billingZip',
+      'postalCode',
+      'postal',
+      'zip',
+    ], zip),
+    state: selectFirstHostedOptionByIdText([
+      'billingState',
+      'billingAdministrativeArea',
+      'state',
+      'administrativeArea',
+      'region',
+    ], state),
+  };
+  return {
+    attempted: Boolean(street || city || zip || state),
+    filledAny: Object.values(filled).some(Boolean),
+    ...filled,
+  };
 }
 
 function selectHostedCountryById(id = 'country', countryCode = 'US') {
@@ -753,9 +894,17 @@ function normalizeHostedPhoneDigits(value = '') {
   return String(value || '').replace(/\D/g, '');
 }
 
+function findHostedPhoneInput() {
+  const candidates = [
+    ...Array.from(document.querySelectorAll('input[data-testid="phone"]') || []),
+    document.getElementById('phone'),
+  ].filter(Boolean);
+  return candidates.find((input) => isVisibleElement(input) && isEnabledControl(input)) || null;
+}
+
 function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
-  const phoneInput = document.getElementById('phone');
-  if (!phoneInput || !isVisibleElement(phoneInput)) {
+  const phoneInput = findHostedPhoneInput();
+  if (!phoneInput) {
     throw new Error('PayPal hosted checkout 未找到电话输入框。');
   }
   const expectedDigits = normalizeHostedPhoneDigits(expectedPhone);
@@ -774,6 +923,15 @@ function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
     renderedPhoneDigits: renderedDigits,
     phoneMatched: true,
   };
+}
+
+function getHostedPhoneInputForGuard() {
+  return findHostedPhoneInput();
+}
+
+function hasHostedPhoneInputValue() {
+  const phoneInput = getHostedPhoneInputForGuard();
+  return Boolean(phoneInput && String(phoneInput.value || '').trim());
 }
 
 function normalizeHostedVerificationCode(value = '') {
@@ -828,6 +986,9 @@ async function clickHostedVerificationResend() {
 
 async function clickHostedCreateAccount(payload = {}) {
   await waitForDocumentComplete();
+  const addressFillResult = payload.address && typeof payload.address === 'object'
+    ? fillHostedAddressFields(payload.address)
+    : null;
   const button = await waitUntil(() => {
     const candidate = findHostedCreateAccountButton();
     return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
@@ -848,6 +1009,8 @@ async function clickHostedCreateAccount(payload = {}) {
     clicked: true,
     submitted: true,
     buttonText: getActionText(button),
+    addressRefilled: Boolean(addressFillResult?.filledAny),
+    addressFillResult,
   };
 }
 
@@ -897,9 +1060,17 @@ function buildHostedVisaCard() {
 async function submitHostedLogin(payload = {}) {
   await waitForDocumentComplete();
   const email = normalizeText(payload.email || buildHostedRandomEmail());
-  const emailInput = document.getElementById('email') || findEmailInput();
-  if (!emailInput) {
-    throw new Error('PayPal hosted checkout 未找到邮箱输入框。');
+  const inputStableWaitMs = Math.max(0, Math.floor(Number(payload.emailInputStableWaitMs) || 0));
+  const emailInput = await waitUntil(() => {
+    const candidate = findEmailInput();
+    return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
+  }, {
+    intervalMs: 500,
+    timeoutMs: Math.max(0, Math.floor(Number(payload.emailInputTimeoutMs) || 0)),
+    timeoutMessage: 'PayPal hosted checkout 未找到邮箱输入框。',
+  });
+  if (inputStableWaitMs > 0) {
+    await sleep(inputStableWaitMs);
   }
   refillPayPalEmailInput(emailInput, email);
   const clickResult = await clickHostedEmailNextButton();
@@ -908,6 +1079,7 @@ async function submitHostedLogin(payload = {}) {
     submitted: true,
     generatedEmail: email,
     clicked: Boolean(clickResult.clicked),
+    emailInputStableWaitMs: inputStableWaitMs,
   };
 }
 
@@ -936,18 +1108,44 @@ async function fillHostedGuestCheckout(payload = {}) {
     firstName: normalizeText(payload.firstName || 'James'),
     lastName: normalizeText(payload.lastName || 'Smith'),
   };
-  fillHostedInputById('email', values.email);
-  fillHostedInputById('phone', values.phone);
-  fillHostedInputById('cardNumber', values.cardNumber);
-  fillHostedInputById('cardExpiry', values.cardExpiry);
-  fillHostedInputById('cardCvv', values.cardCvv);
-  fillHostedInputById('password', values.password);
-  fillHostedInputById('firstName', values.firstName);
-  fillHostedInputById('lastName', values.lastName);
-  fillHostedInputById('billingLine1', address.street || address.address1 || '');
-  fillHostedInputById('billingCity', address.city || '');
-  fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
-  selectHostedOptionByIdText('billingState', address.state || address.region || '');
+  const fillProfileFields = () => {
+    fillHostedInputById('email', values.email);
+    fillHostedInputById('phone', values.phone);
+    fillHostedInputById('cardNumber', values.cardNumber);
+    fillHostedInputById('cardExpiry', values.cardExpiry);
+    fillHostedInputById('cardCvv', values.cardCvv);
+    fillHostedInputById('password', values.password);
+    fillHostedInputById('firstName', values.firstName);
+    fillHostedInputById('lastName', values.lastName);
+    fillHostedInputById('billingLine1', address.street || address.address1 || '');
+    fillHostedInputById('billingCity', address.city || '');
+    fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
+    selectHostedOptionByIdText('billingState', address.state || address.region || '');
+  };
+  const phonePostFillCheckDelayMs = Math.max(
+    0,
+    Math.floor(Number(payload.phonePostFillCheckDelayMs ?? PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS) || 0)
+  );
+  const phoneEmptyRefillMaxRetries = Math.max(
+    0,
+    Math.floor(Number(payload.phoneEmptyRefillMaxRetries ?? PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES) || 0)
+  );
+  let phoneValueReady = false;
+  for (let attempt = 0; attempt <= phoneEmptyRefillMaxRetries; attempt += 1) {
+    fillProfileFields();
+    if (phonePostFillCheckDelayMs > 0) {
+      await sleep(phonePostFillCheckDelayMs);
+    }
+    if (hasHostedPhoneInputValue()) {
+      phoneValueReady = true;
+      break;
+    }
+  }
+  if (!phoneValueReady) {
+    throw new Error(
+      `${PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX}PayPal 无卡直绑资料页 phone 输入框在 ${phoneEmptyRefillMaxRetries} 次重填后仍为空。`
+    );
+  }
   const phoneCheck = verifyHostedPhoneBeforeSubmit(values.phone);
   const clickResult = await clickHostedSubmitButton({
     stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
@@ -1071,6 +1269,8 @@ function inspectPayPalHostedState(payload = {}) {
     hostedGuestCardErrorMessage: getPayPalHostedGuestCardErrorMessage(),
     hostedGuestPhoneError: hasPayPalHostedGuestPhoneError(),
     hostedGuestPhoneErrorMessage: getPayPalHostedGuestPhoneErrorMessage(),
+    hostedCreateAccountAddressError: hasPayPalHostedCreateAccountAddressError(),
+    hostedCreateAccountAddressErrorMessage: getPayPalHostedCreateAccountAddressErrorMessage(),
     reviewConsentReady: Boolean(findHostedReviewConsentButton()),
     approveReady: Boolean(findApproveButton()),
     bodyTextPreview: normalizeText(document.body?.innerText || '').slice(0, 240),

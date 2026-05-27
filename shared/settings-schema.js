@@ -101,6 +101,12 @@
       const resolved = Number.isFinite(numeric) ? numeric : fallback;
       return Math.min(max, Math.max(min, Math.floor(resolved)));
     };
+    const normalizeHostedCheckoutSmsPoolMaxUses = (value, fallback = 3) => normalizeBoundedInteger(
+      value,
+      fallback,
+      1,
+      99
+    );
     const normalizeHostedCheckoutPhone = (value = '') => {
       const digits = String(value || '').trim().replace(/\D+/g, '');
       return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
@@ -280,6 +286,7 @@
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               hostedCheckoutSmsPoolText: '',
+              hostedCheckoutSmsPoolMaxUses: 3,
               hostedCheckoutSmsPoolAutoDisableEnabled: false,
               hostedCheckoutSmsPoolUsage: {},
               hostedCheckoutCurrentSmsEntry: null,
@@ -635,6 +642,12 @@
                 );
                 return poolText;
               })(),
+              hostedCheckoutSmsPoolMaxUses: normalizeHostedCheckoutSmsPoolMaxUses(
+                nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolMaxUses
+                  ?? input?.hostedCheckoutSmsPoolMaxUses
+                  ?? defaults.flows.openai.plus.hostedCheckoutSmsPoolMaxUses,
+                defaults.flows.openai.plus.hostedCheckoutSmsPoolMaxUses
+              ),
               hostedCheckoutSmsPoolAutoDisableEnabled: Boolean(
                 input?.hostedCheckoutSmsPoolAutoDisableEnabled
                   ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsPoolAutoDisableEnabled
@@ -849,6 +862,7 @@
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.hostedCheckoutSmsPoolText = openaiState.plus.hostedCheckoutSmsPoolText;
+      next.hostedCheckoutSmsPoolMaxUses = openaiState.plus.hostedCheckoutSmsPoolMaxUses;
       next.hostedCheckoutSmsPoolAutoDisableEnabled = openaiState.plus.hostedCheckoutSmsPoolAutoDisableEnabled;
       next.hostedCheckoutSmsPoolUsage = cloneValue(openaiState.plus.hostedCheckoutSmsPoolUsage);
       next.hostedCheckoutCurrentSmsEntry = cloneValue(openaiState.plus.hostedCheckoutCurrentSmsEntry);

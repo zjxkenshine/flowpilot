@@ -229,6 +229,21 @@ test('PayPal email page ignores hidden pre-rendered password input', () => {
   assert.equal(api.getPayPalLoginPhase(emailInput, api.findPasswordInput()), 'email');
 });
 
+test('PayPal hosted email finder detects login_email username field', () => {
+  const emailInput = createElement({
+    tag: 'input',
+    type: 'email',
+    id: 'email',
+    name: 'login_email',
+    placeholder: '电子邮箱地址或手机号码',
+    attrs: { autocomplete: 'username' },
+  });
+
+  const api = loadApi([emailInput]);
+
+  assert.equal(api.findEmailInput(), emailInput);
+});
+
 test('PayPal combined login page still sees visible password input', () => {
   const emailInput = createElement({
     tag: 'input',
@@ -316,6 +331,7 @@ function createHostedPayPalHarness(options = {}) {
   const elementsById = new Map();
   let elements = [];
   let listener = null;
+  let phoneFillCount = 0;
   const body = { innerText: '', textContent: '' };
   const location = {
     href: 'https://www.paypal.com/checkoutweb/signup',
@@ -405,6 +421,8 @@ function createHostedPayPalHarness(options = {}) {
     ],
   });
   const emailInput = createDomElement({ tagName: 'INPUT', id: 'email', type: 'email', name: 'email' });
+  emailInput.setAttribute('placeholder', '电子邮箱地址或手机号码');
+  emailInput.setAttribute('autocomplete', 'username');
   const phoneInput = createDomElement({ tagName: 'INPUT', id: 'phone', type: 'tel', name: 'phone' });
   const cardNumberInput = createDomElement({ tagName: 'INPUT', id: 'cardNumber', type: 'text' });
   const cardExpiryInput = createDomElement({ tagName: 'INPUT', id: 'cardExpiry', type: 'text' });
@@ -452,6 +470,37 @@ function createHostedPayPalHarness(options = {}) {
     id: 'createAccountButton',
     text: 'Agree & Create Account',
     attrs: { 'data-testid': 'createAccountButton' },
+  });
+  const createAccountBillingLine1Input = createDomElement({ tagName: 'INPUT', id: 'billingLine1', type: 'text' });
+  const createAccountBillingCityInput = createDomElement({ tagName: 'INPUT', id: 'billingCity', type: 'text' });
+  const createAccountBillingPostalCodeInput = createDomElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text' });
+  const createAccountBillingStateSelect = createDomElement({
+    tagName: 'SELECT',
+    id: 'billingState',
+    value: '',
+    options: [
+      { textContent: 'New York', label: 'New York', value: 'NY' },
+      { textContent: 'Texas', label: 'Texas', value: 'TX' },
+      { textContent: 'Washington', label: 'Washington', value: 'WA' },
+    ],
+  });
+  const createAccountAddressErrorContainer = createDomElement({
+    tagName: 'DIV',
+    id: 'page-level-error-message',
+    text: 'Check the address you entered and try again.',
+    attrs: {
+      'aria-live': 'polite',
+      'data-testid': 'page-level-error-container',
+      tabindex: '-1',
+    },
+  });
+  const createAccountAddressErrorMessage = createDomElement({
+    tagName: 'P',
+    text: 'Check the address you entered and try again.',
+    attrs: {
+      'data-error-key': 'pageLevelError.invalidAddress',
+      'data-testid': 'page-level-error-message',
+    },
   });
   const nextButton = createDomElement({
     tagName: 'BUTTON',
@@ -518,13 +567,22 @@ function createHostedPayPalHarness(options = {}) {
     ]);
   }
 
-  function showCreateAccount() {
+  function showCreateAccount(options = {}) {
     location.href = 'https://www.paypal.com/checkoutweb/create-account';
     location.host = 'www.paypal.com';
     location.pathname = '/checkoutweb/create-account';
-    body.innerText = 'Create your PayPal account. Agree & Create Account';
+    body.innerText = options.invalidAddress
+      ? 'Create your PayPal account. Agree & Create Account. Check the address you entered and try again.'
+      : 'Create your PayPal account. Agree & Create Account';
     body.textContent = body.innerText;
-    setElements([createAccountButton]);
+    setElements([
+      createAccountBillingLine1Input,
+      createAccountBillingCityInput,
+      createAccountBillingPostalCodeInput,
+      createAccountBillingStateSelect,
+      ...(options.invalidAddress ? [createAccountAddressErrorContainer, createAccountAddressErrorMessage] : []),
+      createAccountButton,
+    ]);
   }
 
   function showPayEmail() {
@@ -666,6 +724,20 @@ function createHostedPayPalHarness(options = {}) {
         if (text.includes('[role="alert"]')) {
           return elements.filter((element) => element.getAttribute('role') === 'alert');
         }
+        if (
+          text.includes('page-level-error-message')
+          || text.includes('page-level-error-container')
+          || text.includes('[data-error-key]')
+          || text.includes('[aria-live]')
+        ) {
+          return elements.filter((element) => (
+            element.id === 'page-level-error-message'
+            || element.getAttribute('data-testid') === 'page-level-error-container'
+            || element.getAttribute('data-testid') === 'page-level-error-message'
+            || Boolean(element.getAttribute('data-error-key'))
+            || Boolean(element.getAttribute('aria-live'))
+          ));
+        }
         return [];
       },
     },
@@ -689,10 +761,14 @@ function createHostedPayPalHarness(options = {}) {
     resetStopState() {},
     isStopError() { return false; },
     throwIfStopped() {},
-    sleep() { return Promise.resolve(); },
+    sleep(ms) {
+      events.push({ type: 'sleep', ms });
+      return Promise.resolve();
+    },
     fillInput(element, value) {
       if (element === phoneInput && typeof options.renderPhone === 'function') {
-        element.value = options.renderPhone(value);
+        phoneFillCount += 1;
+        element.value = options.renderPhone(value, phoneFillCount);
       } else {
         element.value = value;
       }
@@ -804,6 +880,82 @@ test('PayPal hosted guest checkout verifies configured local phone before submit
     JSON.parse(JSON.stringify(harness.events.filter((event) => event.type === 'operation').map((event) => event.metadata))),
     [{ stepKey: 'paypal-hosted-card', kind: 'click', label: 'hosted-paypal-card-submit' }]
   );
+});
+
+test('PayPal hosted guest checkout refills profile when phone input stays empty after fill', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value, phoneFillCount) => (phoneFillCount === 1 ? '' : `+1 ${value}`),
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      firstName: 'James',
+      lastName: 'Smith',
+      phonePostFillCheckDelayMs: 10000,
+      phoneEmptyRefillMaxRetries: 3,
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, true);
+  assert.equal(result.phoneMatched, true);
+  assert.equal(
+    harness.events.filter((event) => event.type === 'fill' && event.id === 'phone').length,
+    2
+  );
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === 'sleep' && event.ms === 10000).map((event) => event.ms),
+    [10000, 10000]
+  );
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
+test('PayPal hosted guest checkout fails without submit when phone input remains empty after refills', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: () => '',
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      phonePostFillCheckDelayMs: 0,
+      phoneEmptyRefillMaxRetries: 3,
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, undefined);
+  assert.match(result.error, /^PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL::/);
+  assert.equal(
+    harness.events.filter((event) => event.type === 'fill' && event.id === 'phone').length,
+    4
+  );
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
 });
 
 test('PayPal hosted guest checkout accepts profile address aliases', async () => {
@@ -965,12 +1117,15 @@ test('PayPal hosted /pay email page fills email and clicks Next instead of Creat
     payload: {
       expectedStage: 'pay_login',
       email: 'guest@example.com',
+      emailInputStableWaitMs: 5000,
     },
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.stage, 'pay_login');
   assert.equal(result.submitted, true);
+  assert.equal(result.emailInputStableWaitMs, 5000);
+  assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 5000), true);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'email' && event.value === 'guest@example.com'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), false);
@@ -1007,6 +1162,51 @@ test('PayPal hosted create account page is detected and handled as its own step'
     JSON.parse(JSON.stringify(harness.events.filter((event) => event.type === 'operation').map((event) => event.metadata))),
     [{ stepKey: 'paypal-hosted-create-account', kind: 'click', label: 'hosted-paypal-create-account' }]
   );
+});
+
+test('PayPal hosted create account page exposes invalid address error', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showCreateAccount({ invalidAddress: true });
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'create_account');
+  assert.equal(state.hostedCreateAccountAddressError, true);
+  assert.match(state.hostedCreateAccountAddressErrorMessage, /Check the address/);
+});
+
+test('PayPal hosted create account step refills address before retry click', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showCreateAccount({ invalidAddress: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'create_account',
+      address: {
+        street: '8 Retry Ave',
+        city: 'Austin',
+        state: 'Texas',
+        zip: '73301',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'create_account');
+  assert.equal(result.submitted, true);
+  assert.equal(result.addressRefilled, true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '8 Retry Ave'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingCity' && event.value === 'Austin'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '73301'), true);
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'billingState' && event.event === 'change' && event.value === 'TX'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), true);
 });
 
 test('PayPal hosted verification page exposes invalid-code and resend state', async () => {

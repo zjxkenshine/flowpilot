@@ -268,7 +268,12 @@ test('PayPal profile generator persists generated profile and copies full profil
 
   assert.equal(saveMessage.type, 'SAVE_SETTING');
   assert.equal(saveMessage.payload.paypalGeneratedProfile.email, 'user@example.com');
+  assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.email, 'user@example.com');
+  assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.address.street, 'Marunouchi 1-1');
+  assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.address.zip, '100-0005');
+  assert.equal(saveMessage.payload.hostedCheckoutGuestProfile.address.street, 'Marunouchi 1-1');
   assert.equal(getLatestState().paypalGeneratedProfile.password, 'CustomSecret123!');
+  assert.equal(getLatestState().plusHostedCheckoutGuestProfile.address.city, 'Chiyoda-ku');
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardNumber, /^4147\d{12}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardCvv, /^\d{3}$/);
@@ -279,6 +284,55 @@ test('PayPal profile generator persists generated profile and copies full profil
 
   assert.match(copied, /^邮箱：user@example\.com\n电话：\+4915123456789\n卡号：4147\d{12}\n有效期：(0[1-9]|1[0-2]) \/ \d{2}\nCVV：\d{3}\n密码：CustomSecret123!\n名字：Ada\n姓氏：Lovelace\n生日：2001-02-03\n国家：DE\n地址：Marunouchi 1-1\n城市：Chiyoda-ku\n州省：Tokyo\n邮编：100-0005$/);
   assert.equal(copied.includes('整段地址'), false);
+});
+
+test('PayPal profile generator displays hosted checkout profile before persisted profile', () => {
+  const { generator, profileDetails, profileSummary } = createGenerator({
+    initialState: {
+      paypalGeneratedProfile: {
+        email: 'persisted@example.com',
+        address1: 'Old Address',
+        city: 'Old City',
+        region: 'Old Region',
+        postalCode: '00000',
+        countryCode: 'US',
+        generatedAt: 111,
+      },
+      plusHostedCheckoutGuestProfile: {
+        email: 'runtime@example.com',
+        phone: '4155551234',
+        firstName: 'James',
+        lastName: 'Smith',
+        cardNumber: '4147200000000000',
+        cardExpiry: '12 / 29',
+        cardCvv: '123',
+        password: 'Aa1!runtime',
+        generatedAt: 222,
+        address: {
+          street: '8 Retry Ave',
+          city: 'Austin',
+          state: 'Texas',
+          zip: '73301',
+          countryCode: 'US',
+        },
+      },
+    },
+    initialCollapsed: false,
+  });
+
+  const profile = generator.getCurrentProfile();
+  generator.renderPayPalProfile();
+
+  assert.equal(profile.email, 'runtime@example.com');
+  assert.equal(profile.address1, '8 Retry Ave');
+  assert.equal(profile.city, 'Austin');
+  assert.equal(profile.region, 'Texas');
+  assert.equal(profile.postalCode, '73301');
+  assert.equal(profile.fullAddress, '8 Retry Ave Austin Texas 73301 US');
+  assert.match(profileSummary.textContent, /最近生成/);
+  assert.match(profileDetails.innerHTML, /runtime@example\.com/);
+  assert.match(profileDetails.innerHTML, /8 Retry Ave/);
+  assert.doesNotMatch(profileDetails.innerHTML, /Old Address/);
 });
 
 test('PayPal profile generator reports toast error when copying empty profile', async () => {

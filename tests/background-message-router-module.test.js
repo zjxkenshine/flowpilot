@@ -1604,6 +1604,109 @@ test('NODE_COMPLETE records registration-success account book entry when wait-re
   assert.equal(accountBookCalls[0][1].ipProxyAppliedExitRegion, 'JP');
 });
 
+test('NODE_COMPLETE skips Phone Plus payment segment after non-free registration status', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const accountBookCalls = [];
+  const fallbackCalls = [];
+  let state = {
+    nodeStatuses: {
+      'wait-registration-success': 'pending',
+      'plus-checkout-create': 'pending',
+      'oauth-login': 'pending',
+      'platform-verify': 'pending',
+    },
+    currentNodeId: 'wait-registration-success',
+    phonePlusModeEnabled: true,
+    email: '',
+    signupPhoneNumber: '+15550101',
+    ipProxyAppliedExitIp: '203.0.113.8',
+    ipProxyAppliedExitRegion: 'JP',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => {},
+    batchUpdateLuckmailPurchases: async () => {},
+    buildLocalhostCleanupPrefix: () => '',
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: () => ({}),
+    broadcastDataUpdate: () => {},
+    clearAutoRunTimerAlarm: async () => {},
+    clearStopRequest: () => {},
+    getState: async () => ({ ...state, nodeStatuses: { ...state.nodeStatuses } }),
+    getNodeIdsForState: () => [
+      'open-chatgpt',
+      'submit-signup-email',
+      'fill-password',
+      'fetch-signup-code',
+      'fill-profile',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+    getStepIdByNodeIdForState: (nodeId) => ({
+      'wait-registration-success': 6,
+      'plus-checkout-create': 7,
+      'oauth-login': 8,
+      'platform-verify': 10,
+    })[nodeId] || 0,
+    getStepDefinitionForState: (step) => ({ id: step, key: step === 6 ? 'wait-registration-success' : 'platform-verify' }),
+    getStepIdsForState: () => [1, 2, 3, 4, 5, 6, 7, 8, 10],
+    getLastStepIdForState: () => 10,
+    getStopRequested: () => false,
+    getSourceLabel: () => '',
+    isCloudflareSecurityBlockedError: () => false,
+    isStopError: () => false,
+    notifyNodeComplete: () => {},
+    notifyNodeError: () => {},
+    setNodeStatus: async (nodeId, status) => {
+      state = {
+        ...state,
+        currentNodeId: nodeId,
+        nodeStatuses: {
+          ...state.nodeStatuses,
+          [nodeId]: status,
+        },
+      };
+    },
+    setState: async (updates) => {
+      state = { ...state, ...(updates || {}) };
+    },
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
+    },
+    handlePhonePlusNonFreeTrialFallback: async (...args) => {
+      fallbackCalls.push(args);
+      return { handled: true, nextNodeId: 'oauth-login' };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'wait-registration-success',
+    payload: {
+      nodeId: 'wait-registration-success',
+      freeStatus: 'unknown',
+      freeStatusDetection: { freeStatus: 'unknown', reason: 'subscription_action_missing' },
+    },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(accountBookCalls.length, 1);
+  assert.equal(accountBookCalls[0][0], 'registration_success');
+  assert.equal(accountBookCalls[0][1].freeStatus, 'unknown');
+  assert.equal(fallbackCalls.length, 1);
+  assert.equal(fallbackCalls[0][0].freeStatus, 'unknown');
+  assert.deepStrictEqual(fallbackCalls[0][1], {
+    reason: 'phone-plus-registration-non-free',
+    detail: 'freeStatus=unknown',
+    nodeId: 'wait-registration-success',
+  });
+});
+
 test('NODE_COMPLETE records registration-success account book entry when kiro register finalization completes', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

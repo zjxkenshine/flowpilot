@@ -139,6 +139,7 @@ const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const DEFAULT_REGISTRATION_EMAIL_STATE = { emailHistory: [] };
 const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
   hostedCheckoutFirstResendWaitSeconds: 20,
@@ -163,6 +164,10 @@ function normalizePersistentSettingValue(key, value) {
   switch (key) {
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolMaxUses': {
+      const numeric = Number(value);
+      return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
+    }
     case 'hostedCheckoutSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
       return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
@@ -254,6 +259,7 @@ return {
     schemaVersion: 1,
     settings: {
       hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify?t=1',
+      hostedCheckoutSmsPoolMaxUses: '4',
       hostedCheckoutSmsPoolUsage: {
         '1234567890----https://example.com/verify': {
           useCount: 2,
@@ -293,6 +299,7 @@ return {
     phone: '1234567890',
     verificationUrl: 'https://example.com/verify',
   });
+  assert.equal(api.getPersistedUpdates().hostedCheckoutSmsPoolMaxUses, 4);
   assert.equal(
     api.getStateUpdates().hostedCheckoutSmsPoolText,
     '1234567890----https://example.com/verify'
@@ -303,6 +310,7 @@ return {
     verificationUrl: 'https://example.com/verify',
   });
   assert.equal(result.hostedCheckoutSmsPoolText, '1234567890----https://example.com/verify');
+  assert.equal(result.hostedCheckoutSmsPoolMaxUses, 4);
 });
 
 test('importSettingsBundle restores hosted sms pool state from schema-only settings', async () => {
@@ -322,6 +330,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
   phoneVerificationEnabled: false,
@@ -336,6 +345,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
   'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolMaxUses',
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
   'phoneVerificationEnabled',
@@ -369,6 +379,10 @@ function normalizePersistentSettingValue(key, value) {
       return Boolean(value);
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolMaxUses': {
+      const numeric = Number(value);
+      return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
+    }
     case 'hostedCheckoutSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
       return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
@@ -478,6 +492,7 @@ return {
               hostedCheckoutVerificationPollIntervalSeconds: 6,
               hostedCheckoutVerificationResendMaxAttempts: 4,
               hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+              hostedCheckoutSmsPoolMaxUses: '6.8',
               hostedCheckoutSmsPoolUsage: {
                 '4155555678----https://example.com/verify': { useCount: 2, lastError: 'timeout' },
                 stale: { useCount: 9, lastError: 'stale' },
@@ -519,13 +534,17 @@ return {
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollAttempts, 11);
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollIntervalSeconds, 6);
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationResendMaxAttempts, 4);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutSmsPoolMaxUses, 6);
   assert.equal(api.getStateUpdates().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(api.getStateUpdates().hostedCheckoutSmsPoolMaxUses, 6);
   assert.equal(api.getStateUpdates().hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(api.getStateUpdates().hostedCheckoutFirstResendWaitSeconds, 34);
   assert.equal(api.getBroadcastPayload().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
   assert.equal(api.getBroadcastPayload().hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(api.getBroadcastPayload().hostedCheckoutVerificationResendMaxAttempts, 4);
+  assert.equal(api.getBroadcastPayload().hostedCheckoutSmsPoolMaxUses, 6);
   assert.equal(result.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(result.hostedCheckoutSmsPoolMaxUses, 6);
   assert.equal(result.hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(result.hostedCheckoutVerificationPollIntervalSeconds, 6);
 });

@@ -162,6 +162,7 @@ const chrome = {
       return {
         state: {
           hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify',
+          hostedCheckoutSmsPoolMaxUses: 5,
           hostedCheckoutSmsPoolUsage: {
             '1234567890----https://example.com/verify': {
               useCount: 2,
@@ -204,6 +205,7 @@ return {
     schemaVersion: 1,
     settings: {
       hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify',
+      hostedCheckoutSmsPoolMaxUses: 5,
       hostedCheckoutSmsPoolUsage: {
         '1234567890----https://example.com/verify': {
           useCount: 1,
@@ -243,6 +245,7 @@ return {
   assert.deepEqual(snapshot.appliedStates, [
     {
       hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify',
+      hostedCheckoutSmsPoolMaxUses: 5,
       hostedCheckoutSmsPoolUsage: {
         '1234567890----https://example.com/verify': {
           useCount: 2,
@@ -261,6 +264,7 @@ return {
   assert.deepEqual(snapshot.statusStates, [
     {
       hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify',
+      hostedCheckoutSmsPoolMaxUses: 5,
       hostedCheckoutSmsPoolUsage: {
         '1234567890----https://example.com/verify': {
           useCount: 2,

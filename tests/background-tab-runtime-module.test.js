@@ -609,6 +609,144 @@ test('tab runtime force-new opens replacement before removing the active stale s
   ]);
 });
 
+test('tab runtime applies browser fingerprint to new automation tabs', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const applied = [];
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToTab: async (tabId, profile, options) => {
+      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, source: options.source });
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => ({ id: 17, windowId: payload.windowId, url: payload.url }),
+        get: async () => ({ id: 17, windowId: 100, url: 'https://chatgpt.com/' }),
+        query: async () => [],
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      browserFingerprintProfile: { profileId: 'fp-test', userAgent: 'ua' },
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    shouldApplyBrowserFingerprintToSource: (_source, options) => ['openai-auth', 'signup-page'].includes(options.canonicalSource),
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://chatgpt.com/');
+
+  assert.deepEqual(applied, [
+    { tabId: 17, profileId: 'fp-test', phase: 'created', source: 'signup-page' },
+  ]);
+});
+
+test('tab runtime applies browser fingerprint before and after reuse navigation and reload', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const applied = [];
+  let currentUrl = 'https://chatgpt.com/';
+  let currentState = {
+    automationWindowId: 100,
+    browserFingerprintProfile: { profileId: 'fp-test', userAgent: 'ua' },
+    tabRegistry: {
+      'signup-page': { tabId: 17, ready: true, windowId: 100 },
+    },
+    sourceLastUrls: {
+      'signup-page': 'https://chatgpt.com/',
+    },
+  };
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToTab: async (_tabId, _profile, options) => {
+      applied.push(options.phase);
+    },
+    chrome: {
+      tabs: {
+        get: async () => ({ id: 17, windowId: 100, url: currentUrl, status: 'complete' }),
+        query: async () => [],
+        update: async (_tabId, payload) => {
+          if (payload.url) currentUrl = payload.url;
+          return { id: 17, windowId: 100, url: currentUrl, status: 'complete' };
+        },
+        reload: async () => {},
+        onUpdated: {
+          addListener: (listener) => {
+            setTimeout(() => listener(17, { status: 'complete' }), 0);
+          },
+          removeListener: () => {},
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: () => false,
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    shouldApplyBrowserFingerprintToSource: () => true,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/authorize');
+  currentUrl = 'https://auth.openai.com/authorize';
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/authorize', {
+    reloadIfSameUrl: true,
+  });
+
+  assert.deepEqual(applied, [
+    'reuse-before-navigate',
+    'reuse-after-navigate',
+    'reuse-before-activate',
+    'reuse-before-reload',
+    'reuse-after-reload',
+  ]);
+});
+
+test('tab runtime does not apply browser fingerprint to mail provider tabs', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  let applyCalls = 0;
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToTab: async () => {
+      applyCalls += 1;
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => ({ id: 17, windowId: payload.windowId, url: payload.url }),
+        get: async () => ({ id: 17, windowId: 100, url: 'https://mail.163.com/' }),
+        query: async () => [],
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      browserFingerprintProfile: { profileId: 'fp-test', userAgent: 'ua' },
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    shouldApplyBrowserFingerprintToSource: () => false,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('mail-163', 'https://mail.163.com/');
+
+  assert.equal(applyCalls, 0);
+});
+
 test('tab runtime does not dynamically inject static auth bundles during force-new or same-url reuse', async () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');

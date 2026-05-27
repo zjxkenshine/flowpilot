@@ -209,6 +209,7 @@
       upsertMail2925Account,
       upsertHotmailAccount,
       upsertAccountBookEntry,
+      handlePhonePlusNonFreeTrialFallback,
       verifyHotmailAccount,
       checkoutConversionProxyManager = null,
     } = deps;
@@ -1154,6 +1155,22 @@
           ) {
             await upsertAccountBookEntry('registration_success', postCompletionState);
           }
+          const shouldSkipPhonePlusPaymentAfterRegistration = Boolean(
+            nodeId === 'wait-registration-success'
+            && postCompletionState?.phonePlusModeEnabled
+            && String(postCompletionState?.freeStatus || '').trim().toLowerCase() !== 'free'
+          );
+          if (
+            shouldSkipPhonePlusPaymentAfterRegistration
+            && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+          ) {
+            const freeStatus = String(postCompletionState?.freeStatus || '').trim().toLowerCase() || 'unknown';
+            await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
+              reason: 'phone-plus-registration-non-free',
+              detail: `freeStatus=${freeStatus}`,
+              nodeId,
+            });
+          }
           if (isFinalNode && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
@@ -1708,6 +1725,21 @@
               oauthFlowDeadlineSourceUrl: null,
             } : {}),
           };
+          if (
+            message.payload?.plusHostedCheckoutGuestProfile
+            && typeof message.payload.plusHostedCheckoutGuestProfile === 'object'
+            && !Array.isArray(message.payload.plusHostedCheckoutGuestProfile)
+          ) {
+            stateUpdates.plusHostedCheckoutGuestProfile = message.payload.plusHostedCheckoutGuestProfile;
+            stateUpdates.hostedCheckoutGuestProfile = message.payload.plusHostedCheckoutGuestProfile;
+            stateUpdates.plusHostedCheckoutPhoneDigits = String(message.payload.plusHostedCheckoutGuestProfile.phone || '').trim();
+          } else if (
+            message.payload?.hostedCheckoutGuestProfile
+            && typeof message.payload.hostedCheckoutGuestProfile === 'object'
+            && !Array.isArray(message.payload.hostedCheckoutGuestProfile)
+          ) {
+            stateUpdates.hostedCheckoutGuestProfile = message.payload.hostedCheckoutGuestProfile;
+          }
           if (Object.prototype.hasOwnProperty.call(canonicalSettingsUpdates, 'activeFlowId')
             && !Object.prototype.hasOwnProperty.call(stateUpdates, 'flowId')) {
             stateUpdates.flowId = canonicalSettingsUpdates.activeFlowId;

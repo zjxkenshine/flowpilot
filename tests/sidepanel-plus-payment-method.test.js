@@ -290,6 +290,33 @@ test('sidepanel PayPal hosted security challenge toggle defaults off and syncs t
   );
 });
 
+test('sidepanel PayPal hosted sms pool max uses renders and syncs through settings', () => {
+  const inputMatch = sidepanelHtml.match(
+    /<input[^>]+id="input-hosted-checkout-sms-pool-max-uses"[^>]*>/i
+  );
+  assert.ok(inputMatch);
+  assert.match(inputMatch[0], /\bvalue="3"/);
+  assert.match(inputMatch[0], /\bmin="1"/);
+  assert.match(inputMatch[0], /\bmax="99"/);
+
+  assert.match(sidepanelSource, /const DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES = 3/);
+  assert.match(sidepanelSource, /const inputHostedCheckoutSmsPoolMaxUses = document\.getElementById\('input-hosted-checkout-sms-pool-max-uses'\)/);
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /hostedCheckoutSmsPoolMaxUses:/);
+  assert.match(collectSource, /normalizeHostedCheckoutSmsPoolMaxUsesValue\(inputHostedCheckoutSmsPoolMaxUses\.value/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /inputHostedCheckoutSmsPoolMaxUses\.value\s*=\s*String/);
+  assert.match(applySource, /normalizeHostedCheckoutSmsPoolMaxUsesValue\(state\?\.hostedCheckoutSmsPoolMaxUses/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 5000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutSmsPoolMaxUses !== undefined/);
+  assert.match(dataUpdatedSnippet, /normalizeHostedCheckoutSmsPoolMaxUsesValue\(message\.payload\.hostedCheckoutSmsPoolMaxUses/);
+});
+
 test('sidepanel Plus UI restores traditional PayPal account mode when hosted final step is disabled', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),

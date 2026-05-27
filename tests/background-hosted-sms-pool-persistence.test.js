@@ -52,6 +52,7 @@ test('buildPersistentSettingsPayload keeps hosted current sms entry only when it
 const api = new Function(`
 const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
   hostedCheckoutFirstResendWaitSeconds: 20,
@@ -65,6 +66,10 @@ function normalizePersistentSettingValue(key, value) {
   switch (key) {
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolMaxUses': {
+      const numeric = Number(value);
+      return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
+    }
     case 'hostedCheckoutSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
       return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
@@ -130,6 +135,7 @@ return { buildPersistentSettingsPayload };
 
   const kept = api.buildPersistentSettingsPayload({
     hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify?t=1',
+    hostedCheckoutSmsPoolMaxUses: '7.4',
     hostedCheckoutSmsPoolUsage: {
       '1234567890----https://example.com/verify': { useCount: 2, lastError: 'timeout' },
       stale: { useCount: 9, lastError: 'stale' },
@@ -142,6 +148,7 @@ return { buildPersistentSettingsPayload };
   });
 
   assert.equal(kept.hostedCheckoutSmsPoolText, '1234567890----https://example.com/verify');
+  assert.equal(kept.hostedCheckoutSmsPoolMaxUses, 7);
   assert.deepEqual(kept.hostedCheckoutCurrentSmsEntry, {
     key: '1234567890----https://example.com/verify',
     phone: '1234567890',
@@ -220,6 +227,7 @@ const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
 };
@@ -234,6 +242,10 @@ function normalizePersistentSettingValue(key, value) {
   switch (key) {
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolMaxUses': {
+      const numeric = Number(value);
+      return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
+    }
     case 'hostedCheckoutSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
       return Object.fromEntries(Object.entries(value).map(([entryKey, item]) => {
@@ -292,6 +304,7 @@ const chrome = {
       async get() {
         return {
           hostedCheckoutSmsPoolText: '1234567890----https://example.com/verify?t=1',
+          hostedCheckoutSmsPoolMaxUses: 5,
           hostedCheckoutSmsPoolUsage: {
             '1234567890----https://example.com/verify': { useCount: 2, lastError: 'timeout' },
             stale: { useCount: 9, lastError: 'stale' },
@@ -320,6 +333,7 @@ return { exportSettingsBundle };
   assert.equal(bundle.schemaVersion, 1);
   assert.equal(bundle.extensionVersion, '1.2.3');
   assert.equal(bundle.settings.hostedCheckoutSmsPoolText, '1234567890----https://example.com/verify');
+  assert.equal(bundle.settings.hostedCheckoutSmsPoolMaxUses, 5);
   assert.deepEqual(bundle.settings.hostedCheckoutSmsPoolUsage, {
     '1234567890----https://example.com/verify': {
       useCount: 2,

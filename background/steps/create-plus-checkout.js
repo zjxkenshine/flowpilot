@@ -17,6 +17,8 @@
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
+  const HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS = 5000;
+  const HOSTED_CHECKOUT_EMAIL_INPUT_TIMEOUT_MS = 0;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS = 12;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_MS = 5000;
   const HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS = 3000;
@@ -30,15 +32,19 @@
   const HOSTED_CHECKOUT_VERIFICATION_POLL_ATTEMPTS_LIMIT = 60;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_DEFAULT_SECONDS = 5;
   const HOSTED_CHECKOUT_VERIFICATION_POLL_INTERVAL_LIMIT_SECONDS = 60;
+  const HOSTED_CHECKOUT_SMS_POOL_MAX_USES_DEFAULT = 3;
+  const HOSTED_CHECKOUT_SMS_POOL_MAX_USES_LIMIT = 99;
   const HOSTED_CHECKOUT_PAYPAL_BLOCKED_ERROR_PREFIX = 'HOSTED_CHECKOUT_PAYPAL_BLOCKED::';
   const HOSTED_CHECKOUT_GENERIC_ERROR_PREFIX = 'HOSTED_CHECKOUT_GENERIC_ERROR::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX = 'HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT::';
   const HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_FALLBACK::';
   const HOSTED_CHECKOUT_CARD_DECLINED_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_DECLINED::';
+  const PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX = 'PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL::';
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_DEFAULT = 1;
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
   const HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
+  const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
@@ -432,6 +438,104 @@
       return null;
     }
 
+    function getExistingHostedCheckoutEmailCandidate(state = {}) {
+      const paymentEmailState = getPlusPaymentEmailStateLocal(state);
+      if (paymentEmailState.current) {
+        return {
+          email: paymentEmailState.current,
+          source: paymentEmailState.source || 'payment:cached',
+          reused: true,
+        };
+      }
+
+      const registrationEmailState = state?.registrationEmailState && typeof state.registrationEmailState === 'object'
+        ? state.registrationEmailState
+        : {};
+      const registrationEmail = String(
+        registrationEmailState.current
+        || state?.email
+        || state?.accountIdentifier
+        || ''
+      ).trim().toLowerCase();
+      if (registrationEmail && /@/.test(registrationEmail)) {
+        return {
+          email: registrationEmail,
+          source: registrationEmailState.current ? 'registration:current' : 'registration:state',
+          reused: true,
+        };
+      }
+
+      const providerEmail = getPhonePlusExistingPaymentEmailCandidate(state);
+      if (providerEmail?.email) {
+        return providerEmail;
+      }
+
+      const profileEmail = String(getHostedProfileFromState(state)?.email || '').trim().toLowerCase();
+      if (profileEmail) {
+        return {
+          email: profileEmail,
+          source: 'profile:existing',
+          reused: true,
+        };
+      }
+
+      const previousRegistrationEmail = String(registrationEmailState.previous || '').trim().toLowerCase();
+      if (previousRegistrationEmail && /@/.test(previousRegistrationEmail)) {
+        return {
+          email: previousRegistrationEmail,
+          source: 'registration:previous',
+          reused: true,
+        };
+      }
+
+      return null;
+    }
+
+    async function resolveExistingHostedCheckoutPaymentEmail(state = {}) {
+      const latestState = await getLatestHostedState(state);
+      const existing = getExistingHostedCheckoutEmailCandidate(latestState);
+      if (!existing?.email) {
+        return null;
+      }
+      if (existing.source !== 'profile:existing') {
+        await persistPhonePlusPaymentEmail(existing.email, { source: existing.source });
+      }
+      await addHostedStepLog(
+        PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+        `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已复用 ${existing.email}（来源：${existing.source}）。`,
+        'info'
+      );
+      return {
+        email: existing.email,
+        source: existing.source,
+        reused: true,
+      };
+    }
+
+    async function resolveHostedCheckoutPaymentEmail(state = {}) {
+      const latestState = await getLatestHostedState(state);
+      const existing = await resolveExistingHostedCheckoutPaymentEmail(latestState);
+      if (existing?.email) {
+        return existing;
+      }
+
+      const created = await createPhonePlusPaymentEmail(latestState);
+      if (!created?.email) {
+        throw new Error('PayPal 无卡直绑支付邮箱解析失败：未获得可用邮箱地址。');
+      }
+      await persistPhonePlusPaymentEmail(created.email, { source: created.source });
+      await addHostedStepLog(
+        PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+        `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已新建 ${created.email}（来源：${created.source}）。`,
+        'info'
+      );
+      return {
+        email: created.email,
+        source: created.source,
+        reused: false,
+      };
+    }
+
     async function createPhonePlusPaymentEmail(state = {}) {
       if (typeof isLuckmailProvider === 'function' && isLuckmailProvider(state)) {
         if (typeof ensureLuckmailPurchaseForFlow !== 'function') {
@@ -506,14 +610,7 @@
 
     async function resolvePhonePlusPaymentEmail(state = {}) {
       if (!isPhonePlusModeState(state)) {
-        const profileEmail = String(getHostedProfileFromState(state)?.email || '').trim().toLowerCase();
-        if (profileEmail) {
-          return {
-            email: profileEmail,
-            source: 'profile:existing',
-            reused: true,
-          };
-        }
+        return resolveHostedCheckoutPaymentEmail(state);
       }
       const latestState = await getLatestHostedState(state);
       const existing = getPhonePlusExistingPaymentEmailCandidate(latestState);
@@ -896,6 +993,25 @@
       );
     }
 
+    function normalizeHostedCheckoutSmsPoolMaxUses(value, fallback = HOSTED_CHECKOUT_SMS_POOL_MAX_USES_DEFAULT) {
+      const rawValue = String(value ?? '').trim();
+      const fallbackValue = Math.min(
+        HOSTED_CHECKOUT_SMS_POOL_MAX_USES_LIMIT,
+        Math.max(1, Math.floor(Number(fallback) || HOSTED_CHECKOUT_SMS_POOL_MAX_USES_DEFAULT))
+      );
+      if (!rawValue) {
+        return fallbackValue;
+      }
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric)) {
+        return fallbackValue;
+      }
+      return Math.min(
+        HOSTED_CHECKOUT_SMS_POOL_MAX_USES_LIMIT,
+        Math.max(1, Math.floor(numeric))
+      );
+    }
+
     function normalizePlusCheckoutCloudConversionApiUrl(value = '') {
       const rawValue = String(value || '').trim();
       if (!rawValue) {
@@ -1146,6 +1262,67 @@
       return error;
     }
 
+    function isHostedCheckoutSmsPoolExhaustedError(error) {
+      return Boolean(error?.hostedCheckoutConfigMeta?.smsPoolExhausted);
+    }
+
+    function isPayPalHostedPhoneEmptyAfterFillError(error) {
+      return getErrorMessage(error).startsWith(PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX);
+    }
+
+    async function handlePayPalHostedPhoneEmptyAfterFillFallback(state = {}, error = null, options = {}) {
+      if (!isPayPalHostedPhoneEmptyAfterFillError(error)) {
+        return null;
+      }
+      if (!isPhonePlusModeState(state) || typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        return null;
+      }
+      const detail = getErrorMessage(error)
+        .replace(PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX, '')
+        .trim()
+        || 'PayPal 无卡直绑资料页 phone 输入框在 3 次重填后仍为空。';
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'hosted-checkout-phone-empty-after-fill',
+        detail,
+        nodeId: String(options.nodeId || PAYPAL_HOSTED_STEP_CARD).trim() || PAYPAL_HOSTED_STEP_CARD,
+        phaseLabel: String(options.phaseLabel || 'PayPal hosted 资料页 phone 检查').trim(),
+      });
+      if (!fallbackResult?.handled) {
+        return null;
+      }
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+        reason: 'hosted-checkout-phone-empty-after-fill',
+        detail,
+      };
+    }
+
+    async function handleHostedCheckoutSmsPoolExhaustedFallback(state = {}, error = null, options = {}) {
+      if (!isHostedCheckoutSmsPoolExhaustedError(error)) {
+        return null;
+      }
+      if (!isPhonePlusModeState(state) || typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        return null;
+      }
+      const detail = getErrorMessage(error);
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'hosted-checkout-sms-pool-exhausted',
+        detail,
+        nodeId: String(options.nodeId || 'plus-checkout-create').trim() || 'plus-checkout-create',
+        phaseLabel: String(options.phaseLabel || 'PayPal 接码池').trim(),
+      });
+      if (!fallbackResult?.handled) {
+        return null;
+      }
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+        reason: 'hosted-checkout-sms-pool-exhausted',
+        detail,
+      };
+    }
+
     async function logHostedCheckoutRuntimeConfig(stepKey, config = {}, options = {}) {
       if (!stepKey) {
         return;
@@ -1165,7 +1342,10 @@
     }
 
     async function resolveHostedCheckoutRuntimeConfig(state = {}, options = {}) {
-      const { ensureCurrentSmsEntry = false } = options || {};
+      const {
+        ensureCurrentSmsEntry = false,
+        allowExhaustedCurrentSmsEntry = false,
+      } = options || {};
       const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
       const mergedState = {
         ...(latestState && typeof latestState === 'object' ? latestState : {}),
@@ -1174,20 +1354,23 @@
       const rawPoolText = String(mergedState?.hostedCheckoutSmsPoolText || '').trim();
       const poolEntries = parseHostedCheckoutSmsPoolEntries(rawPoolText);
       const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
+      const smsPoolMaxUses = normalizeHostedCheckoutSmsPoolMaxUses(mergedState?.hostedCheckoutSmsPoolMaxUses);
       const manualVerificationUrl = String(mergedState?.hostedCheckoutVerificationUrl || '').trim();
       const manualPhone = normalizeHostedPhoneForPayload(mergedState?.hostedCheckoutPhoneNumber);
       let selectedSmsEntry = normalizeHostedCheckoutCurrentSmsEntry(mergedState?.hostedCheckoutCurrentSmsEntry, poolEntries);
 
       if (selectedSmsEntry) {
         const currentUsage = poolUsage[selectedSmsEntry.key] || {};
-        if (!isHostedCheckoutSmsPoolEntryEnabled(currentUsage)) {
+        const currentUseCount = Math.max(0, Math.floor(Number(currentUsage.useCount) || 0));
+        const currentReachedLimit = currentUseCount >= smsPoolMaxUses;
+        if (!isHostedCheckoutSmsPoolEntryEnabled(currentUsage) || (currentReachedLimit && !allowExhaustedCurrentSmsEntry)) {
           selectedSmsEntry = null;
           await clearHostedCheckoutCurrentSmsEntry();
         }
       }
 
       if (!selectedSmsEntry && ensureCurrentSmsEntry && poolEntries.length > 0) {
-        selectedSmsEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, poolUsage);
+        selectedSmsEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, poolUsage, smsPoolMaxUses);
         if (selectedSmsEntry) {
           await applyHostedCheckoutRuntimePatch({
             hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
@@ -1208,12 +1391,30 @@
 
       if (poolEntries.length > 0) {
         if (!selectedSmsEntry?.phone || !selectedSmsEntry?.verificationUrl) {
+          const enabledEntries = poolEntries.filter((entry) => isHostedCheckoutSmsPoolEntryEnabled(poolUsage[entry.key] || {}));
+          const exhausted = enabledEntries.length > 0 && enabledEntries.every((entry) => {
+            const itemUsage = poolUsage[entry.key] || {};
+            return Math.max(0, Math.floor(Number(itemUsage.useCount) || 0)) >= smsPoolMaxUses;
+          });
+          if (exhausted) {
+            throw buildHostedCheckoutConfigError(
+              `PayPal 接码池所有启用号码都已达到 ${smsPoolMaxUses} 次使用上限，请导入新号码或调高单号码最多使用次数。`,
+              {
+                configSource: 'sms-pool',
+                poolSize: poolEntries.length,
+                selectedEntry: null,
+                smsPoolExhausted: true,
+                maxUses: smsPoolMaxUses,
+              }
+            );
+          }
           throw buildHostedCheckoutConfigError(
             'PayPal 接码池已配置，但未解析到可用号码/验证码链接，请检查接码池保存状态或导入格式。',
             {
               configSource: 'sms-pool',
               poolSize: poolEntries.length,
               selectedEntry: null,
+              maxUses: smsPoolMaxUses,
             }
           );
         }
@@ -1244,6 +1445,7 @@
           ),
           hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
           hostedCheckoutUsesSmsPool: true,
+          hostedCheckoutSmsPoolMaxUses: smsPoolMaxUses,
           configSource: 'sms-pool',
           poolSize: poolEntries.length,
         };
@@ -1289,16 +1491,18 @@
         ),
         hostedCheckoutCurrentSmsEntry: null,
         hostedCheckoutUsesSmsPool: false,
+        hostedCheckoutSmsPoolMaxUses: smsPoolMaxUses,
         configSource: 'manual-config',
         poolSize: 0,
       };
     }
 
-    function chooseHostedCheckoutSmsPoolEntry(entries = [], usage = {}) {
+    function chooseHostedCheckoutSmsPoolEntry(entries = [], usage = {}, maxUses = HOSTED_CHECKOUT_SMS_POOL_MAX_USES_DEFAULT) {
       if (!Array.isArray(entries) || entries.length === 0) {
         return null;
       }
       const normalizedUsage = normalizeHostedCheckoutSmsPoolUsage(usage);
+      const normalizedMaxUses = normalizeHostedCheckoutSmsPoolMaxUses(maxUses);
       return entries
         .map((entry, index) => {
           const itemUsage = normalizedUsage[entry.key] || {};
@@ -1310,7 +1514,7 @@
             enabled: isHostedCheckoutSmsPoolEntryEnabled(itemUsage),
           };
         })
-        .filter((entry) => entry.enabled)
+        .filter((entry) => entry.enabled && entry.useCount < normalizedMaxUses)
         .sort((left, right) => {
           if (left.useCount !== right.useCount) {
             return left.useCount - right.useCount;
@@ -1394,11 +1598,12 @@
       const state = await getState().catch(() => ({}));
       const poolEntries = parseHostedCheckoutSmsPoolEntries(state?.hostedCheckoutSmsPoolText || '');
       const usage = normalizeHostedCheckoutSmsPoolUsage(state?.hostedCheckoutSmsPoolUsage || {});
+      const maxUses = normalizeHostedCheckoutSmsPoolMaxUses(state?.hostedCheckoutSmsPoolMaxUses);
       const previous = usage[normalizedEntry.key] || {};
       if (!isHostedCheckoutSmsPoolEntryEnabled(previous)) {
         return {
           disabledEntry: normalizedEntry,
-          nextEntry: chooseHostedCheckoutSmsPoolEntry(poolEntries, usage),
+          nextEntry: chooseHostedCheckoutSmsPoolEntry(poolEntries, usage, maxUses),
         };
       }
       const nextUsage = await updateHostedCheckoutPoolUsage(normalizedEntry, {
@@ -1410,7 +1615,7 @@
         disabledReason: String(reason || '').trim(),
       });
       const normalizedNextUsage = normalizeHostedCheckoutSmsPoolUsage(nextUsage || usage);
-      const nextEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, normalizedNextUsage);
+      const nextEntry = chooseHostedCheckoutSmsPoolEntry(poolEntries, normalizedNextUsage, maxUses);
       const currentKey = String(
         state?.hostedCheckoutCurrentSmsEntry?.key
         || buildHostedCheckoutPoolKey(
@@ -1435,6 +1640,99 @@
       return profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : null;
     }
 
+    function normalizeHostedProfileDisplayCountryCode(value = '') {
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      return normalized.length === 2 ? normalized : '';
+    }
+
+    function firstNonEmptyHostedProfileValue(...values) {
+      for (const value of values) {
+        const normalized = String(value || '').trim();
+        if (normalized) {
+          return normalized;
+        }
+      }
+      return '';
+    }
+
+    function buildHostedProfileFullAddress(parts = {}) {
+      return [
+        parts.address1,
+        parts.city,
+        parts.region,
+        parts.postalCode,
+        parts.countryCode,
+      ]
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    function buildPayPalGeneratedProfileFromHostedProfile(profile = {}) {
+      const source = profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {};
+      const address = source.address && typeof source.address === 'object' && !Array.isArray(source.address)
+        ? source.address
+        : {};
+      const countryCode = normalizeHostedProfileDisplayCountryCode(firstNonEmptyHostedProfileValue(
+        source.countryCode,
+        address.countryCode,
+        source.generatedFromCountry,
+        address.country
+      ));
+      const address1 = firstNonEmptyHostedProfileValue(source.address1, address.address1, address.street);
+      const city = firstNonEmptyHostedProfileValue(source.city, address.city);
+      const region = firstNonEmptyHostedProfileValue(source.region, source.state, address.region, address.state);
+      const postalCode = firstNonEmptyHostedProfileValue(source.postalCode, source.zip, address.postalCode, address.zip);
+      return {
+        email: String(source.email || '').trim(),
+        phone: String(source.phone || '').trim(),
+        cardNumber: String(source.cardNumber || '').trim(),
+        cardExpiry: String(source.cardExpiry || '').trim(),
+        cardCvv: String(source.cardCvv || '').trim(),
+        password: String(source.password || '').trim(),
+        firstName: String(source.firstName || '').trim(),
+        lastName: String(source.lastName || '').trim(),
+        birthday: String(source.birthday || '').trim(),
+        countryCode,
+        address1,
+        city,
+        region,
+        postalCode,
+        fullAddress: firstNonEmptyHostedProfileValue(
+          source.fullAddress,
+          buildHostedProfileFullAddress({ address1, city, region, postalCode, countryCode })
+        ),
+        generatedFromCountry: normalizeHostedProfileDisplayCountryCode(source.generatedFromCountry) || countryCode,
+        generatedAt: Math.max(0, Number(source.generatedAt) || Date.now()),
+      };
+    }
+
+    function buildHostedProfileStatePatch(profile = {}) {
+      const normalizedProfile = profile && typeof profile === 'object' && !Array.isArray(profile)
+        ? {
+          ...profile,
+          email: String(profile.email || '').trim().toLowerCase(),
+          phone: String(profile.phone || '').trim(),
+          generatedAt: Math.max(0, Number(profile.generatedAt) || Date.now()),
+        }
+        : {};
+      return {
+        plusHostedCheckoutGuestProfile: normalizedProfile,
+        hostedCheckoutGuestProfile: normalizedProfile,
+        plusHostedCheckoutPhoneDigits: normalizedProfile.phone || '',
+        paypalGeneratedProfile: buildPayPalGeneratedProfileFromHostedProfile(normalizedProfile),
+      };
+    }
+
+    async function persistHostedGuestProfile(profile = {}) {
+      const patch = buildHostedProfileStatePatch(profile);
+      await setState(patch);
+      if (typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate(patch);
+      }
+      return patch.plusHostedCheckoutGuestProfile;
+    }
+
     async function getLatestHostedState(state = {}) {
       const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
       return {
@@ -1451,7 +1749,7 @@
       const phonePlusMode = isPhonePlusModeState(mergedState);
       const paymentEmailInfo = phonePlusMode
         ? await resolvePhonePlusPaymentEmail(mergedState)
-        : null;
+        : await resolveExistingHostedCheckoutPaymentEmail(mergedState);
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
       });
@@ -1495,10 +1793,7 @@
           }
         );
       }
-      await setState({
-        plusHostedCheckoutGuestProfile: nextProfile,
-        plusHostedCheckoutPhoneDigits: nextProfile.phone,
-      });
+      await persistHostedGuestProfile(nextProfile);
       return {
         profile: nextProfile,
         config,
@@ -1608,7 +1903,8 @@
       let config = null;
       try {
         config = await getHostedCheckoutRuntimeConfig(state, {
-          ensureCurrentSmsEntry: true,
+          ensureCurrentSmsEntry: false,
+          allowExhaustedCurrentSmsEntry: true,
         });
       } catch (error) {
         await addHostedStepLog(
@@ -2539,10 +2835,7 @@
             `Step 6: hosted checkout reported card declined; retrying with a fresh address (${hostedOpenAiCardDeclinedRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedCardDeclinedErrorMessage || 'Try another card.'}`,
             'warn'
           );
-          await setState({
-            plusHostedCheckoutGuestProfile: currentProfile,
-            hostedCheckoutGuestProfile: currentProfile,
-          });
+          await persistHostedGuestProfile(currentProfile);
           const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
@@ -2572,10 +2865,7 @@
             `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
             'warn'
           );
-          await setState({
-            plusHostedCheckoutGuestProfile: currentProfile,
-            hostedCheckoutGuestProfile: currentProfile,
-          });
+          await persistHostedGuestProfile(currentProfile);
           const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
@@ -2807,11 +3097,7 @@
         ...profile,
         phone: String(disableResult.nextEntry.phone || '').trim(),
       };
-      await setState({
-        plusHostedCheckoutGuestProfile: nextProfile,
-        hostedCheckoutGuestProfile: nextProfile,
-        plusHostedCheckoutPhoneDigits: nextProfile.phone,
-      });
+      await persistHostedGuestProfile(nextProfile);
       await addHostedStepLog(
         stepKey,
         `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码池已切换到下一个启用号码 ${disableResult.nextEntry.phone}，准备重新填写资料页。`,
@@ -2838,6 +3124,16 @@
       const message = String(state?.hostedAddressErrorMessage || state?.error || '').trim();
       return Boolean(state?.hostedAddressError)
         || /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i.test(message);
+    }
+
+    function isHostedCheckoutPayPalCreateAccountAddressErrorState(state = {}) {
+      const message = String(
+        state?.hostedCreateAccountAddressErrorMessage
+        || state?.error
+        || ''
+      ).trim();
+      return Boolean(state?.hostedCreateAccountAddressError)
+        || /pageLevelError\.invalidAddress|invalidAddress|check\s+the\s+address\s+you\s+entered\s+and\s+try\s+again\.?|invalid\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized|unrecognized)|(?:检查|核对).*地址|地址.*(?:无效|错误|无法识别|不被识别)/i.test(message);
     }
 
     function isHostedCheckoutOpenAiCardDeclinedState(state = {}) {
@@ -3040,7 +3336,25 @@
       }
 
       const stepNumber = getHostedStepNumber(stepKey);
-      const { profile, config } = await ensureHostedGuestProfile(state);
+      let profile = null;
+      let config = null;
+      try {
+        ({ profile, config } = await ensureHostedGuestProfile(state));
+      } catch (error) {
+        const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
+          nodeId: stepKey,
+          phaseLabel: 'PayPal hosted 验证码页',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return {
+            handled: true,
+            context,
+            phonePlusFallbackToFreeAuth: true,
+            fallbackResult: fallback.fallbackResult,
+          };
+        }
+        throw error;
+      }
       if (pageState?.hostedVerificationInvalidCode) {
         const maxResendAttempts = normalizeHostedCheckoutVerificationResendMaxAttempts(
           config?.verificationResendMaxAttempts
@@ -3278,10 +3592,23 @@
         if (initialAmountCheck?.phonePlusFallbackToFreeAuth) {
           return;
         }
-        const { profile, config } = await ensureHostedGuestProfile(state);
-        await logHostedCheckoutRuntimeConfig(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, config, {
-          extra: `OpenAI Checkout 手机号 ${maskHostedPhoneForLog(profile.phone)}`,
+      let profile = null;
+      let config = null;
+      try {
+        ({ profile, config } = await ensureHostedGuestProfile(state));
+      } catch (error) {
+        const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
+          nodeId: 'plus-checkout-create',
+          phaseLabel: '创建 PayPal hosted checkout',
         });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        throw error;
+      }
+      await logHostedCheckoutRuntimeConfig(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, config, {
+        extra: `OpenAI Checkout 手机号 ${maskHostedPhoneForLog(profile.phone)}`,
+      });
         await addLog(`步骤 6：正在提交 OpenAI Checkout，等待跳转到 PayPal 邮箱页（电话使用本地号码 ${profile.phone}）。`, 'info');
         const hostedCheckoutResult = await runHostedOpenAiCheckoutWithProxySession(
           tabId,
@@ -3370,7 +3697,20 @@
         return;
       }
 
-      const { profile, config } = await ensureHostedGuestProfile(state);
+      let profile = null;
+      let config = null;
+      try {
+        ({ profile, config } = await ensureHostedGuestProfile(state));
+      } catch (error) {
+        const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
+          nodeId: stepKey,
+          phaseLabel: '提交 OpenAI hosted checkout',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        throw error;
+      }
       await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在选择 PayPal 并提交 OpenAI hosted checkout（电话使用本地号码 ${profile.phone}）。`, 'info');
       const transitionUrl = await runHostedOpenAiCheckoutWithProxySession(
         tabId,
@@ -3398,7 +3738,20 @@
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
-      const { profile, config } = await ensureHostedGuestProfile(state);
+      let profile = null;
+      let config = null;
+      try {
+        ({ profile, config } = await ensureHostedGuestProfile(state));
+      } catch (error) {
+        const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
+          nodeId: stepKey,
+          phaseLabel: 'PayPal hosted 邮箱页',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        throw error;
+      }
       await logHostedCheckoutRuntimeConfig(stepKey, config, {
         extra: `PayPal 填写手机号 ${maskHostedPhoneForLog(profile.phone)}`,
       });
@@ -3431,6 +3784,8 @@
       const { nextState, completedByStageChange } = await runHostedPayPalStepAndWaitForStageChange(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_LOGIN,
         email: profile.email,
+        emailInputStableWaitMs: HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS,
+        emailInputTimeoutMs: HOSTED_CHECKOUT_EMAIL_INPUT_TIMEOUT_MS,
       }, PAYPAL_HOSTED_STAGE_LOGIN, { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 邮箱页跳转` });
       if (completedByStageChange) {
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：已检测到 PayPal 进入后续页面（${nextState.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN}），邮箱节点直接完成。`, 'info');
@@ -3446,10 +3801,23 @@
       try {
         const tabId = await resolveHostedCheckoutTabId(state, stepKey);
         const verificationContext = createHostedVerificationRetryContext();
-        const {
-          profile: refreshedProfile,
-          config: refreshedProfileConfig,
-        } = await ensureHostedGuestProfile(state, { forceRefresh: true });
+        let refreshedProfile = null;
+        let refreshedProfileConfig = null;
+        try {
+          ({
+            profile: refreshedProfile,
+            config: refreshedProfileConfig,
+          } = await ensureHostedGuestProfile(state, { forceRefresh: true }));
+        } catch (error) {
+          const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
+            nodeId: stepKey,
+            phaseLabel: 'PayPal hosted 资料页',
+          });
+          if (fallback?.phonePlusFallbackToFreeAuth) {
+            return;
+          }
+          throw error;
+        }
         let refreshedState = {
           ...state,
           plusHostedCheckoutGuestProfile: refreshedProfile,
@@ -3518,14 +3886,22 @@
             throw buildHostedCheckoutBlockedError(pageState);
           }
         }
-        if ((await handleHostedPayPalVerificationState(tabId, pageState, refreshedState, verificationContext, stepKey)).handled) {
+        const initialVerificationResult = await handleHostedPayPalVerificationState(tabId, pageState, refreshedState, verificationContext, stepKey);
+        if (initialVerificationResult.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        if (initialVerificationResult.handled) {
           const nextState = await waitForHostedPayPalStage(
             tabId,
             async (stateInfo) => {
               if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
                 return true;
               }
-              if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
+              const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey);
+              if (verificationResult.phonePlusFallbackToFreeAuth) {
+                return true;
+              }
+              if (verificationResult.handled) {
                 return false;
               }
               return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
@@ -3533,6 +3909,9 @@
             { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
           );
           if (isHostedCheckoutPlusActivationResolved(nextState)) {
+            return;
+          }
+          if (nextState === true) {
             return;
           }
           await completeHostedStep(stepKey, tabId, {
@@ -3603,7 +3982,19 @@
                 throw new Error(`Step ${stepNumber}: PayPal guest checkout card error exceeded ${HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS} retries. Error: ${cardErrorMessage}`);
               }
               hostedGuestCardErrorRetries += 1;
-              const retryProfileResult = await ensureHostedGuestProfile(refreshedState, { forceRefresh: true });
+              let retryProfileResult = null;
+              try {
+                retryProfileResult = await ensureHostedGuestProfile(refreshedState, { forceRefresh: true });
+              } catch (error) {
+                const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(refreshedState, error, {
+                  nodeId: stepKey,
+                  phaseLabel: 'PayPal hosted 资料页重试',
+                });
+                if (fallback?.phonePlusFallbackToFreeAuth) {
+                  return true;
+                }
+                throw error;
+              }
               profile = retryProfileResult.profile;
               refreshedState = {
                 ...refreshedState,
@@ -3616,16 +4007,31 @@
                 `Step ${stepNumber}: PayPal guest checkout reported a card error; retrying with a fresh profile (${hostedGuestCardErrorRetries}/${HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS}). Error: ${stateInfo.hostedGuestCardErrorMessage || 'unknown card error'}`,
                 'warn'
               );
-              await runHostedPayPalStep(tabId, {
-                ...profile,
-                expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-                phone: profile.phone,
-              }, { stepKey });
+              try {
+                await runHostedPayPalStep(tabId, {
+                  ...profile,
+                  expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+                  phone: profile.phone,
+                }, { stepKey });
+              } catch (error) {
+                const fallback = await handlePayPalHostedPhoneEmptyAfterFillFallback(refreshedState, error, {
+                  nodeId: stepKey,
+                  phaseLabel: 'PayPal hosted 资料页重试',
+                });
+                if (fallback?.phonePlusFallbackToFreeAuth) {
+                  return true;
+                }
+                throw error;
+              }
               hostedProfileSubmitted = true;
               hostedGuestCardErrorRetrySettlingUntil = Date.now() + HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS;
               return false;
             }
-            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey)).handled) {
+            const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey);
+            if (verificationResult.phonePlusFallbackToFreeAuth) {
+              return true;
+            }
+            if (verificationResult.handled) {
               return false;
             }
             return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT;
@@ -3635,10 +4041,20 @@
         if (isHostedCheckoutPlusActivationResolved(nextState)) {
           return;
         }
+        if (nextState === true) {
+          return;
+        }
         await completeHostedStep(stepKey, tabId, {
           plusHostedCheckoutLastStage: nextState.hostedStage || '',
         });
       } catch (error) {
+        const fallback = await handlePayPalHostedPhoneEmptyAfterFillFallback(state, error, {
+          nodeId: stepKey,
+          phaseLabel: 'PayPal hosted 资料页',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
         await maybeAutoDisableHostedCheckoutCurrentSmsEntry(error).catch(() => null);
         throw error;
       }
@@ -3649,6 +4065,9 @@
       const stepNumber = getHostedStepNumber(stepKey);
       const tabId = await resolveHostedCheckoutTabId(state, stepKey);
       const verificationContext = createHostedVerificationRetryContext();
+      let createAccountState = await getLatestHostedState(state);
+      let profile = getHostedProfileFromState(createAccountState) || {};
+      let hostedCreateAccountAddressRetries = 0;
       if (await completeHostedStepIfSuccessful(stepKey, tabId, state)) {
         return;
       }
@@ -3665,20 +4084,31 @@
       if (isHostedCheckoutPlusActivationResolved(pageState)) {
         return;
       }
-      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+      const initialVerificationResult = await handleHostedPayPalVerificationState(tabId, pageState, createAccountState, verificationContext, stepKey);
+      if (initialVerificationResult.phonePlusFallbackToFreeAuth) {
+        return;
+      }
+      if (initialVerificationResult.handled) {
         const nextState = await waitForHostedPayPalStage(
           tabId,
           async (stateInfo) => {
             if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
               return true;
             }
-            if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+            const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, createAccountState, verificationContext, stepKey);
+            if (verificationResult.phonePlusFallbackToFreeAuth) {
+              return true;
+            }
+            if (verificationResult.handled) {
               return false;
             }
             return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_VERIFICATION;
           },
           { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 验证码页跳转` }
         );
+        if (nextState === true || isHostedCheckoutPlusActivationResolved(nextState)) {
+          return;
+        }
         await completeHostedStep(stepKey, tabId, {
           plusHostedCheckoutLastStage: nextState.hostedStage || '',
         });
@@ -3706,7 +4136,39 @@
           if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
             return true;
           }
-          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+          if (isHostedCheckoutPayPalCreateAccountAddressErrorState(stateInfo)) {
+            if (hostedCreateAccountAddressRetries >= HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS) {
+              throw new Error(`步骤 ${stepNumber}：PayPal 创建账号页地址校验失败已达到 ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} 次：${stateInfo.hostedCreateAccountAddressErrorMessage || 'Check the address you entered and try again.'}`);
+            }
+            hostedCreateAccountAddressRetries += 1;
+            const retryAddress = await fetchHostedCheckoutAddress();
+            profile = {
+              ...profile,
+              address: retryAddress,
+            };
+            createAccountState = {
+              ...createAccountState,
+              plusHostedCheckoutGuestProfile: profile,
+              hostedCheckoutGuestProfile: profile,
+            };
+              await persistHostedGuestProfile(profile);
+            await addHostedStepLog(
+              stepKey,
+              `步骤 ${stepNumber}：PayPal 创建账号页提示地址无效，已重新生成地址并重试 (${hostedCreateAccountAddressRetries}/${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS})。错误：${stateInfo.hostedCreateAccountAddressErrorMessage || 'Check the address you entered and try again.'}`,
+              'warn'
+            );
+            await runHostedPayPalStep(tabId, {
+              expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+              address: retryAddress,
+            }, { stepKey });
+            await sleepWithStop(1000);
+            return false;
+          }
+          const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, createAccountState, verificationContext, stepKey);
+          if (verificationResult.phonePlusFallbackToFreeAuth) {
+            return true;
+          }
+          if (verificationResult.handled) {
             return false;
           }
           return stateInfo?.hostedStage && stateInfo.hostedStage !== PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
@@ -3714,6 +4176,9 @@
         { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 创建确认页跳转` }
       );
       if (isHostedCheckoutPlusActivationResolved(nextState)) {
+        return;
+      }
+      if (nextState === true) {
         return;
       }
       await completeHostedStep(stepKey, tabId, {
@@ -3742,7 +4207,11 @@
       if (isHostedCheckoutPlusActivationResolved(pageState)) {
         return;
       }
-      if ((await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey)).handled) {
+      const initialVerificationResult = await handleHostedPayPalVerificationState(tabId, pageState, state, verificationContext, stepKey);
+      if (initialVerificationResult.phonePlusFallbackToFreeAuth) {
+        return;
+      }
+      if (initialVerificationResult.handled) {
         await waitForHostedUrlAfterAction(
           tabId,
           (url) => isHostedCheckoutSuccessUrl(url),
@@ -3767,7 +4236,11 @@
           if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
             return true;
           }
-          if ((await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey)).handled) {
+          const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey);
+          if (verificationResult.phonePlusFallbackToFreeAuth) {
+            return true;
+          }
+          if (verificationResult.handled) {
             return false;
           }
           return Boolean(stateInfo?.successUrl || stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_OUTSIDE);

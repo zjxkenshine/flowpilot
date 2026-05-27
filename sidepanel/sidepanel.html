@@ -537,6 +537,13 @@
             <div class="data-inline hosted-sms-pool-import-actions">
               <button id="btn-hosted-sms-pool-import-file" class="btn btn-outline btn-sm" type="button">导入文件</button>
               <button id="btn-hosted-sms-pool-import" class="btn btn-primary btn-sm" type="button">导入号码</button>
+              <label class="hosted-checkout-setting-field hosted-sms-pool-max-uses-field"
+                title="每个 PayPal 接码池号码成功使用达到该次数后选号会跳过；默认 3 次">
+                <span class="setting-caption">单号最多</span>
+                <input type="number" id="input-hosted-checkout-sms-pool-max-uses"
+                  class="data-input auto-delay-input" value="3" min="1" max="99" step="1" />
+                <span class="hosted-sms-pool-max-uses-unit">次</span>
+              </label>
               <label class="hosted-checkout-setting-toggle hosted-sms-pool-auto-disable-toggle" title="开启后，PayPal 接码池号码连续接码失败会被自动禁用，后续选号自动跳过；默认关闭">
                 <span class="setting-caption">自动禁用</span>
                 <span class="toggle-switch">

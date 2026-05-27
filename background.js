@@ -27,6 +27,7 @@ importScripts(
   'background/paypal-account-store.js',
   'background/ip-proxy-provider-711proxy.js',
   'background/ip-proxy-core.js',
+  'background/browser-fingerprint.js',
   'background/sub2api-api.js',
   'background/cpa-api.js',
   'background/panel-bridge.js',
@@ -1490,6 +1491,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
   chatGptApiSmsPoolText: '',
@@ -1735,6 +1737,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolMaxUses',
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
   'plusHostedCheckoutOauthDelaySeconds',
@@ -1828,6 +1831,10 @@ const DEFAULT_STATE = {
   ipProxyAppliedExitDetecting: false,
   ipProxyAppliedExitError: '',
   ipProxyAppliedExitSource: '',
+  browserFingerprintProfile: null,
+  browserFingerprintAppliedAt: 0,
+  browserFingerprintExitIp: '',
+  browserFingerprintExitRegion: '',
 };
 
 function normalizeAutoRunDelayMinutes(value) {
@@ -3753,6 +3760,10 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '').trim();
     case 'hostedCheckoutSmsPoolText':
       return String(value || '').replace(/\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolMaxUses': {
+      const numeric = Number(value);
+      return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
+    }
     case 'hostedCheckoutSmsPoolUsage':
     case 'chatGptApiSmsPoolUsage':
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -4763,6 +4774,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
   assignIfUpdated('hostedCheckoutSmsPoolText', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolText']);
+  assignIfUpdated('hostedCheckoutSmsPoolMaxUses', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolMaxUses']);
   assignIfUpdated('hostedCheckoutSmsPoolUsage', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolUsage']);
   assignIfUpdated('hostedCheckoutCurrentSmsEntry', ['flows', 'openai', 'plus', 'hostedCheckoutCurrentSmsEntry']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
@@ -4962,6 +4974,10 @@ function buildFreshAutoRunKeepState(prevState = {}) {
 
   keepState.activeFlowId = activeFlowId;
   keepState.flowId = activeFlowId;
+  keepState.browserFingerprintProfile = null;
+  keepState.browserFingerprintAppliedAt = 0;
+  keepState.browserFingerprintExitIp = '';
+  keepState.browserFingerprintExitRegion = '';
   if (Object.prototype.hasOwnProperty.call(sourceState, 'panelMode')) {
     keepState.panelMode = normalizePanelMode(sourceState.panelMode);
   }
@@ -10156,8 +10172,17 @@ const loggingStatus = self.MultiPageBackgroundLoggingStatus?.createLoggingStatus
   STOP_ERROR_MESSAGE,
 });
 
+const browserFingerprintManager = self.MultiPageBackgroundBrowserFingerprint?.createBrowserFingerprintManager?.({
+  addLog,
+  broadcastDataUpdate,
+  chrome,
+  getState,
+  setState,
+}) || null;
+
 const tabRuntime = self.MultiPageBackgroundTabRuntime?.createTabRuntime({
   addLog,
+  applyBrowserFingerprintToTab: (...args) => browserFingerprintManager?.applyBrowserFingerprintToTab?.(...args),
   chrome,
   getSourceLabel,
   getState,
@@ -10165,6 +10190,7 @@ const tabRuntime = self.MultiPageBackgroundTabRuntime?.createTabRuntime({
   isRetryableContentScriptTransportError,
   LOG_PREFIX,
   matchesSourceUrlFamily,
+  shouldApplyBrowserFingerprintToSource: (...args) => browserFingerprintManager?.shouldApplyBrowserFingerprintToSource?.(...args),
   sourceRegistry,
   setState,
   sleepWithStop,
@@ -10662,9 +10688,19 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
 
   const amountSuffix = amountLabel ? `（${amountLabel}）` : '';
   const detailSuffix = fallbackDetail ? `原因：${fallbackDetail}` : '';
-  const fallbackMessage = fallbackReason === 'plus-checkout-conversion-proxy-failed'
-    ? `Phone Plus：支付转换代理失败，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`
-    : `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
+  let fallbackMessage = '';
+  if (fallbackReason === 'plus-checkout-conversion-proxy-failed') {
+    fallbackMessage = `Phone Plus：支付转换代理失败，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
+  } else if (fallbackReason === 'hosted-checkout-sms-pool-exhausted') {
+    fallbackMessage = `Phone Plus：PayPal 接码池号码已达到使用上限，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
+  } else if (fallbackReason === 'hosted-checkout-phone-empty-after-fill') {
+    fallbackMessage = `Phone Plus：PayPal 无卡直绑资料页 phone 输入框多次重填后仍为空，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
+  } else {
+    fallbackMessage = `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
+  }
+  if (fallbackReason === 'phone-plus-registration-non-free') {
+    fallbackMessage = `Phone Plus：第 6 步账号类型不是 free${fallbackDetail ? `（${fallbackDetail}）` : ''}，已跳过 Plus 支付段，继续 OAuth 流程。`;
+  }
   await addLog(
     fallbackMessage,
     'warn',
@@ -12321,6 +12357,22 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
     && typeof upsertAndBroadcastAccountBookEntry === 'function'
   ) {
     await upsertAndBroadcastAccountBookEntry('registration_success', postCompletionState);
+  }
+  const shouldSkipPhonePlusPaymentAfterRegistration = Boolean(
+    nodeId === 'wait-registration-success'
+    && postCompletionState?.phonePlusModeEnabled
+    && String(postCompletionState?.freeStatus || '').trim().toLowerCase() !== 'free'
+  );
+  if (
+    shouldSkipPhonePlusPaymentAfterRegistration
+    && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+  ) {
+    const freeStatus = String(postCompletionState?.freeStatus || '').trim().toLowerCase() || 'unknown';
+    await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
+      reason: 'phone-plus-registration-non-free',
+      detail: `freeStatus=${freeStatus}`,
+      nodeId,
+    });
   }
   if (nodeId === lastNodeId) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
@@ -15411,6 +15463,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
   completeNodeFromBackground,
+  ensureBrowserFingerprintForProxyExit: browserFingerprintManager?.ensureBrowserFingerprintForProxyExit,
   getState,
   openSignupEntryTab,
   probeIpProxyExit,
@@ -15497,9 +15550,15 @@ const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
   addLog,
   chrome,
   completeNodeFromBackground,
+  CLOUDFLARE_TEMP_EMAIL_GENERATOR,
+  fetchCloudflareTempEmailAddress,
   getErrorMessage,
+  getState,
   getTabId,
+  persistRegistrationEmailState,
   registrationSuccessWaitMs: STEP6_REGISTRATION_SUCCESS_WAIT_MS,
+  resolveSignupMethod,
+  setPlusPaymentEmailState,
   sleepWithStop,
 });
 const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
@@ -16101,6 +16160,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   upsertHotmailAccount,
   upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
   verifyHotmailAccount,
+  handlePhonePlusNonFreeTrialFallback,
   checkoutConversionProxyManager,
 });
 

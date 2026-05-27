@@ -288,6 +288,219 @@ test('step 6 records unknown for non-root url, login button, missing tab, and in
   assert.match(failureDetection.error, /Cannot access tab/);
 });
 
+test('step 6 generates phone-prefixed Cloudflare Temp Email for phone signup and syncs payment email', async () => {
+  const api = createStep6Api();
+  const events = {
+    completions: [],
+    fetchCalls: [],
+    persistCalls: [],
+    paymentCalls: [],
+  };
+  const initialState = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    signupPhoneNumber: '+86 138-1234-5678',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+86 138-1234-5678',
+    signupPhoneCompletedActivation: {
+      activationId: 'done-1',
+      phoneNumber: '+86 138-1234-5678',
+    },
+  };
+  let state = { ...initialState };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    CLOUDFLARE_TEMP_EMAIL_GENERATOR: 'cloudflare-temp-email',
+    completeNodeFromBackground: async (step, payload) => {
+      events.completions.push({ step, payload });
+    },
+    fetchCloudflareTempEmailAddress: async (callState, options) => {
+      events.fetchCalls.push({ state: callState, options });
+      return '8613812345678@mail.example.com';
+    },
+    getState: async () => state,
+    persistRegistrationEmailState: async (callState, email, options) => {
+      events.persistCalls.push({ state: callState, email, options });
+      state = {
+        ...state,
+        email,
+        registrationEmailState: {
+          current: email,
+          previous: email,
+          source: options.source,
+          updatedAt: 123,
+        },
+      };
+    },
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => String(currentState.signupMethod || '').trim().toLowerCase(),
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(initialState);
+
+  assert.equal(events.fetchCalls.length, 1);
+  assert.equal(events.fetchCalls[0].options.localPart, '8613812345678');
+  assert.equal(events.fetchCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(events.fetchCalls[0].options.source, 'generated:cloudflare-temp-email:phone-prefix');
+  assert.equal(events.persistCalls.length, 1);
+  assert.equal(events.persistCalls[0].email, '8613812345678@mail.example.com');
+  assert.equal(events.persistCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(events.persistCalls[0].options.source, 'generated:cloudflare-temp-email:phone-prefix');
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: '8613812345678@mail.example.com',
+    options: { source: 'registration:phone-prefix-cloudflare-temp-email' },
+  }]);
+  assert.deepStrictEqual(events.completions.map((entry) => entry.step), ['wait-registration-success']);
+});
+
+test('step 6 does not duplicate registration persistence when Cloudflare generation already persisted the email', async () => {
+  const api = createStep6Api();
+  const events = {
+    fetchCalls: [],
+    persistCalls: [],
+    paymentCalls: [],
+    completions: [],
+  };
+  let state = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    signupPhoneNumber: '+66 95 991 6439',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+66 95 991 6439',
+  };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    fetchCloudflareTempEmailAddress: async (_callState, options) => {
+      events.fetchCalls.push(options);
+      const email = '66959916439@mail.example.com';
+      state = {
+        ...state,
+        email,
+        registrationEmailState: {
+          current: email,
+          previous: email,
+          source: options.source,
+          updatedAt: 456,
+        },
+      };
+      return email;
+    },
+    getState: async () => state,
+    persistRegistrationEmailState: async () => {
+      events.persistCalls.push('persist');
+    },
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(state);
+
+  assert.equal(events.fetchCalls[0].localPart, '66959916439');
+  assert.deepStrictEqual(events.persistCalls, []);
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: '66959916439@mail.example.com',
+    options: { source: 'registration:phone-prefix-cloudflare-temp-email' },
+  }]);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
+});
+
+test('step 6 skips phone-prefixed email generation outside phone Cloudflare Temp Email mode', async () => {
+  const api = createStep6Api();
+
+  async function run(state) {
+    const events = { fetchCalls: 0, paymentCalls: 0, completions: [] };
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      completeNodeFromBackground: async (step) => {
+        events.completions.push(step);
+      },
+      fetchCloudflareTempEmailAddress: async () => {
+        events.fetchCalls += 1;
+        return 'should-not-create@example.com';
+      },
+      getState: async () => state,
+      registrationSuccessWaitMs: 0,
+      resolveSignupMethod: (currentState) => currentState.signupMethod,
+      setPlusPaymentEmailState: async () => {
+        events.paymentCalls += 1;
+      },
+      sleepWithStop: async () => {},
+    });
+    await executor.executeStep6(state);
+    return events;
+  }
+
+  assert.deepStrictEqual(await run({
+    signupMethod: 'phone',
+    emailGenerator: 'duck',
+    signupPhoneNumber: '+8613812345678',
+  }), {
+    fetchCalls: 0,
+    paymentCalls: 0,
+    completions: ['wait-registration-success'],
+  });
+
+  assert.deepStrictEqual(await run({
+    signupMethod: 'email',
+    emailGenerator: 'cloudflare-temp-email',
+    email: 'user@example.com',
+  }), {
+    fetchCalls: 0,
+    paymentCalls: 0,
+    completions: ['wait-registration-success'],
+  });
+});
+
+test('step 6 fails before completion when phone Cloudflare mode lacks a usable phone prefix', async () => {
+  const api = createStep6Api();
+  const events = {
+    fetchCalls: 0,
+    completions: [],
+  };
+  const state = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    signupPhoneNumber: ' + -- ',
+    accountIdentifierType: 'phone',
+    accountIdentifier: 'phone-without-digits',
+  };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    fetchCloudflareTempEmailAddress: async () => {
+      events.fetchCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    getState: async () => state,
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    sleepWithStop: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep6(state),
+    /无法提取可用手机号数字/
+  );
+  assert.equal(events.fetchCalls, 0);
+  assert.deepStrictEqual(events.completions, []);
+});
+
 test('step 7 retries up to configured limit and then fails', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};

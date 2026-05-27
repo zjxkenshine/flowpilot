@@ -284,6 +284,7 @@ const inputHostedCheckoutPhone = document.getElementById('input-hosted-checkout-
 const rowHostedCheckoutSmsPool = document.getElementById('row-hosted-checkout-sms-pool');
 const rowHostedCheckoutResendSettings = document.getElementById('row-hosted-checkout-resend-settings');
 const inputHostedCheckoutSmsPoolAutoDisableEnabled = document.getElementById('input-hosted-checkout-sms-pool-auto-disable-enabled');
+const inputHostedCheckoutSmsPoolMaxUses = document.getElementById('input-hosted-checkout-sms-pool-max-uses');
 const inputHostedCheckoutFirstDirectResendEnabled = document.getElementById('input-hosted-checkout-first-direct-resend-enabled');
 const inputHostedCheckoutFirstResendWaitSeconds = document.getElementById('input-hosted-checkout-first-resend-wait-seconds');
 const inputHostedCheckoutSubsequentResendWaitSeconds = document.getElementById('input-hosted-checkout-subsequent-resend-wait-seconds');
@@ -697,6 +698,7 @@ const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
+const DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES = 3;
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
@@ -3475,6 +3477,19 @@ function normalizeHostedCheckoutVerificationResendMaxAttemptsValue(value, fallba
   return Math.min(10, Math.max(0, parsed));
 }
 
+function normalizeHostedCheckoutSmsPoolMaxUsesValue(value, fallback = DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES) {
+  const rawValue = String(value ?? '').trim();
+  const fallbackValue = Math.min(99, Math.max(1, Math.floor(Number(fallback) || DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES)));
+  if (!rawValue) {
+    return fallbackValue;
+  }
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) {
+    return fallbackValue;
+  }
+  return Math.min(99, Math.max(1, Math.floor(parsed)));
+}
+
 function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -5358,6 +5373,9 @@ function collectSettingsPayload() {
     hostedCheckoutSmsPoolAutoDisableEnabled: typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled
       ? Boolean(inputHostedCheckoutSmsPoolAutoDisableEnabled.checked)
       : Boolean(latestState?.hostedCheckoutSmsPoolAutoDisableEnabled),
+    hostedCheckoutSmsPoolMaxUses: typeof inputHostedCheckoutSmsPoolMaxUses !== 'undefined' && inputHostedCheckoutSmsPoolMaxUses
+      ? normalizeHostedCheckoutSmsPoolMaxUsesValue(inputHostedCheckoutSmsPoolMaxUses.value, latestState?.hostedCheckoutSmsPoolMaxUses ?? DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES)
+      : normalizeHostedCheckoutSmsPoolMaxUsesValue(latestState?.hostedCheckoutSmsPoolMaxUses, DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES),
     hostedCheckoutFirstDirectResendEnabled: typeof inputHostedCheckoutFirstDirectResendEnabled !== 'undefined' && inputHostedCheckoutFirstDirectResendEnabled
       ? Boolean(inputHostedCheckoutFirstDirectResendEnabled.checked)
       : Boolean(latestState?.hostedCheckoutFirstDirectResendEnabled),
@@ -12099,6 +12117,11 @@ function applySettingsState(state) {
   if (typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
     inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(state?.hostedCheckoutSmsPoolAutoDisableEnabled);
   }
+  if (typeof inputHostedCheckoutSmsPoolMaxUses !== 'undefined' && inputHostedCheckoutSmsPoolMaxUses) {
+    inputHostedCheckoutSmsPoolMaxUses.value = String(
+      normalizeHostedCheckoutSmsPoolMaxUsesValue(state?.hostedCheckoutSmsPoolMaxUses, DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES)
+    );
+  }
   if (typeof inputHostedCheckoutFirstDirectResendEnabled !== 'undefined' && inputHostedCheckoutFirstDirectResendEnabled) {
     inputHostedCheckoutFirstDirectResendEnabled.checked = Boolean(state?.hostedCheckoutFirstDirectResendEnabled);
   }
@@ -14018,6 +14041,10 @@ const hostedSmsPoolManager = window.SidepanelHostedSmsPoolManager?.createHostedS
     setUsage: (usage) => {
       syncLatestState({ hostedCheckoutSmsPoolUsage: usage && typeof usage === 'object' ? usage : {} });
     },
+    getMaxUses: () => normalizeHostedCheckoutSmsPoolMaxUsesValue(
+      inputHostedCheckoutSmsPoolMaxUses?.value || latestState?.hostedCheckoutSmsPoolMaxUses,
+      DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES
+    ),
     getCurrentEntry: () => latestState?.hostedCheckoutCurrentSmsEntry || null,
     setCurrentEntry: (entry) => {
       syncLatestState({
@@ -17542,6 +17569,20 @@ inputHostedCheckoutSmsPoolAutoDisableEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputHostedCheckoutSmsPoolMaxUses?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+  queueHostedSmsPoolRefresh();
+});
+
+inputHostedCheckoutSmsPoolMaxUses?.addEventListener('blur', () => {
+  inputHostedCheckoutSmsPoolMaxUses.value = String(
+    normalizeHostedCheckoutSmsPoolMaxUsesValue(inputHostedCheckoutSmsPoolMaxUses.value, DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES)
+  );
+  saveSettings({ silent: true }).catch(() => { });
+  queueHostedSmsPoolRefresh();
+});
+
 inputHostedCheckoutFirstDirectResendEnabled?.addEventListener('change', () => {
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -20205,6 +20246,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.hostedCheckoutSmsPoolAutoDisableEnabled !== undefined && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
         inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(message.payload.hostedCheckoutSmsPoolAutoDisableEnabled);
       }
+      if (message.payload.hostedCheckoutSmsPoolMaxUses !== undefined && inputHostedCheckoutSmsPoolMaxUses) {
+        inputHostedCheckoutSmsPoolMaxUses.value = String(
+          normalizeHostedCheckoutSmsPoolMaxUsesValue(message.payload.hostedCheckoutSmsPoolMaxUses, DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES)
+        );
+        queueHostedSmsPoolRefresh();
+      }
       if (message.payload.hostedCheckoutFirstDirectResendEnabled !== undefined && inputHostedCheckoutFirstDirectResendEnabled) {
         inputHostedCheckoutFirstDirectResendEnabled.checked = Boolean(message.payload.hostedCheckoutFirstDirectResendEnabled);
       }
@@ -20657,7 +20704,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         renderPayPalAccounts();
         renderPayPalProfile();
       }
-      if (message.payload.paypalGeneratedProfile !== undefined) {
+      if (
+        message.payload.paypalGeneratedProfile !== undefined
+        || message.payload.plusHostedCheckoutGuestProfile !== undefined
+        || message.payload.hostedCheckoutGuestProfile !== undefined
+      ) {
         renderPayPalProfile();
       }
       if (message.payload.currentMail2925AccountId !== undefined || message.payload.mail2925Accounts !== undefined) {

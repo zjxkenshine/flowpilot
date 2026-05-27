@@ -12,6 +12,10 @@
       'tabRegistry',
       'sourceLastUrls',
       'flowStartTime',
+      'browserFingerprintProfile',
+      'browserFingerprintAppliedAt',
+      'browserFingerprintExitIp',
+      'browserFingerprintExitRegion',
     ]);
     const RUNTIME_PROXY_FIELDS = Object.freeze([
       'ipProxyApiPool',
@@ -48,6 +52,9 @@
         'plusCheckoutCurrency',
         'plusCheckoutSource',
         'plusPaymentEmailState',
+        'plusHostedCheckoutGuestProfile',
+        'hostedCheckoutGuestProfile',
+        'plusHostedCheckoutPhoneDigits',
         'plusCheckoutAlreadyPaid',
         'plusCheckoutAlreadyPaidAt',
         'plusCheckoutAlreadyPaidDetail',

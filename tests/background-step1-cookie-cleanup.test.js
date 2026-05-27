@@ -161,6 +161,7 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
   const api = loadStep1Module();
   const events = {
     openedSteps: [],
+    fingerprintCalls: 0,
     probeCalls: 0,
   };
 
@@ -173,6 +174,9 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
       return { proxyRouting: { exitIp: '203.0.113.8', reason: 'applied' } };
     },
     switchIpProxy: async () => {},
+    ensureBrowserFingerprintForProxyExit: async () => {
+      events.fingerprintCalls += 1;
+    },
     openSignupEntryTab: async (step) => {
       events.openedSteps.push(step);
     },
@@ -182,6 +186,7 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
   await executor.executeStep1();
 
   assert.equal(events.probeCalls, 0);
+  assert.equal(events.fingerprintCalls, 0);
   assert.deepStrictEqual(events.openedSteps, [1]);
 });
 
@@ -206,6 +211,10 @@ test('step 1 reuses existing proxy exit info without probing when exit IP alread
     switchIpProxy: async () => {
       events.push(['switch']);
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
+      return { profile: { exitRegion: routing.exitRegion } };
+    },
     openSignupEntryTab: async (step) => {
       events.push(['open', step]);
     },
@@ -217,6 +226,7 @@ test('step 1 reuses existing proxy exit info without probing when exit IP alread
   await executor.executeStep1();
 
   assert.deepStrictEqual(events, [
+    ['fingerprint', '203.0.113.8', 'JP'],
     ['open', 1],
     ['complete', 'open-chatgpt'],
   ]);
@@ -255,6 +265,10 @@ test('step 1 waits for proxy exit settle and continues without probing when exit
     switchIpProxy: async () => {
       events.push(['switch']);
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
+      return { profile: { exitRegion: routing.exitRegion } };
+    },
     openSignupEntryTab: async (step) => {
       events.push(['open', step]);
     },
@@ -266,6 +280,7 @@ test('step 1 waits for proxy exit settle and continues without probing when exit
   await executor.executeStep1();
 
   assert.deepStrictEqual(events, [
+    ['fingerprint', '203.0.113.8', 'JP'],
     ['open', 1],
     ['complete', 'open-chatgpt'],
   ]);
@@ -298,6 +313,10 @@ test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty',
     switchIpProxy: async () => {
       events.push(['switch']);
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
+      return { profile: { exitRegion: routing.exitRegion } };
+    },
     openSignupEntryTab: async (step) => {
       events.push(['open', step]);
     },
@@ -310,8 +329,54 @@ test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty',
 
   assert.deepStrictEqual(events, [
     ['probe', 12000, true],
+    ['fingerprint', '198.51.100.8', 'US'],
     ['open', 1],
     ['complete', 'open-chatgpt'],
+  ]);
+});
+
+test('step 1 stops before opening ChatGPT when browser fingerprint apply fails', async () => {
+  const api = loadStep1Module();
+  const events = [];
+
+  const executor = api.createStep1Executor({
+    addLog: async () => {},
+    chrome: createNoopChromeApi(),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '',
+      ipProxyAppliedExitDetecting: false,
+    }),
+    probeIpProxyExit: async () => {
+      events.push(['probe']);
+      return {
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '198.51.100.8',
+          exitRegion: 'US',
+        },
+      };
+    },
+    switchIpProxy: async () => {},
+    ensureBrowserFingerprintForProxyExit: async () => {
+      events.push(['fingerprint']);
+      throw new Error('fingerprint failed');
+    },
+    openSignupEntryTab: async () => {
+      events.push(['open']);
+    },
+    completeNodeFromBackground: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep1(),
+    /fingerprint failed/
+  );
+
+  assert.deepStrictEqual(events, [
+    ['probe'],
+    ['fingerprint'],
   ]);
 });
 
@@ -353,6 +418,10 @@ test('step 1 switches to next proxy and reprobes before opening ChatGPT', async 
     switchIpProxy: async (direction, options) => {
       events.push(['switch', direction, options.state.marker, options.skipExitProbe, options.forceRefresh]);
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
+      return { profile: { exitRegion: routing.exitRegion } };
+    },
     openSignupEntryTab: async (step) => {
       events.push(['open', step]);
     },
@@ -365,6 +434,7 @@ test('step 1 switches to next proxy and reprobes before opening ChatGPT', async 
     ['probe', 'state-1'],
     ['switch', 'next', 'state-1', true, true],
     ['probe', 'state-2'],
+    ['fingerprint', '198.51.100.9', 'US'],
     ['open', 1],
   ]);
 });
@@ -396,6 +466,10 @@ test('step 1 switches to next proxy when proxy probe throws', async () => {
     switchIpProxy: async (direction, options) => {
       events.push(['switch', direction, options.skipExitProbe, options.forceRefresh]);
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
+      return { profile: { exitRegion: routing.exitRegion } };
+    },
     openSignupEntryTab: async (step) => {
       events.push(['open', step]);
     },
@@ -408,6 +482,7 @@ test('step 1 switches to next proxy when proxy probe throws', async () => {
     ['probe', 1],
     ['switch', 'next', true, true],
     ['probe', 2],
+    ['fingerprint', '198.51.100.10', 'SG'],
     ['open', 1],
   ]);
 });

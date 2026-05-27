@@ -39,7 +39,7 @@
 
     function buildEmailPersistOptions(options = {}, source = '') {
       return {
-        source,
+        source: String(options?.source || '').trim() || source,
         preserveAccountIdentity: Boolean(options?.preserveAccountIdentity),
         ...(options?.stateTarget !== undefined ? { stateTarget: options.stateTarget } : {}),
       };

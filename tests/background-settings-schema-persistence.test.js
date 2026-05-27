@@ -99,6 +99,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
+  'hostedCheckoutSmsPoolMaxUses',
   'hostedCheckoutSmsPoolAutoDisableEnabled',
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
@@ -137,6 +138,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
+  hostedCheckoutSmsPoolMaxUses: 3,
   hostedCheckoutSmsPoolAutoDisableEnabled: false,
   hostedCheckoutSmsPoolUsage: {},
   hostedCheckoutCurrentSmsEntry: null,
@@ -641,6 +643,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
     signupMethod: 'email',
     plusAccountAccessStrategy: 'sub2api_codex_session',
     hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+    hostedCheckoutSmsPoolMaxUses: '4.9',
     hostedCheckoutSmsPoolAutoDisableEnabled: true,
     hostedCheckoutSmsPoolUsage: {
       '4155555678----https://example.com/verify': { useCount: 1 },
@@ -663,6 +666,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
   assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
   assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
   assert.equal(payload.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(payload.hostedCheckoutSmsPoolMaxUses, 4);
   assert.equal(payload.hostedCheckoutSmsPoolAutoDisableEnabled, true);
   assert.deepEqual(payload.hostedCheckoutCurrentSmsEntry, {
     key: '4155555678----https://example.com/verify',
@@ -674,6 +678,7 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
     '4155555678----https://example.com/verify'
   );
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled, true);
+  assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 4);
 });
 
 test('buildPersistentSettingsPayload projects nested Phone Plus settings into flat view and canonical schema', () => {
@@ -905,6 +910,7 @@ const chrome = {
                   plusModeEnabled: true,
                   plusPaymentMethod: 'paypal',
                   hostedCheckoutSmsPoolText: '14155555678----https://example.com/verify?t=1',
+                  hostedCheckoutSmsPoolMaxUses: 0,
                   hostedCheckoutSmsPoolUsage: {
                     '4155555678----https://example.com/verify': {
                       useCount: 2,
@@ -937,6 +943,7 @@ const chrome = {
   const state = await api.getPersistedSettings();
 
   assert.equal(state.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(state.hostedCheckoutSmsPoolMaxUses, 1);
   assert.deepEqual(state.hostedCheckoutSmsPoolUsage, {
     '4155555678----https://example.com/verify': {
       useCount: 2,
@@ -954,6 +961,40 @@ const chrome = {
     phone: '4155555678',
     verificationUrl: 'https://example.com/verify',
   });
+});
+
+test('buildPersistentSettingsPayload normalizes PayPal hosted sms pool max uses from defaults flat and nested settings', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.hostedCheckoutSmsPoolMaxUses, 3);
+  assert.equal(defaults.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 3);
+
+  const flat = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsPoolMaxUses: '8.7',
+  }, { fillDefaults: true });
+  assert.equal(flat.hostedCheckoutSmsPoolMaxUses, 8);
+  assert.equal(flat.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 8);
+
+  const clamped = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsPoolMaxUses: 0,
+  }, { fillDefaults: true });
+  assert.equal(clamped.hostedCheckoutSmsPoolMaxUses, 1);
+  assert.equal(clamped.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 1);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            hostedCheckoutSmsPoolMaxUses: '6.3',
+          },
+        },
+      },
+    },
+  }, { fillDefaults: true });
+  assert.equal(nested.hostedCheckoutSmsPoolMaxUses, 6);
+  assert.equal(nested.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 6);
 });
 
 test('setPersistentSettings materializes canonical schema keys for schema-only updates', async () => {
@@ -1195,6 +1236,7 @@ function getRemovedKeys() {
       '4155555678----https://example.com/verify-a?t=9',
       '4155559999----https://example.com/verify-b',
     ].join('\n'),
+    hostedCheckoutSmsPoolMaxUses: 5,
     hostedCheckoutSmsPoolAutoDisableEnabled: true,
     hostedCheckoutSmsPoolUsage: {
       '4155555678----https://example.com/verify-a': {
@@ -1219,6 +1261,7 @@ function getRemovedKeys() {
     '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
   );
   assert.equal(persisted.hostedCheckoutSmsPoolAutoDisableEnabled, true);
+  assert.equal(persisted.hostedCheckoutSmsPoolMaxUses, 5);
   assert.deepEqual(persisted.hostedCheckoutCurrentSmsEntry, {
     key: '4155555678----https://example.com/verify-a',
     phone: '4155555678',
@@ -1230,6 +1273,7 @@ function getRemovedKeys() {
     '4155555678----https://example.com/verify-a\n4155559999----https://example.com/verify-b'
   );
   assert.equal(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled, true);
+  assert.equal(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 5);
   assert.deepEqual(write.settingsState.flows.openai.plus.hostedCheckoutSmsPoolUsage, {
     '4155555678----https://example.com/verify-a': {
       useCount: 2,

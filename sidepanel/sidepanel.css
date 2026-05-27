@@ -1417,6 +1417,25 @@ header {
   margin-left: auto;
 }
 
+.hosted-sms-pool-max-uses-field {
+  margin-left: auto;
+}
+
+.hosted-sms-pool-max-uses-field .auto-delay-input {
+  width: 64px;
+  min-width: 64px;
+}
+
+.hosted-sms-pool-max-uses-unit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hosted-sms-pool-max-uses-field + .hosted-sms-pool-auto-disable-toggle {
+  margin-left: 0;
+}
+
 .plus-checkout-conversion-proxy-test-result.status-running {
   color: var(--amber);
 }
