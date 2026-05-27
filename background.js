@@ -15003,23 +15003,95 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     }
     return undefined;
   };
-  const releaseHostedCheckoutConversionProxySessionBeforeRetry = async (state = {}, options = {}) => {
-    if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
-      return false;
+  async function resetPaymentProxyAndSwitchIpBeforeCheckoutRetry(state = {}, options = {}) {
+    let latestState = state && typeof state === 'object' ? state : {};
+    let releasedPaymentProxy = false;
+    if (typeof getState === 'function') {
+      latestState = await getState().catch(() => latestState);
     }
-    if (!isHostedCheckoutFinalStepEnabled(state)) {
-      return false;
+
+    if (checkoutConversionProxyManager?.getStoredSession && checkoutConversionProxyManager?.restoreSession) {
+      const session = await checkoutConversionProxyManager.getStoredSession(latestState);
+      if (session?.active) {
+        const displayName = String(session.displayName || session.selectedEntryDisplayName || '').trim();
+        await checkoutConversionProxyManager.restoreSession(session);
+        releasedPaymentProxy = true;
+        await addLog(
+          displayName
+            ? `自动运行：Plus Checkout 重试前已释放支付转换代理 ${displayName}，准备恢复 IP 代理并重建 checkout。`
+            : '自动运行：Plus Checkout 重试前已释放支付转换代理，准备恢复 IP 代理并重建 checkout。',
+          'info'
+        );
+        if (typeof getState === 'function') {
+          latestState = await getState().catch(() => latestState);
+        }
+      }
     }
-    const session = await checkoutConversionProxyManager.getStoredSession(state);
-    if (!session?.active || session.flowType !== PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
-      return false;
+
+    if (!latestState?.ipProxyEnabled) {
+      await addLog('自动运行：Plus Checkout 重试前未启用 IP 代理，跳过换 IP，继续重建 checkout。', 'info');
+      return {
+        releasedPaymentProxy,
+        switchedIpProxy: false,
+        skippedReason: 'ip_proxy_disabled',
+      };
     }
-    await checkoutConversionProxyManager.restoreSession(session);
-    if (options.logMessage) {
-      await addLog(options.logMessage, options.logLevel || 'info');
+
+    if (typeof switchIpProxy !== 'function') {
+      throw new Error('自动运行：已启用 IP 代理，但切换能力不可用，停止重建 Plus Checkout。');
     }
-    return true;
-  };
+
+    const checkoutLabel = String(options.checkoutLabel || 'Plus Checkout').trim() || 'Plus Checkout';
+    const retryCount = Math.max(0, Math.floor(Number(options.retryCount) || 0));
+    await addLog(
+      `自动运行：${checkoutLabel} 重试前正在切换 IP 代理${retryCount ? `（第 ${retryCount} 次重建）` : ''}...`,
+      'info'
+    );
+
+    let switchResult = null;
+    try {
+      switchResult = await switchIpProxy('next', {
+        state: latestState,
+        forceRefresh: true,
+        skipExitProbe: false,
+      });
+    } catch (error) {
+      throw new Error(`自动运行：Plus Checkout 重试前切换 IP 代理失败，已停止重建 checkout：${getErrorMessage(error)}`);
+    }
+
+    const routing = switchResult?.proxyRouting || {};
+    const reason = String(routing?.reason || '').trim().toLowerCase();
+    const exitIp = String(routing?.exitIp || '').trim();
+    const exitRegion = String(routing?.exitRegion || '').trim();
+    const failedReason = [
+      'connectivity_failed',
+      'apply_failed',
+      'missing_proxy_entry',
+      'proxy_api_unavailable',
+      'disabled',
+      'disabled_probe_only',
+    ].includes(reason);
+    if (!routing || routing.applied === false || !exitIp || failedReason) {
+      const detail = String(
+        routing?.exitError
+        || routing?.error
+        || switchResult?.reason
+        || reason
+        || '未检测到可用出口'
+      ).trim();
+      throw new Error(`自动运行：Plus Checkout 重试前切换 IP 代理后出口不可用，已停止重建 checkout：${detail}`);
+    }
+
+    const display = String(switchResult?.display || '').trim();
+    const displaySuffix = display ? `（${display}）` : '';
+    const exitSuffix = exitRegion ? `${exitIp} [${exitRegion}]` : exitIp;
+    await addLog(`自动运行：Plus Checkout 重试前已切换 IP 代理${displaySuffix}，当前出口 ${exitSuffix}。`, 'ok');
+    return {
+      releasedPaymentProxy,
+      switchedIpProxy: true,
+      switchResult,
+    };
+  }
   const restartCurrentNodeAfterIdle = async (nodeId, error) => {
     if (!isAutoRunStepIdleRestartError(error)) {
       return false;
@@ -15292,8 +15364,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           'warn'
         );
         const checkoutResetAnchorNodeId = getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile';
-        await releaseHostedCheckoutConversionProxySessionBeforeRetry(latestState, {
-          logMessage: 'PayPal hosted retry cleanup: released previous checkout conversion proxy session before restarting step 6.',
+        await resetPaymentProxyAndSwitchIpBeforeCheckoutRetry(latestState, {
+          checkoutLabel,
+          retryCount: checkoutRestartCount,
         });
         await invalidateDownstreamAfterAutoRunNodeRestart(checkoutResetAnchorNodeId, {
           logLabel: `节点 ${nodeId} ${checkoutLabel}失败后准备回到 plus-checkout-create 重试（第 ${checkoutRestartCount} 次）`,

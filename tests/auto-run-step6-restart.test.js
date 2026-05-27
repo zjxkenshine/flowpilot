@@ -10,7 +10,7 @@ function extractFunction(name) {
     .map((marker) => source.indexOf(marker))
     .find((index) => index >= 0);
   if (start < 0) {
-    throw new Error(`missing function ${name}`);
+    return extractConstFunction(name);
   }
 
   let parenDepth = 0;
@@ -50,6 +50,48 @@ function extractFunction(name) {
   }
 
   return source.slice(start, end);
+}
+
+function extractConstFunction(name) {
+  const marker = `const ${name} =`;
+  const start = source.indexOf(marker);
+  if (start < 0) {
+    throw new Error(`missing function ${name}`);
+  }
+
+  let depth = 0;
+  let inString = '';
+  let inTemplate = false;
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    const prev = source[i - 1];
+    if (inString) {
+      if (ch === inString && prev !== '\\') {
+        inString = '';
+      }
+      continue;
+    }
+    if (inTemplate) {
+      if (ch === '`' && prev !== '\\') {
+        inTemplate = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      continue;
+    }
+    if (ch === '`') {
+      inTemplate = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') depth -= 1;
+    if (ch === ';' && depth === 0) {
+      return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`missing const function terminator for ${name}`);
 }
 
 const NODE_COMPAT_HELPERS = `
@@ -150,6 +192,7 @@ const bundle = [
   extractFunction('isAddPhoneAuthUrl'),
   extractFunction('isAddPhoneAuthState'),
   extractFunction('isPlusCheckoutNonFreeTrialFailure'),
+  extractFunction('isCloudCheckoutAlreadyPaidFailure'),
   extractFunction('isGpcCheckoutRestartRequiredFailure'),
   extractFunction('isPlusCheckoutRestartStep'),
   extractFunction('isPlusCheckoutRestartRequiredFailure'),
@@ -254,9 +297,10 @@ function createHarness(options = {}) {
     idleLogCheckIntervalMs = 5000,
     hangStep = 0,
     hangBudget = 0,
+    switchIpProxyImpl = null,
   } = options;
 
-  return new Function(`
+  return new Function('switchIpProxyImpl', `
 const AUTO_STEP_DELAYS = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0, 13: 0 };
 const LAST_STEP_ID = ${JSON.stringify(lastStepId)};
 const FINAL_OAUTH_CHAIN_START_STEP = ${JSON.stringify(finalOAuthChainStartStep)};
@@ -283,6 +327,8 @@ const events = {
   cancellations: [],
   stopBroadcasts: 0,
   proxyRestores: [],
+  proxySwitches: [],
+  order: [],
 };
 
 async function addLog(message, level = 'info') {
@@ -303,10 +349,28 @@ async function getState() {
 const checkoutConversionProxyManager = {
   getStoredSession: async (state = {}) => state.plusCheckoutConversionProxySession || null,
   restoreSession: async (session) => {
+    events.order.push('restore');
     events.proxyRestores.push({ flowType: session?.flowType || '', displayName: session?.displayName || '' });
     return true;
   },
 };
+async function switchIpProxy(direction, options = {}) {
+  events.order.push('switch');
+  events.proxySwitches.push({ direction, options });
+  const customSwitch = ${switchIpProxyImpl ? 'switchIpProxyImpl' : 'null'};
+  if (typeof customSwitch === 'function') {
+    return customSwitch(direction, options, events);
+  }
+  return {
+    display: 'proxy-next',
+    proxyRouting: {
+      applied: true,
+      reason: 'applied',
+      exitIp: '203.0.113.10',
+      exitRegion: 'US',
+    },
+  };
+}
 function isHostedCheckoutFinalStepEnabled(state = {}) {
   const normalized = String(state?.plusPaymentMethod || '').trim().toLowerCase();
   if (normalized === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
@@ -321,23 +385,7 @@ function isHostedCheckoutFinalStepEnabled(state = {}) {
   }
   return state?.plusHostedCheckoutIsFinalStep !== false;
 }
-async function releaseHostedCheckoutConversionProxySessionBeforeRetry(state = {}, options = {}) {
-  if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
-    return false;
-  }
-  if (!isHostedCheckoutFinalStepEnabled(state)) {
-    return false;
-  }
-  const session = await checkoutConversionProxyManager.getStoredSession(state);
-  if (!session?.active || session.flowType !== PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
-    return false;
-  }
-  await checkoutConversionProxyManager.restoreSession(session);
-  if (options.logMessage) {
-    await addLog(options.logMessage, options.logLevel || 'info');
-  }
-  return true;
-}
+${extractFunction('resetPaymentProxyAndSwitchIpBeforeCheckoutRetry')}
 function getStepIdsForState() {
   return ${JSON.stringify(stepIds)};
 }
@@ -369,6 +417,7 @@ async function getTabId() {
   return 1;
 }
 async function invalidateDownstreamAfterStepRestart(step, options = {}) {
+  events.order.push('invalidate');
   events.invalidations.push({ step, options });
 }
 function cancelPendingCommands(reason = '') {
@@ -421,7 +470,7 @@ return {
     }
   },
 };
-`)();
+`)(switchIpProxyImpl);
 }
 
 test('auto-run keeps restarting from step 7 after post-login failures without a hard cap', async () => {
@@ -760,7 +809,7 @@ test('auto-run restarts Plus checkout from step 6 when checkout creation fails',
   assert.ok(events.logs.some(({ message }) => /回到节点 plus-checkout-create 重新创建 Plus Checkout/.test(message)));
 });
 
-test('auto-run hosted PayPal retry releases hosted checkout conversion proxy before invalidation', async () => {
+test('auto-run hosted PayPal retry releases checkout conversion proxy and switches IP before invalidation', async () => {
   const plusHostedSteps = {
     6: { key: 'plus-checkout-create' },
     7: { key: 'paypal-hosted-email' },
@@ -786,6 +835,7 @@ test('auto-run hosted PayPal retry releases hosted checkout conversion proxy bef
       plusModeEnabled: true,
       plusPaymentMethod: 'paypal-hosted',
       plusCheckoutSource: 'paypal-hosted',
+      ipProxyEnabled: true,
       plusCheckoutConversionProxySession: {
         active: true,
         flowType: 'paypal-hosted',
@@ -803,7 +853,132 @@ test('auto-run hosted PayPal retry releases hosted checkout conversion proxy bef
   assert.deepStrictEqual(events.proxyRestores, [
     { flowType: 'paypal-hosted', displayName: 'socks5://proxy.example:1080' },
   ]);
+  assert.deepStrictEqual(events.proxySwitches.map((entry) => entry.direction), ['next']);
+  assert.equal(events.proxySwitches[0].options.forceRefresh, true);
+  assert.equal(events.proxySwitches[0].options.skipExitProbe, false);
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.deepStrictEqual(events.order, ['restore', 'switch', 'invalidate']);
+});
+
+test('auto-run classic PayPal retry releases residual checkout conversion proxy and switches IP', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    8: { key: 'paypal-approve' },
+    9: { key: 'plus-checkout-return' },
+    10: { key: 'oauth-login' },
+    11: { key: 'fetch-login-code' },
+    12: { key: 'confirm-oauth' },
+    13: { key: 'platform-verify' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：账单页卡住，请重新创建 checkout。',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+      ipProxyEnabled: true,
+      plusCheckoutConversionProxySession: {
+        active: true,
+        flowType: 'classic-paypal',
+        releaseNodeKey: 'paypal-approve',
+        appliedStepKey: 'plus-checkout-billing',
+        displayName: 'http://pay-proxy.example:8080',
+        snapshot: { applied: true },
+        appliedAt: 1,
+      },
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.proxyRestores, [
+    { flowType: 'classic-paypal', displayName: 'http://pay-proxy.example:8080' },
+  ]);
+  assert.deepStrictEqual(events.proxySwitches.map((entry) => entry.direction), ['next']);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.deepStrictEqual(events.order, ['restore', 'switch', 'invalidate']);
+});
+
+test('auto-run Plus retry releases checkout conversion proxy without switching IP when IP proxy is disabled', async () => {
+  const plusHostedSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'paypal-hosted-email' },
+    8: { key: 'paypal-hosted-card' },
+    9: { key: 'paypal-hosted-create-account' },
+    10: { key: 'paypal-hosted-review' },
+    11: { key: 'oauth-login' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：PayPal hosted email 页面加载失败，请重新创建 Plus Checkout。',
+    stepDefinitions: plusHostedSteps,
+    stepIds: [6, 7, 8, 9, 10, 11],
+    lastStepId: 11,
+    finalOAuthChainStartStep: 11,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      plusCheckoutSource: 'paypal-hosted',
+      ipProxyEnabled: false,
+      plusCheckoutConversionProxySession: {
+        active: true,
+        flowType: 'paypal-hosted',
+        displayName: 'socks5://proxy.example:1080',
+        snapshot: { applied: true },
+        appliedAt: 1,
+      },
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.proxyRestores, [
+    { flowType: 'paypal-hosted', displayName: 'socks5://proxy.example:1080' },
+  ]);
+  assert.equal(events.proxySwitches.length, 0);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.deepStrictEqual(events.order, ['restore', 'invalidate']);
+});
+
+test('auto-run Plus retry stops when IP proxy switch fails', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：账单页卡住，请重新创建 checkout。',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+      ipProxyEnabled: true,
+    },
+    switchIpProxyImpl: async () => {
+      throw new Error('代理池为空');
+    },
+  });
+
+  const result = await harness.runAndCaptureError();
+
+  assert.ok(result?.error);
+  assert.match(result.error.message, /切换 IP 代理失败/);
+  assert.equal(result.events.invalidations.length, 0);
+  assert.deepStrictEqual(result.events.order, ['switch']);
 });
 
 test('auto-run restarts Plus checkout from step 6 when billing fails for non-free-trial reasons', async () => {
