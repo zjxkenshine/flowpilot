@@ -25,6 +25,7 @@
       city: '',
       region: '',
       postalCode: '',
+      fullAddress: '',
       generatedFromCountry: '',
       generatedAt: 0,
     };
@@ -44,6 +45,7 @@
       'city',
       'region',
       'postalCode',
+      'fullAddress',
       'generatedFromCountry',
       'generatedAt',
     ];
@@ -181,6 +183,19 @@
       return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
 
+    function buildFullAddress({
+      address1 = '',
+      city = '',
+      region = '',
+      postalCode = '',
+      countryCode = '',
+    } = {}) {
+      return [address1, city, region, postalCode, countryCode]
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ');
+    }
+
     function normalizeExitRegionToCountryCode(value = '') {
       const raw = String(value || '').trim();
       if (!raw) {
@@ -264,6 +279,10 @@
         || buildPassword()
       ).trim();
       const card = buildVisaCard();
+      const address1 = String(fallback.address1 || '').trim();
+      const city = String(fallback.city || '').trim();
+      const region = String(fallback.region || '').trim();
+      const postalCode = String(fallback.postalCode || '').trim();
 
       return normalizeProfile({
         email,
@@ -276,10 +295,11 @@
         lastName: String(name?.lastName || '').trim(),
         birthday: buildBirthdayString(birthday),
         countryCode: effectiveCountryCode,
-        address1: String(fallback.address1 || '').trim(),
-        city: String(fallback.city || '').trim(),
-        region: String(fallback.region || '').trim(),
-        postalCode: String(fallback.postalCode || '').trim(),
+        address1,
+        city,
+        region,
+        postalCode,
+        fullAddress: buildFullAddress({ address1, city, region, postalCode, countryCode: effectiveCountryCode }),
         generatedFromCountry: effectiveCountryCode,
         generatedAt: Date.now(),
       });
@@ -326,6 +346,7 @@
         ['城市', 'city'],
         ['州省', 'region'],
         ['邮编', 'postalCode'],
+        ['整段地址', 'fullAddress'],
         ['来源国家', 'generatedFromCountry'],
         ['生成时间', 'generatedAt'],
       ];
@@ -413,6 +434,7 @@
         city: '城市',
         region: '州省',
         postalCode: '邮编',
+        fullAddress: '整段地址',
         generatedFromCountry: '来源国家',
         generatedAt: '生成时间',
       }[field] || '字段';

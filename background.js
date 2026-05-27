@@ -505,6 +505,7 @@ const DEFAULT_PAYPAL_GENERATED_PROFILE = Object.freeze({
   city: '',
   region: '',
   postalCode: '',
+  fullAddress: '',
   generatedFromCountry: '',
   generatedAt: 0,
 });

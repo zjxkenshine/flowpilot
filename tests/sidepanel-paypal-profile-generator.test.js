@@ -190,6 +190,7 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
   assert.equal(profile.city, 'Chiyoda-ku');
   assert.equal(profile.region, 'Tokyo');
   assert.equal(profile.postalCode, '100-0005');
+  assert.equal(profile.fullAddress, 'Marunouchi 1-1 Chiyoda-ku Tokyo 100-0005 JP');
   assert.equal(profile.generatedAt > 0, true);
 });
 
@@ -221,6 +222,7 @@ test('PayPal profile generator falls back to selected PayPal account email and U
   assert.equal(profile.countryCode, 'US');
   assert.equal(profile.generatedFromCountry, 'US');
   assert.equal(profile.city, 'New York');
+  assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
 });
 
 test('PayPal profile generator defaults to a local US address seed without proxy country', () => {
@@ -247,6 +249,7 @@ test('PayPal profile generator defaults to a local US address seed without proxy
   assert.equal(profile.generatedFromCountry, 'US');
   assert.equal(profile.address1, '3450 Broadway');
   assert.equal(profile.city, 'New York');
+  assert.equal(profile.fullAddress, '3450 Broadway New York New York 10031 US');
 });
 
 test('PayPal profile generator persists generated profile and copies full profile in fixed order', async () => {
@@ -269,11 +272,13 @@ test('PayPal profile generator persists generated profile and copies full profil
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardNumber, /^4147\d{12}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardCvv, /^\d{3}$/);
+  assert.equal(saveMessage.payload.paypalGeneratedProfile.fullAddress, 'Marunouchi 1-1 Chiyoda-ku Tokyo 100-0005 DE');
 
   await btnCopyProfile.click();
   const copied = events.filter((event) => event.type === 'copy').at(-1)?.text;
 
   assert.match(copied, /^邮箱：user@example\.com\n电话：\+4915123456789\n卡号：4147\d{12}\n有效期：(0[1-9]|1[0-2]) \/ \d{2}\nCVV：\d{3}\n密码：CustomSecret123!\n名字：Ada\n姓氏：Lovelace\n生日：2001-02-03\n国家：DE\n地址：Marunouchi 1-1\n城市：Chiyoda-ku\n州省：Tokyo\n邮编：100-0005$/);
+  assert.equal(copied.includes('整段地址'), false);
 });
 
 test('PayPal profile generator reports toast error when copying empty profile', async () => {
@@ -337,6 +342,7 @@ test('PayPal profile generator normalizes persisted profile shape', () => {
     city: '',
     region: '',
     postalCode: '',
+    fullAddress: '',
     generatedFromCountry: '',
     generatedAt: 123,
   });

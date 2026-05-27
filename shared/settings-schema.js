@@ -72,6 +72,7 @@
       city: '',
       region: '',
       postalCode: '',
+      fullAddress: '',
       generatedFromCountry: '',
       generatedAt: 0,
     });

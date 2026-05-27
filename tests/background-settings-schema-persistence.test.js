@@ -151,6 +151,7 @@ const PERSISTED_SETTING_DEFAULTS = {
     city: '',
     region: '',
     postalCode: '',
+    fullAddress: '',
     generatedFromCountry: '',
     generatedAt: 0,
   },
@@ -480,6 +481,7 @@ test('buildPersistentSettingsPayload persists PayPal generated profile into sett
       city: ' Chiyoda ',
       region: ' Tokyo ',
       postalCode: ' 100-0005 ',
+      fullAddress: ' 1 Marunouchi Chiyoda Tokyo 100-0005 JP ',
       generatedFromCountry: ' de ',
       generatedAt: '12345',
     },
@@ -500,6 +502,7 @@ test('buildPersistentSettingsPayload persists PayPal generated profile into sett
     city: 'Chiyoda',
     region: 'Tokyo',
     postalCode: '100-0005',
+    fullAddress: '1 Marunouchi Chiyoda Tokyo 100-0005 JP',
     generatedFromCountry: 'DE',
     generatedAt: 12345,
   };
