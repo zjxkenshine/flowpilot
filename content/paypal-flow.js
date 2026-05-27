@@ -181,6 +181,16 @@ function findInputByPatterns(patterns) {
   }) || null;
 }
 
+function isReadOnlyControl(el = null) {
+  if (!el || el.nodeType !== 1) {
+    return false;
+  }
+  const ariaReadOnly = String(el.getAttribute?.('aria-readonly') || '').trim().toLowerCase();
+  return el.readOnly === true
+    || el.getAttribute?.('readonly') !== null
+    || ariaReadOnly === 'true';
+}
+
 function findEmailInput() {
   const isPasswordCandidate = (input) => {
     const type = String(input?.getAttribute?.('type') || input?.type || '').trim().toLowerCase();
@@ -195,7 +205,7 @@ function findEmailInput() {
     return type === 'password' || /password|pass|密码/i.test(metadataText);
   };
   const isEmailCandidate = (input) => {
-    if (!input || isPasswordCandidate(input)) {
+    if (!input || isReadOnlyControl(input) || isPasswordCandidate(input)) {
       return false;
     }
     const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
@@ -212,6 +222,7 @@ function findEmailInput() {
       const type = String(input.getAttribute('type') || input.type || '').trim().toLowerCase();
       return isEnabledControl(input)
         && !['hidden', 'checkbox', 'radio', 'submit', 'button', 'file'].includes(type)
+        && !isReadOnlyControl(input)
         && !isPasswordCandidate(input);
     });
   const direct = [
@@ -224,6 +235,62 @@ function findEmailInput() {
   return direct
     || inputs.find(isEmailCandidate)
     || null;
+}
+
+function hasReadOnlyFieldStructureSignal(node = null) {
+  if (!node || node.nodeType !== 1) {
+    return false;
+  }
+  if (isReadOnlyControl(node)) {
+    return true;
+  }
+  const signalText = normalizeText([
+    node.id,
+    node.className,
+    node.getAttribute?.('class'),
+    node.getAttribute?.('data-testid'),
+    node.getAttribute?.('data-test-id'),
+    node.getAttribute?.('data-automation-id'),
+    node.getAttribute?.('role'),
+    node.getAttribute?.('aria-readonly'),
+  ].filter(Boolean).join(' '));
+  return /ReadOnlyFormField|read\s*only|read[-_]?only|readonly/i.test(signalText);
+}
+
+function getReadOnlyEmailLabel(node = null) {
+  if (!node || node.nodeType !== 1) {
+    return '';
+  }
+  const type = String(node.getAttribute?.('type') || node.type || '').trim().toLowerCase();
+  if (type === 'email') {
+    return 'email';
+  }
+  const text = normalizeText([
+    node.textContent,
+    node.innerText,
+    node.getAttribute?.('aria-label'),
+    node.getAttribute?.('title'),
+    node.getAttribute?.('placeholder'),
+    node.getAttribute?.('name'),
+    node.id,
+  ].filter(Boolean).join(' '));
+  const match = text.match(/email\s*address|e-?mail|电子邮箱|电子邮件|邮件地址|邮箱/i);
+  return match ? match[0] : '';
+}
+
+function findReadOnlyEmailField() {
+  let candidates = [];
+  try {
+    candidates = Array.from(document.querySelectorAll('*') || []);
+  } catch {
+    candidates = [];
+  }
+  return candidates.find((node) => (
+    node
+    && hasReadOnlyFieldStructureSignal(node)
+    && getReadOnlyEmailLabel(node)
+    && isVisibleElement(node)
+  )) || null;
 }
 
 function findPasswordInput() {
@@ -260,6 +327,13 @@ function findEmailNextButton() {
   ]);
 }
 
+function findHostedEmailNextButton() {
+  return findEmailNextButton() || findClickableByText([
+    /continue/i,
+    /继续/i,
+  ]);
+}
+
 function findPasswordLoginButton() {
   const button = findClickableByText([
     /login|log\s*in|sign\s*in/i,
@@ -280,7 +354,9 @@ function getPayPalPathname() {
 }
 
 function isHostedLoginPage() {
-  return getPayPalPathname() === '/pay' || Boolean(document.getElementById('email'));
+  return getPayPalPathname() === '/pay'
+    || Boolean(document.getElementById('email'))
+    || Boolean(findReadOnlyEmailField() && findHostedEmailNextButton());
 }
 
 function isHostedGuestCheckoutPage() {
@@ -992,7 +1068,7 @@ async function clickHostedSubmitButton(options = {}) {
 
 async function clickHostedEmailNextButton() {
   const button = await waitUntil(() => {
-    const candidate = findEmailNextButton();
+    const candidate = findHostedEmailNextButton();
     return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
   }, {
     intervalMs: 500,
@@ -1279,18 +1355,35 @@ async function submitHostedLogin(payload = {}) {
   await waitForDocumentComplete();
   const email = normalizeText(payload.email || buildHostedRandomEmail());
   const inputStableWaitMs = Math.max(0, Math.floor(Number(payload.emailInputStableWaitMs) || 0));
-  const emailInput = await waitUntil(() => {
+  const emailTarget = await waitUntil(() => {
     const candidate = findEmailInput();
-    return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
+    if (candidate && isVisibleElement(candidate) && isEnabledControl(candidate)) {
+      return {
+        emailInput: candidate,
+        readOnlyEmailField: null,
+      };
+    }
+    const readOnlyEmailField = findReadOnlyEmailField();
+    const nextButton = findHostedEmailNextButton();
+    if (readOnlyEmailField && nextButton && isVisibleElement(nextButton) && isEnabledControl(nextButton)) {
+      return {
+        emailInput: null,
+        readOnlyEmailField,
+      };
+    }
+    return null;
   }, {
     intervalMs: 500,
     timeoutMs: Math.max(0, Math.floor(Number(payload.emailInputTimeoutMs) || 0)),
-    timeoutMessage: 'PayPal hosted checkout 未找到邮箱输入框。',
+    timeoutMessage: 'PayPal hosted checkout 未找到邮箱输入框或只读邮箱字段。',
   });
-  if (inputStableWaitMs > 0) {
+  if (emailTarget.emailInput && inputStableWaitMs > 0) {
     await sleep(inputStableWaitMs);
   }
-  refillPayPalEmailInput(emailInput, email);
+  const readOnlyEmailLabel = getReadOnlyEmailLabel(emailTarget.readOnlyEmailField);
+  if (emailTarget.emailInput) {
+    refillPayPalEmailInput(emailTarget.emailInput, email);
+  }
   const clickResult = await clickHostedEmailNextButton();
   return {
     stage: PAYPAL_HOSTED_STAGE_LOGIN,
@@ -1298,6 +1391,9 @@ async function submitHostedLogin(payload = {}) {
     generatedEmail: email,
     clicked: Boolean(clickResult.clicked),
     emailInputStableWaitMs: inputStableWaitMs,
+    emailSkipped: Boolean(emailTarget.readOnlyEmailField),
+    readOnlyEmailDetected: Boolean(emailTarget.readOnlyEmailField),
+    readOnlyEmailLabel,
   };
 }
 
@@ -1508,6 +1604,7 @@ function inspectPayPalHostedState(payload = {}) {
   const stage = detectPayPalHostedStage(payload);
   const createAccountButton = findHostedCreateAccountButton();
   const phoneInputState = getHostedPhoneInputState();
+  const readOnlyEmailField = findReadOnlyEmailField();
   const securityChallengeProbe = payload?.securityChallengeEnabled === true
     ? probePayPalHostedSecurityChallengeOverlay()
     : buildPayPalHostedSecurityChallengeProbeDefaults();
@@ -1516,7 +1613,9 @@ function inspectPayPalHostedState(payload = {}) {
     readyState: document.readyState,
     hostedStage: stage,
     hasGuestCardFields: Boolean(document.getElementById('cardNumber')),
-    hasHostedEmailInput: Boolean(document.getElementById('email') || findEmailInput()),
+    hasHostedEmailInput: Boolean(document.getElementById('email') || findEmailInput() || readOnlyEmailField),
+    readOnlyEmailDetected: Boolean(readOnlyEmailField),
+    readOnlyEmailLabel: getReadOnlyEmailLabel(readOnlyEmailField),
     createAccountReady: Boolean(createAccountButton && isVisibleElement(createAccountButton) && isEnabledControl(createAccountButton)),
     verificationInputsVisible: hasHostedVerificationInputs(),
     hostedVerificationInvalidCode: hasHostedInvalidVerificationCodeError(),

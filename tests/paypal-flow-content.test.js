@@ -130,6 +130,7 @@ ${extractFunction('getVisibleControls')}
 ${extractFunction('isEnabledControl')}
 ${extractFunction('findClickableByText')}
 ${extractFunction('findInputByPatterns')}
+${extractFunction('isReadOnlyControl')}
 ${extractFunction('findEmailInput')}
 ${extractFunction('findPasswordInput')}
 ${extractFunction('findLoginNextButton')}
@@ -521,6 +522,20 @@ function createHostedPayPalHarness(options = {}) {
     id: 'addressIndex1',
     text: '2307 Spring Forest Road Raleigh, NC, USA',
   });
+  const readOnlyEmailFieldZh = createDomElement({
+    tagName: 'DIV',
+    text: '邮箱',
+    attrs: { class: 'ReadOnlyFormField-container' },
+  });
+  const readOnlyEmailFieldEn = createDomElement({
+    tagName: 'DIV',
+    text: 'Email address',
+    attrs: { class: 'ReadOnlyFormField-container' },
+  });
+  const plainEmailText = createDomElement({
+    tagName: 'DIV',
+    text: 'Email address',
+  });
   const nextButton = createDomElement({
     tagName: 'BUTTON',
     id: 'btnNext',
@@ -613,6 +628,24 @@ function createHostedPayPalHarness(options = {}) {
     body.innerText = '请输入您的电子邮箱地址。 下一页 或 创建账户';
     body.textContent = body.innerText;
     setElements([emailInput, nextButton, createAccountButton]);
+  }
+
+  function showPayReadOnlyEmail({ locale = 'zh', plainTextOnly = false } = {}) {
+    location.href = 'https://www.paypal.com/pay?token=demo';
+    location.host = 'www.paypal.com';
+    location.pathname = '/pay';
+    const readOnlyField = locale === 'en' ? readOnlyEmailFieldEn : readOnlyEmailFieldZh;
+    nextButton.textContent = locale === 'en' ? 'Continue' : '下一页';
+    nextButton.innerText = nextButton.textContent;
+    body.innerText = plainTextOnly
+      ? 'Email address Continue'
+      : `${readOnlyField.textContent} ${nextButton.textContent}`;
+    body.textContent = body.innerText;
+    setElements([
+      plainTextOnly ? plainEmailText : readOnlyField,
+      nextButton,
+      createAccountButton,
+    ]);
   }
 
   function showVerification({ invalid = false } = {}) {
@@ -730,6 +763,7 @@ function createHostedPayPalHarness(options = {}) {
       },
       querySelectorAll(selector) {
         const text = String(selector || '');
+        if (text === '*') return elements.slice();
         if (text === 'input') return elements.filter((element) => element.tagName === 'INPUT');
         if (text === 'input[type="email"]') return elements.filter((element) => element.type === 'email');
         if (text === 'input[type="password"]') return elements.filter((element) => element.type === 'password');
@@ -886,6 +920,7 @@ function createHostedPayPalHarness(options = {}) {
     showCaptchaOverlay,
     showGuestCardError,
     showPayEmail,
+    showPayReadOnlyEmail,
     showCreateAccount,
     showGenericError,
     showGuestCheckout,
@@ -1310,6 +1345,82 @@ test('PayPal hosted /pay email page fills email and clicks Next instead of Creat
     JSON.parse(JSON.stringify(harness.events.filter((event) => event.type === 'operation').map((event) => event.metadata))),
     [{ stepKey: 'paypal-hosted-email', kind: 'click', label: 'hosted-paypal-email-next' }]
   );
+});
+
+test('PayPal hosted /pay skips Chinese read-only email field and clicks Next', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showPayReadOnlyEmail({ locale: 'zh' });
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'pay_login');
+  assert.equal(state.hasHostedEmailInput, true);
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'pay_login',
+      email: 'guest@example.com',
+      emailInputStableWaitMs: 5000,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'pay_login');
+  assert.equal(result.submitted, true);
+  assert.equal(result.emailSkipped, true);
+  assert.equal(result.readOnlyEmailDetected, true);
+  assert.match(result.readOnlyEmailLabel, /邮箱/);
+  assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 5000), false);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), false);
+});
+
+test('PayPal hosted /pay skips English read-only email field and clicks Continue', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showPayReadOnlyEmail({ locale: 'en' });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'pay_login',
+      email: 'guest@example.com',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.emailSkipped, true);
+  assert.equal(result.readOnlyEmailDetected, true);
+  assert.match(result.readOnlyEmailLabel, /Email/i);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), true);
+});
+
+test('PayPal hosted /pay does not skip plain email text without read-only structure', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showPayReadOnlyEmail({ locale: 'en', plainTextOnly: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'pay_login',
+      email: 'guest@example.com',
+      emailInputTimeoutMs: 1,
+    },
+  });
+
+  assert.equal(result.ok, undefined);
+  assert.match(result.error, /未找到邮箱输入框或只读邮箱字段/);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), false);
 });
 
 test('PayPal hosted create account page is detected and handled as its own step', async () => {
