@@ -277,7 +277,7 @@ test('account book manager masks passwords by default, toggles display, exports 
   });
 });
 
-test('account book manager exports utf8 bom txt with readable 4-column table', async () => {
+test('account book manager exports utf8 bom txt with readable 5-column table', async () => {
   const source = fs.readFileSync('sidepanel/account-book-manager.js', 'utf8');
   const windowObject = {};
   const api = new Function('window', `${source}; return window.SidepanelAccountBookManager;`)(windowObject);
@@ -337,9 +337,9 @@ test('account book manager exports utf8 bom txt with readable 4-column table', a
   assert.deepEqual(downloads[0].options, { prependUtf8Bom: true });
   assert.match(downloads[0].fileName, /^flowpilot-account-book-\d{8}-\d{6}\.txt$/);
   assert.match(downloads[0].content, /^# FlowPilot Account Book Export\r\n# schemaVersion=1\r\n# encoding=UTF-8\r\n# exportedAt=/);
-  assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\tIP\r\n/);
-  assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t203\.0\.113\.8 \[US\]\r\n/);
-  assert.match(downloads[0].content, /--\t--\t--\t--\r\n$/);
+  assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\t状态\tIP\r\n/);
+  assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t导入成功\t203\.0\.113\.8 \[US\]\r\n/);
+  assert.match(downloads[0].content, /--\t--\t--\t注册成功\t--\r\n$/);
 });
 
 test('account book manager renders all status labels with matching classes', () => {

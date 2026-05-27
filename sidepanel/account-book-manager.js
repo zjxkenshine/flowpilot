@@ -213,11 +213,12 @@
         `# exportedAt=${exportedAt}`,
         `# count=${entries.length}`,
         '',
-        ['\u90ae\u7bb1', '\u624b\u673a\u53f7', '\u5bc6\u7801', 'IP'].join('\t'),
+        ['\u90ae\u7bb1', '\u624b\u673a\u53f7', '\u5bc6\u7801', '\u72b6\u6001', 'IP'].join('\t'),
         ...entries.map((entry) => [
           sanitizeTxtCell(entry.email),
           sanitizeTxtCell(entry.phoneNumber),
           sanitizeTxtCell(entry.password),
+          sanitizeTxtCell(getStatusMeta(entry.captureStage).label),
           sanitizeTxtCell(formatSignupIp(entry)),
         ].join('\t')),
       ];
