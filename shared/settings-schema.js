@@ -306,6 +306,7 @@
             },
             autoRun: {
               autoRunRetryPaypalCallback: false,
+              autoRunPreserveIssueLogsOnRestart: false,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -323,6 +324,7 @@
             },
             autoRun: {
               autoRunRetryPaypalCallback: false,
+              autoRunPreserveIssueLogsOnRestart: false,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -724,6 +726,11 @@
                 ?? nested?.flows?.openai?.autoRun?.autoRunRetryPaypalCallback
                 ?? defaults.flows.openai.autoRun.autoRunRetryPaypalCallback
               ),
+              autoRunPreserveIssueLogsOnRestart: Boolean(
+                input?.autoRunPreserveIssueLogsOnRestart
+                ?? nested?.flows?.openai?.autoRun?.autoRunPreserveIssueLogsOnRestart
+                ?? defaults.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
                   ?? nested?.flows?.openai?.autoRun?.stepExecutionRange
@@ -757,6 +764,12 @@
                 input?.kiroAutoRunRetryPaypalCallback
                 ?? nested?.flows?.kiro?.autoRun?.autoRunRetryPaypalCallback
                 ?? defaults.flows.kiro.autoRun.autoRunRetryPaypalCallback
+              ),
+              autoRunPreserveIssueLogsOnRestart: Boolean(
+                input?.kiroAutoRunPreserveIssueLogsOnRestart
+                ?? input?.autoRunPreserveIssueLogsOnRestart
+                ?? nested?.flows?.kiro?.autoRun?.autoRunPreserveIssueLogsOnRestart
+                ?? defaults.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart
               ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.kiro
@@ -894,6 +907,7 @@
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
       next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
+      next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

@@ -1118,6 +1118,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       updates: {
         autoRunSkipFailures: false,
         autoRunRetryPaypalCallback: false,
+        autoRunPreserveIssueLogsOnRestart: false,
       },
     },
     {
@@ -1126,6 +1127,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       options: {
         autoRunSkipFailures: false,
         autoRunRetryPaypalCallback: false,
+        autoRunPreserveIssueLogsOnRestart: false,
         mode: 'restart',
       },
     },

@@ -1569,6 +1569,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   gopayHelperApiKeyStatus: '',
   autoRunSkipFailures: false,
   autoRunRetryPaypalCallback: false,
+  autoRunPreserveIssueLogsOnRestart: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
   autoRunDelayEnabled: false,
@@ -1763,6 +1764,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusHostedCheckoutOauthDelaySeconds',
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
+  'autoRunPreserveIssueLogsOnRestart',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2767,6 +2769,7 @@ function normalizeAutoRunTimerPlan(plan) {
   const totalRuns = normalizeRunCount(plan.totalRuns);
   const autoRunSkipFailures = Boolean(plan.autoRunSkipFailures);
   const autoRunRetryPaypalCallback = Boolean(plan.autoRunRetryPaypalCallback);
+  const autoRunPreserveIssueLogsOnRestart = Boolean(plan.autoRunPreserveIssueLogsOnRestart);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -2785,6 +2788,7 @@ function normalizeAutoRunTimerPlan(plan) {
       totalRuns,
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart,
       mode,
       currentRun: 0,
       attemptRun: 0,
@@ -2804,6 +2808,7 @@ function normalizeAutoRunTimerPlan(plan) {
       totalRuns,
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart,
       mode: 'restart',
       currentRun: normalizedCurrentRun,
       attemptRun: normalizedAttemptRun,
@@ -2822,6 +2827,7 @@ function normalizeAutoRunTimerPlan(plan) {
     totalRuns,
     autoRunSkipFailures,
     autoRunRetryPaypalCallback,
+    autoRunPreserveIssueLogsOnRestart,
     mode: 'restart',
     currentRun: normalizedCurrentRun,
     attemptRun: normalizedAttemptRun,
@@ -2853,6 +2859,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     totalRuns: state.scheduledAutoRunPlan?.totalRuns ?? state.autoRunTotalRuns,
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
     autoRunRetryPaypalCallback: state.scheduledAutoRunPlan?.autoRunRetryPaypalCallback ?? state.autoRunRetryPaypalCallback,
+    autoRunPreserveIssueLogsOnRestart: state.scheduledAutoRunPlan?.autoRunPreserveIssueLogsOnRestart ?? state.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: state.autoRunSessionId,
     mode: state.scheduledAutoRunPlan?.mode,
   });
@@ -3997,6 +4004,7 @@ function normalizePersistentSettingValue(key, value) {
       return Math.max(0, Number(value) || 0);
     case 'autoRunSkipFailures':
     case 'autoRunRetryPaypalCallback':
+    case 'autoRunPreserveIssueLogsOnRestart':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
@@ -4809,6 +4817,8 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutCurrentSmsEntry', ['flows', 'openai', 'plus', 'hostedCheckoutCurrentSmsEntry']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
+  assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
+  assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -4937,6 +4947,7 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
     ? prevState.settingsState
     : {};
   const normalizedStepExecutionRangeByFlow = normalizeStepExecutionRangeByFlow(prevState?.stepExecutionRangeByFlow || {});
+  const preserveIssueLogs = Boolean(prevState?.autoRunPreserveIssueLogsOnRestart);
   const nextSettingsStatePatch = {
     activeFlowId,
     services: {
@@ -4955,24 +4966,39 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
     flows: {
       openai: {
         integrationTargetId: prevState?.openaiIntegrationTargetId || prevState?.panelMode,
-        autoRun: normalizedStepExecutionRangeByFlow.openai
-          ? {
-            stepExecutionRange: normalizedStepExecutionRangeByFlow.openai,
-          }
-          : undefined,
+        autoRun: {
+          autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
+          ...(normalizedStepExecutionRangeByFlow.openai
+            ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }
+            : {}),
+        },
       },
       kiro: {
         targetId: prevState?.kiroTargetId,
-        autoRun: normalizedStepExecutionRangeByFlow.kiro
-          ? {
-            stepExecutionRange: normalizedStepExecutionRangeByFlow.kiro,
-          }
-          : undefined,
+        autoRun: {
+          autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
+          ...(normalizedStepExecutionRangeByFlow.kiro
+            ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.kiro }
+            : {}),
+        },
       },
     },
   };
 
   return mergeAutoRunKeepStateValue(currentSettingsState, nextSettingsStatePatch);
+}
+
+function filterAutoRunIssueLogsForRestart(logs = []) {
+  if (!Array.isArray(logs)) {
+    return [];
+  }
+  return logs
+    .filter((entry) => {
+      const level = String(entry?.level || '').trim().toLowerCase();
+      return level === 'warn' || level === 'error';
+    })
+    .slice(-500)
+    .map((entry) => cloneAutoRunKeepStateValue(entry));
 }
 
 function buildFreshAutoRunKeepState(prevState = {}) {
@@ -5022,6 +5048,10 @@ function buildFreshAutoRunKeepState(prevState = {}) {
     keepState.settingsSchemaVersion = Number(sourceState.settingsSchemaVersion) || 0;
   }
   keepState.settingsState = settingsState;
+  keepState.autoRunPreserveIssueLogsOnRestart = Boolean(sourceState.autoRunPreserveIssueLogsOnRestart);
+  if (keepState.autoRunPreserveIssueLogsOnRestart) {
+    keepState.logs = filterAutoRunIssueLogsForRestart(sourceState.logs);
+  }
   return keepState;
 }
 
@@ -11438,6 +11468,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: normalizedPlan.mode,
       },
       statusPayload: {
@@ -11456,6 +11487,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: 'restart',
         resumeCurrentRun: nextRun,
         resumeAttemptRun: 1,
@@ -11475,6 +11507,7 @@ function getAutoRunTimerResumeOptions(plan) {
       autoRunSessionId: normalizedPlan.autoRunSessionId,
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
       mode: 'restart',
       resumeCurrentRun: normalizedPlan.currentRun,
       resumeAttemptRun: normalizedPlan.attemptRun,
@@ -11570,6 +11603,7 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
       {
         autoRunSkipFailures: plan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
         autoRunTimerPlan: null,
         scheduledAutoRunPlan: null,
@@ -11621,6 +11655,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     totalRuns,
     autoRunSkipFailures: options.autoRunSkipFailures,
     autoRunRetryPaypalCallback: options.autoRunRetryPaypalCallback,
+    autoRunPreserveIssueLogsOnRestart: options.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: sessionId,
     mode: options.mode,
   });
@@ -11633,6 +11668,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
   await persistAutoRunTimerPlan(timerPlan, {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
     autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
+    autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, []),
   });
   await addLog(
@@ -11705,6 +11741,7 @@ async function restoreAutoRunTimerIfNeeded() {
     }, {
       autoRunSkipFailures: plan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
     });
   } else {
@@ -11724,6 +11761,7 @@ async function restoreAutoRunTimerIfNeeded() {
       autoRunSessionId: plan.autoRunSessionId,
       autoRunSkipFailures: plan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
       autoRunTimerPlan: plan,
       scheduledAutoRunPlan: null,
@@ -12807,6 +12845,7 @@ async function requestStop(options = {}) {
       autoRunSessionId: 0,
       autoRunSkipFailures: timerPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
       autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, timerPlan.roundSummaries),
       autoRunTimerPlan: null,
       scheduledAutoRunPlan: null,
@@ -15602,6 +15641,7 @@ async function resumeAutoRun() {
     autoRunSessionId: normalizeAutoRunSessionId(state.autoRunSessionId),
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
     autoRunRetryPaypalCallback: Boolean(state.autoRunRetryPaypalCallback),
+    autoRunPreserveIssueLogsOnRestart: Boolean(state.autoRunPreserveIssueLogsOnRestart),
     mode: 'continue',
     resumeCurrentRun: currentRun,
     resumeAttemptRun: attemptRun,

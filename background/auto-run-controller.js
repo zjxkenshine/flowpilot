@@ -143,6 +143,7 @@
         cloudflareDomains: state.cloudflareDomains,
         reusablePhoneActivation: state.reusablePhoneActivation,
         autoRunRetryPaypalCallback: state.autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart: state.autoRunPreserveIssueLogsOnRestart,
       };
     }
 
@@ -386,7 +387,12 @@
     }
 
     async function waitBetweenAutoRunRounds(targetRun, totalRuns, roundSummary, options = {}) {
-      const { autoRunSkipFailures = false, autoRunRetryPaypalCallback = false, roundSummaries = [] } = options;
+      const {
+        autoRunSkipFailures = false,
+        autoRunRetryPaypalCallback = false,
+        autoRunPreserveIssueLogsOnRestart = false,
+        roundSummaries = [],
+      } = options;
       if (totalRuns <= 1 || targetRun >= totalRuns) {
         return false;
       }
@@ -413,12 +419,14 @@
         autoRunSessionId: currentRuntime.autoRunSessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
         countdownNote: `第 ${Math.min(targetRun + 1, totalRuns)}/${totalRuns} 轮即将开始`,
       }, {
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
       runtime.set({ autoRunActive: false });
@@ -426,7 +434,12 @@
     }
 
     async function waitBeforeAutoRunRetry(targetRun, totalRuns, nextAttemptRun, options = {}) {
-      const { autoRunSkipFailures = false, autoRunRetryPaypalCallback = false, roundSummaries = [] } = options;
+      const {
+        autoRunSkipFailures = false,
+        autoRunRetryPaypalCallback = false,
+        autoRunPreserveIssueLogsOnRestart = false,
+        roundSummaries = [],
+      } = options;
       const fallbackThreadIntervalMinutes = normalizeAutoRunFallbackThreadIntervalMinutes(
         (await getState()).autoRunFallbackThreadIntervalMinutes
       );
@@ -447,12 +460,14 @@
         autoRunSessionId: runtime.get().autoRunSessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
         countdownNote: `第 ${targetRun}/${totalRuns} 轮第 ${nextAttemptRun} 次尝试即将开始`,
       }, {
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
       runtime.set({ autoRunActive: false });
@@ -514,6 +529,7 @@
 
       const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
       const autoRunRetryPaypalCallback = Boolean(options.autoRunRetryPaypalCallback);
+      const autoRunPreserveIssueLogsOnRestart = Boolean(options.autoRunPreserveIssueLogsOnRestart);
       const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
       const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
         ? Math.min(totalRuns, options.resumeCurrentRun)
@@ -550,6 +566,7 @@
         autoRunSessionId: sessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
         ...getAutoRunStatusPayload(initialPhase, {
           currentRun: showResumePosition ? resumeCurrentRun : 0,
@@ -627,6 +644,7 @@
               autoRunSessionId: sessionId,
               autoRunSkipFailures,
               autoRunRetryPaypalCallback,
+              autoRunPreserveIssueLogsOnRestart,
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun, sessionId }),
             });
@@ -953,6 +971,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
                 if (parkedForRetry) {
@@ -1016,6 +1035,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
                 if (parkedForRetry) {
@@ -1275,6 +1295,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
                 if (parkedForRetry) {
@@ -1345,6 +1366,7 @@
           const parkedForNextRound = await waitBetweenAutoRunRounds(targetRun, totalRuns, roundSummary, {
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
+            autoRunPreserveIssueLogsOnRestart,
             roundSummaries,
           });
           if (parkedForNextRound) {

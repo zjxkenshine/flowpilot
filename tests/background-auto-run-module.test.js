@@ -17,6 +17,109 @@ test('auto-run controller module exposes a factory', () => {
   assert.equal(typeof api?.createAutoRunController, 'function');
 });
 
+test('fresh auto-run keep state preserves only warn and error logs when enabled', () => {
+  const globalScope = {
+    MultiPageFlowRegistry: {
+      normalizeFlowId: (value, fallback) => String(value || fallback || 'openai').trim().toLowerCase(),
+    },
+  };
+  const api = new Function('self', `
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const kiroStateHelpers = null;
+function isPlainObjectValue(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+function cloneAutoRunKeepStateValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => cloneAutoRunKeepStateValue(entry));
+  }
+  if (isPlainObjectValue(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [key, cloneAutoRunKeepStateValue(entryValue)])
+    );
+  }
+  return value;
+}
+function mergeAutoRunKeepStateValue(baseValue, patchValue) {
+  if (Array.isArray(patchValue)) {
+    return patchValue.map((entry) => cloneAutoRunKeepStateValue(entry));
+  }
+  if (!isPlainObjectValue(patchValue)) {
+    return patchValue === undefined ? cloneAutoRunKeepStateValue(baseValue) : patchValue;
+  }
+  const baseObject = isPlainObjectValue(baseValue) ? baseValue : {};
+  const nextObject = { ...cloneAutoRunKeepStateValue(baseObject) };
+  for (const [key, entryValue] of Object.entries(patchValue)) {
+    nextObject[key] = mergeAutoRunKeepStateValue(baseObject[key], entryValue);
+  }
+  return nextObject;
+}
+function normalizeStepExecutionRangeByFlow(value = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+function buildPersistentSettingsPayload(input = {}) {
+  return {
+    autoRunPreserveIssueLogsOnRestart: Boolean(input.autoRunPreserveIssueLogsOnRestart),
+    settingsState: input.settingsState || {},
+  };
+}
+function collectAutoRunFreshResetRuntimeSettingKeys() {
+  return new Set();
+}
+${extractFunction('buildAutoRunFreshResetSettingsState')}
+${extractFunction('filterAutoRunIssueLogsForRestart')}
+${extractFunction('buildFreshAutoRunKeepState')}
+return { buildFreshAutoRunKeepState };
+`)(globalScope);
+
+  const logs = [
+    { message: 'starting', level: 'info', nested: { kept: false } },
+    { message: 'heads up', level: 'warn', nested: { kept: true } },
+    { message: 'done', level: 'ok' },
+    { message: 'failed', level: 'error' },
+  ];
+  const disabled = api.buildFreshAutoRunKeepState({
+    activeFlowId: 'openai',
+    autoRunPreserveIssueLogsOnRestart: false,
+    logs,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(disabled, 'logs'), false);
+
+  const enabled = api.buildFreshAutoRunKeepState({
+    activeFlowId: 'openai',
+    autoRunPreserveIssueLogsOnRestart: true,
+    logs,
+    autoRunRoundSummaries: [{ status: 'failed' }],
+    autoRunSessionId: 123,
+  });
+  assert.deepEqual(
+    enabled.logs.map((entry) => [entry.level, entry.message]),
+    [
+      ['warn', 'heads up'],
+      ['error', 'failed'],
+    ]
+  );
+  assert.equal(enabled.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(enabled.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(enabled, 'autoRunRoundSummaries'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(enabled, 'autoRunSessionId'), false);
+  logs[1].nested.kept = false;
+  assert.equal(enabled.logs[0].nested.kept, true, 'preserved logs should be cloned');
+
+  const manyLogs = Array.from({ length: 510 }, (_, index) => ({
+    level: 'warn',
+    message: `warning-${index + 1}`,
+  }));
+  const capped = api.buildFreshAutoRunKeepState({
+    activeFlowId: 'openai',
+    autoRunPreserveIssueLogsOnRestart: true,
+    logs: manyLogs,
+  });
+  assert.equal(capped.logs.length, 500);
+  assert.equal(capped.logs[0].message, 'warning-11');
+  assert.equal(capped.logs[499].message, 'warning-510');
+});
+
 test('auto-run account record status preserves the real failed node instead of parsing guidance text', () => {
   const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
   const globalScope = {};

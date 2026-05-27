@@ -545,6 +545,7 @@ const btnCfDomainMode = document.getElementById('btn-cf-domain-mode');
 const inputRunCount = document.getElementById('input-run-count');
 const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures');
 const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-retry-paypal-callback');
+const inputAutoRunPreserveIssueLogsOnRestart = document.getElementById('input-auto-run-preserve-issue-logs-on-restart');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
 const inputStep6CookieCleanupEnabled = document.getElementById('input-step6-cookie-cleanup-enabled');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
@@ -5680,6 +5681,9 @@ function collectSettingsPayload() {
     autoRunSkipFailures: inputAutoSkipFailures.checked,
     autoRunRetryPaypalCallback: typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback
       ? Boolean(inputAutoRunRetryPaypalCallback.checked)
+      : false,
+    autoRunPreserveIssueLogsOnRestart: typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart
+      ? Boolean(inputAutoRunPreserveIssueLogsOnRestart.checked)
       : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
@@ -12626,6 +12630,9 @@ function applySettingsState(state) {
   if (typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback) {
     inputAutoRunRetryPaypalCallback.checked = Boolean(state?.autoRunRetryPaypalCallback);
   }
+  if (typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart) {
+    inputAutoRunPreserveIssueLogsOnRestart.checked = Boolean(state?.autoRunPreserveIssueLogsOnRestart);
+  }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
     inputStep6CookieCleanupEnabled.checked = Boolean(state?.step6CookieCleanupEnabled);
@@ -16787,6 +16794,9 @@ async function startAutoRunFromCurrentSettings() {
   const autoRunRetryPaypalCallback = typeof inputAutoRunRetryPaypalCallback !== 'undefined' && inputAutoRunRetryPaypalCallback
     ? Boolean(inputAutoRunRetryPaypalCallback.checked)
     : false;
+  const autoRunPreserveIssueLogsOnRestart = typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart
+    ? Boolean(inputAutoRunPreserveIssueLogsOnRestart.checked)
+    : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
   const contributionQq = String(inputContributionQq?.value || '').trim();
   const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
@@ -16845,6 +16855,7 @@ async function startAutoRunFromCurrentSettings() {
       targetId,
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
+      autoRunPreserveIssueLogsOnRestart,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
       contributionAdapterId: latestState?.contributionAdapterId || '',
       contributionNickname,
@@ -19244,6 +19255,16 @@ inputAutoSkipFailures.addEventListener('change', async () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputAutoRunRetryPaypalCallback?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputAutoRunPreserveIssueLogsOnRestart?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputTempEmailBaseUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -20994,6 +21015,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && inputAutoRunRetryPaypalCallback
       ) {
         inputAutoRunRetryPaypalCallback.checked = Boolean(message.payload.autoRunRetryPaypalCallback);
+      }
+      if (
+        message.payload.autoRunPreserveIssueLogsOnRestart !== undefined
+        && typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined'
+        && inputAutoRunPreserveIssueLogsOnRestart
+      ) {
+        inputAutoRunPreserveIssueLogsOnRestart.checked = Boolean(message.payload.autoRunPreserveIssueLogsOnRestart);
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

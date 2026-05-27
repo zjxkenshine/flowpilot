@@ -106,6 +106,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
   'paypalGeneratedProfile',
+  'autoRunRetryPaypalCallback',
+  'autoRunPreserveIssueLogsOnRestart',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -165,6 +167,8 @@ const PERSISTED_SETTING_DEFAULTS = {
     generatedFromCountry: '',
     generatedAt: 0,
   },
+  autoRunRetryPaypalCallback: false,
+  autoRunPreserveIssueLogsOnRestart: false,
   phoneVerificationEnabled: false,
   mailProvider: '163',
   ipProxyEnabled: false,
@@ -376,6 +380,38 @@ test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh
   assert.equal(payload.ipProxyPoolTargetCount, '25');
   assert.equal(payload.ipProxySwitchIpRoundCount, '3');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload persists auto-run issue log preservation into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.autoRunPreserveIssueLogsOnRestart, false);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, false);
+  assert.equal(defaults.settingsState.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart, false);
+
+  const flat = api.buildPersistentSettingsPayload({
+    autoRunPreserveIssueLogsOnRestart: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(flat.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(flat.settingsState.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart, true);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            autoRunPreserveIssueLogsOnRestart: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(nested.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, true);
+  assert.equal(nested.settingsState.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart, false);
 });
 
 test('buildPersistentSettingsPayload persists browser fingerprint switch and level into settings schema', () => {

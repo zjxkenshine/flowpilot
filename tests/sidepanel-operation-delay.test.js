@@ -59,6 +59,15 @@ test('sidepanel no longer exposes operation delay switch and places step executi
   assert.ok(stepRangeIndex < oauthDisplayIndex, 'step execution range should stay above oauth runtime display');
 });
 
+test('sidepanel exposes and wires auto-run issue log preservation switch', () => {
+  assert.match(html, /id="input-auto-run-preserve-issue-logs-on-restart"/);
+  assert.match(html, /重开留错/);
+  assert.match(source, /const inputAutoRunPreserveIssueLogsOnRestart = document\.getElementById\('input-auto-run-preserve-issue-logs-on-restart'\);/);
+  assert.match(source, /autoRunPreserveIssueLogsOnRestart:\s*typeof inputAutoRunPreserveIssueLogsOnRestart/);
+  assert.match(source, /inputAutoRunPreserveIssueLogsOnRestart\.checked = Boolean\(state\?\.autoRunPreserveIssueLogsOnRestart\);/);
+  assert.match(source, /inputAutoRunPreserveIssueLogsOnRestart\?\.addEventListener\('change'/);
+});
+
 test('sidepanel operation delay state is always normalized back to enabled', () => {
   const harness = new Function(`
     let latestState = { operationDelayEnabled: false };

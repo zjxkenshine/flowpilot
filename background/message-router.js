@@ -1653,9 +1653,15 @@
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           const autoRunSkipFailures = Boolean(message.payload?.autoRunSkipFailures);
           const autoRunRetryPaypalCallback = Boolean(message.payload?.autoRunRetryPaypalCallback);
+          const autoRunPreserveIssueLogsOnRestart = Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart);
           const mode = message.payload?.mode === 'continue' ? 'continue' : 'restart';
-          await setState({ autoRunSkipFailures, autoRunRetryPaypalCallback });
-          startAutoRunLoop(totalRuns, { autoRunSkipFailures, autoRunRetryPaypalCallback, mode });
+          await setState({ autoRunSkipFailures, autoRunRetryPaypalCallback, autoRunPreserveIssueLogsOnRestart });
+          startAutoRunLoop(totalRuns, {
+            autoRunSkipFailures,
+            autoRunRetryPaypalCallback,
+            autoRunPreserveIssueLogsOnRestart,
+            mode,
+          });
           return { ok: true };
         }
 
@@ -1696,6 +1702,7 @@
             delayMinutes: message.payload?.delayMinutes,
             autoRunSkipFailures: Boolean(message.payload?.autoRunSkipFailures),
             autoRunRetryPaypalCallback: Boolean(message.payload?.autoRunRetryPaypalCallback),
+            autoRunPreserveIssueLogsOnRestart: Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart),
             mode: message.payload?.mode,
           });
         }
