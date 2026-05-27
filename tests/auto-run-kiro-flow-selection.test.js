@@ -86,7 +86,7 @@ test('auto-run controller preserves kiro flow across fresh reset and starts from
   const controller = api.createAutoRunController({
     addLog: async () => {},
     appendAccountRunRecord: async () => null,
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -316,7 +316,7 @@ test('auto-run controller stops immediately on kiro proxy failures even when ski
       events.records.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',

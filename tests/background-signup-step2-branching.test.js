@@ -966,3 +966,47 @@ test('signup flow helper rewrites retryable step 3 finalize transport timeout in
     },
   ]);
 });
+
+test('signup flow helper treats step 3 finalize reconnect error as ready when tab already reached verification', async () => {
+  const logs = [];
+
+  const helpers = signupFlowApi.createSignupFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    buildGeneratedAliasEmail: () => '',
+    chrome: { tabs: { get: async () => ({ id: 31, url: 'https://auth.openai.com/email-verification' }) } },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureHotmailAccountForFlow: async () => ({}),
+    ensureLuckmailPurchaseForFlow: async () => ({}),
+    isGeneratedAliasProvider: () => false,
+    isReusableGeneratedAliasEmail: () => false,
+    isHotmailProvider: () => false,
+    isRetryableContentScriptTransportError: (error) => /页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(error?.message || String(error || '')),
+    isLuckmailProvider: () => false,
+    isSignupEmailVerificationPageUrl: (url) => /\/email-verification(?:[/?#]|$)/i.test(url || ''),
+    isSignupPasswordPageUrl: () => false,
+    reuseOrCreateTab: async () => 31,
+    sendToContentScriptResilient: async () => {
+      throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+    },
+    setEmailState: async () => {},
+    SIGNUP_ENTRY_URL: 'https://chatgpt.com/',
+    SIGNUP_PAGE_INJECT_FILES: ['content/utils.js', 'content/signup-page.js'],
+    waitForTabUrlMatch: async () => null,
+  });
+
+  const result = await helpers.finalizeSignupPasswordSubmitInTab(31, 'Secret123!', 3);
+
+  assert.deepStrictEqual(result, {
+    ready: true,
+    state: 'verification_page',
+    url: 'https://auth.openai.com/email-verification',
+    assumed: true,
+    transportRecovered: true,
+  });
+  assert.equal(
+    logs.some(({ message, level }) => level === 'warn' && /通信短暂中断/.test(message)),
+    true
+  );
+});

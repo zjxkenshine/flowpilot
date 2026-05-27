@@ -142,7 +142,7 @@ test('auto-run controller verifies hotmail mailbox before each fresh attempt sta
   const controller = api.createAutoRunController({
     addLog: async () => {},
     appendAccountRunRecord: async () => null,
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',

@@ -66,7 +66,7 @@ test('launchAutoRunTimerPlan ignores stale timer plans after stop invalidates th
 const AUTO_RUN_TIMER_KIND_SCHEDULED_START = 'scheduled_start';
 const AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS = 'between_rounds';
 const AUTO_RUN_TIMER_KIND_BEFORE_RETRY = 'before_retry';
-const AUTO_RUN_MAX_RETRIES_PER_ROUND = 3;
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 
 let autoRunTimerLaunching = false;
 let autoRunActive = false;
@@ -151,7 +151,7 @@ test('launchAutoRunTimerPlan cancels an invalid scheduled start before restartin
 const AUTO_RUN_TIMER_KIND_SCHEDULED_START = 'scheduled_start';
 const AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS = 'between_rounds';
 const AUTO_RUN_TIMER_KIND_BEFORE_RETRY = 'before_retry';
-const AUTO_RUN_MAX_RETRIES_PER_ROUND = 3;
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 
 let autoRunTimerLaunching = false;
 let autoRunActive = false;

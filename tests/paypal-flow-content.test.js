@@ -712,6 +712,19 @@ function createHostedPayPalHarness(options = {}) {
         if (text === 'input') return elements.filter((element) => element.tagName === 'INPUT');
         if (text === 'input[type="email"]') return elements.filter((element) => element.type === 'email');
         if (text === 'input[type="password"]') return elements.filter((element) => element.type === 'password');
+        if (text === 'input[type="tel"]') return elements.filter((element) => element.tagName === 'INPUT' && element.type === 'tel');
+        if (text.includes('data-testid') && text.includes('phone')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /phone/i.test(element.getAttribute('data-testid') || ''));
+        }
+        if (text.includes('name') && text.includes('phone')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /phone/i.test(element.name || ''));
+        }
+        if (text.includes('autocomplete') && text.includes('tel')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /^tel/i.test(element.getAttribute('autocomplete') || ''));
+        }
+        if (text.includes('inputmode') && text.includes('tel')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /^tel$/i.test(element.getAttribute('inputmode') || ''));
+        }
         if (text === '#captcha-standalone') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
         if (text === '.captcha-overlay') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
         if (text === '.captcha-container') return elements.includes(captchaOverlay) ? [captchaOverlay] : [];
@@ -766,7 +779,12 @@ function createHostedPayPalHarness(options = {}) {
       return Promise.resolve();
     },
     fillInput(element, value) {
-      if (element === phoneInput && typeof options.renderPhone === 'function') {
+      const isPhoneElement = element === phoneInput
+        || /phone/i.test(element.id || '')
+        || /phone/i.test(element.name || '')
+        || String(element.type || '').toLowerCase() === 'tel'
+        || /^tel/i.test(element.getAttribute?.('autocomplete') || '');
+      if (isPhoneElement && typeof options.renderPhone === 'function') {
         phoneFillCount += 1;
         element.value = options.renderPhone(value, phoneFillCount);
       } else {
@@ -825,8 +843,11 @@ function createHostedPayPalHarness(options = {}) {
 
   return {
     countrySelect,
+    createDomElement,
     events,
     send,
+    setElements,
+    elements: () => elements.slice(),
     showBlockedPage,
     showCaptchaOverlay,
     showGuestCardError,
@@ -924,6 +945,82 @@ test('PayPal hosted guest checkout refills profile when phone input stays empty 
     [10000, 10000]
   );
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
+test('PayPal hosted guest checkout uses 8 second default before refilling empty phone', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value, phoneFillCount) => (phoneFillCount === 1 ? '' : `+1 ${value}`),
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.phonePostFillCheckDelayMs, 8000);
+  assert.equal(result.phoneRefillAttempts, 2);
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === 'sleep' && event.ms === 8000).map((event) => event.ms),
+    [8000, 8000]
+  );
+});
+
+test('PayPal hosted guest checkout finds phone input without phone id', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+  const alternatePhoneInput = harness.createDomElement({
+    tagName: 'INPUT',
+    id: 'contact-number',
+    type: 'tel',
+    name: 'phoneNumber',
+    attrs: {
+      autocomplete: 'tel-national',
+      placeholder: 'Mobile number',
+    },
+  });
+  const nextElements = harness.elements()
+    .filter((element) => element.id !== 'phone');
+  const emailIndex = nextElements.findIndex((element) => element.id === 'email');
+  nextElements.splice(emailIndex + 1, 0, alternatePhoneInput);
+  harness.setElements(nextElements);
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.phoneMatched, true);
+  assert.equal(result.renderedPhoneDigits, '14155551234');
+  assert.match(result.phoneInputDescriptor, /contact-number|phoneNumber|tel-national/);
+  assert.equal(
+    harness.events.some((event) => event.type === 'fill' && event.id === 'contact-number' && event.value === '+1 4155551234'),
+    true
+  );
 });
 
 test('PayPal hosted guest checkout fails without submit when phone input remains empty after refills', async () => {

@@ -3374,6 +3374,183 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.ok(events.indexOf(profileEvent) < events.indexOf(submitEvent));
 });
 
+test('PayPal hosted card node stops immediately when hosted submit is skipped', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return { hostedStage: 'guest_checkout' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        return {
+          stage: 'unknown',
+          expectedStage: 'guest_checkout',
+          submitted: false,
+          skipped: true,
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 123,
+      plusHostedCheckoutGuestProfile: {
+        email: 'guest@example.com',
+        phone: '4155551234',
+        address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+      },
+    }),
+    /PayPal .*未执行提交|PayPal .*submit/i
+  );
+
+  assert.equal(
+    events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_HOSTED_GET_STATE').length,
+    1
+  );
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
+test('PayPal hosted card node refills when phone is empty while waiting for transition', async () => {
+  const events = [];
+  let statePollCount = 0;
+  let runCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        runCount += 1;
+        return {
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: '4155551234',
+          renderedPhoneDigits: '14155551234',
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        return statePollCount >= 3
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout', hostedGuestPhoneValuePresent: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(runCount, 2);
+  assert.equal(
+    events.some((event) => event.type === 'log' && /phone 输入框为空/.test(event.message)),
+    true
+  );
+  assert.equal(events.some((event) => event.type === 'complete'), true);
+});
+
+test('PayPal hosted card node falls back when waiting transition keeps reporting empty phone', async () => {
+  const events = [];
+  let latestState = createHostedRuntimeState({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutTabId: 456,
+    plusPaymentEmailState: {
+      current: 'payment@example.com',
+      source: 'payment:test',
+      updatedAt: 100,
+    },
+  });
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => latestState,
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-openai-checkout', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        return {
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: '4155551234',
+          renderedPhoneDigits: '14155551234',
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return { hostedStage: 'guest_checkout', hostedGuestPhoneValuePresent: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard(latestState);
+
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'hosted-checkout-phone-empty-after-fill');
+  assert.match(fallback?.context?.detail || '', /phone 输入框.*3 次重填后仍为空/);
+  assert.equal(
+    events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP').length,
+    4
+  );
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
 test('PayPal hosted card node regenerates and persists a fresh guest profile before short-circuiting on later stages', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({

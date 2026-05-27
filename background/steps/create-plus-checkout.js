@@ -1270,6 +1270,25 @@
       return getErrorMessage(error).startsWith(PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX);
     }
 
+    function buildPayPalHostedPhoneEmptyAfterFillError(refillMaxRetries = 3) {
+      return new Error(`${PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX}PayPal 无卡直绑资料页 phone 输入框在 ${refillMaxRetries} 次重填后仍为空。`);
+    }
+
+    function assertHostedPayPalGuestCheckoutSubmitted(result = {}, stepNumber = getHostedStepNumber(PAYPAL_HOSTED_STEP_CARD)) {
+      if (!result || typeof result !== 'object') {
+        throw new Error(`步骤 ${stepNumber}：PayPal 资料页提交没有返回有效结果。`);
+      }
+      if (result.skipped || result.submitted === false) {
+        const stage = String(result.stage || result.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN).trim();
+        const expectedStage = String(result.expectedStage || PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT).trim();
+        throw new Error(`步骤 ${stepNumber}：PayPal 资料页未执行提交（当前状态：${stage || PAYPAL_HOSTED_STAGE_UNKNOWN}，期望状态：${expectedStage || PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT}）。`);
+      }
+      if (result.phoneMatched !== true) {
+        throw new Error(`步骤 ${stepNumber}：PayPal 资料页提交前未完成电话复查，已停止等待跳转。`);
+      }
+      return result;
+    }
+
     async function handlePayPalHostedPhoneEmptyAfterFillFallback(state = {}, error = null, options = {}) {
       if (!isPayPalHostedPhoneEmptyAfterFillError(error)) {
         return null;
@@ -3946,8 +3965,12 @@
             'info'
           );
         }
+        if (cardResult) {
+          assertHostedPayPalGuestCheckoutSubmitted(cardResult, stepNumber);
+        }
         let hostedGuestCardErrorRetries = 0;
         let hostedGuestCardErrorRetrySettlingUntil = 0;
+        let hostedGuestPhoneEmptyRefillRetries = 0;
         const nextState = await waitForHostedPayPalStage(
           tabId,
           async (stateInfo) => {
@@ -4025,6 +4048,41 @@
               }
               hostedProfileSubmitted = true;
               hostedGuestCardErrorRetrySettlingUntil = Date.now() + HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS;
+              return false;
+            }
+            if (
+              stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+              && stateInfo.hostedGuestPhoneValuePresent === false
+              && !stateInfo.hostedGuestCardError
+              && !stateInfo.hostedGuestPhoneError
+            ) {
+              if (hostedGuestPhoneEmptyRefillRetries >= HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS) {
+                throw buildPayPalHostedPhoneEmptyAfterFillError(HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS);
+              }
+              hostedGuestPhoneEmptyRefillRetries += 1;
+              await addHostedStepLog(
+                stepKey,
+                `步骤 ${stepNumber}：PayPal 资料页仍停留且 phone 输入框为空，正在重新填写资料 (${hostedGuestPhoneEmptyRefillRetries}/${HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS})。`,
+                'warn'
+              );
+              try {
+                const refillResult = await runHostedPayPalStep(tabId, {
+                  ...profile,
+                  expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+                  phone: profile.phone,
+                }, { stepKey });
+                assertHostedPayPalGuestCheckoutSubmitted(refillResult, stepNumber);
+                hostedProfileSubmitted = true;
+              } catch (error) {
+                const fallback = await handlePayPalHostedPhoneEmptyAfterFillFallback(refreshedState, error, {
+                  nodeId: stepKey,
+                  phaseLabel: 'PayPal hosted 资料页重填',
+                });
+                if (fallback?.phonePlusFallbackToFreeAuth) {
+                  return true;
+                }
+                throw error;
+              }
               return false;
             }
             const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey);

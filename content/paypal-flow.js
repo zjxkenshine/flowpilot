@@ -13,7 +13,7 @@ const PAYPAL_HOSTED_STAGE_APPROVAL = 'approval';
 const PAYPAL_HOSTED_STAGE_GENERIC_ERROR = 'generic_error';
 const PAYPAL_HOSTED_STAGE_UNKNOWN = 'unknown';
 const PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX = 'PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL::';
-const PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS = 10000;
+const PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS = 8000;
 const PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES = 3;
 const PAYPAL_HOSTED_STEP_KEYS = {
   [PAYPAL_HOSTED_STAGE_LOGIN]: 'paypal-hosted-email',
@@ -894,12 +894,86 @@ function normalizeHostedPhoneDigits(value = '') {
   return String(value || '').replace(/\D/g, '');
 }
 
+function getHostedInputDescriptor(input = null) {
+  if (!input) return '';
+  return normalizeText([
+    input.id ? `#${input.id}` : '',
+    input.name ? `name=${input.name}` : '',
+    input.type ? `type=${input.type}` : '',
+    input.getAttribute?.('data-testid') ? `testid=${input.getAttribute('data-testid')}` : '',
+    input.getAttribute?.('autocomplete') ? `autocomplete=${input.getAttribute('autocomplete')}` : '',
+    input.getAttribute?.('inputmode') ? `inputmode=${input.getAttribute('inputmode')}` : '',
+    input.getAttribute?.('placeholder') ? `placeholder=${input.getAttribute('placeholder')}` : '',
+    input.getAttribute?.('aria-label') ? `aria=${input.getAttribute('aria-label')}` : '',
+  ].filter(Boolean).join(' '));
+}
+
+function isHostedPhoneInputCandidate(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+  if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password', 'email'].includes(type)) {
+    return false;
+  }
+  const identityText = normalizeText([
+    input.id,
+    input.name,
+    input.type,
+    input.getAttribute?.('data-testid'),
+    input.getAttribute?.('autocomplete'),
+    input.getAttribute?.('inputmode'),
+  ].filter(Boolean).join(' '));
+  const labelText = normalizeText([
+    input.getAttribute?.('placeholder'),
+    input.getAttribute?.('aria-label'),
+    input.getAttribute?.('title'),
+  ].filter(Boolean).join(' '));
+  const strongPhoneSignal = input.id === 'phone'
+    || /phone|mobile|tel|手机号|手机|电话/i.test(identityText)
+    || type === 'tel'
+    || String(input.getAttribute?.('autocomplete') || '').trim().toLowerCase().startsWith('tel')
+    || String(input.getAttribute?.('inputmode') || '').trim().toLowerCase() === 'tel';
+  const emailIdentitySignal = /(?:^|[\s_-])(?:email|e-mail|login[_-]?email|username|user)(?:$|[\s_-])/i.test(identityText)
+    || ['email', 'username'].includes(String(input.getAttribute?.('autocomplete') || '').trim().toLowerCase());
+  if (emailIdentitySignal && !strongPhoneSignal) {
+    return false;
+  }
+  return strongPhoneSignal
+    || (/phone|mobile|tel|手机号|手机|电话/i.test(labelText) && !/email|e-mail|username|login|邮箱|邮件/i.test(labelText));
+}
+
 function findHostedPhoneInput() {
   const candidates = [
-    ...Array.from(document.querySelectorAll('input[data-testid="phone"]') || []),
     document.getElementById('phone'),
+    ...Array.from(document.querySelectorAll('input[data-testid*="phone" i]') || []),
+    ...Array.from(document.querySelectorAll('input[name*="phone" i]') || []),
+    ...Array.from(document.querySelectorAll('input[type="tel"]') || []),
+    ...Array.from(document.querySelectorAll('input[autocomplete^="tel" i]') || []),
+    ...Array.from(document.querySelectorAll('input[inputmode="tel" i]') || []),
+    ...Array.from(document.querySelectorAll('input') || []),
   ].filter(Boolean);
-  return candidates.find((input) => isVisibleElement(input) && isEnabledControl(input)) || null;
+  const seen = new Set();
+  return candidates.find((input) => {
+    if (seen.has(input)) return false;
+    seen.add(input);
+    return isHostedPhoneInputCandidate(input);
+  }) || null;
+}
+
+function fillHostedPhoneInput(value = '') {
+  const input = findHostedPhoneInput();
+  if (!input) {
+    return {
+      filled: false,
+      descriptor: '',
+    };
+  }
+  fillInput(input, String(value || ''));
+  return {
+    filled: true,
+    descriptor: getHostedInputDescriptor(input),
+  };
 }
 
 function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
@@ -922,6 +996,7 @@ function verifyHostedPhoneBeforeSubmit(expectedPhone = '') {
     payloadPhoneDigits: expectedDigits,
     renderedPhoneDigits: renderedDigits,
     phoneMatched: true,
+    phoneInputDescriptor: getHostedInputDescriptor(phoneInput),
   };
 }
 
@@ -932,6 +1007,17 @@ function getHostedPhoneInputForGuard() {
 function hasHostedPhoneInputValue() {
   const phoneInput = getHostedPhoneInputForGuard();
   return Boolean(phoneInput && String(phoneInput.value || '').trim());
+}
+
+function getHostedPhoneInputState() {
+  const phoneInput = getHostedPhoneInputForGuard();
+  const value = phoneInput ? String(phoneInput.value || '') : '';
+  return {
+    phoneInputFound: Boolean(phoneInput),
+    phoneInputDescriptor: getHostedInputDescriptor(phoneInput),
+    hostedGuestPhoneValuePresent: Boolean(value.trim()),
+    hostedGuestPhoneDigits: normalizeHostedPhoneDigits(value),
+  };
 }
 
 function normalizeHostedVerificationCode(value = '') {
@@ -1110,7 +1196,7 @@ async function fillHostedGuestCheckout(payload = {}) {
   };
   const fillProfileFields = () => {
     fillHostedInputById('email', values.email);
-    fillHostedInputById('phone', values.phone);
+    const phoneFill = fillHostedPhoneInput(values.phone);
     fillHostedInputById('cardNumber', values.cardNumber);
     fillHostedInputById('cardExpiry', values.cardExpiry);
     fillHostedInputById('cardCvv', values.cardCvv);
@@ -1121,6 +1207,7 @@ async function fillHostedGuestCheckout(payload = {}) {
     fillHostedInputById('billingCity', address.city || '');
     fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
     selectHostedOptionByIdText('billingState', address.state || address.region || '');
+    return phoneFill;
   };
   const phonePostFillCheckDelayMs = Math.max(
     0,
@@ -1131,8 +1218,12 @@ async function fillHostedGuestCheckout(payload = {}) {
     Math.floor(Number(payload.phoneEmptyRefillMaxRetries ?? PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES) || 0)
   );
   let phoneValueReady = false;
+  let phoneRefillAttempts = 0;
+  let phoneInputDescriptor = '';
   for (let attempt = 0; attempt <= phoneEmptyRefillMaxRetries; attempt += 1) {
-    fillProfileFields();
+    const phoneFill = fillProfileFields();
+    phoneRefillAttempts += 1;
+    phoneInputDescriptor = phoneFill?.descriptor || phoneInputDescriptor;
     if (phonePostFillCheckDelayMs > 0) {
       await sleep(phonePostFillCheckDelayMs);
     }
@@ -1156,6 +1247,10 @@ async function fillHostedGuestCheckout(payload = {}) {
     stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
     submitted: true,
     payloadPhone: values.phone,
+    phoneRefillAttempts,
+    phonePostFillCheckDelayMs,
+    phoneInputDescriptor: phoneCheck.phoneInputDescriptor || phoneInputDescriptor,
+    phoneValueReady,
     ...phoneCheck,
   };
 }
@@ -1246,6 +1341,7 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
 function inspectPayPalHostedState(payload = {}) {
   const stage = detectPayPalHostedStage(payload);
   const createAccountButton = findHostedCreateAccountButton();
+  const phoneInputState = getHostedPhoneInputState();
   const securityChallengeProbe = payload?.securityChallengeEnabled === true
     ? probePayPalHostedSecurityChallengeOverlay()
     : buildPayPalHostedSecurityChallengeProbeDefaults();
@@ -1269,6 +1365,7 @@ function inspectPayPalHostedState(payload = {}) {
     hostedGuestCardErrorMessage: getPayPalHostedGuestCardErrorMessage(),
     hostedGuestPhoneError: hasPayPalHostedGuestPhoneError(),
     hostedGuestPhoneErrorMessage: getPayPalHostedGuestPhoneErrorMessage(),
+    ...phoneInputState,
     hostedCreateAccountAddressError: hasPayPalHostedCreateAccountAddressError(),
     hostedCreateAccountAddressErrorMessage: getPayPalHostedCreateAccountAddressErrorMessage(),
     reviewConsentReady: Boolean(findHostedReviewConsentButton()),

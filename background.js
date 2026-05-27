@@ -730,7 +730,7 @@ const IP_PROXY_AUTO_SYNC_DEFAULT_INTERVAL_MINUTES = 15;
 const AUTO_RUN_DELAY_MIN_MINUTES = 1;
 const AUTO_RUN_DELAY_MAX_MINUTES = 1440;
 const AUTO_RUN_RETRY_DELAY_MS = 3000;
-const AUTO_RUN_MAX_RETRIES_PER_ROUND = 3;
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;
 const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
@@ -10119,7 +10119,7 @@ function isStopError(error) {
 
 function isRetryableContentScriptTransportError(error) {
   const message = String(typeof error === 'string' ? error : error?.message || '');
-  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed/i.test(message);
+  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed|页面刚完成跳转或刷新，内容脚本还没有重新接回|页面未能重新就绪|页面通信异常/i.test(message);
 }
 
 function isStepFetchNetworkRetryableError(error) {

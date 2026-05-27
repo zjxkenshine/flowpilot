@@ -177,7 +177,7 @@ test('auto-run controller skips add-phone failures to the next round instead of 
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -340,7 +340,7 @@ test('auto-run controller treats phone-number supply exhaustion as round-fatal a
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -503,7 +503,7 @@ test('auto-run controller treats ended GPC task as round-fatal and skips same-ro
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -664,7 +664,7 @@ test('auto-run controller keeps same-round retrying for step9 local replacement 
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -822,7 +822,7 @@ test('auto-run controller skips user_already_exists failures to the next round i
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -986,7 +986,7 @@ test('auto-run controller skips step 4 repeated 405 recovery failures to the nex
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -1152,7 +1152,7 @@ test('auto-run controller keeps retrying the same custom mail provider pool emai
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
@@ -1252,7 +1252,7 @@ test('auto-run controller keeps retrying the same custom mail provider pool emai
   assert.equal(events.broadcasts.filter(({ phase }) => phase === 'retrying').length, 2);
   assert.ok(events.broadcasts.filter(({ phase }) => phase === 'retrying').every(({ currentRun }) => currentRun === 1));
   assert.ok(events.logs.some(({ message }) => /继续使用当前邮箱/.test(message)));
-  assert.equal(events.logs.some(({ message }) => /达到 3 次重试上限，继续下一轮/.test(message)), false);
+  assert.equal(events.logs.some(({ message }) => /达到 5 次重试上限，继续下一轮/.test(message)), false);
   assert.equal(events.accountRecords.length, 0);
   assert.equal(runtime.state.autoRunActive, false);
   assert.equal(runtime.state.autoRunSessionId, 0);
@@ -1317,7 +1317,7 @@ test('auto-run controller retries 5sim rate limit failures instead of treating c
       events.accountRecords.push({ status, reason });
       return { status, reason };
     },
-    AUTO_RUN_MAX_RETRIES_PER_ROUND: 3,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 5,
     AUTO_RUN_RETRY_DELAY_MS: 3000,
     AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
     AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',

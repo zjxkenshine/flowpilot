@@ -226,22 +226,27 @@
       };
       const prepareTimeoutMs = 30000;
       const prepareResponseTimeoutMs = 30000;
+      const prepareAttemptTimeoutMs = 15000;
       const prepareStartAt = Date.now();
       let prepareResult = null;
 
       while (Date.now() - prepareStartAt < prepareTimeoutMs) {
         throwIfStopped();
+        const remainingBeforePrepareMs = Math.max(0, prepareTimeoutMs - (Date.now() - prepareStartAt));
+        if (remainingBeforePrepareMs <= 0) {
+          break;
+        }
 
         try {
-          prepareResult = typeof sendToContentScript === 'function'
-            ? await sendToContentScript('signup-page', prepareRequest, {
-              responseTimeoutMs: prepareResponseTimeoutMs,
-            })
-            : await sendToContentScriptResilient('signup-page', prepareRequest, {
-              timeoutMs: Math.max(1000, prepareTimeoutMs - (Date.now() - prepareStartAt)),
+          prepareResult = typeof sendToContentScriptResilient === 'function'
+            ? await sendToContentScriptResilient('signup-page', prepareRequest, {
+              timeoutMs: Math.max(1000, Math.min(prepareAttemptTimeoutMs, remainingBeforePrepareMs)),
               responseTimeoutMs: prepareResponseTimeoutMs,
               retryDelayMs: 700,
               logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',
+            })
+            : await sendToContentScript('signup-page', prepareRequest, {
+              responseTimeoutMs: Math.min(prepareResponseTimeoutMs, remainingBeforePrepareMs),
             });
           break;
         } catch (error) {
@@ -254,26 +259,32 @@
             throw error;
           }
 
-          const recoverResult = await sendToContentScriptResilient('signup-page', {
-            type: 'RECOVER_AUTH_RETRY_PAGE',
-            step: 4,
-            source: 'background',
-            payload: {
-              flow: 'signup',
+          try {
+            const recoverResult = await sendToContentScriptResilient('signup-page', {
+              type: 'RECOVER_AUTH_RETRY_PAGE',
               step: 4,
+              source: 'background',
+              payload: {
+                flow: 'signup',
+                step: 4,
+                timeoutMs: Math.min(12000, remainingMs),
+                maxClickAttempts: 2,
+                logLabel: '步骤 4：检测到注册认证重试页，正在点击“重试”恢复',
+              },
+            }, {
               timeoutMs: Math.min(12000, remainingMs),
-              maxClickAttempts: 2,
-              logLabel: '步骤 4：检测到注册认证重试页，正在点击“重试”恢复',
-            },
-          }, {
-            timeoutMs: Math.min(12000, remainingMs),
-            responseTimeoutMs: Math.min(12000, remainingMs),
-            retryDelayMs: 700,
-            logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',
-          });
+              responseTimeoutMs: Math.min(12000, remainingMs),
+              retryDelayMs: 700,
+              logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',
+            });
 
-          if (recoverResult?.error) {
-            throw new Error(recoverResult.error);
+            if (recoverResult?.error) {
+              throw new Error(recoverResult.error);
+            }
+          } catch (recoverError) {
+            if (!isRetryableContentScriptTransportError(recoverError)) {
+              throw recoverError;
+            }
           }
         }
       }

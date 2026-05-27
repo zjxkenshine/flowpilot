@@ -252,6 +252,54 @@
         logMessage: `步骤 ${step}：认证页仍在切换，正在等待页面恢复后继续确认提交流程...`,
       });
 
+      async function detectStep3FinalizeTransportFallback() {
+        let currentUrl = '';
+        try {
+          const currentTab = await chrome.tabs.get(tabId);
+          currentUrl = currentTab?.url || '';
+        } catch {
+          currentUrl = '';
+        }
+
+        const currentState = resolveSignupPostIdentityState(currentUrl);
+        if (currentState === 'verification_page' || currentState === 'phone_verification_page') {
+          return {
+            ready: true,
+            state: currentState,
+            url: currentUrl,
+            assumed: true,
+            transportRecovered: true,
+          };
+        }
+        if (currentState === 'profile_page') {
+          return {
+            ready: true,
+            alreadyVerified: true,
+            state: currentState,
+            url: currentUrl,
+            assumed: true,
+            transportRecovered: true,
+          };
+        }
+        const parsed = parseUrlSafely(currentUrl);
+        const host = String(parsed?.hostname || '').toLowerCase();
+        if (['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(host)) {
+          const path = String(parsed?.pathname || '');
+          if (!/^\/(?:auth(?:\/|$)|create-account(?:\/|$)|email-verification(?:\/|$)|log-in(?:\/|$)|login(?:\/|$)|add-phone(?:\/|$))/i.test(path)) {
+            return {
+              ready: true,
+              alreadyVerified: true,
+              skipProfileStep: true,
+              state: 'logged_in_home',
+              url: currentUrl,
+              assumed: true,
+              transportRecovered: true,
+            };
+          }
+        }
+        return null;
+      }
+
       let result;
       try {
         result = await sendToContentScriptResilient('signup-page', {
@@ -273,6 +321,17 @@
         });
       } catch (error) {
         if (isRetryableContentScriptTransportError(error)) {
+          const fallback = await detectStep3FinalizeTransportFallback();
+          if (fallback) {
+            if (typeof addLog === 'function') {
+              await addLog(
+                `步骤 ${step}：认证页通信短暂中断，但当前页面已进入${fallback.state === 'logged_in_home' ? '已登录首页' : '注册后续页面'}，按提交成功继续。`,
+                'warn'
+              );
+            }
+            return fallback;
+          }
+
           const message = `步骤 ${step}：认证页在提交后切换过程中页面通信超时，未能重新就绪，暂时无法确认是否进入下一页面。请重试当前轮。`;
           if (typeof addLog === 'function') {
             await addLog(message, 'warn');

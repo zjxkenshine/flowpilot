@@ -391,8 +391,8 @@ test('step 4 phone signup email-verification handoff polls mailbox instead of co
   assert.equal(Object.prototype.hasOwnProperty.call(resolvedCalls[0].options, 'signupProfile'), true);
 });
 
-test('step 4 prepare retries transport by recovering retry page without replaying full prepare loop', async () => {
-  let sendToContentScriptCalls = 0;
+test('step 4 prepare retries reconnect error after step 3 landed on verification page', async () => {
+  let prepareCalls = 0;
   let recoverCalls = 0;
   let resolveCalls = 0;
   const logs = [];
@@ -424,24 +424,21 @@ test('step 4 prepare retries transport by recovering retry page without replayin
       resolveCalls += 1;
     },
     reuseOrCreateTab: async () => {},
-    sendToContentScript: async (_source, message) => {
-      if (message.type !== 'PREPARE_SIGNUP_VERIFICATION') {
-        return {};
-      }
-      sendToContentScriptCalls += 1;
-      if (sendToContentScriptCalls === 1) {
-        throw new Error('Content script on signup-page did not respond in 30s. Try refreshing the tab and retry.');
-      }
-      return { ready: true };
-    },
     sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'PREPARE_SIGNUP_VERIFICATION') {
+        prepareCalls += 1;
+        if (prepareCalls === 1) {
+          throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+        }
+        return { ready: true };
+      }
       if (message.type === 'RECOVER_AUTH_RETRY_PAGE') {
         recoverCalls += 1;
         return { recovered: true };
       }
-      return {};
+      throw new Error(`unexpected message ${message.type}`);
     },
-    isRetryableContentScriptTransportError: (error) => /did not respond in \d+s/i.test(String(error?.message || error)),
+    isRetryableContentScriptTransportError: (error) => /did not respond in \d+s|页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(String(error?.message || error)),
     shouldUseCustomRegistrationEmail: () => false,
     STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
     throwIfStopped: () => {},
@@ -452,11 +449,118 @@ test('step 4 prepare retries transport by recovering retry page without replayin
     password: 'secret',
   });
 
-  assert.equal(sendToContentScriptCalls, 2);
+  assert.equal(prepareCalls, 2);
   assert.equal(recoverCalls, 1);
   assert.equal(resolveCalls, 1);
   assert.equal(
     logs.some((entry) => /正在确认注册验证码页面是否就绪/.test(entry.message)),
     true
+  );
+});
+
+test('step 4 prepare keeps waiting when retry-page recovery also loses content script', async () => {
+  let prepareCalls = 0;
+  let recoverCalls = 0;
+  let resolveCalls = 0;
+
+  const executor = api.createStep4Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypass: async () => {},
+    ensureMail2925MailboxSession: async () => {},
+    getMailConfig: () => ({
+      provider: '163',
+      label: '163 邮箱',
+      source: 'mail-163',
+      url: 'https://mail.163.com',
+    }),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    resolveVerificationStep: async () => {
+      resolveCalls += 1;
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'PREPARE_SIGNUP_VERIFICATION') {
+        prepareCalls += 1;
+        if (prepareCalls === 1) {
+          throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+        }
+        return { ready: true };
+      }
+      if (message.type === 'RECOVER_AUTH_RETRY_PAGE') {
+        recoverCalls += 1;
+        throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    isRetryableContentScriptTransportError: (error) => /页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(String(error?.message || error)),
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeStep4({
+    email: 'user@example.com',
+    password: 'secret',
+  });
+
+  assert.equal(prepareCalls, 2);
+  assert.equal(recoverCalls, 1);
+  assert.equal(resolveCalls, 1);
+});
+
+test('step 4 prepare still throws non-retryable business errors', async () => {
+  const executor = api.createStep4Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    confirmCustomVerificationStepBypass: async () => {},
+    ensureMail2925MailboxSession: async () => {},
+    getMailConfig: () => ({
+      provider: '163',
+      label: '163 邮箱',
+      source: 'mail-163',
+      url: 'https://mail.163.com',
+    }),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    resolveVerificationStep: async () => {
+      throw new Error('resolve should not run');
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'PREPARE_SIGNUP_VERIFICATION') {
+        throw new Error('SIGNUP_USER_ALREADY_EXISTS::步骤 4：检测到 user_already_exists。');
+      }
+      throw new Error(`unexpected message ${message.type}`);
+    },
+    isRetryableContentScriptTransportError: () => false,
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep4({
+      email: 'user@example.com',
+      password: 'secret',
+    }),
+    /SIGNUP_USER_ALREADY_EXISTS::/
   );
 });
