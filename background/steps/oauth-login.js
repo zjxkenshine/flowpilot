@@ -166,6 +166,10 @@
       return getStep7ResultState(result) === 'verification_page' && !isStep7PhoneVerificationResult(result);
     }
 
+    function getStep7LastAuthClickKind(result = {}) {
+      return String(result?.lastAuthClickKind || '').trim();
+    }
+
     function buildStep7CompletionPayload(result = {}, currentState = {}, currentIdentifierType = '', currentPhoneNumber = '') {
       const phoneSignupMode = currentIdentifierType === 'phone';
       const payload = {
@@ -205,6 +209,11 @@
       }
 
       if (isStep7AddEmailResult(result)) {
+        if (getStep7LastAuthClickKind(result) === 'select-existing-session') {
+          payload.skipLoginVerificationStep = true;
+          payload.addEmailPage = true;
+          return payload;
+        }
         throw new Error(`步骤 ${completionStepForState(currentState)}：邮箱注册模式 OAuth 登录不应进入添加邮箱页。URL: ${result?.url || ''}`.trim());
       }
       if (isStep7AddPhoneResult(result) || isStep7PhoneVerificationResult(result)) {

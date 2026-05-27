@@ -881,6 +881,76 @@ test('step 7 can start from a manually filled signup phone without completed ste
   ]);
 });
 
+test('step 7 allows add-email only after selecting an existing session in email mode', async () => {
+  const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
+
+  async function runScenario(lastAuthClickKind) {
+    const events = {
+      completions: [],
+      sendPayloads: [],
+    };
+    const state = {
+      email: 'user@example.com',
+      password: 'secret',
+      signupMethod: 'email',
+      resolvedSignupMethod: 'email',
+    };
+    const executor = api.createStep7Executor({
+      addLog: async () => {},
+      completeNodeFromBackground: async (step, payload) => {
+        events.completions.push({ step, payload });
+      },
+      getErrorMessage: (error) => error?.message || String(error || ''),
+      getLoginAuthStateLabel: (stateName) => stateName || 'unknown',
+      getState: async () => ({ ...state }),
+      isStep6RecoverableResult: (result) => result?.step6Outcome === 'recoverable',
+      isStep6SuccessResult: (result) => result?.step6Outcome === 'success',
+      refreshOAuthUrlBeforeStep6: async () => 'https://oauth.example/latest',
+      reuseOrCreateTab: async () => {},
+      sendToContentScriptResilient: async (_sourceName, message) => {
+        events.sendPayloads.push(message.payload);
+        return {
+          step6Outcome: 'success',
+          state: 'add_email_page',
+          url: 'https://auth.openai.com/add-email',
+          addEmailPage: true,
+          ...(lastAuthClickKind ? { lastAuthClickKind } : {}),
+        };
+      },
+      STEP6_MAX_ATTEMPTS: 1,
+      throwIfStopped: () => {},
+    });
+
+    await executor.executeStep7(state);
+    return events;
+  }
+
+  const allowedEvents = await runScenario('select-existing-session');
+  assert.deepStrictEqual(allowedEvents.completions, [
+    {
+      step: 'oauth-login',
+      payload: {
+        loginVerificationRequestedAt: null,
+        skipLoginVerificationStep: true,
+        addEmailPage: true,
+      },
+    },
+  ]);
+  assert.equal(allowedEvents.sendPayloads[0].loginIdentifierType, 'email');
+
+  await assert.rejects(
+    () => runScenario('open-login-entry'),
+    /邮箱注册模式 OAuth 登录不应进入添加邮箱页/
+  );
+
+  await assert.rejects(
+    () => runScenario(''),
+    /邮箱注册模式 OAuth 登录不应进入添加邮箱页/
+  );
+});
+
 test('step 7 stops immediately when management secret is missing', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};

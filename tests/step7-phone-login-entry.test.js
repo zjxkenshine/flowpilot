@@ -209,7 +209,7 @@ async function step6LoginFromPasswordPage() { return { routed: 'password' }; }
 async function step6LoginFromPhonePage() { return { routed: 'phone' }; }
 async function finalizeStep6VerificationReady() { return { routed: 'verification' }; }
 function createStep6OAuthConsentSuccessResult() { return { routed: 'oauth' }; }
-function createStep6AddEmailSuccessResult() { return { routed: 'add-email' }; }
+function createStep6AddEmailSuccessResult(_snapshot, options = {}) { return { routed: 'add-email', ...options }; }
 async function createStep6LoginTimeoutRecoveryTransition() { return { action: 'recoverable', result: { routed: 'recoverable' } }; }
 function createStep6RecoverableResult(reason, snapshot, options = {}) {
   return { step6Outcome: 'recoverable', reason, state: snapshot?.state, message: options.message || '' };
@@ -227,6 +227,51 @@ return { clicks, step6OpenLoginEntry };
 
   assert.deepStrictEqual(api.clicks, ['generic']);
   assert.equal(result.routed, 'phone');
+});
+
+test('step 7 marks add-email after opening other-account entry', async () => {
+  const api = new Function(`
+const clicks = [];
+const genericEntry = { id: 'generic', textContent: '\\u767b\\u5f55\\u81f3\\u53e6\\u4e00\\u4e2a\\u5e10\\u6237' };
+
+function normalizeStep6Snapshot(snapshot) { return snapshot; }
+function inspectLoginAuthState() {
+  return { state: 'entry_page', loginEntryTrigger: genericEntry };
+}
+function findLoginEntryTrigger() { return genericEntry; }
+function findLoginPhoneEntryTrigger() { return null; }
+function isActionEnabled() { return true; }
+function getActionText(el) { return el.textContent || ''; }
+function log() {}
+async function humanPause() {}
+function simulateClick(el) { clicks.push(el.id); }
+async function waitForLoginEntryOpenTransition() { return { state: 'add_email_page', url: 'https://auth.openai.com/add-email' }; }
+async function switchFromEmailPageToPhoneLogin() { return { routed: 'switch-phone' }; }
+async function step6LoginFromEmailPage() { return { routed: 'email' }; }
+async function step6LoginFromPasswordPage() { return { routed: 'password' }; }
+async function step6LoginFromPhonePage() { return { routed: 'phone' }; }
+async function finalizeStep6VerificationReady() { return { routed: 'verification' }; }
+function createStep6OAuthConsentSuccessResult() { return { routed: 'oauth' }; }
+function createStep6AddEmailSuccessResult(_snapshot, options = {}) { return { routed: 'add-email', ...options }; }
+async function createStep6LoginTimeoutRecoveryTransition() { return { action: 'recoverable', result: { routed: 'recoverable' } }; }
+function createStep6RecoverableResult(reason, snapshot, options = {}) {
+  return { step6Outcome: 'recoverable', reason, state: snapshot?.state, message: options.message || '' };
+}
+
+${extractFunction('step6OpenLoginEntry')}
+
+return { clicks, step6OpenLoginEntry };
+  `)();
+
+  const result = await api.step6OpenLoginEntry(
+    { email: 'user@example.com', loginIdentifierType: 'email' },
+    { state: 'entry_page', loginEntryTrigger: { id: 'generic', textContent: '\u767b\u5f55\u81f3\u53e6\u4e00\u4e2a\u5e10\u6237' } }
+  );
+
+  assert.deepStrictEqual(api.clicks, ['generic']);
+  assert.equal(result.routed, 'add-email');
+  assert.equal(result.via, 'entry_open_add_email_page');
+  assert.equal(result.lastAuthClickKind, 'open-login-entry');
 });
 
 test('step 7 selects existing session on account chooser and routes by next state', async () => {
@@ -270,7 +315,7 @@ async function step6LoginFromPhonePage() { return { routed: 'phone' }; }
 async function step6OpenLoginEntry() { return { routed: 'entry' }; }
 async function finalizeStep6VerificationReady() { return { routed: 'verification' }; }
 function createStep6OAuthConsentSuccessResult() { return { routed: 'oauth' }; }
-function createStep6AddEmailSuccessResult() { return { routed: 'add-email' }; }
+function createStep6AddEmailSuccessResult(_snapshot, options = {}) { return { routed: 'add-email', ...options }; }
 function createStep6AddPhoneSuccessResult() { return { routed: 'add-phone' }; }
 async function createStep6LoginTimeoutRecoveryTransition() { return { action: 'recoverable', result: { routed: 'recoverable' } }; }
 function createStep6RecoverableResult(reason, snapshot, options = {}) {
@@ -288,6 +333,10 @@ return { clicks, metadata, step6ChooseExistingAccount };
     );
 
     assert.equal(result.routed, routed, nextState);
+    if (nextState === 'add_email_page') {
+      assert.equal(result.via, 'choose_account_add_email_page');
+      assert.equal(result.lastAuthClickKind, 'select-existing-session');
+    }
     assert.deepEqual(api.clicks, ['session'], nextState);
     assert.deepEqual(api.metadata, [{ stepKey: 'oauth-login', kind: 'click', label: 'select-existing-session' }], nextState);
   }

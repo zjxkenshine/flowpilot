@@ -4753,6 +4753,9 @@ function createStep6SuccessResult(snapshot, options = {}) {
   if (options.directOAuthConsentPage) {
     result.directOAuthConsentPage = true;
   }
+  if (options.lastAuthClickKind) {
+    result.lastAuthClickKind = options.lastAuthClickKind;
+  }
 
   return result;
 }
@@ -6019,6 +6022,7 @@ async function step6ChooseExistingAccount(payload, snapshot) {
   if (nextSnapshot.state === 'add_email_page') {
     return createStep6AddEmailSuccessResult(nextSnapshot, {
       via: 'choose_account_add_email_page',
+      lastAuthClickKind: 'select-existing-session',
     });
   }
   if (nextSnapshot.state === 'add_phone_page') {
@@ -6128,6 +6132,7 @@ async function step6OpenLoginEntry(payload, snapshot) {
   if (nextSnapshot.state === 'add_email_page') {
     return createStep6AddEmailSuccessResult(nextSnapshot, {
       via: 'entry_open_add_email_page',
+      lastAuthClickKind: 'open-login-entry',
     });
   }
   if (nextSnapshot.state === 'login_timeout_error_page') {
