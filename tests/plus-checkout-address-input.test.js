@@ -608,6 +608,106 @@ return { getStructuredAddressFields };
   });
 });
 
+function createHomeFallbackElement({ text = '', attrs = {}, tagName = 'BUTTON' } = {}) {
+  const attrMap = new Map(Object.entries(attrs));
+  return {
+    tagName,
+    textContent: text,
+    innerText: text,
+    value: '',
+    className: attrs.class || '',
+    dataset: {},
+    id: attrs.id || '',
+    parentElement: null,
+    getAttribute: (key) => attrMap.get(key) || '',
+    matches: () => false,
+    getBoundingClientRect: () => ({ width: 180, height: 40 }),
+  };
+}
+
+function inspectHomePlanFallback({ accountText = '', bodyText = '', url = 'https://chatgpt.com/' } = {}) {
+  const account = createHomeFallbackElement({
+    text: accountText,
+    attrs: {
+      'data-testid': 'profile-button',
+      'aria-label': accountText || 'Account menu',
+    },
+  });
+  const body = createHomeFallbackElement({ text: bodyText, tagName: 'MAIN' });
+  const documentMock = {
+    readyState: 'complete',
+    body,
+    documentElement: {},
+    querySelectorAll: (selector) => {
+      const text = String(selector || '');
+      if (text.includes('[role="alert"]') || text.includes('[aria-live]') || text.includes('error')) return [];
+      if (text.includes('profile') || text.includes('account') || text.includes('user') || text.includes('avatar') || text.includes('plan') || text.includes('upgrade')) {
+        return [account];
+      }
+      if (text === 'button, a, [role="button"], [data-testid], [aria-label], [title]') {
+        return [account];
+      }
+      return [];
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  const bundle = [
+    extractFunction('isPayPalHostedOpenAiCheckoutPage'),
+    extractFunction('isChatGptHomeUrl'),
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getChatGptHomeVisibleErrorText'),
+    extractFunction('getActionText'),
+    extractFunction('getSearchText'),
+    extractFunction('getVisibleControls'),
+    extractFunction('isDocumentLevelContainer'),
+    extractFunction('getChatGptHomeAccountAreaCandidates'),
+    extractFunction('getChatGptHomeAccountContainer'),
+    extractFunction('getChatGptHomeAccountAreaText'),
+    extractFunction('inspectChatGptHomePlanFallback'),
+    'return { inspectChatGptHomePlanFallback };',
+  ].join('\n');
+
+  const api = new Function('window', 'document', 'location', 'URL', bundle)(
+    windowMock,
+    documentMock,
+    { href: url },
+    URL
+  );
+  return api.inspectChatGptHomePlanFallback();
+}
+
+test('ChatGPT home plan fallback succeeds from account area while ignoring page body Free text', () => {
+  const result = inspectHomePlanFallback({
+    accountText: 'Personal Plus',
+    bodyText: 'A chat message says Free and Upgrade in the transcript.',
+  });
+
+  assert.equal(result.checked, true);
+  assert.equal(result.successLikely, true);
+  assert.equal(result.reason, 'account-area-without-free-or-upgrade');
+});
+
+test('ChatGPT home plan fallback blocks English free and upgrade account text', () => {
+  for (const accountText of ['Free plan', 'Upgrade plan']) {
+    const result = inspectHomePlanFallback({ accountText });
+    assert.equal(result.checked, true);
+    assert.equal(result.successLikely, false);
+    assert.match(result.blockingText, /Free|Upgrade/i);
+  }
+});
+
+test('ChatGPT home plan fallback blocks Chinese free and upgrade account text', () => {
+  for (const accountText of ['免费计划', '升级到 Plus']) {
+    const result = inspectHomePlanFallback({ accountText });
+    assert.equal(result.checked, true);
+    assert.equal(result.successLikely, false);
+    assert.match(result.blockingText, /免费|升级/);
+  }
+});
+
 test('findSubscribeButton prefers the submit subscription button', () => {
   const bundle = [
     extractFunction('isVisibleElement'),

@@ -18,6 +18,10 @@
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
   const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
+  const HOSTED_CHECKOUT_HOME_FALLBACK_URL = 'https://chatgpt.com/';
+  const HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS = 2;
+  const HOSTED_CHECKOUT_HOME_FALLBACK_RETRY_DELAY_MS = 3000;
+  const HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED_PREFIX = 'HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED::';
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
   const HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS = 5000;
@@ -881,7 +885,7 @@
       }
     }
 
-    async function releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, completedUrl = '', state = null) {
+    async function releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, completedUrl = '', state = null, options = {}) {
       if (!proxyManager?.getStoredSession) {
         return false;
       }
@@ -898,7 +902,7 @@
       if (String(session.releaseNodeKey || '').trim() !== PAYPAL_HOSTED_STEP_REVIEW) {
         return false;
       }
-      if (!isHostedCheckoutSuccessUrl(completedUrl)) {
+      if (!isHostedCheckoutSuccessUrl(completedUrl) && !options?.successFallback) {
         return false;
       }
       await proxyManager.restoreSession(session);
@@ -1023,6 +1027,18 @@
 
     function isHostedCheckoutSuccessUrl(url = '') {
       return HOSTED_CHECKOUT_SUCCESS_URL_PATTERN.test(String(url || ''));
+    }
+
+    function isHostedCheckoutHomeFallbackUrl(url = '') {
+      try {
+        const parsed = new URL(String(url || ''));
+        const hostname = String(parsed.hostname || '').toLowerCase();
+        const pathname = String(parsed.pathname || '/').replace(/\/+$/g, '') || '/';
+        return ['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(hostname)
+          && pathname === '/';
+      } catch {
+        return false;
+      }
     }
 
     function isHostedOpenAiCheckoutUrl(url = '') {
@@ -2049,11 +2065,7 @@
       });
     }
 
-    async function completeHostedStepIfSuccessful(stepKey, tabId, state = {}, options = {}) {
-      const currentUrl = await getHostedCurrentUrl(tabId);
-      if (!isHostedCheckoutSuccessUrl(currentUrl)) {
-        return false;
-      }
+    async function completeHostedSuccessfulPayment(stepKey, tabId, state = {}, currentUrl = '', options = {}) {
       let config = null;
       try {
         config = await getHostedCheckoutRuntimeConfig(state, {
@@ -2083,13 +2095,111 @@
         await addHostedStepLog(stepKey, `步骤 ${getHostedStepNumber(stepKey)}：支付成功后等待 ${config.oauthDelaySeconds} 秒，再继续账号接入。`, 'info');
         await sleepWithStop(config.oauthDelaySeconds * 1000);
       }
-      await releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, currentUrl, state);
+      await releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, currentUrl, state, {
+        successFallback: Boolean(options?.successFallback),
+      });
       await completeHostedStep(stepKey, tabId, {
         plusReturnUrl: currentUrl,
         plusHostedCheckoutCompleted: true,
         plusHostedCheckoutOauthDelaySeconds: config.oauthDelaySeconds,
+        ...(options.completionPayload && typeof options.completionPayload === 'object' ? options.completionPayload : {}),
       });
       return true;
+    }
+
+    async function inspectHostedCheckoutHomeFallback(tabId, stepKey, state = {}) {
+      if (String(stepKey || '').trim() !== PAYPAL_HOSTED_STEP_REVIEW) {
+        return {
+          success: false,
+          currentUrl: await getHostedCurrentUrl(tabId),
+          detail: 'not-review-step',
+        };
+      }
+
+      await addHostedStepLog(stepKey, `步骤 ${getHostedStepNumber(stepKey)}：未检测到 ChatGPT 支付成功 URL，打开 ChatGPT 主页面进行 Plus 状态兜底检查。`, 'warn');
+      if (chrome?.tabs?.update) {
+        await chrome.tabs.update(tabId, { url: HOSTED_CHECKOUT_HOME_FALLBACK_URL, active: true });
+      }
+      await waitForTabCompleteUntilStopped(tabId).catch(() => {});
+
+      let lastFallback = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS; attempt += 1) {
+        throwIfStopped();
+        try {
+          const pageState = await inspectPlusCheckoutState(tabId);
+          lastFallback = pageState?.homePlanFallback || null;
+          const fallbackUrl = String(pageState?.url || await getHostedCurrentUrl(tabId) || '').trim();
+          if (lastFallback?.successLikely) {
+            await addHostedStepLog(
+              stepKey,
+              `步骤 ${getHostedStepNumber(stepKey)}：ChatGPT 主页面账号区域未出现 Free/Upgrade/免费/升级，按无卡直绑支付成功继续。`,
+              'ok'
+            );
+            return {
+              success: true,
+              currentUrl: fallbackUrl || HOSTED_CHECKOUT_HOME_FALLBACK_URL,
+              detail: lastFallback.reason || 'home-plan-fallback-success',
+              fallback: lastFallback,
+            };
+          }
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${getHostedStepNumber(stepKey)}：ChatGPT 主页面兜底检查第 ${attempt}/${HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS} 次未确认成功（${lastFallback?.reason || 'unknown'}${lastFallback?.blockingText ? `，命中文案：${lastFallback.blockingText}` : ''}）。`,
+            'warn'
+          );
+        } catch (error) {
+          lastError = error;
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${getHostedStepNumber(stepKey)}：ChatGPT 主页面兜底检查第 ${attempt}/${HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS} 次失败：${error?.message || String(error || '未知错误')}`,
+            'warn'
+          );
+        }
+
+        if (attempt < HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS) {
+          await sleepWithStop(HOSTED_CHECKOUT_HOME_FALLBACK_RETRY_DELAY_MS);
+          if (chrome?.tabs?.reload) {
+            await chrome.tabs.reload(tabId).catch(() => {});
+            await waitForTabCompleteUntilStopped(tabId).catch(() => {});
+          }
+        }
+      }
+
+      const currentUrl = await getHostedCurrentUrl(tabId);
+      return {
+        success: false,
+        currentUrl,
+        detail: lastError?.message || lastFallback?.reason || 'home-plan-fallback-not-successful',
+        fallback: lastFallback,
+      };
+    }
+
+    async function completeHostedStepIfSuccessful(stepKey, tabId, state = {}, options = {}) {
+      const currentUrl = await getHostedCurrentUrl(tabId);
+      if (isHostedCheckoutSuccessUrl(currentUrl)) {
+        return await completeHostedSuccessfulPayment(stepKey, tabId, state, currentUrl, options);
+      }
+      if (!options.allowHomeFallback) {
+        return false;
+      }
+      const fallbackResult = await inspectHostedCheckoutHomeFallback(tabId, stepKey, state);
+      if (!fallbackResult.success) {
+        if (options.throwOnHomeFallbackFailure) {
+          throw new Error(`${HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED_PREFIX}${fallbackResult.detail || 'ChatGPT home fallback did not confirm Plus activation.'}`);
+        }
+        return false;
+      }
+      return await completeHostedSuccessfulPayment(stepKey, tabId, state, fallbackResult.currentUrl, {
+        ...options,
+        successFallback: true,
+        completionPayload: {
+          plusHostedCheckoutSuccessFallback: true,
+          plusHostedCheckoutSuccessFallbackReason: fallbackResult.detail || '',
+          plusHostedCheckoutSuccessFallbackPreview: String(fallbackResult?.fallback?.accountAreaTextPreview || '').slice(0, 300),
+          plusHostedCheckoutSuccessFallbackAt: Date.now(),
+        },
+      });
     }
 
     async function waitForUrlMatch(tabId, matcher, timeoutMs = 30000, retryDelayMs = 500) {
@@ -4635,12 +4745,14 @@
       if (initialVerificationResult.handled) {
         await waitForHostedUrlAfterAction(
           tabId,
-          (url) => isHostedCheckoutSuccessUrl(url),
-          { label: `步骤 ${stepNumber}：等待 PayPal 验证码后回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
-        );
-        if (!await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
-          throw new Error(`步骤 ${stepNumber}：PayPal 验证码提交后未检测到 ChatGPT 支付成功页。`);
-        }
+          (url) => isHostedCheckoutSuccessUrl(url) || !isPayPalUrl(url),
+          { label: `步骤 ${stepNumber}：等待 PayPal 验证码后回到 ChatGPT 页面`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
+        ).catch(() => null);
+        await completeHostedStepIfSuccessful(stepKey, tabId, state, {
+          waitBeforeComplete: true,
+          allowHomeFallback: true,
+          throwOnHomeFallbackFailure: true,
+        });
         return;
       }
       if (pageState.hostedStage !== PAYPAL_HOSTED_STAGE_REVIEW) {
@@ -4651,26 +4763,34 @@
       await runHostedPayPalStep(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_REVIEW,
       }, { stepKey });
-      await waitForHostedPayPalStage(
+      await waitForHostedUrlAfterAction(
         tabId,
-        async (stateInfo) => {
-          if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
-            return true;
-          }
-          const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey);
-          if (verificationResult.phonePlusFallbackToFreeAuth) {
-            return true;
-          }
-          if (verificationResult.handled) {
-            return false;
-          }
-          return Boolean(stateInfo?.successUrl || stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_OUTSIDE);
-        },
-        { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
-      );
-      if (!await completeHostedStepIfSuccessful(stepKey, tabId, state, { waitBeforeComplete: true })) {
-        throw new Error(`步骤 ${stepNumber}：PayPal 授权后未检测到 ChatGPT 支付成功页。`);
-      }
+        (url) => isHostedCheckoutSuccessUrl(url) || !isPayPalUrl(url),
+        { label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 页面`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
+      ).catch(async () => {
+        await waitForHostedPayPalStage(
+          tabId,
+          async (stateInfo) => {
+            if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
+              return true;
+            }
+            const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, state, verificationContext, stepKey);
+            if (verificationResult.phonePlusFallbackToFreeAuth) {
+              return true;
+            }
+            if (verificationResult.handled) {
+              return false;
+            }
+            return Boolean(stateInfo?.successUrl || stateInfo?.hostedStage === PAYPAL_HOSTED_STAGE_OUTSIDE);
+          },
+          { stepKey, label: `步骤 ${stepNumber}：等待 PayPal 回到 ChatGPT 支付成功页`, timeoutMs: HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS }
+        );
+      });
+      await completeHostedStepIfSuccessful(stepKey, tabId, state, {
+        waitBeforeComplete: true,
+        allowHomeFallback: true,
+        throwOnHomeFallbackFailure: true,
+      });
     }
 
     function normalizeHelperCountryCode(countryCode = '86') {

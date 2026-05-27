@@ -177,6 +177,21 @@ function isPayPalHostedOpenAiCheckoutPage() {
   return host.includes('pay.openai.com') || host.includes('checkout.stripe.com');
 }
 
+function isChatGptHomeUrl(url = '') {
+  let parsed = null;
+  try {
+    parsed = new URL(String(url || location?.href || ''), location?.href || 'https://chatgpt.com/');
+  } catch {
+    return false;
+  }
+  const hostname = String(parsed.hostname || '').toLowerCase();
+  if (!['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(hostname)) {
+    return false;
+  }
+  const pathname = String(parsed.pathname || '/').replace(/\/+$/g, '') || '/';
+  return pathname === '/';
+}
+
 function hideHostedAddressAutocomplete() {
   [
     '.AddressAutocomplete-results',
@@ -605,6 +620,185 @@ function isVisibleElement(el) {
 
 function normalizeText(text = '') {
   return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+function getChatGptHomeVisibleErrorText() {
+  if (typeof document?.querySelectorAll !== 'function') {
+    return '';
+  }
+  const errorPattern = /something\s+went\s+wrong|unable\s+to\s+load|failed\s+to\s+load|network\s+error|error\s+loading|try\s+again|请重试|出错|错误|无法加载/i;
+  const selectors = [
+    '[role="alert"]',
+    '[aria-live]',
+    '[data-testid*="error" i]',
+    '[class*="error" i]',
+    '[class*="Error"]',
+  ];
+  const seen = new Set();
+  for (const selector of selectors) {
+    let nodes = [];
+    try {
+      nodes = Array.from(document.querySelectorAll(selector));
+    } catch {
+      nodes = [];
+    }
+    for (const node of nodes) {
+      if (!node || seen.has(node) || !isVisibleElement(node)) continue;
+      seen.add(node);
+      const text = normalizeText(node.innerText || node.textContent || '');
+      if (text && errorPattern.test(text)) {
+        return text.slice(0, 240);
+      }
+    }
+  }
+  return '';
+}
+
+function getChatGptHomeAccountAreaCandidates() {
+  if (typeof document?.querySelectorAll !== 'function') {
+    return [];
+  }
+  const selectors = [
+    '[data-testid*="profile" i]',
+    '[data-testid*="account" i]',
+    '[data-testid*="user" i]',
+    '[data-testid*="avatar" i]',
+    '[data-testid*="plan" i]',
+    '[data-testid*="upgrade" i]',
+    '[aria-label*="profile" i]',
+    '[aria-label*="account" i]',
+    '[aria-label*="user" i]',
+    '[aria-label*="avatar" i]',
+    '[aria-label*="plan" i]',
+    '[aria-label*="upgrade" i]',
+    '[title*="profile" i]',
+    '[title*="account" i]',
+    '[title*="user" i]',
+    '[title*="avatar" i]',
+    '[title*="plan" i]',
+    '[title*="upgrade" i]',
+    'a[href*="/pricing"]',
+  ];
+  const hintPattern = /profile|account|user|avatar|workspace|plan|plus|upgrade|free|个人资料|账户|账号|用户|套餐|计划|升级|免费/i;
+  const seen = new Set();
+  const candidates = [];
+  const addCandidate = (node) => {
+    if (!node || seen.has(node) || !isVisibleElement(node)) return;
+    seen.add(node);
+    candidates.push(node);
+  };
+
+  for (const selector of selectors) {
+    let nodes = [];
+    try {
+      nodes = Array.from(document.querySelectorAll(selector));
+    } catch {
+      nodes = [];
+    }
+    nodes.forEach(addCandidate);
+  }
+
+  for (const node of getVisibleControls('button, a, [role="button"], [data-testid], [aria-label], [title]')) {
+    const text = getSearchText(node);
+    if (hintPattern.test(text)) {
+      addCandidate(node);
+    }
+  }
+
+  return candidates;
+}
+
+function getChatGptHomeAccountContainer(node) {
+  let current = node;
+  for (let depth = 0; current && depth < 4; depth += 1, current = current.parentElement) {
+    if (!isVisibleElement(current) || isDocumentLevelContainer(current)) {
+      continue;
+    }
+    const text = normalizeText(current.innerText || current.textContent || getSearchText(current));
+    if (text.length > 0 && text.length <= 320) {
+      return current;
+    }
+    try {
+      if (current.matches?.('button, a, [role="button"], [data-testid], [aria-label], [title], header, nav, aside')) {
+        return current;
+      }
+    } catch {
+      // Keep the original candidate if selector matching is unavailable.
+    }
+  }
+  return node;
+}
+
+function getChatGptHomeAccountAreaText() {
+  const candidates = getChatGptHomeAccountAreaCandidates();
+  const seen = new Set();
+  const textParts = [];
+  for (const candidate of candidates) {
+    const container = getChatGptHomeAccountContainer(candidate);
+    if (!container || seen.has(container)) continue;
+    seen.add(container);
+    const text = normalizeText([
+      container.innerText,
+      container.textContent,
+      getSearchText(container),
+    ].filter(Boolean).join(' '));
+    if (text) {
+      textParts.push(text);
+    }
+  }
+  return {
+    candidateCount: candidates.length,
+    text: normalizeText(textParts.join(' | ')).slice(0, 1000),
+  };
+}
+
+function inspectChatGptHomePlanFallback() {
+  const result = {
+    checked: false,
+    successLikely: false,
+    blockingText: '',
+    accountAreaTextPreview: '',
+    reason: '',
+  };
+  if (!isChatGptHomeUrl(location?.href || '')) {
+    return {
+      ...result,
+      reason: 'not-chatgpt-home',
+    };
+  }
+  if (document.readyState !== 'complete') {
+    return {
+      ...result,
+      reason: `document-${document.readyState || 'unknown'}`,
+    };
+  }
+  const errorText = getChatGptHomeVisibleErrorText();
+  if (errorText) {
+    return {
+      ...result,
+      reason: 'visible-error',
+      blockingText: errorText,
+    };
+  }
+
+  const accountArea = getChatGptHomeAccountAreaText();
+  const accountText = normalizeText(accountArea.text || '');
+  if (!accountArea.candidateCount || !accountText) {
+    return {
+      ...result,
+      checked: true,
+      reason: 'account-area-not-found',
+    };
+  }
+
+  const blockingMatch = accountText.match(/\bFree\b|\bUpgrade\b|免费|升级/i);
+  return {
+    checked: true,
+    successLikely: !blockingMatch,
+    blockingText: blockingMatch ? String(blockingMatch[0] || '').trim() : '',
+    accountAreaTextPreview: accountText.slice(0, 300),
+    reason: blockingMatch ? 'free-or-upgrade-visible' : 'account-area-without-free-or-upgrade',
+  };
 }
 
 function parseLocalizedAmount(rawValue = '') {
@@ -2309,6 +2503,7 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedPaypalDisabledSignals: hostedCardFallback.paypalDisabledSignals,
     hostedCardAccordionSelected: hostedCardFallback.cardAccordionSelected,
     checkoutAmountSummary: getCheckoutAmountSummary(),
+    homePlanFallback: inspectChatGptHomePlanFallback(),
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',
       city: structuredAddress.city?.value || '',
