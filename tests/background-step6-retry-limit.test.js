@@ -161,6 +161,63 @@ test('step 6 detects free trial status from strict chatgpt root page', async () 
   assert.equal(completions[0].payload.freeStatusDetection.reason, 'free_trial_action_visible');
 });
 
+test('step 6 detects English Free as free status from strict chatgpt root page', async () => {
+  const api = createStep6Api();
+  const completions = [];
+  const chromeApi = {
+    scripting: {
+      executeScript: async ({ func }) => [{ result: func() }],
+    },
+  };
+  const previousLocation = globalThis.location;
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  globalThis.location = { href: 'https://chatgpt.com/' };
+  globalThis.window = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [
+      {
+        textContent: 'Free',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+      {
+        textContent: 'Upgrade',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+    ],
+  };
+
+  try {
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      chrome: chromeApi,
+      completeNodeFromBackground: async (step, payload) => {
+        completions.push({ step, payload });
+      },
+      getTabId: async () => 13,
+      registrationSuccessWaitMs: 0,
+      sleepWithStop: async () => {},
+    });
+
+    await executor.executeStep6();
+  } finally {
+    globalThis.location = previousLocation;
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+
+  assert.equal(completions[0].payload.freeStatus, 'free');
+  assert.equal(completions[0].payload.freeStatusDetection.reason, 'free_trial_action_visible');
+  assert.equal(completions[0].payload.freeStatusDetection.matchedText, 'Free');
+});
+
 test('step 6 detects paid upgrade status from strict chatgpt root page', async () => {
   const api = createStep6Api();
   const completions = [];
@@ -209,6 +266,107 @@ test('step 6 detects paid upgrade status from strict chatgpt root page', async (
 
   assert.equal(completions[0].payload.freeStatus, 'paid');
   assert.equal(completions[0].payload.freeStatusDetection.reason, 'paid_upgrade_action_visible');
+});
+
+test('step 6 detects English Upgrade as paid status from strict chatgpt root page', async () => {
+  const api = createStep6Api();
+  const completions = [];
+  const chromeApi = {
+    scripting: {
+      executeScript: async ({ func }) => [{ result: func() }],
+    },
+  };
+  const previousLocation = globalThis.location;
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  globalThis.location = { href: 'https://chatgpt.com/' };
+  globalThis.window = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [
+      {
+        textContent: 'Upgrade',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+    ],
+  };
+
+  try {
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      chrome: chromeApi,
+      completeNodeFromBackground: async (step, payload) => {
+        completions.push({ step, payload });
+      },
+      getTabId: async () => 14,
+      registrationSuccessWaitMs: 0,
+      sleepWithStop: async () => {},
+    });
+
+    await executor.executeStep6();
+  } finally {
+    globalThis.location = previousLocation;
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+
+  assert.equal(completions[0].payload.freeStatus, 'paid');
+  assert.equal(completions[0].payload.freeStatusDetection.reason, 'paid_upgrade_action_visible');
+  assert.equal(completions[0].payload.freeStatusDetection.matchedText, 'Upgrade');
+});
+
+test('step 6 keeps Plus-only subscription action as unknown status', async () => {
+  const api = createStep6Api();
+  const completions = [];
+  const chromeApi = {
+    scripting: {
+      executeScript: async ({ func }) => [{ result: func() }],
+    },
+  };
+  const previousLocation = globalThis.location;
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  globalThis.location = { href: 'https://chatgpt.com/' };
+  globalThis.window = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [
+      {
+        textContent: 'Plus',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+    ],
+  };
+
+  try {
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      chrome: chromeApi,
+      completeNodeFromBackground: async (step, payload) => {
+        completions.push({ step, payload });
+      },
+      getTabId: async () => 15,
+      registrationSuccessWaitMs: 0,
+      sleepWithStop: async () => {},
+    });
+
+    await executor.executeStep6();
+  } finally {
+    globalThis.location = previousLocation;
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+
+  assert.equal(completions[0].payload.freeStatus, 'unknown');
+  assert.equal(completions[0].payload.freeStatusDetection.reason, 'subscription_action_missing');
 });
 
 test('step 6 records unknown for non-root url, login button, missing tab, and injection failure', async () => {

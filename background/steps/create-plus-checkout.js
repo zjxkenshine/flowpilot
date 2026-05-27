@@ -6,6 +6,9 @@
   const PLUS_CHECKOUT_ENTRY_URL = 'https://chatgpt.com/';
   const PLUS_CHECKOUT_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/plus-checkout.js'];
   const PAYPAL_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/paypal-flow.js'];
+  const PAYPAL_FLOW_SCRIPT_VERSION = '2026-05-28-hosted-email-diagnostics-v2';
+  const PAYPAL_HOSTED_GET_STATE_MESSAGE = 'PAYPAL_HOSTED_GET_STATE_V2';
+  const PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE = 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2';
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -916,6 +919,85 @@
         return await runHostedOpenAiCheckout(tabId, profile, config);
       } catch (error) {
         await releaseHostedCheckoutConversionProxySessionOnFailure(stepKey, error);
+        throw error;
+      }
+    }
+
+    function isExpectedHostedPayPalScriptVersion(pageState = {}) {
+      return String(pageState?.scriptVersion || '').trim() === PAYPAL_FLOW_SCRIPT_VERSION;
+    }
+
+    function shouldReinjectHostedPayPalContentScript(pageState = {}, options = {}) {
+      if (options?.skipScriptVersionCheck === true || options?.forceReinjectChecked === true) {
+        return false;
+      }
+      if (isExpectedHostedPayPalScriptVersion(pageState)) {
+        return false;
+      }
+      return Boolean(chrome?.scripting?.executeScript);
+    }
+
+    async function forceReinjectHostedPayPalContentScript(tabId, options = {}) {
+      if (!chrome?.scripting?.executeScript) {
+        return false;
+      }
+      const stepKey = String(options?.stepKey || PAYPAL_HOSTED_STEP_EMAIL).trim() || PAYPAL_HOSTED_STEP_EMAIL;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (injectedSource) => {
+            window.__MULTIPAGE_SOURCE = injectedSource;
+          },
+          args: [PAYPAL_SOURCE],
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: PAYPAL_INJECT_FILES,
+        });
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：检测到 PayPal 页面脚本版本不是最新，已重新注入 PayPal 脚本后重试。`,
+          'warn'
+        );
+        return true;
+      } catch (error) {
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：PayPal 脚本版本不是最新，尝试重新注入失败：${error?.message || String(error || '未知错误')}`,
+          'warn'
+        );
+        return false;
+      }
+    }
+
+    function isHostedPayPalVersionedMessageUnsupportedError(error) {
+      return /unexpected message type .*PAYPAL_.*_V2|paypal-flow\.js 不处理消息：PAYPAL_.*_V2|Receiving end does not exist/i
+        .test(String(error?.message || error || ''));
+    }
+
+    async function sendHostedPayPalContentMessage(tabId, type, legacyType, payload = {}, options = {}) {
+      try {
+        const result = await sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
+          type,
+          source: 'background',
+          payload,
+        });
+        if (result === undefined && legacyType && !chrome?.scripting?.executeScript) {
+          return sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
+            type: legacyType,
+            source: 'background',
+            payload,
+          });
+        }
+        return result;
+      } catch (error) {
+        if (legacyType && !chrome?.scripting?.executeScript && isHostedPayPalVersionedMessageUnsupportedError(error)) {
+          return sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
+            type: legacyType,
+            source: 'background',
+            payload,
+          });
+        }
         throw error;
       }
     }
@@ -2976,13 +3058,15 @@
         injectSource: PAYPAL_SOURCE,
         logMessage: '步骤 6：正在等待 PayPal 无卡直绑页面脚本就绪...',
       });
-      const result = await sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
-        type: 'PAYPAL_HOSTED_GET_STATE',
-        source: 'background',
-        payload: {
-          securityChallengeEnabled,
-        },
+      let result = await sendHostedPayPalContentMessage(tabId, PAYPAL_HOSTED_GET_STATE_MESSAGE, 'PAYPAL_HOSTED_GET_STATE', {
+        securityChallengeEnabled,
       });
+      if (shouldReinjectHostedPayPalContentScript(result, options)) {
+        await forceReinjectHostedPayPalContentScript(tabId, options);
+        result = await sendHostedPayPalContentMessage(tabId, PAYPAL_HOSTED_GET_STATE_MESSAGE, 'PAYPAL_HOSTED_GET_STATE', {
+          securityChallengeEnabled,
+        });
+      }
       if (result?.error) {
         throw new Error(result.error);
       }
@@ -3017,13 +3101,9 @@
         injectSource: PAYPAL_SOURCE,
         logMessage: '步骤 6：正在等待 PayPal 无卡直绑页面脚本就绪...',
       });
-      const result = await sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
-        type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
-        source: 'background',
-        payload: {
-          ...payload,
-          securityChallengeEnabled,
-        },
+      const result = await sendHostedPayPalContentMessage(tabId, PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE, 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP', {
+        ...payload,
+        securityChallengeEnabled,
       });
       if (result?.error) {
         throw new Error(result.error);
@@ -3412,6 +3492,17 @@
         || pageState?.resolvedByPlusActivation === true;
     }
 
+    function isHostedPayPalEmailTargetMissingError(error) {
+      return /未找到邮箱输入框(?:或只读邮箱字段)?|did not find.*email|email input/i
+        .test(String(error?.message || error || ''));
+    }
+
+    function isHostedPayPalReadOnlyEmailActionRetryable(pageState = {}) {
+      return pageState?.hostedStage === PAYPAL_HOSTED_STAGE_LOGIN
+        && pageState?.readOnlyEmailDetected === true
+        && pageState?.hostedEmailNextButtonDetected === true;
+    }
+
     async function requestHostedCheckoutGenericErrorChoice(tabId, pageState = {}, completionPayload = {}) {
       const requestId = `paypal-hosted-generic-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const pageMessage = String(pageState?.hostedGenericErrorMessage || '').trim()
@@ -3737,6 +3828,63 @@
       throw stageOutcome.error;
     }
 
+    async function runHostedPayPalEmailStepWithDiagnostics(tabId, payload = {}, previousStage = PAYPAL_HOSTED_STAGE_LOGIN, options = {}) {
+      try {
+        return await runHostedPayPalStepAndWaitForStageChange(tabId, payload, previousStage, options);
+      } catch (error) {
+        if (!isHostedPayPalEmailTargetMissingError(error)) {
+          throw error;
+        }
+        const stepKey = options?.stepKey || PAYPAL_HOSTED_STEP_EMAIL;
+        const stepNumber = getHostedStepNumber(stepKey);
+        const latestState = await getHostedPayPalState(tabId, {
+          ...options,
+          forceReinjectChecked: true,
+        });
+        if (isHostedCheckoutPlusActivationResolved(latestState)) {
+          return {
+            result: null,
+            nextState: latestState,
+            completedByStageChange: true,
+            recoveredAfterEmailTargetMissing: true,
+          };
+        }
+        if (isHostedStageAtOrAfter(latestState.hostedStage, PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT)
+          && latestState.hostedStage !== PAYPAL_HOSTED_STAGE_LOGIN) {
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${stepNumber}：邮箱页动作提示未找到输入框，但二次确认 PayPal 已进入后续页面（${latestState.hostedStage}），继续流程。`,
+            'warn'
+          );
+          return {
+            result: null,
+            nextState: latestState,
+            completedByStageChange: true,
+            recoveredAfterEmailTargetMissing: true,
+          };
+        }
+        if (isHostedPayPalReadOnlyEmailActionRetryable(latestState)) {
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${stepNumber}：邮箱页动作提示未找到输入框，二次确认检测到只读邮箱字段（${latestState.readOnlyEmailLabel || 'email'}），正在重试点击继续。`,
+            'warn'
+          );
+          return runHostedPayPalStepAndWaitForStageChange(tabId, payload, previousStage, {
+            ...options,
+            forceReinjectChecked: true,
+          });
+        }
+        const diagnostic = [
+          latestState?.scriptVersion ? `script=${latestState.scriptVersion}` : '',
+          latestState?.hostedStage ? `stage=${latestState.hostedStage}` : '',
+          latestState?.readOnlyEmailSummary ? `readOnly=${latestState.readOnlyEmailSummary}` : '',
+          latestState?.hostedEmailNextButtonSummary ? `button=${latestState.hostedEmailNextButtonSummary}` : '',
+          latestState?.bodyTextPreview ? `body=${latestState.bodyTextPreview}` : '',
+        ].filter(Boolean).join(' | ');
+        throw new Error(`${error.message}${diagnostic ? ` 二次确认：${diagnostic}` : ''}`);
+      }
+    }
+
     function resolveCheckoutTargetUrl(result = {}, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
       const useHostedCheckoutFinalStep = Boolean(options.useHostedCheckoutFinalStep)
         || paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED;
@@ -3971,7 +4119,7 @@
       }
 
       await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在填写 PayPal 无卡直绑邮箱。`, 'info');
-      const { nextState, completedByStageChange } = await runHostedPayPalStepAndWaitForStageChange(tabId, {
+      const { nextState, completedByStageChange } = await runHostedPayPalEmailStepWithDiagnostics(tabId, {
         expectedStage: PAYPAL_HOSTED_STAGE_LOGIN,
         email: profile.email,
         emailInputStableWaitMs: HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS,

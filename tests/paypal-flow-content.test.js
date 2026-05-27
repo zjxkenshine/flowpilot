@@ -333,6 +333,8 @@ function createHostedPayPalHarness(options = {}) {
   let elements = [];
   let listener = null;
   let phoneFillCount = 0;
+  let sleepCount = 0;
+  let delayedReadOnlyEmailField = null;
   const body = { innerText: '', textContent: '' };
   const location = {
     href: 'https://www.paypal.com/checkoutweb/signup',
@@ -648,6 +650,18 @@ function createHostedPayPalHarness(options = {}) {
     ]);
   }
 
+  function showPayReadOnlyEmailAfterDelay({ locale = 'en' } = {}) {
+    location.href = 'https://www.paypal.com/pay?token=demo';
+    location.host = 'www.paypal.com';
+    location.pathname = '/pay';
+    delayedReadOnlyEmailField = locale === 'en' ? readOnlyEmailFieldEn : readOnlyEmailFieldZh;
+    nextButton.textContent = locale === 'en' ? 'Continue' : '下一页';
+    nextButton.innerText = nextButton.textContent;
+    body.innerText = `${delayedReadOnlyEmailField.textContent} ${nextButton.textContent}`;
+    body.textContent = body.innerText;
+    setElements([nextButton, createAccountButton]);
+  }
+
   function showVerification({ invalid = false } = {}) {
     location.href = 'https://www.paypal.com/checkoutweb/verification';
     location.host = 'www.paypal.com';
@@ -843,7 +857,11 @@ function createHostedPayPalHarness(options = {}) {
     isStopError() { return false; },
     throwIfStopped() {},
     sleep(ms) {
+      sleepCount += 1;
       events.push({ type: 'sleep', ms });
+      if (delayedReadOnlyEmailField && sleepCount >= 2 && !elements.includes(delayedReadOnlyEmailField)) {
+        setElements([delayedReadOnlyEmailField, nextButton, createAccountButton]);
+      }
       return Promise.resolve();
     },
     fillInput(element, value) {
@@ -921,6 +939,7 @@ function createHostedPayPalHarness(options = {}) {
     showGuestCardError,
     showPayEmail,
     showPayReadOnlyEmail,
+    showPayReadOnlyEmailAfterDelay,
     showCreateAccount,
     showGenericError,
     showGuestCheckout,
@@ -1322,6 +1341,9 @@ test('PayPal hosted /pay email page fills email and clicks Next instead of Creat
   assert.equal(state.ok, true);
   assert.equal(state.hostedStage, 'pay_login');
   assert.equal(state.hasHostedEmailInput, true);
+  assert.equal(typeof state.scriptVersion, 'string');
+  assert.equal(state.readOnlyEmailDetected, false);
+  assert.equal(Array.isArray(state.visibleInputSummaries), true);
 
   const result = await harness.send({
     type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
@@ -1336,6 +1358,7 @@ test('PayPal hosted /pay email page fills email and clicks Next instead of Creat
   assert.equal(result.ok, true);
   assert.equal(result.stage, 'pay_login');
   assert.equal(result.submitted, true);
+  assert.equal(typeof result.scriptVersion, 'string');
   assert.equal(result.emailInputStableWaitMs, 5000);
   assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 5000), true);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'email' && event.value === 'guest@example.com'), true);
@@ -1359,6 +1382,11 @@ test('PayPal hosted /pay skips Chinese read-only email field and clicks Next', a
   assert.equal(state.ok, true);
   assert.equal(state.hostedStage, 'pay_login');
   assert.equal(state.hasHostedEmailInput, true);
+  assert.equal(typeof state.scriptVersion, 'string');
+  assert.equal(state.readOnlyEmailDetected, true);
+  assert.match(state.readOnlyEmailLabel, /邮箱/);
+  assert.match(state.readOnlyEmailSummary, /ReadOnlyFormField|邮箱/);
+  assert.equal(Array.isArray(state.visibleInputSummaries), true);
 
   const result = await harness.send({
     type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
@@ -1380,6 +1408,28 @@ test('PayPal hosted /pay skips Chinese read-only email field and clicks Next', a
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'createAccountButton'), false);
+});
+
+test('PayPal hosted /pay rechecks when read-only email field appears after initial probe', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showPayReadOnlyEmailAfterDelay({ locale: 'en' });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'pay_login',
+      email: 'guest@example.com',
+      emailInputTimeoutMs: 1,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.emailSkipped, true);
+  assert.equal(result.readOnlyEmailDetected, true);
+  assert.match(result.readOnlyEmailLabel, /Email/i);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), true);
 });
 
 test('PayPal hosted /pay skips English read-only email field and clicks Continue', async () => {
@@ -1419,6 +1469,9 @@ test('PayPal hosted /pay does not skip plain email text without read-only struct
 
   assert.equal(result.ok, undefined);
   assert.match(result.error, /未找到邮箱输入框或只读邮箱字段/);
+  assert.match(result.error, /scriptVersion:/);
+  assert.match(result.error, /visibleButtons:/);
+  assert.match(result.error, /body: Email address Continue/);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.value === 'guest@example.com'), false);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'btnNext'), false);
 });

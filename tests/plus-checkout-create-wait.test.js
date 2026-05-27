@@ -3111,6 +3111,114 @@ test('PayPal hosted email node completes when Next navigation drops the content 
   );
 });
 
+test('PayPal hosted email node completes when missing email target error is followed by guest checkout state', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/pay?token=EC-test';
+  let statePollCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => createHostedRuntimeState({
+      plusPaymentEmailState: {
+        current: 'payment@example.com',
+        source: 'payment:test',
+        updatedAt: 1,
+      },
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE_V2' || message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        return statePollCount >= 2
+          ? { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'guest_checkout' }
+          : { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'pay_login' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2' || message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        throw new Error('PayPal hosted checkout 未找到邮箱输入框或只读邮箱字段。 URL: https://www.paypal.com/pay');
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedEmail({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'payment@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-email'), true);
+  assert.equal(
+    events.some((event) => event.type === 'log' && /二次确认 PayPal 已进入后续页面（guest_checkout）/.test(event.message)),
+    true
+  );
+});
+
+test('PayPal hosted state reinjects content script when script version is stale', async () => {
+  const events = [];
+  let statePollCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      scripting: {
+        executeScript: async (details) => events.push({ type: 'execute-script', details }),
+      },
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE_V2') {
+        statePollCount += 1;
+        return statePollCount === 1
+          ? { hostedStage: 'guest_checkout' }
+          : { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'create_account' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2') {
+        return { submitted: true };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(events.filter((event) => event.type === 'execute-script').length, 2);
+  assert.equal(
+    events.some((event) => event.type === 'log' && /脚本版本不是最新/.test(event.message)),
+    true
+  );
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
+});
+
 test('PayPal hosted generic_error creates manual confirmation when auto retry is disabled', async () => {
   const events = [];
   const broadcasts = [];

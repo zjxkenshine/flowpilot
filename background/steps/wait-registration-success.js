@@ -134,8 +134,8 @@
       }
     }
 
-    const freeTrialPattern = /免费试用|try\s*(?:it\s*)?free|start\s*(?:free\s*)?trial|free\s*trial/i;
-    const paidPattern = /升级|upgrade|plus/i;
+    const freeTrialPattern = /免费|free/i;
+    const paidPattern = /升级|upgrade/i;
     let paidMatch = '';
 
     for (const element of getActionCandidates()) {
