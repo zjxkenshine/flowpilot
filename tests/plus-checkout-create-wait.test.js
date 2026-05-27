@@ -2887,6 +2887,124 @@ test('PayPal hosted OpenAI checkout retries with a fresh address after address v
   assert.equal(events.find((event) => event.type === 'complete')?.step, 'paypal-hosted-openai-checkout');
 });
 
+test('PayPal hosted OpenAI checkout retries with a fresh address when address line is empty after submit', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';
+  let stateReads = 0;
+  let addressIndex = 0;
+  const addresses = [
+    {
+      Address: '8 Retry Ave',
+      City: 'Austin',
+      State: 'Texas',
+      Zip_Code: '73301',
+    },
+  ];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => {
+          events.push({ type: 'tab-get', tabId, url: currentUrl });
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      assert.equal(url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
+      const address = addresses[addressIndex] || addresses.at(-1);
+      addressIndex += 1;
+      return createHostedAddressResponse(address);
+    },
+    getState: async () => ({
+      plusHostedCheckoutGuestProfile: {
+        email: 'payment@example.com',
+        phone: '2125550000',
+        address: {
+          street: '1 Main St',
+          city: 'New York',
+          state: 'New York',
+          zip: '10001',
+        },
+      },
+      hostedCheckoutPhoneNumber: '(415) 555-1234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        if (message.payload?.address?.street === '8 Retry Ave') {
+          currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
+        }
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        stateReads += 1;
+        if (stateReads === 1) {
+          return {
+            checkoutAmountSummary: {
+              hasTodayDue: true,
+              amount: 0,
+              isZero: true,
+              rawAmount: '$0.00',
+            },
+          };
+        }
+        if (stateReads === 2) {
+          return {
+            hostedOpenAiPage: true,
+            hostedAddressFieldValues: {
+              address1: '',
+              city: 'New York',
+              region: 'New York',
+              postalCode: '10001',
+            },
+          };
+        }
+        currentUrl = 'https://www.paypal.com/pay?token=BA-hosted';
+        return { hostedVerificationVisible: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 55,
+    plusPaymentMethod: 'paypal-hosted',
+    plusHostedCheckoutGuestProfile: {
+      email: 'payment@example.com',
+      phone: '2125550000',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+    hostedCheckoutPhoneNumber: '2125550000',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
+  assert.equal(submitEvents.length, 2);
+  assert.equal(submitEvents[0].message.payload.address.street, '1 Main St');
+  assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(submitEvents[1].message.payload.address.countryCode, 'US');
+  const profileUpdates = events.filter((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile);
+  const retryProfileUpdate = profileUpdates.at(-1)?.payload || {};
+  assert.equal(retryProfileUpdate.plusHostedCheckoutGuestProfile.address.street, '8 Retry Ave');
+  assert.equal(retryProfileUpdate.paypalGeneratedProfile.address1, '8 Retry Ave');
+  assert.equal(events.some((event) => event.type === 'log' && /billing address is empty after submit/i.test(event.message)), true);
+  assert.equal(events.find((event) => event.type === 'complete')?.step, 'paypal-hosted-openai-checkout');
+});
+
 test('PayPal hosted OpenAI checkout throws card declined prefix after retry limit', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';

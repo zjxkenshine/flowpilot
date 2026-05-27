@@ -1076,7 +1076,23 @@ function buildResolvedStepDefinitionState(state = {}) {
 
 function getStepDefinitionsForState(state = {}) {
   const resolvedState = buildResolvedStepDefinitionState(state);
-  const useHostedCheckoutFinalStep = isHostedCheckoutFinalStepEnabled(resolvedState);
+  const resolvedPlusPaymentMethod = normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod);
+  const paypalHostedPaymentMethod = typeof PLUS_PAYMENT_METHOD_PAYPAL_HOSTED === 'string'
+    ? PLUS_PAYMENT_METHOD_PAYPAL_HOSTED
+    : 'paypal-hosted';
+  const paypalPaymentMethod = typeof PLUS_PAYMENT_METHOD_PAYPAL === 'string'
+    ? PLUS_PAYMENT_METHOD_PAYPAL
+    : 'paypal';
+  const useHostedCheckoutFinalStep = typeof isHostedCheckoutFinalStepEnabled === 'function'
+    ? isHostedCheckoutFinalStepEnabled(resolvedState)
+    : (
+      resolvedPlusPaymentMethod === paypalHostedPaymentMethod
+      || (
+        resolvedPlusPaymentMethod === paypalPaymentMethod
+        && Boolean(resolvedState?.plusModeEnabled || resolvedState?.phonePlusModeEnabled)
+        && resolvedState?.plusHostedCheckoutIsFinalStep !== false
+      )
+    );
   const rootScope = typeof self !== 'undefined' ? self : globalThis;
   if (rootScope.MultiPageStepDefinitions?.getSteps) {
     const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
@@ -1085,7 +1101,7 @@ function getStepDefinitionsForState(state = {}) {
       activeFlowId,
       plusModeEnabled: Boolean(resolvedState?.plusModeEnabled),
       phonePlusModeEnabled: Boolean(resolvedState?.phonePlusModeEnabled),
-      plusPaymentMethod: normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod),
+      plusPaymentMethod: resolvedPlusPaymentMethod,
       plusHostedCheckoutIsFinalStep: resolvedState?.plusHostedCheckoutIsFinalStep,
       plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(resolvedState?.plusAccountAccessStrategy),
       signupMethod: getSignupMethodForStepDefinitions(resolvedState),
@@ -1464,6 +1480,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   codex2apiUrl: DEFAULT_CODEX2API_URL,
   codex2apiAdminKey: '',
   customPassword: '',
+  browserFingerprintEnabled: true,
+  browserFingerprintLevel: 'standard',
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
@@ -1715,6 +1733,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'signupMethod',
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
+  'browserFingerprintEnabled',
+  'browserFingerprintLevel',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -3660,6 +3680,14 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '');
     case 'signupMethod':
       return normalizeSignupMethod(value);
+    case 'browserFingerprintEnabled':
+      return Boolean(value);
+    case 'browserFingerprintLevel':
+      return self.MultiPageBackgroundBrowserFingerprint?.normalizeBrowserFingerprintLevel
+        ? self.MultiPageBackgroundBrowserFingerprint.normalizeBrowserFingerprintLevel(value)
+        : (String(value || '').trim().toLowerCase() === 'basic' || String(value || '').trim().toLowerCase() === 'enhanced'
+          ? String(value || '').trim().toLowerCase()
+          : 'standard');
     case 'plusPaymentMethod':
       return normalizePlusPaymentMethod(value);
     case 'plusHostedCheckoutIsFinalStep':
@@ -4751,6 +4779,8 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('signupMethod', ['flows', 'openai', 'signup', 'signupMethod']);
   assignIfUpdated('phoneVerificationEnabled', ['flows', 'openai', 'signup', 'phoneVerificationEnabled']);
   assignIfUpdated('phoneSignupReloginAfterBindEmailEnabled', ['flows', 'openai', 'signup', 'phoneSignupReloginAfterBindEmailEnabled']);
+  assignIfUpdated('browserFingerprintEnabled', ['flows', 'openai', 'browserFingerprint', 'enabled']);
+  assignIfUpdated('browserFingerprintLevel', ['flows', 'openai', 'browserFingerprint', 'level']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
@@ -16308,6 +16338,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   deleteAccountRunHistoryRecords: (...args) => deleteAndBroadcastAccountRunHistoryRecords(...args),
   clearAutoRunTimerAlarm,
   clearFreeReusablePhoneActivation,
+  clearBrowserFingerprint: (...args) => browserFingerprintManager?.clearBrowserFingerprint?.(...args),
   clearLuckmailRuntimeState,
   clearYydsMailRuntimeState,
   clearStopRequest,

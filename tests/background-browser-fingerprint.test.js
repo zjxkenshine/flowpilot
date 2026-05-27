@@ -36,6 +36,18 @@ test('browser fingerprint profile is stable for the same proxy exit and run id',
   assert.deepEqual(first.languages, ['zh-CN', 'zh']);
   assert.equal(first.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
   assert.equal(first.timezoneId, 'Asia/Tokyo');
+  assert.equal(first.level, 'standard');
+});
+
+test('browser fingerprint level normalization supports basic standard and enhanced', () => {
+  const api = loadBrowserFingerprintModule();
+
+  assert.equal(api.normalizeBrowserFingerprintLevel('basic'), 'basic');
+  assert.equal(api.normalizeBrowserFingerprintLevel('standard'), 'standard');
+  assert.equal(api.normalizeBrowserFingerprintLevel('enhanced'), 'enhanced');
+  assert.equal(api.normalizeBrowserFingerprintLevel(' BASIC '), 'basic');
+  assert.equal(api.normalizeBrowserFingerprintLevel('unknown'), 'standard');
+  assert.equal(api.normalizeBrowserFingerprintLevel(''), 'standard');
 });
 
 test('browser fingerprint profile changes when exit or run changes', () => {
@@ -196,6 +208,69 @@ test('browser fingerprint manager persists runtime-only profile fields', async (
   } finally {
     console.info = originalInfo;
   }
+});
+
+test('browser fingerprint manager skips generation and clears runtime when disabled', async () => {
+  const api = loadBrowserFingerprintModule();
+  const dnrCalls = [];
+  const stateUpdates = [];
+  const broadcasts = [];
+  const manager = api.createBrowserFingerprintManager({
+    chrome: {
+      declarativeNetRequest: {
+        updateDynamicRules: async (payload) => {
+          dnrCalls.push(payload);
+        },
+      },
+    },
+    getState: async () => ({
+      activeRunId: 'run-disabled',
+      browserFingerprintEnabled: false,
+      browserFingerprintProfile: { profileId: 'old' },
+    }),
+    setState: async (payload) => {
+      stateUpdates.push(payload);
+    },
+    broadcastDataUpdate: (payload) => {
+      broadcasts.push(payload);
+    },
+    addLog: async () => {},
+  });
+
+  const result = await manager.ensureBrowserFingerprintForProxyExit({
+    exitIp: '198.51.100.8',
+    exitRegion: 'US',
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'disabled');
+  assert.deepEqual(dnrCalls, [{ removeRuleIds: [12051], addRules: [] }]);
+  assert.deepEqual(stateUpdates, [{
+    browserFingerprintProfile: null,
+    browserFingerprintAppliedAt: 0,
+    browserFingerprintExitIp: '',
+    browserFingerprintExitRegion: '',
+  }]);
+  assert.deepEqual(broadcasts, stateUpdates);
+});
+
+test('enhanced browser fingerprint patch payload is stable and does not include exit ip', () => {
+  const api = loadBrowserFingerprintModule();
+  const profile = api.buildBrowserFingerprintProfile(
+    { exitIp: '198.51.100.77', exitRegion: 'SG' },
+    { activeRunId: 'run-enhanced', browserFingerprintLevel: 'enhanced' },
+    { createdAt: 1 }
+  );
+
+  const first = api.buildNavigatorPatchPayload(profile);
+  const second = api.buildNavigatorPatchPayload(profile);
+
+  assert.equal(profile.level, 'enhanced');
+  assert.equal(first.level, 'enhanced');
+  assert.equal(first.noiseSeed, second.noiseSeed);
+  assert.match(first.noiseSeed, /^fp_noise_/);
+  assert.equal(JSON.stringify(first).includes('198.51.100.77'), false);
+  assert.equal(JSON.stringify(first).includes(profile.seedKey), false);
 });
 
 test('browser fingerprint manager logs generated profile summary without exit ip', async () => {

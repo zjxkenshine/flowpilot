@@ -78,6 +78,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'signupMethod',
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
+  'browserFingerprintEnabled',
+  'browserFingerprintLevel',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -117,6 +119,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   panelMode: 'cpa',
   signupMethod: 'email',
+  browserFingerprintEnabled: true,
+  browserFingerprintLevel: 'standard',
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
@@ -221,6 +225,10 @@ function normalizeSignupMethod(value = '') {
 function normalizePlusPaymentMethod(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'gopay' || normalized === 'gpc-helper' ? normalized : 'paypal';
+}
+function normalizeBrowserFingerprintLevel(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'basic' || normalized === 'enhanced' ? normalized : 'standard';
 }
 ${extractFunction('normalizePlusAccountAccessStrategy')}
 ${extractFunction('normalizePlusCheckoutConversionProxySource')}
@@ -368,6 +376,42 @@ test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh
   assert.equal(payload.ipProxyPoolTargetCount, '25');
   assert.equal(payload.ipProxySwitchIpRoundCount, '3');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload persists browser fingerprint switch and level into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.browserFingerprintEnabled, true);
+  assert.equal(defaults.browserFingerprintLevel, 'standard');
+  assert.equal(defaults.settingsState.flows.openai.browserFingerprint.enabled, true);
+  assert.equal(defaults.settingsState.flows.openai.browserFingerprint.level, 'standard');
+
+  const flat = api.buildPersistentSettingsPayload({
+    browserFingerprintEnabled: false,
+    browserFingerprintLevel: 'enhanced',
+  }, { fillDefaults: true });
+  assert.equal(flat.browserFingerprintEnabled, false);
+  assert.equal(flat.browserFingerprintLevel, 'enhanced');
+  assert.equal(flat.settingsState.flows.openai.browserFingerprint.enabled, false);
+  assert.equal(flat.settingsState.flows.openai.browserFingerprint.level, 'enhanced');
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          browserFingerprint: {
+            enabled: true,
+            level: 'basic',
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.browserFingerprintEnabled, true);
+  assert.equal(nested.browserFingerprintLevel, 'basic');
+  assert.equal(nested.settingsState.flows.openai.browserFingerprint.level, 'basic');
 });
 
 test('buildPersistentSettingsPayload persists Plus checkout conversion proxy into settings schema', () => {

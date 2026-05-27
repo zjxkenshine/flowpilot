@@ -237,6 +237,52 @@ test('step 1 reuses existing proxy exit info without probing when exit IP alread
   ]);
 });
 
+test('step 1 skips browser fingerprint generation when disabled but still opens ChatGPT', async () => {
+  const api = loadStep1Module();
+  const events = [];
+
+  const executor = api.createStep1Executor({
+    addLog: async (message, level) => {
+      events.push(['log', message, level]);
+    },
+    chrome: createNoopChromeApi(),
+    getState: async () => ({
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.8',
+      ipProxyAppliedExitRegion: 'JP',
+      ipProxyAppliedExitDetecting: false,
+      ipProxyAppliedExitSource: 'page_context',
+      browserFingerprintEnabled: false,
+    }),
+    probeIpProxyExit: async () => {
+      events.push(['probe']);
+      return {};
+    },
+    switchIpProxy: async () => {
+      events.push(['switch']);
+    },
+    ensureBrowserFingerprintForProxyExit: async () => {
+      events.push(['fingerprint']);
+    },
+    openSignupEntryTab: async (step) => {
+      events.push(['open', step]);
+    },
+    completeNodeFromBackground: async (nodeId) => {
+      events.push(['complete', nodeId]);
+    },
+  });
+
+  await executor.executeStep1();
+
+  assert.equal(events.some((event) => event[0] === 'fingerprint'), false);
+  assert.deepStrictEqual(events.filter((event) => event[0] === 'open'), [['open', 1]]);
+  assert.deepStrictEqual(events.filter((event) => event[0] === 'complete'), [['complete', 'open-chatgpt']]);
+  assert.equal(
+    events.some((event) => event[0] === 'log' && String(event[1]).includes('浏览器指纹已关闭')),
+    true
+  );
+});
+
 test('step 1 waits for proxy exit settle and continues without probing when exit IP appears', async () => {
   const api = loadStep1Module();
   const events = [];

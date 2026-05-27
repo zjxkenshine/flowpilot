@@ -52,7 +52,7 @@
   const HOSTED_CHECKOUT_VERIFICATION_RESEND_MAX_ATTEMPTS_LIMIT = 10;
   const HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
-  const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 3;
+  const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
@@ -3144,6 +3144,36 @@
           await sleepWithStop(1000);
           continue;
         }
+        if (isHostedCheckoutOpenAiAddressEmptyState(pageState)) {
+          if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS) {
+            throw new Error(`Step 6: hosted checkout billing address stayed empty after ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} fresh address refills.`);
+          }
+          hostedOpenAiAddressRetries += 1;
+          verificationSubmitted = false;
+          const retryAddress = await fetchHostedCheckoutAddress();
+          currentProfile = {
+            ...currentProfile,
+            address: retryAddress,
+          };
+          await addLog(
+            `Step 6: hosted checkout billing address is empty after submit; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}).`,
+            'warn'
+          );
+          await persistHostedGuestProfile(currentProfile);
+          const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
+            type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+            source: 'background',
+            payload: {
+              email: hostedCheckoutEmail,
+              address: currentProfile.address,
+            },
+          });
+          if (retryResult?.error) {
+            throw new Error(retryResult.error);
+          }
+          await sleepWithStop(1000);
+          continue;
+        }
         if (pageState?.hostedVerificationVisible && !verificationSubmitted) {
           const verificationCode = await pollHostedVerificationCode(config.verificationUrl);
           const verifyResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
@@ -3388,6 +3418,20 @@
         || /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i.test(message);
     }
 
+    function isHostedCheckoutOpenAiAddressEmptyState(state = {}) {
+      if (!state?.hostedOpenAiPage) {
+        return false;
+      }
+      const values = state?.hostedAddressFieldValues;
+      if (!values || typeof values !== 'object' || Array.isArray(values)) {
+        return false;
+      }
+      if (!Object.prototype.hasOwnProperty.call(values, 'address1')) {
+        return false;
+      }
+      return !normalizeString(values.address1);
+    }
+
     function isHostedCheckoutPayPalCreateAccountAddressErrorState(state = {}) {
       const message = String(
         state?.hostedCreateAccountAddressErrorMessage
@@ -3431,39 +3475,38 @@
         ? context.state
         : {};
 
-      if (retries > 0 && context?.addressSuggestionFallbackUsed !== true) {
-        const fallbackPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
-          ? {
-            expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-            addressOnly: true,
-            address: previousProfile.address,
-            useAddressSuggestionFallback: true,
-          }
-          : {
-            expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
-            address: previousProfile.address,
-            useAddressSuggestionFallback: true,
-          };
-        await addHostedStepLog(
-          stepKey,
-          `Step ${stepNumber}: PayPal ${retryStage} still reports an invalid address after a fresh address retry; selecting the first PayPal address suggestion before continuing. Error: ${errorMessage}`,
-          'warn'
-        );
-        await runHostedPayPalStep(tabId, fallbackPayload, { stepKey });
-        await sleepWithStop(1000);
-        return {
-          handled: true,
-          retries,
-          profile: previousProfile,
-          state: previousState,
-          address: previousProfile.address || null,
-          stage: retryStage,
-          addressSuggestionFallbackUsed: true,
-        };
-      }
-
       if (retries >= HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS) {
-        throw new Error(`Step ${stepNumber}: PayPal ${retryStage} address validation failed after ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} retries: ${errorMessage}`);
+        if (context?.addressSuggestionFallbackUsed !== true) {
+          const fallbackPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+            ? {
+              expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+              addressOnly: true,
+              address: previousProfile.address,
+              useAddressSuggestionFallback: true,
+            }
+            : {
+              expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+              address: previousProfile.address,
+              useAddressSuggestionFallback: true,
+            };
+          await addHostedStepLog(
+            stepKey,
+            `Step ${stepNumber}: PayPal ${retryStage} still reports an invalid address after ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} fresh address retries; selecting the first PayPal address suggestion before continuing. Error: ${errorMessage}`,
+            'warn'
+          );
+          await runHostedPayPalStep(tabId, fallbackPayload, { stepKey });
+          await sleepWithStop(1000);
+          return {
+            handled: true,
+            retries,
+            profile: previousProfile,
+            state: previousState,
+            address: previousProfile.address || null,
+            stage: retryStage,
+            addressSuggestionFallbackUsed: true,
+          };
+        }
+        throw new Error(`Step ${stepNumber}: PayPal ${retryStage} address validation failed after ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} fresh address retries and PayPal address suggestion fallback: ${errorMessage}`);
       }
 
       const nextRetries = retries + 1;

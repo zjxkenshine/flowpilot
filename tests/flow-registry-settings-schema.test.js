@@ -155,6 +155,39 @@ test('settings schema preserves CPA session strategy in canonical state and read
   assert.equal(view.plusAccountAccessStrategy, 'cpa_codex_session');
 });
 
+test('settings schema preserves browser fingerprint defaults and nested overrides', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const defaults = schema.normalizeSettingsState({});
+  const defaultView = schema.buildSettingsView(defaults);
+
+  assert.deepEqual(defaults.flows.openai.browserFingerprint, {
+    enabled: true,
+    level: 'standard',
+  });
+  assert.equal(defaultView.browserFingerprintEnabled, true);
+  assert.equal(defaultView.browserFingerprintLevel, 'standard');
+
+  const normalized = schema.normalizeSettingsState({
+    settingsState: {
+      flows: {
+        openai: {
+          browserFingerprint: {
+            enabled: false,
+            level: 'enhanced',
+          },
+        },
+      },
+    },
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.flows.openai.browserFingerprint.enabled, false);
+  assert.equal(normalized.flows.openai.browserFingerprint.level, 'enhanced');
+  assert.equal(view.browserFingerprintEnabled, false);
+  assert.equal(view.browserFingerprintLevel, 'enhanced');
+});
+
 test('settings schema preserves Plus checkout conversion proxy in canonical state and read view', () => {
   const { settingsSchema } = loadApis();
   const schema = settingsSchema.createSettingsSchema();

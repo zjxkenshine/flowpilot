@@ -223,6 +223,16 @@ function fillHostedInput(selector, value) {
   return true;
 }
 
+function getHostedAddressFieldValues() {
+  const regionSelect = document.querySelector('#billingAdministrativeArea');
+  return {
+    address1: document.querySelector('#billingAddressLine1')?.value || '',
+    city: document.querySelector('#billingLocality')?.value || '',
+    region: getHostedSelectValueText(regionSelect) || regionSelect?.value || '',
+    postalCode: document.querySelector('#billingPostalCode')?.value || '',
+  };
+}
+
 async function fillHostedEmailInput(email) {
   const normalizedEmail = normalizeText(email);
   if (!normalizedEmail) {
@@ -2504,6 +2514,7 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedCardAccordionSelected: hostedCardFallback.cardAccordionSelected,
     checkoutAmountSummary: getCheckoutAmountSummary(),
     homePlanFallback: inspectChatGptHomePlanFallback(),
+    hostedAddressFieldValues: getHostedAddressFieldValues(),
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',
       city: structuredAddress.city?.value || '',

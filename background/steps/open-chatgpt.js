@@ -178,6 +178,13 @@
       ].includes(reason);
     }
 
+    function isBrowserFingerprintEnabledForStep1(state = {}) {
+      if (state?.settingsState?.flows?.openai?.browserFingerprint?.enabled === false) {
+        return false;
+      }
+      return state?.browserFingerprintEnabled !== false;
+    }
+
     function hasReadyProxyExit(routing = {}) {
       return isReadyProxyRouting(routing) && !routing?.skipped;
     }
@@ -374,13 +381,20 @@
       if (!hasReadyProxyExit(routing)) {
         return null;
       }
+      const latestState = typeof getState === 'function' ? await getState() : {};
+      if (!isBrowserFingerprintEnabledForStep1(latestState)) {
+        await addLog('步骤 1：浏览器指纹已关闭，跳过本轮指纹生成。', 'info');
+        return { skipped: true, reason: 'disabled' };
+      }
       if (typeof ensureBrowserFingerprintForProxyExit !== 'function') {
         throw new Error('浏览器指纹更新能力不可用。');
       }
-      const latestState = typeof getState === 'function' ? await getState() : {};
       const result = await ensureBrowserFingerprintForProxyExit(routing, {
         state: latestState,
       });
+      if (result?.skipped) {
+        return result;
+      }
       const region = String(
         result?.profile?.exitRegion
         || routing?.exitRegion

@@ -590,6 +590,96 @@ test('Classic PayPal billing retries address autocomplete after address tax erro
   }
 });
 
+test('Classic PayPal billing refills a fresh address when subscribe clears address line 1', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  let addressRefilled = false;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [
+        { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+        { frameId: 3, url: 'https://checkout.stripe.com/elements-inner-address' },
+      ],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          hasSubscribeButton: true,
+        },
+        3: {
+          billingFieldsVisible: true,
+          countryText: 'United States',
+          addressFieldValues: {
+            address1: '3450 Broadway',
+            city: 'New York',
+            region: 'New York',
+            postalCode: '10031',
+          },
+        },
+      },
+      onGetState: async ({ frameId }) => {
+        if (frameId === 0) {
+          return {
+            hasPayPal: true,
+            paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+            hasSubscribeButton: true,
+          };
+        }
+        return {
+          billingFieldsVisible: true,
+          countryText: 'United States',
+          addressFieldValues: {
+            address1: clickCalls >= 1 && !addressRefilled ? '' : '1600 Pennsylvania Ave NW',
+            city: 'Washington',
+            region: 'District of Columbia',
+            postalCode: '20500',
+          },
+        };
+      },
+      onClickSubscribe: async ({ checkoutTab }) => {
+        clickCalls += 1;
+        if (addressRefilled && clickCalls >= 2) {
+          checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        }
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: 'Subscribe',
+        };
+      },
+      onSetState: async (updates) => {
+        if (clickCalls >= 1 && updates?.plusBillingAddress) {
+          addressRefilled = true;
+        }
+      },
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => createRandomUserUsPayload(),
+      }),
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+    assert.equal(subscribeMessages.length, 2);
+    assert.equal(fillMessages.length, 2);
+    assert.equal(fillMessages[1].frameId, 3);
+    assert.equal(fillMessages[1].message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
+    assert.equal(events.logs.some((entry) => /billing address is empty|cleared the billing address/i.test(entry.message)), true);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('Classic PayPal billing stops after two address tax autocomplete retries', async () => {
   const originalNow = Date.now;
   let now = 0;

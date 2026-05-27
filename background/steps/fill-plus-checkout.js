@@ -1751,6 +1751,22 @@
         || null;
     }
 
+    function findEmptyBillingAddressInspection(inspections = []) {
+      return inspections.find((item) => {
+        if (!item?.result?.billingFieldsVisible || item.frame?.ready === false) {
+          return false;
+        }
+        const values = item.result.addressFieldValues;
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+          return false;
+        }
+        if (!Object.prototype.hasOwnProperty.call(values, 'address1')) {
+          return false;
+        }
+        return !normalizeText(values.address1);
+      }) || null;
+    }
+
     async function inspectCheckoutAmountSummary(tabId) {
       const frames = await getReadyCheckoutFrames(tabId);
       const inspections = await inspectCheckoutFrames(tabId, frames);
@@ -1974,6 +1990,10 @@
         redirectTimeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
         ensurePaymentActive = false,
         addressTaxRetryContext = null,
+        addressEmptyRetryContext = null,
+        state = {},
+        billingFrame = null,
+        fullName = '',
       } = options;
       const timeoutSeconds = Math.round(Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) / 1000);
 
@@ -2020,6 +2040,53 @@
           lastSubmitError: '',
           timeoutSeconds,
         };
+      }
+
+      if (addressEmptyRetryContext && billingFrame && fullName) {
+        const frames = await getReadyCheckoutFrames(tabId);
+        const inspections = await inspectCheckoutFrames(tabId, frames);
+        const emptyAddressInspection = findEmptyBillingAddressInspection(inspections);
+        if (emptyAddressInspection) {
+          const retryCount = Math.max(0, Math.floor(Number(addressEmptyRetryContext.count) || 0));
+          if (retryCount >= PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS) {
+            return {
+              redirectedToPayment: false,
+              subscribeResult,
+              subscribeClicked,
+              subscribeButtonText,
+              subscribeButtonStatus,
+              addressEmptyRetryExhausted: true,
+              addressEmptyRetryCount: retryCount,
+              lastSubmitError: `billing address line 1 stayed empty after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries`,
+              timeoutSeconds,
+            };
+          }
+
+          const nextRetryCount = retryCount + 1;
+          await addLog(`Step 7: checkout cleared the billing address after subscribe; regenerating and refilling address (${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}).`, 'warn');
+          const freshSeed = await resolveBillingAddressSeed(state, emptyAddressInspection.result?.countryText || '', { paymentMethod });
+          const retryBillingFrame = {
+            ...billingFrame,
+            frameId: emptyAddressInspection.frame.frameId,
+            frameUrl: emptyAddressInspection.frame.url || billingFrame.frameUrl || '',
+            countryText: emptyAddressInspection.result?.countryText || billingFrame.countryText || '',
+            ready: emptyAddressInspection.frame.ready !== false,
+          };
+          const refillResult = await fillBillingAddressForCheckout(tabId, retryBillingFrame, fullName, freshSeed);
+          addressEmptyRetryContext.count = nextRetryCount;
+          return {
+            redirectedToPayment: false,
+            subscribeResult,
+            subscribeClicked,
+            subscribeButtonText,
+            subscribeButtonStatus,
+            addressEmptyRetried: true,
+            addressEmptyRetryCount: nextRetryCount,
+            addressEmptyRetryResult: refillResult,
+            lastSubmitError: `billing address was empty after subscribe; refilled with a fresh address ${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}`,
+            timeoutSeconds,
+          };
+        }
       }
 
       if (addressTaxRetryContext && paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
@@ -2108,10 +2175,14 @@
         paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
         paymentConfig = getPaymentMethodConfig(paymentMethod),
         subscribeFrameCandidates = [{ frameId: 0, url: '' }],
+        state = {},
+        billingFrame = null,
+        fullName = '',
       } = options;
       let redirectedToPayment = false;
       let lastSubmitError = '';
       const addressTaxRetryContext = { count: 0 };
+      const addressEmptyRetryContext = { count: 0 };
 
       for (let attempt = 1; attempt <= PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
         await addLog(
@@ -2132,6 +2203,10 @@
           beforeClickDelayMs: attempt === 1 ? 700 : 1200,
           redirectTimeoutMs: PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
           addressTaxRetryContext,
+          addressEmptyRetryContext,
+          state,
+          billingFrame,
+          fullName,
         });
         if (submitAttempt.subscribeResult?.error) {
           lastSubmitError = submitAttempt.lastSubmitError;
@@ -2141,6 +2216,14 @@
 
         if (submitAttempt.addressTaxRetryExhausted) {
           throw new Error(`PLUS_CHECKOUT_ADDRESS_TAX_RETRY_EXHAUSTED::Step 7: address/tax validation still failed after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries. ${submitAttempt.addressTaxErrorMessage || 'Address cannot be used to calculate tax.'}`);
+        }
+        if (submitAttempt.addressEmptyRetryExhausted) {
+          throw new Error(`PLUS_CHECKOUT_ADDRESS_EMPTY_RETRY_EXHAUSTED::Step 7: billing address stayed empty after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} fresh address refills.`);
+        }
+        if (submitAttempt.addressEmptyRetried) {
+          lastSubmitError = submitAttempt.lastSubmitError;
+          attempt -= 1;
+          continue;
         }
         if (submitAttempt.addressTaxRetried) {
           lastSubmitError = submitAttempt.lastSubmitError;
@@ -2337,6 +2420,9 @@
             paymentMethod,
             paymentConfig,
             subscribeFrameCandidates,
+            state: billingState,
+            billingFrame,
+            fullName,
           });
           await completeNodeFromBackground('plus-checkout-billing', {
             plusBillingCountryText: billingResult?.countryText || '',
@@ -2355,6 +2441,9 @@
             paymentMethod,
             paymentConfig,
             subscribeFrameCandidates,
+            state: billingState,
+            billingFrame,
+            fullName,
           });
           await completeNodeFromBackground('plus-checkout-billing', {
             plusBillingCountryText: billingResult?.countryText || '',

@@ -618,7 +618,7 @@ test('tab runtime applies browser fingerprint to new automation tabs', async () 
     LOG_PREFIX: '[test]',
     addLog: async () => {},
     applyBrowserFingerprintToTab: async (tabId, profile, options) => {
-      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, source: options.source });
+      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, source: options.source, level: options.level });
     },
     chrome: {
       tabs: {
@@ -630,6 +630,7 @@ test('tab runtime applies browser fingerprint to new automation tabs', async () 
     getSourceLabel: (sourceName) => sourceName || 'unknown',
     getState: async () => ({
       automationWindowId: 100,
+      browserFingerprintLevel: 'enhanced',
       browserFingerprintProfile: { profileId: 'fp-test', userAgent: 'ua' },
       tabRegistry: {},
       sourceLastUrls: {},
@@ -643,8 +644,45 @@ test('tab runtime applies browser fingerprint to new automation tabs', async () 
   await runtime.reuseOrCreateTab('signup-page', 'https://chatgpt.com/');
 
   assert.deepEqual(applied, [
-    { tabId: 17, profileId: 'fp-test', phase: 'created', source: 'signup-page' },
+    { tabId: 17, profileId: 'fp-test', phase: 'created', source: 'signup-page', level: 'enhanced' },
   ]);
+});
+
+test('tab runtime skips browser fingerprint when disabled even if an old profile exists', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  let applyCalls = 0;
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToTab: async () => {
+      applyCalls += 1;
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => ({ id: 17, windowId: payload.windowId, url: payload.url }),
+        get: async () => ({ id: 17, windowId: 100, url: 'https://chatgpt.com/' }),
+        query: async () => [],
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      browserFingerprintEnabled: false,
+      browserFingerprintProfile: { profileId: 'fp-old', userAgent: 'ua' },
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    shouldApplyBrowserFingerprintToSource: () => true,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://chatgpt.com/');
+
+  assert.equal(applyCalls, 0);
 });
 
 test('tab runtime applies browser fingerprint before and after reuse navigation and reload', async () => {

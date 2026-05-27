@@ -326,6 +326,25 @@
           <span class="setting-caption">手机号注册后接 Plus 订阅链路</span>
         </div>
       </div>
+      <div class="data-row" id="row-browser-fingerprint">
+        <span class="data-label">浏览器指纹</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-browser-fingerprint-enabled" title="开启后按代理出口生成并应用浏览器指纹">
+              <input type="checkbox" id="input-browser-fingerprint-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <select id="select-browser-fingerprint-level" class="data-select browser-fingerprint-level-select" aria-label="浏览器指纹生成级别">
+            <option value="basic">基础</option>
+            <option value="standard">标准</option>
+            <option value="enhanced">增强</option>
+          </select>
+          <span class="setting-caption browser-fingerprint-caption" id="browser-fingerprint-caption">标准生成</span>
+        </div>
+      </div>
       <div class="data-row" id="row-plus-account-access-strategy" style="display:none;">
         <span class="data-label">账号接入策略</span>
         <div class="data-inline">

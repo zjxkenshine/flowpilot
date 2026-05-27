@@ -19,6 +19,9 @@
     'other',
   ];
   const FINGERPRINT_LOG_LABEL = '[FlowPilot:browser-fingerprint] generated';
+  const BROWSER_FINGERPRINT_LEVEL_BASIC = 'basic';
+  const BROWSER_FINGERPRINT_LEVEL_STANDARD = 'standard';
+  const BROWSER_FINGERPRINT_LEVEL_ENHANCED = 'enhanced';
 
   const REGION_DEFAULTS = Object.freeze({
     US: Object.freeze({
@@ -151,6 +154,31 @@
       return upper;
     }
     return REGION_NAME_ALIASES[upper] || '';
+  }
+
+  function normalizeBrowserFingerprintLevel(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === BROWSER_FINGERPRINT_LEVEL_BASIC || normalized === BROWSER_FINGERPRINT_LEVEL_ENHANCED) {
+      return normalized;
+    }
+    return BROWSER_FINGERPRINT_LEVEL_STANDARD;
+  }
+
+  function isBrowserFingerprintEnabled(state = {}) {
+    const nestedEnabled = state?.settingsState?.flows?.openai?.browserFingerprint?.enabled;
+    if (nestedEnabled === false) {
+      return false;
+    }
+    return state?.browserFingerprintEnabled !== false;
+  }
+
+  function getBrowserFingerprintLevelFromState(state = {}, fallback = BROWSER_FINGERPRINT_LEVEL_STANDARD) {
+    const rawLevel = state?.browserFingerprintLevel
+      ?? state?.settingsState?.flows?.openai?.browserFingerprint?.level;
+    if (rawLevel === undefined || rawLevel === null || String(rawLevel || '').trim() === '') {
+      return normalizeBrowserFingerprintLevel(fallback);
+    }
+    return normalizeBrowserFingerprintLevel(rawLevel);
   }
 
   function hashString(value = '') {
@@ -334,6 +362,9 @@
 
     return {
       profileId: `fp_${hashString(seedKey).toString(16)}`,
+      level: normalizeBrowserFingerprintLevel(
+        options?.level ?? options?.browserFingerprintLevel ?? getBrowserFingerprintLevelFromState(state)
+      ),
       seedKey,
       exitIp,
       exitRegion: regionCode,
@@ -374,6 +405,9 @@
   }
 
   function shouldApplyBrowserFingerprintToSource(source = '', options = {}) {
+    if (options?.state && !isBrowserFingerprintEnabled(options.state)) {
+      return false;
+    }
     const canonicalSource = String(options?.canonicalSource || source || '').trim();
     return new Set([
       'chatgpt',
@@ -418,8 +452,30 @@
     return { skipped: false, ruleIds: HEADER_RULE_IDS.slice(), applied: addRules.length > 0 };
   }
 
-  function buildNavigatorPatchPayload(profile = {}) {
+  async function clearBrowserFingerprintHeaderRules(chromeApi) {
+    if (!chromeApi?.declarativeNetRequest?.updateDynamicRules) {
+      return { skipped: true, reason: 'dnr_unavailable' };
+    }
+    await chromeApi.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: HEADER_RULE_IDS,
+      addRules: [],
+    });
+    return { skipped: false, ruleIds: HEADER_RULE_IDS.slice(), applied: false };
+  }
+
+  function buildClearedBrowserFingerprintState() {
     return {
+      browserFingerprintProfile: null,
+      browserFingerprintAppliedAt: 0,
+      browserFingerprintExitIp: '',
+      browserFingerprintExitRegion: '',
+    };
+  }
+
+  function buildNavigatorPatchPayload(profile = {}, options = {}) {
+    const level = normalizeBrowserFingerprintLevel(options?.level ?? profile.level);
+    return {
+      level,
       userAgent: profile.userAgent,
       language: profile.languages?.[0] || profile.locale,
       languages: Array.isArray(profile.languages) ? profile.languages : [profile.locale || 'en-US'],
@@ -435,6 +491,9 @@
       webglVendor: profile.webglVendor,
       webglRenderer: profile.webglRenderer,
       geolocation: profile.geolocation,
+      noiseSeed: level === BROWSER_FINGERPRINT_LEVEL_ENHANCED
+        ? `fp_noise_${hashString(`enhanced|${profile.profileId || ''}`).toString(16)}`
+        : '',
     };
   }
 
@@ -446,6 +505,14 @@
     if (!isValidBrowserFingerprintProfile(profile)) {
       return { skipped: true, reason: 'missing_profile' };
     }
+    if (options?.state && !isBrowserFingerprintEnabled(options.state)) {
+      return { skipped: true, reason: 'disabled' };
+    }
+    const level = normalizeBrowserFingerprintLevel(
+      options?.level
+      ?? options?.browserFingerprintLevel
+      ?? getBrowserFingerprintLevelFromState(options?.state, profile.level)
+    );
     const target = { tabId: Number(tabId) };
     let attached = false;
     if (chromeApi?.debugger?.attach && chromeApi?.debugger?.sendCommand) {
@@ -465,28 +532,30 @@
           platform: profile.platform,
           userAgentMetadata: profile.userAgentMetadata,
         });
-        await chromeApi.debugger.sendCommand(target, 'Emulation.setLocaleOverride', {
-          locale: profile.locale,
-        });
-        await chromeApi.debugger.sendCommand(target, 'Emulation.setTimezoneOverride', {
-          timezoneId: profile.timezoneId,
-        });
-        await chromeApi.debugger.sendCommand(target, 'Emulation.setGeolocationOverride', {
-          latitude: profile.geolocation.latitude,
-          longitude: profile.geolocation.longitude,
-          accuracy: profile.geolocation.accuracy,
-        });
-        await chromeApi.debugger.sendCommand(target, 'Emulation.setDeviceMetricsOverride', {
-          width: Number(profile.screen?.width) || 1440,
-          height: Number(profile.screen?.height) || 900,
-          deviceScaleFactor: Number(profile.screen?.deviceScaleFactor) || 1,
-          mobile: false,
-          screenWidth: Number(profile.screen?.width) || 1440,
-          screenHeight: Number(profile.screen?.height) || 900,
-          positionX: 0,
-          positionY: 0,
-          dontSetVisibleSize: false,
-        });
+        if (level !== BROWSER_FINGERPRINT_LEVEL_BASIC) {
+          await chromeApi.debugger.sendCommand(target, 'Emulation.setLocaleOverride', {
+            locale: profile.locale,
+          });
+          await chromeApi.debugger.sendCommand(target, 'Emulation.setTimezoneOverride', {
+            timezoneId: profile.timezoneId,
+          });
+          await chromeApi.debugger.sendCommand(target, 'Emulation.setGeolocationOverride', {
+            latitude: profile.geolocation.latitude,
+            longitude: profile.geolocation.longitude,
+            accuracy: profile.geolocation.accuracy,
+          });
+          await chromeApi.debugger.sendCommand(target, 'Emulation.setDeviceMetricsOverride', {
+            width: Number(profile.screen?.width) || 1440,
+            height: Number(profile.screen?.height) || 900,
+            deviceScaleFactor: Number(profile.screen?.deviceScaleFactor) || 1,
+            mobile: false,
+            screenWidth: Number(profile.screen?.width) || 1440,
+            screenHeight: Number(profile.screen?.height) || 900,
+            positionX: 0,
+            positionY: 0,
+            dontSetVisibleSize: false,
+          });
+        }
       } finally {
         if (attached && chromeApi.debugger?.detach) {
           await chromeApi.debugger.detach(target).catch(() => {});
@@ -510,12 +579,16 @@
             }
           };
           const navigatorProto = Navigator.prototype;
+          const isStandardOrEnhanced = payload.level !== 'basic';
+          const isEnhanced = payload.level === 'enhanced';
           defineGetter(navigatorProto, 'userAgent', payload.userAgent);
           defineGetter(navigatorProto, 'language', payload.language);
           defineGetter(navigatorProto, 'languages', Object.freeze([...(payload.languages || [])]));
-          defineGetter(navigatorProto, 'platform', payload.platform);
-          defineGetter(navigatorProto, 'hardwareConcurrency', payload.hardwareConcurrency);
-          defineGetter(navigatorProto, 'deviceMemory', payload.deviceMemory);
+          if (isStandardOrEnhanced) {
+            defineGetter(navigatorProto, 'platform', payload.platform);
+            defineGetter(navigatorProto, 'hardwareConcurrency', payload.hardwareConcurrency);
+            defineGetter(navigatorProto, 'deviceMemory', payload.deviceMemory);
+          }
           if (payload.userAgentData) {
             const userAgentData = {
               ...payload.userAgentData,
@@ -545,7 +618,7 @@
             defineGetter(navigatorProto, 'userAgentData', userAgentData);
           }
 
-          if (payload.geolocation && navigator.geolocation) {
+          if (isStandardOrEnhanced && payload.geolocation && navigator.geolocation) {
             const position = {
               coords: {
                 latitude: payload.geolocation.latitude,
@@ -576,7 +649,7 @@
             }
           }
 
-          if (payload.screen && typeof Screen !== 'undefined') {
+          if (isStandardOrEnhanced && payload.screen && typeof Screen !== 'undefined') {
             for (const [key, value] of Object.entries(payload.screen)) {
               if (['width', 'height', 'availWidth', 'availHeight', 'colorDepth', 'pixelDepth'].includes(key)) {
                 defineGetter(Screen.prototype, key, value);
@@ -600,20 +673,155 @@
               return originalGetParameter.call(this, parameter);
             };
           };
-          patchWebGl('WebGLRenderingContext');
-          patchWebGl('WebGL2RenderingContext');
+          if (isStandardOrEnhanced) {
+            patchWebGl('WebGLRenderingContext');
+            patchWebGl('WebGL2RenderingContext');
+          }
+
+          if (isEnhanced) {
+            let canvasNoiseInternalRead = false;
+            const hashText = (text) => {
+              let hash = 2166136261;
+              const source = String(text || '');
+              for (let index = 0; index < source.length; index += 1) {
+                hash ^= source.charCodeAt(index);
+                hash = Math.imul(hash, 16777619);
+              }
+              return hash >>> 0;
+            };
+            const noiseFor = (suffix, modulo = 3) => (hashText(`${payload.noiseSeed}|${suffix}`) % modulo);
+            const withCanvasNoise = (canvas, suffix, callback) => {
+              if (!canvas || typeof canvas.getContext !== 'function') {
+                return callback();
+              }
+              const width = Math.max(0, Number(canvas.width) || 0);
+              const height = Math.max(0, Number(canvas.height) || 0);
+              if (!width || !height) {
+                return callback();
+              }
+              const context = canvas.getContext('2d', { willReadFrequently: true });
+              if (!context?.getImageData || !context?.putImageData) {
+                return callback();
+              }
+              const x = noiseFor(`${suffix}|x`, width);
+              const y = noiseFor(`${suffix}|y`, height);
+              let imageData;
+              canvasNoiseInternalRead = true;
+              try {
+                imageData = context.getImageData(x, y, 1, 1);
+              } finally {
+                canvasNoiseInternalRead = false;
+              }
+              const original = new Uint8ClampedArray(imageData.data);
+              for (let index = 0; index < 3; index += 1) {
+                const delta = noiseFor(`${suffix}|${index}`, 3) - 1;
+                imageData.data[index] = Math.max(0, Math.min(255, imageData.data[index] + delta));
+              }
+              context.putImageData(imageData, x, y);
+              let restored = false;
+              const restore = () => {
+                if (restored) return;
+                restored = true;
+                imageData.data.set(original);
+                context.putImageData(imageData, x, y);
+              };
+              try {
+                const result = callback(restore);
+                if (result && typeof result.then === 'function') {
+                  return result.finally(restore);
+                }
+                return result;
+              } finally {
+                if (suffix !== 'toBlob') {
+                  restore();
+                }
+              }
+            };
+            if (typeof HTMLCanvasElement !== 'undefined' && !HTMLCanvasElement.prototype.__flowPilotCanvasFingerprintPatched) {
+              const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+              const originalToBlob = HTMLCanvasElement.prototype.toBlob;
+              Object.defineProperty(HTMLCanvasElement.prototype, '__flowPilotCanvasFingerprintPatched', {
+                configurable: true,
+                value: true,
+              });
+              if (typeof originalToDataURL === 'function') {
+                HTMLCanvasElement.prototype.toDataURL = function toDataURLWithFingerprintNoise(...args) {
+                  return withCanvasNoise(this, 'toDataURL', () => originalToDataURL.apply(this, args));
+                };
+              }
+              if (typeof originalToBlob === 'function') {
+                HTMLCanvasElement.prototype.toBlob = function toBlobWithFingerprintNoise(callback, ...args) {
+                  return withCanvasNoise(this, 'toBlob', (restore) => originalToBlob.call(this, (...callbackArgs) => {
+                    try {
+                      if (typeof callback === 'function') {
+                        callback(...callbackArgs);
+                      }
+                    } finally {
+                      restore();
+                    }
+                  }, ...args));
+                };
+              }
+            }
+            if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.__flowPilotImageDataFingerprintPatched) {
+              const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+              Object.defineProperty(CanvasRenderingContext2D.prototype, '__flowPilotImageDataFingerprintPatched', {
+                configurable: true,
+                value: true,
+              });
+              CanvasRenderingContext2D.prototype.getImageData = function getImageDataWithFingerprintNoise(...args) {
+                const imageData = originalGetImageData.apply(this, args);
+                if (canvasNoiseInternalRead) {
+                  return imageData;
+                }
+                if (imageData?.data?.length >= 4) {
+                  for (let index = 0; index < Math.min(12, imageData.data.length); index += 4) {
+                    const delta = noiseFor(`imageData|${index}`, 3) - 1;
+                    imageData.data[index] = Math.max(0, Math.min(255, imageData.data[index] + delta));
+                  }
+                }
+                return imageData;
+              };
+            }
+            if (typeof AudioBuffer !== 'undefined' && !AudioBuffer.prototype.__flowPilotAudioFingerprintPatched) {
+              const originalGetChannelData = AudioBuffer.prototype.getChannelData;
+              const patchedAudioChannels = new WeakMap();
+              Object.defineProperty(AudioBuffer.prototype, '__flowPilotAudioFingerprintPatched', {
+                configurable: true,
+                value: true,
+              });
+              AudioBuffer.prototype.getChannelData = function getChannelDataWithFingerprintNoise(...args) {
+                const channelData = originalGetChannelData.apply(this, args);
+                const channel = Math.max(0, Math.floor(Number(args?.[0]) || 0));
+                let channelSet = patchedAudioChannels.get(this);
+                if (!channelSet) {
+                  channelSet = new Set();
+                  patchedAudioChannels.set(this, channelSet);
+                }
+                if (channelData?.length && !channelSet.has(channel)) {
+                  const stride = Math.max(1, Math.floor(channelData.length / 16));
+                  for (let index = 0; index < channelData.length; index += stride) {
+                    channelData[index] += (noiseFor(`audio|${channel}|${index}`, 3) - 1) * 0.0000001;
+                  }
+                  channelSet.add(channel);
+                }
+                return channelData;
+              };
+            }
+          }
 
           window.__FLOWPILOT_BROWSER_FINGERPRINT__ = Object.freeze({
             profileAppliedAt: Date.now(),
+            level: payload.level,
             language: payload.language,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           });
         },
-        args: [buildNavigatorPatchPayload(profile)],
+        args: [buildNavigatorPatchPayload(profile, { level })],
       });
     }
 
-    return { applied: true, tabId: Number(tabId), profileId: profile.profileId };
+    return { applied: true, tabId: Number(tabId), profileId: profile.profileId, level };
   }
 
   function createBrowserFingerprintManager(deps = {}) {
@@ -627,6 +835,10 @@
 
     async function ensureBrowserFingerprintForProxyExit(proxyRouting = {}, options = {}) {
       const state = options?.state || (typeof getState === 'function' ? await getState() : {});
+      if (!isBrowserFingerprintEnabled(state)) {
+        const clearResult = await clearBrowserFingerprint({ log: false });
+        return { skipped: true, reason: 'disabled', ...clearResult };
+      }
       const profile = buildBrowserFingerprintProfile(proxyRouting, state, options);
       if (!String(profile.exitIp || '').trim()) {
         return { skipped: true, reason: 'missing_exit_ip' };
@@ -652,18 +864,39 @@
     }
 
     async function applyProfileToTab(tabId, profile = null, options = {}) {
+      const state = options?.state || (typeof getState === 'function' ? await getState() : {});
+      if (!isBrowserFingerprintEnabled(state)) {
+        return { skipped: true, reason: 'disabled' };
+      }
       const resolvedProfile = profile || options?.profile || (typeof getState === 'function'
-        ? (await getState())?.browserFingerprintProfile
+        ? state?.browserFingerprintProfile
         : null);
-      return applyBrowserFingerprintToTab(tabId, resolvedProfile, { ...options, chrome: chromeApi });
+      return applyBrowserFingerprintToTab(tabId, resolvedProfile, { ...options, chrome: chromeApi, state });
+    }
+
+    async function clearBrowserFingerprint(options = {}) {
+      const updates = buildClearedBrowserFingerprintState();
+      await clearBrowserFingerprintHeaderRules(chromeApi);
+      if (options?.setState !== false && options?.persist !== false && typeof setState === 'function') {
+        await setState(updates);
+      }
+      if (options?.broadcast !== false && typeof broadcastDataUpdate === 'function') {
+        broadcastDataUpdate(updates);
+      }
+      if (options?.log !== false && typeof addLog === 'function') {
+        await addLog('浏览器指纹已关闭，已清理本轮指纹运行态。', 'info');
+      }
+      return { updates };
     }
 
     return {
       applyBrowserFingerprintHeaderRules: (profile) => applyBrowserFingerprintHeaderRules(chromeApi, profile),
       applyBrowserFingerprintToTab: applyProfileToTab,
       buildBrowserFingerprintProfile,
+      clearBrowserFingerprint,
       ensureBrowserFingerprintForProxyExit,
       isValidBrowserFingerprintProfile,
+      normalizeBrowserFingerprintLevel,
       shouldApplyBrowserFingerprintToSource,
     };
   }
@@ -671,11 +904,20 @@
   return {
     LANGUAGE_FINGERPRINT_PROFILES,
     REGION_DEFAULTS,
+    BROWSER_FINGERPRINT_LEVEL_BASIC,
+    BROWSER_FINGERPRINT_LEVEL_STANDARD,
+    BROWSER_FINGERPRINT_LEVEL_ENHANCED,
     applyBrowserFingerprintHeaderRules,
     applyBrowserFingerprintToTab,
+    buildClearedBrowserFingerprintState,
     buildBrowserFingerprintProfile,
+    buildNavigatorPatchPayload,
+    clearBrowserFingerprintHeaderRules,
     createBrowserFingerprintManager,
+    getBrowserFingerprintLevelFromState,
+    isBrowserFingerprintEnabled,
     isValidBrowserFingerprintProfile,
+    normalizeBrowserFingerprintLevel,
     normalizeRegionCode,
     resolveLanguageFingerprintProfile,
     shouldApplyBrowserFingerprintToSource,

@@ -224,6 +224,25 @@
       ]).has(canonicalSource || source);
     }
 
+    function isBrowserFingerprintEnabledForState(state = {}) {
+      if (state?.settingsState?.flows?.openai?.browserFingerprint?.enabled === false) {
+        return false;
+      }
+      return state?.browserFingerprintEnabled !== false;
+    }
+
+    function getBrowserFingerprintLevelForState(state = {}) {
+      const normalized = String(
+        state?.browserFingerprintLevel
+        ?? state?.settingsState?.flows?.openai?.browserFingerprint?.level
+        ?? 'standard'
+      ).trim().toLowerCase();
+      if (normalized === 'basic' || normalized === 'enhanced') {
+        return normalized;
+      }
+      return 'standard';
+    }
+
     async function applyBrowserFingerprintForSource(source, tabId, options = {}) {
       if (typeof applyBrowserFingerprintToTab !== 'function') {
         return null;
@@ -235,6 +254,9 @@
         return null;
       }
       const state = await getState();
+      if (!isBrowserFingerprintEnabledForState(state)) {
+        return null;
+      }
       const profile = options.profile || state?.browserFingerprintProfile;
       if (!hasBrowserFingerprintProfile(profile)) {
         return null;
@@ -244,6 +266,7 @@
           source,
           phase: options.phase || '',
           state,
+          level: getBrowserFingerprintLevelForState(state),
           url: options.url || '',
         });
       } catch (error) {

@@ -57,6 +57,13 @@
       }
       return 'oauth';
     };
+    const normalizeBrowserFingerprintLevel = (value = '') => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'basic' || normalized === 'enhanced') {
+        return normalized;
+      }
+      return 'standard';
+    };
     const defaultPayPalGeneratedProfile = Object.freeze({
       email: '',
       phone: '',
@@ -262,6 +269,10 @@
               signupMethod: 'email',
               phoneVerificationEnabled: false,
               phoneSignupReloginAfterBindEmailEnabled: false,
+            },
+            browserFingerprint: {
+              enabled: true,
+              level: 'standard',
             },
             plus: {
               plusModeEnabled: false,
@@ -486,6 +497,18 @@
                 input?.phoneSignupReloginAfterBindEmailEnabled
                 ?? nested?.flows?.openai?.signup?.phoneSignupReloginAfterBindEmailEnabled
                 ?? defaults.flows.openai.signup.phoneSignupReloginAfterBindEmailEnabled
+              ),
+            },
+            browserFingerprint: {
+              enabled: Boolean(
+                input?.browserFingerprintEnabled
+                ?? nested?.flows?.openai?.browserFingerprint?.enabled
+                ?? defaults.flows.openai.browserFingerprint.enabled
+              ),
+              level: normalizeBrowserFingerprintLevel(
+                input?.browserFingerprintLevel
+                ?? nested?.flows?.openai?.browserFingerprint?.level
+                ?? defaults.flows.openai.browserFingerprint.level
               ),
             },
             plus: {
@@ -840,6 +863,8 @@
       next.signupMethod = openaiState.signup.signupMethod;
       next.phoneVerificationEnabled = openaiState.signup.phoneVerificationEnabled;
       next.phoneSignupReloginAfterBindEmailEnabled = openaiState.signup.phoneSignupReloginAfterBindEmailEnabled;
+      next.browserFingerprintEnabled = openaiState.browserFingerprint.enabled;
+      next.browserFingerprintLevel = openaiState.browserFingerprint.level;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;

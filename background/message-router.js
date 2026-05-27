@@ -19,6 +19,7 @@
       deleteAccountRunHistoryRecords,
       clearAutoRunTimerAlarm,
       clearFreeReusablePhoneActivation,
+      clearBrowserFingerprint,
       clearLuckmailRuntimeState,
       clearYydsMailRuntimeState,
       clearStopRequest,
@@ -359,6 +360,127 @@
 
     function isSignupPhoneRetryFromStep2Failure(error) {
       return /SIGNUP_PHONE_RETRY_FROM_STEP2::/i.test(getErrorMessage(error));
+    }
+
+    function normalizeManualPlusCheckoutPaymentMethod(value = '') {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'paypal-hosted' || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
+        return 'paypal-hosted';
+      }
+      if (normalized === 'gopay') {
+        return 'gopay';
+      }
+      if (normalized === 'gpc-helper') {
+        return 'gpc-helper';
+      }
+      return 'paypal';
+    }
+
+    function shouldPrepareManualPlusCheckoutNode(nodeId = '', state = {}) {
+      if (String(nodeId || '').trim() !== 'plus-checkout-create') {
+        return false;
+      }
+      if (!Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled)) {
+        return false;
+      }
+      const paymentMethod = normalizeManualPlusCheckoutPaymentMethod(state?.plusPaymentMethod);
+      return paymentMethod === 'paypal' || paymentMethod === 'paypal-hosted';
+    }
+
+    function isFailedManualPlusCheckoutProxyRouting(routing = null, switchResult = null) {
+      if (!routing || typeof routing !== 'object') {
+        return true;
+      }
+      const reason = String(routing.reason || switchResult?.reason || '').trim().toLowerCase();
+      const failedReasons = new Set([
+        'connectivity_failed',
+        'apply_failed',
+        'missing_proxy_entry',
+        'proxy_api_unavailable',
+        'disabled',
+        'disabled_probe_only',
+      ]);
+      return routing.applied === false || !String(routing.exitIp || '').trim() || failedReasons.has(reason);
+    }
+
+    async function prepareManualPlusCheckoutProxyBeforeExecute(nodeId = '', state = {}) {
+      if (!shouldPrepareManualPlusCheckoutNode(nodeId, state)) {
+        return {
+          prepared: false,
+          reason: 'not_plus_checkout_create',
+        };
+      }
+
+      let latestState = state && typeof state === 'object' ? state : {};
+      let releasedPaymentProxy = false;
+      if (checkoutConversionProxyManager?.getStoredSession && checkoutConversionProxyManager?.restoreSession) {
+        const session = await checkoutConversionProxyManager.getStoredSession(latestState);
+        if (session?.active) {
+          const displayName = String(session.displayName || session.selectedEntryDisplayName || '').trim();
+          await checkoutConversionProxyManager.restoreSession(session);
+          releasedPaymentProxy = true;
+          await addLog(
+            displayName
+              ? `手动执行：Plus Checkout 重新创建前已释放支付转换代理 ${displayName}，准备恢复 IP 代理。`
+              : '手动执行：Plus Checkout 重新创建前已释放支付转换代理，准备恢复 IP 代理。',
+            'info'
+          );
+          if (typeof getState === 'function') {
+            latestState = await getState().catch(() => latestState);
+          }
+        }
+      }
+
+      if (!latestState?.ipProxyEnabled) {
+        await addLog('手动执行：Plus Checkout 重新创建前未启用 IP 代理，跳过换 IP。', 'info');
+        return {
+          prepared: true,
+          releasedPaymentProxy,
+          switchedIpProxy: false,
+          skippedReason: 'ip_proxy_disabled',
+        };
+      }
+
+      if (typeof switchIpProxy !== 'function') {
+        throw new Error('手动执行：Plus Checkout 重新创建前需要切换 IP 代理，但切换能力不可用。');
+      }
+
+      await addLog('手动执行：Plus Checkout 重新创建前正在切换 IP 代理...', 'info');
+      let switchResult = null;
+      try {
+        switchResult = await switchIpProxy('next', {
+          state: latestState,
+          forceRefresh: true,
+          skipExitProbe: false,
+        });
+      } catch (error) {
+        throw new Error(`手动执行：Plus Checkout 重新创建前切换 IP 代理失败：${getErrorMessage(error)}`);
+      }
+
+      const routing = switchResult?.proxyRouting || {};
+      if (isFailedManualPlusCheckoutProxyRouting(routing, switchResult)) {
+        const detail = String(
+          routing?.exitError
+          || routing?.error
+          || switchResult?.reason
+          || routing?.reason
+          || '未检测到可用出口'
+        ).trim();
+        throw new Error(`手动执行：Plus Checkout 重新创建前切换 IP 代理后出口不可用：${detail}`);
+      }
+
+      const display = String(switchResult?.display || '').trim();
+      const displaySuffix = display ? `（${display}）` : '';
+      const exitIp = String(routing.exitIp || '').trim();
+      const exitRegion = String(routing.exitRegion || '').trim();
+      const exitSuffix = exitRegion ? `${exitIp} [${exitRegion}]` : exitIp;
+      await addLog(`手动执行：Plus Checkout 重新创建前已切换 IP 代理${displaySuffix}，当前出口 ${exitSuffix}。`, 'ok');
+      return {
+        prepared: true,
+        releasedPaymentProxy,
+        switchedIpProxy: true,
+        switchResult,
+      };
     }
 
     async function clearSignupPhoneRuntimeForStep2Retry() {
@@ -1466,6 +1588,9 @@
           if (message.source === 'sidepanel') {
             await invalidateDownstreamAfterStepRestart(resolvedStep, { logLabel: `节点 ${nodeId} 重新执行` });
           }
+          if (message.source === 'sidepanel') {
+            await prepareManualPlusCheckoutProxyBeforeExecute(nodeId, await getState());
+          }
           if (message.payload.email) {
             await setEmailState(message.payload.email);
           }
@@ -1709,6 +1834,24 @@
               oauthFlowDeadlineSourceUrl: null,
             } : {}),
           };
+          if (
+            Object.prototype.hasOwnProperty.call(canonicalSettingsUpdates, 'browserFingerprintEnabled')
+            && canonicalSettingsUpdates.browserFingerprintEnabled === false
+            && typeof clearBrowserFingerprint === 'function'
+          ) {
+            const clearResult = await clearBrowserFingerprint({
+              broadcast: false,
+              log: false,
+              setState: false,
+            }).catch((error) => ({
+              error: error?.message || String(error || '浏览器指纹清理失败'),
+            }));
+            if (!clearResult?.error) {
+              Object.assign(stateUpdates, clearResult?.updates || {});
+            } else {
+              await addLog(`浏览器指纹关闭后清理失败：${clearResult.error}`, 'warn');
+            }
+          }
           if (
             message.payload?.plusHostedCheckoutGuestProfile
             && typeof message.payload.plusHostedCheckoutGuestProfile === 'object'

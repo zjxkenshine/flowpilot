@@ -94,6 +94,226 @@ test('message router module exposes a factory', () => {
   assert.equal(typeof api?.createMessageRouter, 'function');
 });
 
+function createExecuteNodeRouterHarness(options = {}) {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const events = Array.isArray(options.events) ? options.events : [];
+  let state = {
+    plusModeEnabled: true,
+    plusPaymentMethod: 'paypal',
+    ipProxyEnabled: true,
+    nodeStatuses: {
+      'plus-checkout-create': 'pending',
+      'fill-password': 'pending',
+    },
+    ...(options.state || {}),
+  };
+  const stepByNode = {
+    'plus-checkout-create': 6,
+    'fill-password': 3,
+    ...(options.stepByNode || {}),
+  };
+  const router = api.createMessageRouter({
+    addLog: async (message, level) => events.push({ type: 'log', message, level }),
+    clearStopRequest: () => events.push({ type: 'clear-stop' }),
+    checkoutConversionProxyManager: options.checkoutConversionProxyManager || {
+      getStoredSession: async () => null,
+      restoreSession: async () => {},
+    },
+    doesNodeUseCompletionSignal: () => false,
+    ensureManualInteractionAllowed: async () => events.push({ type: 'manual-allowed' }),
+    executeNode: async (nodeId) => events.push({ type: 'execute', nodeId }),
+    getState: async () => ({ ...state, nodeStatuses: { ...(state.nodeStatuses || {}) } }),
+    getStepIdByNodeIdForState: (nodeId) => stepByNode[nodeId] || 0,
+    invalidateDownstreamAfterStepRestart: async (step) => events.push({ type: 'invalidate', step }),
+    isAutoRunLockedState: () => false,
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    switchIpProxy: options.switchIpProxy || (async (direction, switchOptions = {}) => {
+      events.push({ type: 'switch', direction, options: switchOptions });
+      return {
+        display: 'http://ip-proxy.example:8000',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '203.0.113.9',
+          exitRegion: 'US',
+        },
+      };
+    }),
+  });
+
+  return { router, events, getState: () => state };
+}
+
+test('EXECUTE_NODE plus checkout create releases conversion proxy and switches IP before execute', async () => {
+  const events = [];
+  const harness = createExecuteNodeRouterHarness({
+    events,
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => ({
+        active: true,
+        flowType: 'classic-paypal',
+        displayName: 'http://pay-proxy.example:8080',
+      }),
+      restoreSession: async (session) => events.push({ type: 'restore', session }),
+    },
+    switchIpProxy: async (direction, switchOptions = {}) => {
+      events.push({ type: 'switch', direction, options: switchOptions });
+      return {
+        display: 'http://ip-proxy.example:8000',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '203.0.113.9',
+          exitRegion: 'US',
+        },
+      };
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    payload: { nodeId: 'plus-checkout-create' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.deepStrictEqual(events.map((event) => event.type), [
+    'clear-stop',
+    'manual-allowed',
+    'invalidate',
+    'restore',
+    'log',
+    'log',
+    'switch',
+    'log',
+    'execute',
+  ]);
+  const switchEvent = events.find((event) => event.type === 'switch');
+  assert.equal(switchEvent.direction, 'next');
+  assert.equal(switchEvent.options.forceRefresh, true);
+  assert.equal(switchEvent.options.skipExitProbe, false);
+  assert.equal(switchEvent.options.state.ipProxyEnabled, true);
+});
+
+test('EXECUTE_NODE plus checkout create releases conversion proxy without switching when IP proxy is disabled', async () => {
+  const events = [];
+  const harness = createExecuteNodeRouterHarness({
+    events,
+    state: { ipProxyEnabled: false },
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => ({ active: true, displayName: 'http://pay-proxy.example:8080' }),
+      restoreSession: async (session) => events.push({ type: 'restore', session }),
+    },
+    switchIpProxy: async () => {
+      events.push({ type: 'switch' });
+      throw new Error('should not switch');
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    payload: { nodeId: 'plus-checkout-create' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.deepStrictEqual(events.map((event) => event.type), [
+    'clear-stop',
+    'manual-allowed',
+    'invalidate',
+    'restore',
+    'log',
+    'log',
+    'execute',
+  ]);
+});
+
+test('EXECUTE_NODE plus checkout create stops before execute when switched IP has no exit', async () => {
+  const harness = createExecuteNodeRouterHarness({
+    switchIpProxy: async (direction, switchOptions = {}) => {
+      harness.events.push({ type: 'switch', direction, options: switchOptions });
+      return {
+        proxyRouting: {
+          applied: true,
+          reason: 'connectivity_failed',
+          exitError: 'no exit',
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => harness.router.handleMessage({
+      type: 'EXECUTE_NODE',
+      source: 'sidepanel',
+      payload: { nodeId: 'plus-checkout-create' },
+    }, {}),
+    /Plus Checkout/
+  );
+  assert.equal(harness.events.some((event) => event.type === 'execute'), false);
+});
+
+test('EXECUTE_NODE non plus checkout node does not run proxy preparation', async () => {
+  const harness = createExecuteNodeRouterHarness({
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => {
+        harness.events.push({ type: 'get-session' });
+        return { active: true };
+      },
+      restoreSession: async () => harness.events.push({ type: 'restore' }),
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    payload: { nodeId: 'fill-password' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.deepStrictEqual(harness.events.map((event) => event.type), [
+    'clear-stop',
+    'manual-allowed',
+    'invalidate',
+    'execute',
+  ]);
+});
+
+test('EXECUTE_NODE plus checkout create skips proxy preparation for GoPay and GPC modes', async () => {
+  for (const plusPaymentMethod of ['gopay', 'gpc-helper']) {
+    const harness = createExecuteNodeRouterHarness({
+      state: { plusPaymentMethod },
+      checkoutConversionProxyManager: {
+        getStoredSession: async () => {
+          harness.events.push({ type: 'get-session' });
+          return { active: true };
+        },
+        restoreSession: async () => harness.events.push({ type: 'restore' }),
+      },
+      switchIpProxy: async () => {
+        harness.events.push({ type: 'switch' });
+        return { proxyRouting: { applied: true, exitIp: '203.0.113.10' } };
+      },
+    });
+
+    const response = await harness.router.handleMessage({
+      type: 'EXECUTE_NODE',
+      source: 'sidepanel',
+      payload: { nodeId: 'plus-checkout-create' },
+    }, {});
+
+    assert.equal(response.ok, true);
+    assert.deepStrictEqual(
+      harness.events.map((event) => event.type),
+      ['clear-stop', 'manual-allowed', 'invalidate', 'execute']
+    );
+  }
+});
+
 test('SAVE_SETTING broadcasts free phone reuse setting updates for realtime sidepanel sync', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };
