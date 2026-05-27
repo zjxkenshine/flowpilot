@@ -82,7 +82,13 @@ function createCheckoutContentHarness(options = {}) {
         });
         return true;
       },
-      click() {},
+      click() {
+        checkoutEvents.push({
+          type: 'native-click',
+          id: this.id || '',
+          text: this.textContent || '',
+        });
+      },
       getBoundingClientRect() {
         return {
           left: 10,
@@ -97,7 +103,7 @@ function createCheckoutContentHarness(options = {}) {
 
   const paymentButton = createElement({ tagName: 'BUTTON', text: 'PayPal', attrs: { role: 'tab', 'aria-selected': '', 'data-testid': 'paypal-accordion-item-button' } });
   const hostedEmailInput = createElement({ tagName: 'INPUT', id: 'email', type: 'text', attrs: { name: 'email', placeholder: 'email@example.com' } });
-  const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
+  const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', value: options.hostedAddressValue || '', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
   const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
   const hostedCountrySelect = {
@@ -186,6 +192,8 @@ function createCheckoutContentHarness(options = {}) {
       readyState: 'complete',
       body: {},
       documentElement: {
+        clientWidth: 1200,
+        clientHeight: 800,
         getAttribute(name) {
           return attrs.get(name) || null;
         },
@@ -203,6 +211,9 @@ function createCheckoutContentHarness(options = {}) {
           return includeHostedEmailInput ? hostedEmailInput : null;
         }
         if (text === '#billingAddressLine1') return hostedAddressInput;
+        if (text === 'input[name="billingAddressLine1"]') return hostedAddressInput;
+        if (text === 'input[autocomplete="billing address-line1"]') return null;
+        if (text === 'input[autocomplete="address-line1"]') return null;
         if (text === '#billingLocality') return hostedCityInput;
         if (text === '#billingPostalCode') return hostedPostalInput;
         if (text === '#billingCountry') return hostedCountrySelect;
@@ -214,7 +225,7 @@ function createCheckoutContentHarness(options = {}) {
       querySelectorAll(selector) {
         const text = String(selector || '');
         if (text.includes('label[for=')) return [];
-        if (text.includes('[role="option"]') || text.includes('.pac-item') || text === 'li') return [suggestionOption];
+        if (text.includes('[role="option"]') || text.includes('.pac-item') || text === 'li') return options.omitAddressSuggestion ? [] : [suggestionOption];
       if (text === 'iframe') return options.includeHostedPaypalDisabledFrame ? [hostedPaypalDisabledFrame] : [];
         if (
           options.hostedErrorText
@@ -266,6 +277,10 @@ function createCheckoutContentHarness(options = {}) {
         if (text.includes('select') || text.includes('[aria-haspopup="listbox"]')) return [];
         return [];
       },
+      elementFromPoint(clientX, clientY) {
+        checkoutEvents.push({ type: 'element-from-point', clientX, clientY });
+        return options.coordinateTarget || suggestionOption;
+      },
     },
     chrome: {
       runtime: {
@@ -306,12 +321,18 @@ function createCheckoutContentHarness(options = {}) {
       if (element === termsCheckbox) {
         termsCheckbox.checked = true;
         checkoutEvents.push({ type: 'click', target: 'terms' });
+        return;
+      }
+      if (element === suggestionOption) {
+        checkoutEvents.push({ type: 'click', target: 'suggestion' });
       }
     },
   };
   context.window = context;
   context.window.getComputedStyle = (element) => element?.style || { display: 'block', visibility: 'visible' };
   context.window.__PAYPAL_HOSTED_EMAIL_INPUT_TIMEOUT_MS__ = options.hostedEmailInputTimeoutMs || 15000;
+  context.window.innerWidth = 1200;
+  context.window.innerHeight = 800;
 
   vm.createContext(context);
   vm.runInContext(plusCheckoutSource, context);
@@ -4690,6 +4711,78 @@ test('OpenAI hosted checkout exposes address and card declined errors from visib
   });
   assert.equal(declinedState.hostedCardDeclinedError, true);
   assert.match(declinedState.hostedCardDeclinedErrorMessage, /declined/i);
+});
+
+test('OpenAI hosted checkout exposes address tax errors in English and Simplified Chinese', async () => {
+  const englishHarness = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: 'We could not calculate tax for this address.',
+  });
+  const englishState = await englishHarness.send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(englishState.hostedAddressError, true);
+  assert.match(englishState.hostedAddressErrorMessage, /calculate tax/i);
+
+  const chineseHarness = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: '\u65e0\u6cd5\u4e3a\u6b64\u5730\u5740\u8ba1\u7b97\u7a0e\u8d39\u3002',
+  });
+  const chineseState = await chineseHarness.send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(chineseState.hostedAddressError, true);
+  assert.match(chineseState.hostedAddressErrorMessage, /\u7a0e\u8d39/);
+});
+
+test('OpenAI hosted checkout address tax retry deletes one character and selects DOM suggestion', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: 'We could not calculate tax for this address.',
+    hostedAddressValue: '4001 Prospect Rd',
+  });
+
+  const result = await send({
+    type: 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.retried, true);
+  assert.equal(result.inputId, 'billingAddressLine1');
+  assert.equal(result.beforeValue, '4001 Prospect Rd');
+  assert.equal(result.afterValue, '4001 Prospect R');
+  assert.equal(result.selectionMethod, 'dom');
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingAddressLine1' && event.value === '4001 Prospect R'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'suggestion'), true);
+});
+
+test('OpenAI hosted checkout address tax retry falls back to coordinate click', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedErrorText: 'We could not calculate tax for this address.',
+    hostedAddressValue: '4001 Prospect Rd',
+    omitAddressSuggestion: true,
+  });
+
+  const result = await send({
+    type: 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.retried, true);
+  assert.equal(result.selectionMethod, 'coordinate');
+  assert.equal(result.coordinateClick.clientX, 100);
+  assert.equal(result.coordinateClick.clientY, 130);
+  assert.equal(result.coordinateClick.targetTag, 'LI');
+  assert.equal(checkoutEvents.some((event) => event.type === 'element-from-point' && event.clientX === 100 && event.clientY === 130), true);
 });
 
 test('GPC manual checkout injects Plus script before reading ChatGPT session token and sends X-API-Key', async () => {

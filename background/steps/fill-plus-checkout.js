@@ -7,6 +7,8 @@
   const PLUS_CHECKOUT_FRAME_READY_DELAY_MS = 500;
   const PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS = 3;
   const PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS = 10000;
+  const PLUS_CHECKOUT_ADDRESS_TAX_REDIRECT_PROBE_MS = 5000;
+  const PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS = 2;
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
@@ -1744,6 +1746,11 @@
         || null;
     }
 
+    function findAddressTaxErrorInspection(inspections = []) {
+      return inspections.find((item) => item.result?.hostedAddressError && item.frame?.ready !== false)
+        || null;
+    }
+
     async function inspectCheckoutAmountSummary(tabId) {
       const frames = await getReadyCheckoutFrames(tabId);
       const inspections = await inspectCheckoutFrames(tabId, frames);
@@ -1966,6 +1973,7 @@
         beforeClickDelayMs = 0,
         redirectTimeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
         ensurePaymentActive = false,
+        addressTaxRetryContext = null,
       } = options;
       const timeoutSeconds = Math.round(Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) / 1000);
 
@@ -1999,7 +2007,86 @@
         await addLog(`步骤 7：订阅按钮当前为「${buttonStateLabel}」，本轮未点击，正在等待页面是否跳转到 ${paymentConfig.label}（${attempt}/${totalAttempts}）...`, 'warn');
       }
 
-      const redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, redirectTimeoutMs);
+      const effectiveRedirectTimeoutMs = Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS);
+      const initialRedirectWaitMs = Math.min(effectiveRedirectTimeoutMs, PLUS_CHECKOUT_ADDRESS_TAX_REDIRECT_PROBE_MS);
+      let redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, initialRedirectWaitMs);
+      if (redirectedToPayment) {
+        return {
+          redirectedToPayment,
+          subscribeResult,
+          subscribeClicked,
+          subscribeButtonText,
+          subscribeButtonStatus,
+          lastSubmitError: '',
+          timeoutSeconds,
+        };
+      }
+
+      if (addressTaxRetryContext && paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
+        const frames = await getReadyCheckoutFrames(tabId);
+        const inspections = await inspectCheckoutFrames(tabId, frames);
+        const addressTaxInspection = findAddressTaxErrorInspection(inspections);
+        if (addressTaxInspection) {
+          const retryCount = Math.max(0, Math.floor(Number(addressTaxRetryContext.count) || 0));
+          const errorMessage = normalizeText(addressTaxInspection.result?.hostedAddressErrorMessage || '');
+          if (retryCount >= PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS) {
+            return {
+              redirectedToPayment: false,
+              subscribeResult,
+              subscribeClicked,
+              subscribeButtonText,
+              subscribeButtonStatus,
+              addressTaxRetryExhausted: true,
+              addressTaxRetryCount: retryCount,
+              addressTaxErrorMessage: errorMessage,
+              lastSubmitError: `address tax validation still failed after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries: ${errorMessage || 'address cannot be used to calculate tax'}`,
+              timeoutSeconds,
+            };
+          }
+
+          const nextRetryCount = retryCount + 1;
+          await addLog(`Step 7: checkout reported an address/tax error after subscribe; retrying address autocomplete (${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}). Error: ${errorMessage || 'address cannot be used to calculate tax'}`, 'warn');
+          const retryResult = await sendFrameMessage(tabId, addressTaxInspection.frame.frameId, {
+            type: 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE',
+            source: 'background',
+            payload: {
+              attempt: nextRetryCount,
+            },
+          });
+          if (retryResult?.error) {
+            return {
+              redirectedToPayment: false,
+              subscribeResult,
+              subscribeClicked,
+              subscribeButtonText,
+              subscribeButtonStatus,
+              addressTaxRetryError: retryResult.error,
+              addressTaxErrorMessage: errorMessage,
+              lastSubmitError: retryResult.error,
+              timeoutSeconds,
+            };
+          }
+          addressTaxRetryContext.count = nextRetryCount;
+          return {
+            redirectedToPayment: false,
+            subscribeResult,
+            subscribeClicked,
+            subscribeButtonText,
+            subscribeButtonStatus,
+            addressTaxRetried: true,
+            addressTaxRetryCount: nextRetryCount,
+            addressTaxErrorMessage: errorMessage,
+            addressTaxRetryResult: retryResult,
+            lastSubmitError: `address tax validation retry ${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} requested`,
+            timeoutSeconds,
+          };
+        }
+      }
+
+      const remainingRedirectWaitMs = Math.max(0, effectiveRedirectTimeoutMs - initialRedirectWaitMs);
+      if (remainingRedirectWaitMs > 0) {
+        redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, remainingRedirectWaitMs);
+      }
       const lastSubmitError = subscribeClicked
         ? `点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`
         : `订阅按钮当前为「${subscribeButtonText || subscribeButtonStatus || 'unknown'}」，${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`;
@@ -2024,6 +2111,7 @@
       } = options;
       let redirectedToPayment = false;
       let lastSubmitError = '';
+      const addressTaxRetryContext = { count: 0 };
 
       for (let attempt = 1; attempt <= PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
         await addLog(
@@ -2043,10 +2131,25 @@
           totalAttempts: PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS,
           beforeClickDelayMs: attempt === 1 ? 700 : 1200,
           redirectTimeoutMs: PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
+          addressTaxRetryContext,
         });
         if (submitAttempt.subscribeResult?.error) {
           lastSubmitError = submitAttempt.lastSubmitError;
           await addLog(`步骤 7：点击订阅失败（${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS}）：${lastSubmitError}`, 'warn');
+          continue;
+        }
+
+        if (submitAttempt.addressTaxRetryExhausted) {
+          throw new Error(`PLUS_CHECKOUT_ADDRESS_TAX_RETRY_EXHAUSTED::Step 7: address/tax validation still failed after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries. ${submitAttempt.addressTaxErrorMessage || 'Address cannot be used to calculate tax.'}`);
+        }
+        if (submitAttempt.addressTaxRetried) {
+          lastSubmitError = submitAttempt.lastSubmitError;
+          attempt -= 1;
+          continue;
+        }
+        if (submitAttempt.addressTaxRetryError) {
+          lastSubmitError = submitAttempt.lastSubmitError;
+          await addLog(`Step 7: address/tax retry failed (${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS}): ${lastSubmitError}`, 'warn');
           continue;
         }
 

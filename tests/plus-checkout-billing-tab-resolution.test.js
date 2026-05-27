@@ -138,6 +138,8 @@ function createExecutorHarness({
   initialState = {},
   checkoutConversionProxyManager = null,
   submitRedirectUrl = 'https://www.paypal.com/checkoutnow',
+  onGetState = null,
+  onRetryAddressTaxAutocomplete = null,
 }) {
   const api = loadPlusCheckoutBillingModule();
   const events = {
@@ -190,6 +192,12 @@ function createExecutorHarness({
             throw new Error('No receiving end');
           }
           if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+            if (typeof onGetState === 'function') {
+              const stateResult = await onGetState({ checkoutTab, events, frameId, message, tabId });
+              if (stateResult !== undefined) {
+                return stateResult;
+              }
+            }
             return stateByFrame[frameId] || { hasPayPal: false, paypalCandidates: [] };
           }
           if (message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE') {
@@ -201,6 +209,15 @@ function createExecutorHarness({
             } else {
               checkoutTab.url = submitRedirectUrl;
             }
+          }
+          if (message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE') {
+            if (typeof onRetryAddressTaxAutocomplete === 'function') {
+              const retryResult = await onRetryAddressTaxAutocomplete({ checkoutTab, events, frameId, message, tabId });
+              if (retryResult !== undefined) {
+                return retryResult;
+              }
+            }
+            return { retried: true };
           }
           return createSuccessfulBillingResult();
         },
@@ -494,6 +511,165 @@ test('Classic PayPal billing retries submit without rerunning the checkout half-
     assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 20, true);
     assert.equal(events.logs.some((entry) => /重新检测订阅按钮/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing retries address autocomplete after address tax error and then succeeds', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  let addressRetried = false;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [
+        { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+        { frameId: 3, url: 'https://checkout.stripe.com/elements-inner-address' },
+      ],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          hasSubscribeButton: true,
+        },
+        3: {
+          billingFieldsVisible: true,
+        },
+      },
+      onGetState: async ({ frameId }) => {
+        if (frameId === 0) {
+          return {
+            hasPayPal: true,
+            paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+            hasSubscribeButton: true,
+          };
+        }
+        return {
+          billingFieldsVisible: true,
+          hostedAddressError: clickCalls >= 1 && !addressRetried,
+          hostedAddressErrorMessage: clickCalls >= 1 && !addressRetried
+            ? 'We could not calculate tax for this address.'
+            : '',
+        };
+      },
+      onClickSubscribe: async ({ checkoutTab }) => {
+        clickCalls += 1;
+        if (addressRetried && clickCalls >= 2) {
+          checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        }
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: 'Subscribe',
+        };
+      },
+      onRetryAddressTaxAutocomplete: async () => {
+        addressRetried = true;
+        return { retried: true, selectionMethod: 'dom' };
+      },
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    const retryMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE');
+    assert.equal(subscribeMessages.length, 2);
+    assert.equal(retryMessages.length, 1);
+    assert.equal(retryMessages[0].frameId, 3);
+    assert.equal(subscribeMessages.every((entry) => entry.frameId === 0), true);
+    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 10, true);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing stops after two address tax autocomplete retries', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [
+        { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+        { frameId: 3, url: 'https://checkout.stripe.com/elements-inner-address' },
+      ],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          hasSubscribeButton: true,
+        },
+        3: {
+          billingFieldsVisible: true,
+          hostedAddressError: true,
+          hostedAddressErrorMessage: 'We could not calculate tax for this address.',
+        },
+      },
+      onClickSubscribe: async () => ({
+        clicked: true,
+        subscribeButtonStatus: 'clicked',
+        subscribeButtonText: 'Subscribe',
+      }),
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await assert.rejects(
+      () => executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' }),
+      /PLUS_CHECKOUT_ADDRESS_TAX_RETRY_EXHAUSTED::/
+    );
+
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE').length, 2);
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE').length, 3);
+    assert.equal(events.completed.length, 0);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing keeps generic no-redirect retry behavior when there is no address tax error', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+        },
+      },
+      onClickSubscribe: async () => ({
+        clicked: true,
+        subscribeButtonStatus: 'clicked',
+        subscribeButtonText: 'Subscribe',
+      }),
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await assert.rejects(
+      () => executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' }),
+      /PayPal/
+    );
+
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE').length, 3);
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE').length, 0);
+    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 60, true);
   } finally {
     Date.now = originalNow;
   }

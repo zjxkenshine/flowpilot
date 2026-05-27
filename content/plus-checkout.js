@@ -94,6 +94,7 @@ if (document.documentElement.getAttribute(PLUS_CHECKOUT_LISTENER_SENTINEL) !== '
       || message.type === 'PLUS_CHECKOUT_SELECT_ADDRESS_SUGGESTION'
       || message.type === 'PLUS_CHECKOUT_ENSURE_BILLING_ADDRESS'
       || message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE'
+      || message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE'
       || message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'
       || message.type === 'PLUS_CHECKOUT_GET_STATE'
     ) {
@@ -134,6 +135,8 @@ async function handlePlusCheckoutCommand(message) {
       return ensurePlusStructuredBillingAddress(message.payload || {});
     case 'PLUS_CHECKOUT_CLICK_SUBSCRIBE':
       return clickPlusSubscribe(message.payload || {});
+    case 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE':
+      return retryAddressTaxAutocomplete(message.payload || {});
     case 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP':
       return runPayPalHostedOpenAiCheckoutStep(message.payload || {});
     case 'PLUS_CHECKOUT_GET_STATE':
@@ -412,8 +415,8 @@ function getHostedOpenAiCardFallbackState() {
   };
 }
 
-function getHostedOpenAiVisibleErrorText(pattern) {
-  if (!isPayPalHostedOpenAiCheckoutPage() || typeof document?.querySelectorAll !== 'function') {
+function getVisibleErrorText(pattern) {
+  if (typeof document?.querySelectorAll !== 'function') {
     return '';
   }
 
@@ -445,14 +448,23 @@ function getHostedOpenAiVisibleErrorText(pattern) {
   return '';
 }
 
+function getHostedOpenAiVisibleErrorText(pattern) {
+  if (!isPayPalHostedOpenAiCheckoutPage()) {
+    return '';
+  }
+  return getVisibleErrorText(pattern);
+}
+
 function getHostedOpenAiAddressErrorState() {
-  const message = getHostedOpenAiVisibleErrorText(
-    /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i
-  );
+  const message = getVisibleErrorText(getAddressTaxErrorPattern());
   return {
     hasError: Boolean(message),
     message,
   };
+}
+
+function getAddressTaxErrorPattern() {
+  return /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|could\s+not\s+calculate\s+tax|couldn'?t\s+calculate\s+tax|cannot\s+calculate\s+tax|can'?t\s+calculate\s+tax|tax\s+for\s+this\s+address|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5(?:\u4e3a)?(?:\u6b64|\u8fd9\u4e2a|\u8be5)?\u5730\u5740\u8ba1\u7b97(?:\u7a0e|\u7a0e\u8d39)|\u65e0\u6cd5\u8ba1\u7b97(?:\u6b64|\u8fd9\u4e2a|\u8be5)?\u5730\u5740(?:\u7684)?(?:\u7a0e|\u7a0e\u8d39)|\u5730\u5740.*(?:\u7a0e|\u7a0e\u8d39).*\u65e0\u6cd5\u8ba1\u7b97|(?:\u7a0e|\u7a0e\u8d39).*\u65e0\u6cd5\u8ba1\u7b97.*\u5730\u5740|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548|\u5730\u5740\u65e0\u6548/i;
 }
 
 function getHostedOpenAiCardDeclinedState() {
@@ -1463,6 +1475,68 @@ function getAddressSuggestions() {
   return results;
 }
 
+function findBillingAddressLine1Input() {
+  const direct = document.getElementById('billingAddressLine1')
+    || document.querySelector('input[name="billingAddressLine1"]')
+    || document.querySelector('input[autocomplete="billing address-line1"]')
+    || document.querySelector('input[autocomplete="address-line1"]');
+  if (direct && isVisibleElement(direct) && isEnabledControl(direct)) {
+    return direct;
+  }
+  return null;
+}
+
+function dispatchInputValue(input, value) {
+  if (typeof fillInput === 'function') {
+    fillInput(input, value);
+    return;
+  }
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function clampViewportCoordinate(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function clickAddressSuggestionCoordinateFallback(input) {
+  const rect = input.getBoundingClientRect();
+  const viewportWidth = Math.max(1, Number(window.innerWidth) || Number(document.documentElement?.clientWidth) || 1);
+  const viewportHeight = Math.max(1, Number(window.innerHeight) || Number(document.documentElement?.clientHeight) || 1);
+  const clientX = clampViewportCoordinate(rect.left + rect.width / 2, 1, viewportWidth - 1);
+  const clientY = clampViewportCoordinate(rect.top + rect.height * 2.5, 1, viewportHeight - 1);
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX,
+    clientY,
+    button: 0,
+    buttons: 1,
+  };
+  const target = document.elementFromPoint?.(clientX, clientY) || document.body || input;
+  const pointerCtor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+  target.dispatchEvent(new pointerCtor('pointerdown', eventInit));
+  target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+  target.dispatchEvent(new pointerCtor('pointerup', { ...eventInit, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent('mouseup', { ...eventInit, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
+  if (typeof target.click === 'function' && target !== document.body && target !== document.documentElement) {
+    target.click();
+  }
+  return {
+    clientX,
+    clientY,
+    targetTag: target.tagName || '',
+  };
+}
+
 async function selectAddressSuggestion(seed) {
   await fillAddressQuery(seed);
   return clickAddressSuggestion(seed);
@@ -1488,6 +1562,63 @@ async function clickAddressSuggestion(seed = {}) {
   return {
     selectedText: normalizeText(target.textContent || ''),
     suggestionIndex,
+  };
+}
+
+async function retryAddressTaxAutocomplete(payload = {}) {
+  await waitForDocumentComplete();
+  const addressError = getHostedOpenAiAddressErrorState();
+  if (!addressError.hasError) {
+    return {
+      retried: false,
+      reason: 'address-tax-error-not-found',
+      hostedAddressError: false,
+      hostedAddressErrorMessage: '',
+    };
+  }
+
+  const addressInput = findBillingAddressLine1Input() || await findAddressSearchInput();
+  if (!addressInput) {
+    throw new Error('Plus Checkout: address tax retry could not find billing address input.');
+  }
+
+  addressInput.scrollIntoView?.({ block: 'center', inline: 'center', behavior: 'instant' });
+  addressInput.focus?.({ preventScroll: true });
+  await sleep(100);
+
+  const beforeValue = String(addressInput.value || '');
+  if (!beforeValue) {
+    throw new Error('Plus Checkout: address tax retry found an empty billing address input.');
+  }
+  const afterValue = beforeValue.slice(0, -1);
+  dispatchInputValue(addressInput, afterValue);
+  await sleep(Math.max(0, Math.floor(Number(payload.afterDeleteWaitMs) || 2000)));
+
+  const suggestions = getAddressSuggestions();
+  const suggestion = suggestions[0] || null;
+  let selectionMethod = 'coordinate';
+  let selectedText = '';
+  let coordinateClick = null;
+  if (suggestion) {
+    simulateClick(suggestion);
+    selectionMethod = 'dom';
+    selectedText = normalizeText(suggestion.textContent || suggestion.getAttribute?.('aria-label') || '');
+  } else {
+    coordinateClick = clickAddressSuggestionCoordinateFallback(addressInput);
+  }
+
+  await sleep(Math.max(0, Math.floor(Number(payload.afterSelectWaitMs) || 2000)));
+  return {
+    retried: true,
+    hostedAddressError: true,
+    hostedAddressErrorMessage: addressError.message,
+    inputId: addressInput.id || '',
+    inputName: addressInput.getAttribute?.('name') || addressInput.name || '',
+    beforeValue,
+    afterValue,
+    selectionMethod,
+    selectedText,
+    coordinateClick,
   };
 }
 
