@@ -481,7 +481,128 @@ test('step 6 reuses existing phone-prefixed Cloudflare Temp Email without creati
   assert.deepStrictEqual(events.completions, ['wait-registration-success']);
 });
 
-test('step 6 falls back to generated Cloudflare Temp Email when verified phone cache is missing', async () => {
+test('step 6 generates phone-prefixed Cloudflare email for phone signup and syncs payment email', async () => {
+  const api = createStep6Api();
+  const events = {
+    fetchCalls: [],
+    persistCalls: [],
+    paymentCalls: [],
+    completions: [],
+  };
+  const initialState = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare',
+    cloudflareDomain: 'mail.example.com',
+    signupPhoneNumber: '+86 138-1234-5678',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+86 138-1234-5678',
+  };
+  let state = { ...initialState };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    fetchCloudflareEmail: async (callState, options) => {
+      events.fetchCalls.push({ state: callState, options });
+      return `${options.localPart}@${callState.cloudflareDomain}`;
+    },
+    getState: async () => state,
+    persistRegistrationEmailState: async (callState, email, options) => {
+      events.persistCalls.push({ state: callState, email, options });
+      state = {
+        ...state,
+        email,
+        registrationEmailState: {
+          current: email,
+          previous: email,
+          source: options.source,
+          updatedAt: 321,
+        },
+      };
+    },
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(initialState);
+
+  assert.equal(events.fetchCalls.length, 1);
+  assert.equal(events.fetchCalls[0].options.localPart, '8613812345678');
+  assert.equal(events.fetchCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(events.fetchCalls[0].options.source, 'generated:cloudflare:phone-prefix');
+  assert.equal(events.persistCalls.length, 1);
+  assert.equal(events.persistCalls[0].email, '8613812345678@mail.example.com');
+  assert.equal(events.persistCalls[0].options.preserveAccountIdentity, true);
+  assert.equal(events.persistCalls[0].options.source, 'generated:cloudflare:phone-prefix');
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: '8613812345678@mail.example.com',
+    options: { source: 'registration:phone-prefix-cloudflare-email' },
+  }]);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
+});
+
+test('step 6 reuses existing phone-prefixed Cloudflare email without creating another address', async () => {
+  const api = createStep6Api();
+  const events = {
+    fetchCalls: 0,
+    persistCalls: 0,
+    paymentCalls: [],
+    completions: [],
+  };
+  const state = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare',
+    signupPhoneNumber: '+86 138-1234-5678',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+86 138-1234-5678',
+    email: '8613812345678@mail.example.com',
+    registrationEmailState: {
+      current: '8613812345678@mail.example.com',
+      previous: '8613812345678@mail.example.com',
+      source: 'generated:cloudflare:phone-prefix',
+      updatedAt: 123,
+    },
+  };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    fetchCloudflareEmail: async () => {
+      events.fetchCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    getState: async () => state,
+    persistRegistrationEmailState: async () => {
+      events.persistCalls += 1;
+    },
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async (email, options) => {
+      events.paymentCalls.push({ email, options });
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(state);
+
+  assert.equal(events.fetchCalls, 0);
+  assert.equal(events.persistCalls, 0);
+  assert.deepStrictEqual(events.paymentCalls, [{
+    email: '8613812345678@mail.example.com',
+    options: { source: 'registration:phone-prefix-cloudflare-email' },
+  }]);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
+});
+
+test('step 6 uses signup phone as Cloudflare Temp Email prefix when verified phone cache is missing', async () => {
   const api = createStep6Api();
   const events = {
     fetchCalls: [],
@@ -504,7 +625,7 @@ test('step 6 falls back to generated Cloudflare Temp Email when verified phone c
     },
     fetchCloudflareTempEmailAddress: async (callState, options) => {
       events.fetchCalls.push({ state: callState, options });
-      const email = 'random-prefix@mail.example.com';
+      const email = '8613812345678@mail.example.com';
       state = {
         ...state,
         email,
@@ -532,13 +653,13 @@ test('step 6 falls back to generated Cloudflare Temp Email when verified phone c
   await executor.executeStep6(state);
 
   assert.equal(events.fetchCalls.length, 1);
-  assert.equal(events.fetchCalls[0].options.localPart, undefined);
+  assert.equal(events.fetchCalls[0].options.localPart, '8613812345678');
   assert.equal(events.fetchCalls[0].options.preserveAccountIdentity, true);
-  assert.equal(events.fetchCalls[0].options.source, 'generated:cloudflare-temp-email:fallback');
+  assert.equal(events.fetchCalls[0].options.source, 'generated:cloudflare-temp-email:phone-prefix');
   assert.deepStrictEqual(events.persistCalls, []);
   assert.deepStrictEqual(events.paymentCalls, [{
-    email: 'random-prefix@mail.example.com',
-    options: { source: 'registration:cloudflare-temp-email:fallback' },
+    email: '8613812345678@mail.example.com',
+    options: { source: 'registration:phone-prefix-cloudflare-temp-email' },
   }]);
   assert.deepStrictEqual(events.completions, ['wait-registration-success']);
 });

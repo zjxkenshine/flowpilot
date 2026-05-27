@@ -18,6 +18,7 @@
     'websocket',
     'other',
   ];
+  const FINGERPRINT_LOG_LABEL = '[FlowPilot:browser-fingerprint] generated';
 
   const REGION_DEFAULTS = Object.freeze({
     US: Object.freeze({
@@ -230,6 +231,54 @@
   function clonePlain(value) {
     if (value === null || value === undefined) return value;
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function abbreviateFingerprintLogText(value = '', maxLength = 96) {
+    const text = String(value || '').trim();
+    const limit = Number(maxLength) || 96;
+    if (text.length <= limit) {
+      return text;
+    }
+    if (limit <= 3) {
+      return text.slice(0, limit);
+    }
+    return `${text.slice(0, limit - 3)}...`;
+  }
+
+  function summarizeBrowserFingerprintForConsole(profile = {}) {
+    const screen = profile.screen && typeof profile.screen === 'object'
+      ? {
+        width: Number(profile.screen.width) || 0,
+        height: Number(profile.screen.height) || 0,
+        availWidth: Number(profile.screen.availWidth) || 0,
+        availHeight: Number(profile.screen.availHeight) || 0,
+        deviceScaleFactor: Number(profile.screen.deviceScaleFactor) || 1,
+      }
+      : null;
+    return {
+      profileId: String(profile.profileId || '').trim(),
+      exitRegion: String(profile.exitRegion || '').trim(),
+      fallbackRegion: Boolean(profile.fallbackRegion),
+      locale: String(profile.locale || '').trim(),
+      languages: Array.isArray(profile.languages) ? profile.languages.map((language) => String(language || '')) : [],
+      timezoneId: String(profile.timezoneId || '').trim(),
+      platform: String(profile.platform || '').trim(),
+      screen,
+      hardwareConcurrency: Number(profile.hardwareConcurrency) || 0,
+      deviceMemory: Number(profile.deviceMemory) || 0,
+      webglRenderer: abbreviateFingerprintLogText(profile.webglRenderer),
+    };
+  }
+
+  function logGeneratedBrowserFingerprint(profile = {}) {
+    if (!globalThis.console?.info) {
+      return;
+    }
+    try {
+      globalThis.console.info(FINGERPRINT_LOG_LABEL, summarizeBrowserFingerprintForConsole(profile));
+    } catch {
+      // Console logging must never affect fingerprint application.
+    }
   }
 
   function buildBrowserFingerprintProfile(proxyRouting = {}, state = {}, options = {}) {
@@ -585,6 +634,7 @@
       if (typeof broadcastDataUpdate === 'function') {
         broadcastDataUpdate(updates);
       }
+      logGeneratedBrowserFingerprint(profile);
       if (typeof addLog === 'function' && profile.fallbackRegion) {
         await addLog('步骤 1：代理出口地区未识别，已使用默认 US 浏览器指纹。', 'warn');
       }

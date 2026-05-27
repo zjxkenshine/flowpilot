@@ -13590,11 +13590,63 @@ async function fetchCloudflareTempEmailAddress(state, options = {}) {
   return generatedEmailHelpers.fetchCloudflareTempEmailAddress(state, options);
 }
 
+function getPhonePrefixedCloudflareEmailMode(state = {}) {
+  if (resolveSignupMethod(state) !== SIGNUP_METHOD_PHONE) {
+    return '';
+  }
+  const generator = normalizeEmailGenerator(state?.emailGenerator);
+  return generator === 'cloudflare' || generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR
+    ? generator
+    : '';
+}
+
+function isPhonePrefixedCloudflareEmailMode(state = {}) {
+  return Boolean(getPhonePrefixedCloudflareEmailMode(state));
+}
+
+function isPhonePrefixedCloudflareTempEmailMode(state = {}) {
+  return getPhonePrefixedCloudflareEmailMode(state) === CLOUDFLARE_TEMP_EMAIL_GENERATOR;
+}
+
+function isPhonePrefixedCloudflareAliasMode(state = {}) {
+  return getPhonePrefixedCloudflareEmailMode(state) === 'cloudflare';
+}
+
+function getPhonePrefixedCloudflareGeneratedSource(state = {}) {
+  return isPhonePrefixedCloudflareAliasMode(state)
+    ? 'generated:cloudflare:phone-prefix'
+    : 'generated:cloudflare-temp-email:phone-prefix';
+}
+
+function getPhonePrefixedCloudflarePaymentSource(state = {}) {
+  return isPhonePrefixedCloudflareAliasMode(state)
+    ? 'registration:phone-prefix-cloudflare-email'
+    : 'registration:phone-prefix-cloudflare-temp-email';
+}
+
+function getPhonePrefixedCloudflareFallbackGeneratedSource(state = {}) {
+  return isPhonePrefixedCloudflareAliasMode(state)
+    ? 'generated:cloudflare:fallback'
+    : 'generated:cloudflare-temp-email:fallback';
+}
+
+function getPhonePrefixedCloudflareFallbackPaymentSource(state = {}) {
+  return isPhonePrefixedCloudflareAliasMode(state)
+    ? 'registration:cloudflare:fallback'
+    : 'registration:cloudflare-temp-email:fallback';
+}
+
+function getPhonePrefixedCloudflareLabel(state = {}) {
+  return isPhonePrefixedCloudflareAliasMode(state) ? 'Cloudflare' : 'Cloudflare Temp Email';
+}
+
 function getVerifiedPhonePrefixedCloudflareTempEmailSourceValue(state = {}, options = {}) {
   return String(
     options?.phoneNumber
     || state?.signupVerifiedPhoneNumber
     || state?.signupPhoneCompletedActivation?.phoneNumber
+    || state?.signupPhoneNumber
+    || (String(state?.accountIdentifierType || '').trim().toLowerCase() === 'phone' ? state?.accountIdentifier : '')
     || ''
   ).trim();
 }
@@ -13606,11 +13658,6 @@ function getPhonePrefixedCloudflareTempEmailSourceValue(state = {}, options = {}
 function buildPhonePrefixedCloudflareTempEmailLocalPart(state = {}, options = {}) {
   return String(options?.localPart || '').trim().replace(/\D+/g, '')
     || getPhonePrefixedCloudflareTempEmailSourceValue(state, options).replace(/\D+/g, '');
-}
-
-function isPhonePrefixedCloudflareTempEmailMode(state = {}) {
-  return resolveSignupMethod(state) === SIGNUP_METHOD_PHONE
-    && normalizeEmailGenerator(state?.emailGenerator) === CLOUDFLARE_TEMP_EMAIL_GENERATOR;
 }
 
 function getExistingPhonePrefixedRegistrationEmail(state = {}, localPart = '') {
@@ -13650,7 +13697,7 @@ async function syncPhonePrefixedCloudflarePaymentEmail(email, options = {}) {
     return;
   }
   await setPlusPaymentEmailState(normalizedEmail, {
-    source: String(options?.source || '').trim() || 'registration:phone-prefix-cloudflare-temp-email',
+    source: String(options?.source || '').trim() || getPhonePrefixedCloudflarePaymentSource(options?.state || {}),
   });
 }
 
@@ -13660,23 +13707,27 @@ async function ensurePhonePrefixedCloudflareTempEmail(state = {}, options = {}) 
     ...(state || {}),
     ...(latestState && typeof latestState === 'object' && !Array.isArray(latestState) ? latestState : {}),
   };
-  if (!isPhonePrefixedCloudflareTempEmailMode(mergedState)) {
+  if (!isPhonePrefixedCloudflareEmailMode(mergedState)) {
     return null;
   }
 
   const localPart = buildPhonePrefixedCloudflareTempEmailLocalPart(mergedState, options);
+  const label = getPhonePrefixedCloudflareLabel(mergedState);
   if (!localPart) {
     if (options?.fallbackToGenerated === false) {
       return null;
     }
-    await addLog('Cloudflare Temp Email: verified signup phone is not available; falling back to generated mailbox.', 'warn');
-    const fallbackEmail = String(await fetchCloudflareTempEmailAddress(mergedState, {
+    await addLog(`${label}: verified signup phone is not available; falling back to generated mailbox.`, 'warn');
+    const fallbackEmail = String(await (isPhonePrefixedCloudflareAliasMode(mergedState)
+      ? fetchCloudflareEmail
+      : fetchCloudflareTempEmailAddress)(mergedState, {
       preserveAccountIdentity: true,
-      source: 'generated:cloudflare-temp-email:fallback',
+      source: getPhonePrefixedCloudflareFallbackGeneratedSource(mergedState),
     }) || '').trim().toLowerCase();
     if (fallbackEmail) {
       await syncPhonePrefixedCloudflarePaymentEmail(fallbackEmail, {
-        source: 'registration:cloudflare-temp-email:fallback',
+        source: getPhonePrefixedCloudflareFallbackPaymentSource(mergedState),
+        state: mergedState,
       });
     }
     return fallbackEmail || null;
@@ -13684,21 +13735,26 @@ async function ensurePhonePrefixedCloudflareTempEmail(state = {}, options = {}) 
 
   const existingEmail = getExistingPhonePrefixedRegistrationEmail(mergedState, localPart);
   if (existingEmail) {
-    await syncPhonePrefixedCloudflarePaymentEmail(existingEmail);
+    await syncPhonePrefixedCloudflarePaymentEmail(existingEmail, {
+      source: getPhonePrefixedCloudflarePaymentSource(mergedState),
+      state: mergedState,
+    });
     return existingEmail;
   }
 
-  await addLog(`Cloudflare Temp Email: creating phone-prefixed mailbox ${localPart}@configured-domain...`, 'info');
-  const email = String(await fetchCloudflareTempEmailAddress(mergedState, {
+  await addLog(`${label}: creating phone-prefixed mailbox ${localPart}@configured-domain...`, 'info');
+  const email = String(await (isPhonePrefixedCloudflareAliasMode(mergedState)
+    ? fetchCloudflareEmail
+    : fetchCloudflareTempEmailAddress)(mergedState, {
     localPart,
     preserveAccountIdentity: true,
-    source: 'generated:cloudflare-temp-email:phone-prefix',
+    source: getPhonePrefixedCloudflareGeneratedSource(mergedState),
   }) || '').trim().toLowerCase();
   if (!email) {
-    throw new Error('Cloudflare Temp Email phone-prefix generation returned an empty address.');
+    throw new Error(`${label} phone-prefix generation returned an empty address.`);
   }
   if (email.split('@')[0] !== localPart) {
-    throw new Error(`Cloudflare Temp Email phone-prefix generation returned unexpected address ${email}; expected local part ${localPart}.`);
+    throw new Error(`${label} phone-prefix generation returned unexpected address ${email}; expected local part ${localPart}.`);
   }
 
   const postGenerateState = await getState().catch(() => mergedState);
@@ -13710,12 +13766,15 @@ async function ensurePhonePrefixedCloudflareTempEmail(state = {}, options = {}) 
   if (persistedEmail !== email) {
     await persistRegistrationEmailState(postGenerateState || mergedState, email, {
       preserveAccountIdentity: true,
-      source: 'generated:cloudflare-temp-email:phone-prefix',
+      source: getPhonePrefixedCloudflareGeneratedSource(mergedState),
     });
   }
 
-  await syncPhonePrefixedCloudflarePaymentEmail(email);
-  await addLog(`Cloudflare Temp Email: phone-prefixed mailbox fixed as ${email}.`, 'ok');
+  await syncPhonePrefixedCloudflarePaymentEmail(email, {
+    source: getPhonePrefixedCloudflarePaymentSource(mergedState),
+    state: mergedState,
+  });
+  await addLog(`${label}: phone-prefixed mailbox fixed as ${email}.`, 'ok');
   return email;
 }
 
@@ -13725,7 +13784,7 @@ async function ensureCloudflareTempEmailForPhoneSignup(state = {}, options = {})
     ...(state || {}),
     ...(latestState && typeof latestState === 'object' && !Array.isArray(latestState) ? latestState : {}),
   };
-  if (!isPhonePrefixedCloudflareTempEmailMode(mergedState)) {
+  if (!isPhonePrefixedCloudflareEmailMode(mergedState)) {
     return null;
   }
   return ensurePhonePrefixedCloudflareTempEmail(mergedState, options);
@@ -13755,8 +13814,8 @@ async function fetchGeneratedEmail(state, options = {}) {
     return fetchCloudMailAddress(currentState, options);
   }
   if (
-    generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR
-    && isPhonePrefixedCloudflareTempEmailMode(currentState)
+    (generator === 'cloudflare' || generator === CLOUDFLARE_TEMP_EMAIL_GENERATOR)
+    && isPhonePrefixedCloudflareEmailMode(currentState)
     && !String(options?.localPart || options?.name || '').trim()
   ) {
     const email = await ensureCloudflareTempEmailForPhoneSignup(currentState, options);
@@ -15729,6 +15788,7 @@ const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
   chrome,
   completeNodeFromBackground,
   CLOUDFLARE_TEMP_EMAIL_GENERATOR,
+  fetchCloudflareEmail,
   fetchCloudflareTempEmailAddress,
   getErrorMessage,
   getState,
@@ -16454,8 +16514,7 @@ async function resolveSignupEmailForFlow(state, options = {}) {
     ? state
     : await getState();
   if (
-    normalizeEmailGenerator(currentState?.emailGenerator) === CLOUDFLARE_TEMP_EMAIL_GENERATOR
-    && isPhonePrefixedCloudflareTempEmailMode(currentState)
+    isPhonePrefixedCloudflareEmailMode(currentState)
   ) {
     const email = await ensureCloudflareTempEmailForPhoneSignup(currentState, {
       ...options,

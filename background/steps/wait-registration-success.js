@@ -253,6 +253,7 @@
       chrome: chromeApi = globalThis.chrome,
       completeNodeFromBackground,
       CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email',
+      fetchCloudflareEmail = null,
       fetchCloudflareTempEmailAddress = null,
       getErrorMessage = (error) => error?.message || String(error || '未知错误'),
       getState = null,
@@ -347,17 +348,60 @@
       return String(state?.resolvedSignupMethod || state?.signupMethod || '').trim().toLowerCase();
     }
 
-    function isStep6PhoneCloudflareTempEmailEnabled(state = {}) {
+    function getStep6PhoneCloudflareEmailMode(state = {}) {
       const signupMethod = resolveStep6SignupMethod(state);
       const generator = String(state?.emailGenerator || '').trim().toLowerCase();
       const cloudflareTempEmailGenerator = String(CLOUDFLARE_TEMP_EMAIL_GENERATOR || 'cloudflare-temp-email').trim().toLowerCase();
-      return signupMethod === 'phone' && generator === cloudflareTempEmailGenerator;
+      if (signupMethod !== 'phone') {
+        return '';
+      }
+      return generator === 'cloudflare' || generator === cloudflareTempEmailGenerator
+        ? generator
+        : '';
+    }
+
+    function isStep6PhoneCloudflareEmailEnabled(state = {}) {
+      return Boolean(getStep6PhoneCloudflareEmailMode(state));
+    }
+
+    function isStep6PhoneCloudflareAliasMode(state = {}) {
+      return getStep6PhoneCloudflareEmailMode(state) === 'cloudflare';
+    }
+
+    function getStep6PhoneCloudflareLabel(state = {}) {
+      return isStep6PhoneCloudflareAliasMode(state) ? 'Cloudflare' : 'Cloudflare Temp Email';
+    }
+
+    function getStep6PhoneCloudflareGeneratedSource(state = {}) {
+      return isStep6PhoneCloudflareAliasMode(state)
+        ? 'generated:cloudflare:phone-prefix'
+        : 'generated:cloudflare-temp-email:phone-prefix';
+    }
+
+    function getStep6PhoneCloudflarePaymentSource(state = {}) {
+      return isStep6PhoneCloudflareAliasMode(state)
+        ? 'registration:phone-prefix-cloudflare-email'
+        : 'registration:phone-prefix-cloudflare-temp-email';
+    }
+
+    function getStep6PhoneCloudflareFallbackGeneratedSource(state = {}) {
+      return isStep6PhoneCloudflareAliasMode(state)
+        ? 'generated:cloudflare:fallback'
+        : 'generated:cloudflare-temp-email:fallback';
+    }
+
+    function getStep6PhoneCloudflareFallbackPaymentSource(state = {}) {
+      return isStep6PhoneCloudflareAliasMode(state)
+        ? 'registration:cloudflare:fallback'
+        : 'registration:cloudflare-temp-email:fallback';
     }
 
     function getStep6PhoneEmailSourceValue(state = {}) {
       return String(
         state?.signupVerifiedPhoneNumber
         || state?.signupPhoneCompletedActivation?.phoneNumber
+        || state?.signupPhoneNumber
+        || (String(state?.accountIdentifierType || '').trim().toLowerCase() === 'phone' ? state?.accountIdentifier : '')
         || ''
       ).trim();
     }
@@ -400,10 +444,11 @@
 
     async function ensurePhonePrefixedCloudflareTempEmailForStep6(state = {}) {
       const latestState = await resolveLatestStep6State(state);
-      if (!isStep6PhoneCloudflareTempEmailEnabled(latestState)) {
+      if (!isStep6PhoneCloudflareEmailEnabled(latestState)) {
         return null;
       }
       const localPart = buildStep6PhoneEmailLocalPart(latestState);
+      const label = getStep6PhoneCloudflareLabel(latestState);
       if (!localPart) {
         if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
           const helperEmail = await ensurePhonePrefixedCloudflareTempEmail(latestState);
@@ -411,20 +456,23 @@
             return helperEmail;
           }
         }
-        if (typeof fetchCloudflareTempEmailAddress !== 'function') {
-          throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
+        const fallbackFetcher = isStep6PhoneCloudflareAliasMode(latestState)
+          ? fetchCloudflareEmail
+          : fetchCloudflareTempEmailAddress;
+        if (typeof fallbackFetcher !== 'function') {
+          throw new Error(`Step 6: ${label} generation capability is not wired, cannot create a phone-prefixed email.`);
         }
-        await addLog('步骤 6：未读取到已验证手机号，改用 Cloudflare Temp Email 原随机生成模式。', 'warn');
-        const fallbackEmail = String(await fetchCloudflareTempEmailAddress(latestState, {
+        await addLog(`Step 6: no usable phone number found; falling back to ${label} random generation.`, 'warn');
+        const fallbackEmail = String(await fallbackFetcher(latestState, {
           preserveAccountIdentity: true,
-          source: 'generated:cloudflare-temp-email:fallback',
+          source: getStep6PhoneCloudflareFallbackGeneratedSource(latestState),
         }) || '').trim().toLowerCase();
         if (!fallbackEmail) {
-          throw new Error('步骤 6：Cloudflare Temp Email 未返回可用邮箱。');
+          throw new Error(`Step 6: ${label} did not return a usable email.`);
         }
         if (typeof setPlusPaymentEmailState === 'function') {
           await setPlusPaymentEmailState(fallbackEmail, {
-            source: 'registration:cloudflare-temp-email:fallback',
+            source: getStep6PhoneCloudflareFallbackPaymentSource(latestState),
           });
         }
         await addLog(`步骤 6：本轮后续邮箱已回退为 ${fallbackEmail}。`, 'ok');
@@ -435,7 +483,7 @@
       if (existingEmail) {
         if (typeof setPlusPaymentEmailState === 'function') {
           await setPlusPaymentEmailState(existingEmail, {
-            source: 'registration:phone-prefix-cloudflare-temp-email',
+            source: getStep6PhoneCloudflarePaymentSource(latestState),
           });
         }
         await addLog(`步骤 6：本轮后续邮箱已固定为 ${existingEmail}。`, 'ok');
@@ -446,18 +494,21 @@
         return ensurePhonePrefixedCloudflareTempEmail(latestState, { localPart });
       }
 
-      if (typeof fetchCloudflareTempEmailAddress !== 'function') {
-        throw new Error('步骤 6：Cloudflare Temp Email 生成能力未接入，无法为手机号注册生成邮箱。');
+      const fetcher = isStep6PhoneCloudflareAliasMode(latestState)
+        ? fetchCloudflareEmail
+        : fetchCloudflareTempEmailAddress;
+      if (typeof fetcher !== 'function') {
+        throw new Error(`Step 6: ${label} generation capability is not wired, cannot create a phone-prefixed email.`);
       }
 
-      await addLog(`步骤 6：手机号注册成功，正在生成手机号前缀 Cloudflare Temp Email（${localPart}）...`, 'info');
-      const email = String(await fetchCloudflareTempEmailAddress(latestState, {
+      await addLog(`Step 6: phone signup succeeded; creating phone-prefixed ${label} mailbox (${localPart})...`, 'info');
+      const email = String(await fetcher(latestState, {
         localPart,
         preserveAccountIdentity: true,
-        source: 'generated:cloudflare-temp-email:phone-prefix',
+        source: getStep6PhoneCloudflareGeneratedSource(latestState),
       }) || '').trim().toLowerCase();
       if (!email) {
-        throw new Error('步骤 6：Cloudflare Temp Email 未返回可用的手机号前缀邮箱。');
+        throw new Error(`Step 6: ${label} did not return a usable phone-prefixed email.`);
       }
 
       const postGenerateState = await resolveLatestStep6State(latestState);
@@ -469,12 +520,12 @@
       if (typeof persistRegistrationEmailState === 'function' && persistedEmail !== email) {
         await persistRegistrationEmailState(latestState, email, {
           preserveAccountIdentity: true,
-          source: 'generated:cloudflare-temp-email:phone-prefix',
+          source: getStep6PhoneCloudflareGeneratedSource(latestState),
         });
       }
       if (typeof setPlusPaymentEmailState === 'function') {
         await setPlusPaymentEmailState(email, {
-          source: 'registration:phone-prefix-cloudflare-temp-email',
+          source: getStep6PhoneCloudflarePaymentSource(latestState),
         });
       }
       await addLog(`步骤 6：本轮后续邮箱已固定为 ${email}。`, 'ok');

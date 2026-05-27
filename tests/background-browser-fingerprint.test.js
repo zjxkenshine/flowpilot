@@ -135,6 +135,8 @@ test('browser fingerprint manager persists runtime-only profile fields', async (
   const api = loadBrowserFingerprintModule();
   const updates = [];
   const broadcasts = [];
+  const originalInfo = console.info;
+  console.info = () => {};
   const manager = api.createBrowserFingerprintManager({
     chrome: {
       declarativeNetRequest: {
@@ -153,13 +155,70 @@ test('browser fingerprint manager persists runtime-only profile fields', async (
     addLog: async () => {},
   });
 
-  const result = await manager.ensureBrowserFingerprintForProxyExit({
-    exitIp: '198.51.100.8',
-    exitRegion: 'US',
-  });
+  try {
+    const result = await manager.ensureBrowserFingerprintForProxyExit({
+      exitIp: '198.51.100.8',
+      exitRegion: 'US',
+    });
 
-  assert.equal(result.profile.exitIp, '198.51.100.8');
-  assert.equal(updates.some((entry) => entry.browserFingerprintProfile), true);
-  assert.equal(broadcasts.length, 1);
-  assert.equal(broadcasts[0].browserFingerprintExitRegion, 'US');
+    assert.equal(result.profile.exitIp, '198.51.100.8');
+    assert.equal(updates.some((entry) => entry.browserFingerprintProfile), true);
+    assert.equal(broadcasts.length, 1);
+    assert.equal(broadcasts[0].browserFingerprintExitRegion, 'US');
+  } finally {
+    console.info = originalInfo;
+  }
+});
+
+test('browser fingerprint manager logs generated profile summary without exit ip', async () => {
+  const api = loadBrowserFingerprintModule();
+  const originalInfo = console.info;
+  const logs = [];
+  console.info = (...args) => {
+    logs.push(args);
+  };
+  try {
+    const manager = api.createBrowserFingerprintManager({
+      chrome: {
+        declarativeNetRequest: {
+          updateDynamicRules: async () => {},
+        },
+      },
+      getState: async () => ({ activeRunId: 'run-logging' }),
+      setState: async () => {},
+      broadcastDataUpdate: () => {},
+      addLog: async () => {},
+    });
+
+    const result = await manager.ensureBrowserFingerprintForProxyExit({
+      exitIp: '198.51.100.77',
+      exitRegion: 'SG',
+    });
+
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0][0], '[FlowPilot:browser-fingerprint] generated');
+    assert.equal(logs[0].length, 2);
+    const summary = logs[0][1];
+    assert.equal(summary.profileId, result.profile.profileId);
+    assert.equal(summary.exitRegion, 'SG');
+    assert.equal(summary.fallbackRegion, false);
+    assert.equal(summary.locale, 'en-US');
+    assert.deepEqual(summary.languages, ['en-US', 'en']);
+    assert.equal(summary.timezoneId, 'Asia/Singapore');
+    assert.equal(summary.platform, result.profile.platform);
+    assert.deepEqual(summary.screen, {
+      width: result.profile.screen.width,
+      height: result.profile.screen.height,
+      availWidth: result.profile.screen.availWidth,
+      availHeight: result.profile.screen.availHeight,
+      deviceScaleFactor: result.profile.screen.deviceScaleFactor,
+    });
+    assert.equal(summary.hardwareConcurrency, result.profile.hardwareConcurrency);
+    assert.equal(summary.deviceMemory, result.profile.deviceMemory);
+    assert.equal(typeof summary.webglRenderer, 'string');
+    assert.equal(Object.prototype.hasOwnProperty.call(summary, 'exitIp'), false);
+    assert.equal(JSON.stringify(logs).includes('198.51.100.77'), false);
+  } finally {
+    console.info = originalInfo;
+  }
 });

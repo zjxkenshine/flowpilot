@@ -4120,6 +4120,11 @@ test('PayPal hosted card node retries fresh address when PayPal reports invalid 
   assert.equal(submitEvents.length, 2);
   assert.equal(submitEvents[0].message.payload.address.street, '7 Fresh St');
   assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(submitEvents[1].message.payload.addressOnly, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(submitEvents[1].message.payload, 'email'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(submitEvents[1].message.payload, 'phone'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(submitEvents[1].message.payload, 'cardNumber'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(submitEvents[1].message.payload, 'password'), false);
   assert.equal(latestState.plusHostedCheckoutGuestProfile.address.street, '8 Retry Ave');
   assert.equal(latestState.hostedCheckoutGuestProfile.address.city, 'Boston');
   assert.equal(events.some((event) => event.type === 'sleep' && event.ms === 1000), true);
@@ -4207,6 +4212,11 @@ test('PayPal hosted card node uses address suggestion fallback after fresh addre
   assert.equal(fetchCount, 2);
   assert.equal(fallbackSubmitEvents.length, 1);
   assert.equal(fallbackSubmitEvents[0].message.payload.address.street, '8 Retry Ave');
+  assert.equal(fallbackSubmitEvents[0].message.payload.addressOnly, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(fallbackSubmitEvents[0].message.payload, 'email'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(fallbackSubmitEvents[0].message.payload, 'phone'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(fallbackSubmitEvents[0].message.payload, 'cardNumber'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(fallbackSubmitEvents[0].message.payload, 'password'), false);
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
@@ -4422,6 +4432,77 @@ test('Phone Plus hosted checkout prefers phone-prefixed Cloudflare email over st
   assert.deepStrictEqual(
     events.find((event) => event.type === 'set-payment-email' && event.email === '8613812345678@mail.example.com')?.options,
     { source: 'registration:phone-prefix-cloudflare-temp-email' }
+  );
+});
+
+test('Phone Plus hosted checkout uses Cloudflare phone-prefix payment source over stale payment cache', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/test';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    ensurePhonePrefixedCloudflareTempEmail: async (_state, options = {}) => {
+      events.push({ type: 'ensure-phone-email', options });
+      return '8613812345678@mail.example.com';
+    },
+    fetch: async () => createHostedAddressResponse(),
+    getPlusPaymentEmailState: () => ({
+      current: 'stale-payment@example.com',
+      source: 'payment:cached',
+      updatedAt: 100,
+    }),
+    getState: async () => createHostedRuntimeState({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      emailGenerator: 'cloudflare',
+      hostedCheckoutPhoneNumber: '2125550000',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      signupVerifiedPhoneNumber: '+86 138-1234-5678',
+      plusPaymentEmailState: {
+        current: 'stale-payment@example.com',
+        source: 'payment:cached',
+        updatedAt: 100,
+      },
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/pay?token=EC-test';
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return { hostedVerificationVisible: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async (email, options = {}) => {
+      events.push({ type: 'set-payment-email', email, options });
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 321,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    emailGenerator: 'cloudflare',
+  });
+
+  const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
+  assert.ok(submitEvent);
+  assert.equal(submitEvent.message.payload.email, '8613812345678@mail.example.com');
+  assert.deepStrictEqual(
+    events.find((event) => event.type === 'set-payment-email' && event.email === '8613812345678@mail.example.com')?.options,
+    { source: 'registration:phone-prefix-cloudflare-email' }
   );
 });
 
@@ -5364,6 +5445,100 @@ test('PayPal hosted card node resends and refills after invalid verification cod
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '111111'), true);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.resendVerificationCode), true);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '222222'), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
+});
+
+test('PayPal hosted card waits after submitted verification code without regenerating payment email', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let codeSubmitted = false;
+  let verificationPollCount = 0;
+  let generatedEmailCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      if (/randomuser\.me/i.test(url)) {
+        return createHostedAddressResponse({
+          Address: '11 Verify Ln',
+          City: 'Phoenix',
+          State_Full: 'Arizona',
+          Zip_Code: '85001',
+        });
+      }
+      return {
+        ok: true,
+        json: async () => ({}),
+        text: async () => JSON.stringify({
+          data: {
+            message: "PayPal: 111111 is your security code. Don't share it.",
+          },
+        }),
+      };
+    },
+    fetchGeneratedEmail: async () => {
+      generatedEmailCount += 1;
+      events.push({
+        type: 'generate-email',
+        afterCodeSubmitted: codeSubmitted,
+        email: `payment-${generatedEmailCount}@example.com`,
+      });
+      return `payment-${generatedEmailCount}@example.com`;
+    },
+    getState: async () => createHostedRuntimeState({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        if (message.payload?.expectedStage === 'guest_checkout') {
+          currentUrl = 'https://www.paypal.com/checkoutweb/verification';
+          return { submitted: true, phoneMatched: true };
+        }
+        if (message.payload?.verificationCode === '111111') {
+          codeSubmitted = true;
+          return { codeSubmitted: true };
+        }
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        if (currentUrl.includes('/verification')) {
+          verificationPollCount += 1;
+          if (verificationPollCount <= 3) {
+            return {
+              hostedStage: 'verification',
+              verificationInputsVisible: true,
+            };
+          }
+          currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+          return { hostedStage: 'create_account' };
+        }
+        return { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+  });
+
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '111111'), true);
+  assert.equal(events.some((event) => event.type === 'generate-email' && event.afterCodeSubmitted), false);
+  assert.equal(events.filter((event) => event.type === 'log' && /verification code already submitted/i.test(event.message)).length >= 1, true);
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 

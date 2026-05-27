@@ -201,6 +201,13 @@
       return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
     }
 
+    function getPhonePrefixedCloudflarePaymentSource(state = {}) {
+      const generator = String(state?.emailGenerator || '').trim().toLowerCase();
+      return generator === 'cloudflare'
+        ? 'registration:phone-prefix-cloudflare-email'
+        : 'registration:phone-prefix-cloudflare-temp-email';
+    }
+
     function normalizeString(value = '') {
       return String(value || '').trim();
     }
@@ -374,7 +381,7 @@
       ) {
         return {
           email: preferredPhonePrefixEmail,
-          source: 'registration:phone-prefix-cloudflare-temp-email',
+          source: getPhonePrefixedCloudflarePaymentSource(state),
           reused: true,
         };
       }
@@ -642,17 +649,18 @@
           fallbackToGenerated: false,
         }) || '').trim().toLowerCase();
         if (fixedEmail) {
+          const paymentSource = getPhonePrefixedCloudflarePaymentSource(latestState);
           await persistPhonePlusPaymentEmail(fixedEmail, {
-            source: 'registration:phone-prefix-cloudflare-temp-email',
+            source: paymentSource,
           });
           await addHostedStepLog(
             PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
-            `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已复用 ${fixedEmail}（来源：registration:phone-prefix-cloudflare-temp-email）。`,
+            `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：支付邮箱已复用 ${fixedEmail}（来源：${paymentSource}）。`,
             'info'
           );
           return {
             email: fixedEmail,
-            source: 'registration:phone-prefix-cloudflare-temp-email',
+            source: paymentSource,
             reused: true,
           };
         }
@@ -3235,9 +3243,9 @@
       if (retries > 0 && context?.addressSuggestionFallbackUsed !== true) {
         const fallbackPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
           ? {
-            ...previousProfile,
             expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-            phone: previousProfile.phone,
+            addressOnly: true,
+            address: previousProfile.address,
             useAddressSuggestionFallback: true,
           }
           : {
@@ -3290,9 +3298,9 @@
       );
       const retryPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
         ? {
-          ...profile,
           expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-          phone: profile.phone,
+          addressOnly: true,
+          address: retryAddress,
         }
         : {
           expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
@@ -3513,6 +3521,13 @@
       const stepNumber = getHostedStepNumber(stepKey);
       let profile = null;
       let config = null;
+      if (context.verificationSubmitted && !pageState?.hostedVerificationInvalidCode) {
+        await addHostedStepLog(stepKey, `Step ${stepNumber}: PayPal verification code already submitted; waiting for validation result or next page.`, 'info');
+        return {
+          handled: true,
+          context,
+        };
+      }
       try {
         ({ profile, config } = await ensureHostedGuestProfile(state));
       } catch (error) {

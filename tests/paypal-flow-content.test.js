@@ -1124,6 +1124,52 @@ test('PayPal hosted guest checkout accepts profile address aliases', async () =>
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
 });
 
+test('PayPal hosted guest checkout address-only retry only refills billing address', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      addressOnly: true,
+      address: {
+        street: '2307 Spring Hill Road',
+        city: 'Petaluma',
+        state: 'California',
+        zip: '94952',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, 'guest_checkout');
+  assert.equal(result.submitted, true);
+  assert.equal(result.addressOnly, true);
+  assert.equal(result.addressRefilled, true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '2307 Spring Hill Road'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingCity' && event.value === 'Petaluma'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '94952'), true);
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'billingState' && event.event === 'change' && event.value === 'CA'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+  assert.deepEqual(
+    harness.events
+      .filter((event) => event.type === 'fill' && [
+        'email',
+        'phone',
+        'cardNumber',
+        'cardExpiry',
+        'cardCvv',
+        'password',
+        'firstName',
+        'lastName',
+      ].includes(event.id))
+      .map((event) => event.id),
+    []
+  );
+});
+
 test('PayPal hosted guest checkout fails when visible country select cannot switch to US', async () => {
   const harness = createHostedPayPalHarness({
     renderPhone: (value) => `+1 ${value}`,

@@ -1310,8 +1310,33 @@ async function fillHostedGuestCheckout(payload = {}) {
   if (countryResult.selected) {
     await sleep(1000);
   }
-  const generatedCard = buildHostedVisaCard();
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  if (payload.addressOnly === true) {
+    const addressFillResult = fillHostedAddressFields(address);
+    const addressSuggestionResult = payload.useAddressSuggestionFallback === true
+      ? await selectHostedAddressSuggestionFallback()
+      : {
+        addressSuggestionFallbackAttempted: false,
+        addressSuggestionSelected: false,
+        addressSuggestionSelectedText: '',
+        addressSuggestionError: '',
+      };
+    const clickResult = await clickHostedSubmitButton({
+      stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+      label: 'hosted-paypal-address-submit',
+      maxAttempts: 4,
+    });
+    return {
+      stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+      submitted: true,
+      addressOnly: true,
+      addressRefilled: Boolean(addressFillResult?.filledAny),
+      addressFillResult,
+      clicked: Boolean(clickResult?.clicked),
+      ...addressSuggestionResult,
+    };
+  }
+  const generatedCard = buildHostedVisaCard();
   const configuredPhone = normalizeText(payload.phone || '');
   if (!normalizeHostedPhoneDigits(configuredPhone)) {
     throw new Error('PayPal hosted checkout 未收到后台下发的池中手机号/验证码配置，无法继续填写资料页。');
