@@ -28,32 +28,71 @@
       geolocation: Object.freeze({ latitude: 39.8283, longitude: -98.5795, accuracy: 80 }),
     }),
     JP: Object.freeze({
-      locale: 'ja-JP',
-      languages: Object.freeze(['ja-JP', 'ja', 'en-US', 'en']),
-      acceptLanguage: 'ja-JP,ja;q=0.9,en-US;q=0.7,en;q=0.6',
+      locale: 'zh-CN',
+      languages: Object.freeze(['zh-CN', 'zh']),
+      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
       timezoneIds: Object.freeze(['Asia/Tokyo']),
       geolocation: Object.freeze({ latitude: 35.6762, longitude: 139.6503, accuracy: 70 }),
     }),
     TH: Object.freeze({
-      locale: 'th-TH',
-      languages: Object.freeze(['th-TH', 'th', 'en-US', 'en']),
-      acceptLanguage: 'th-TH,th;q=0.9,en-US;q=0.7,en;q=0.6',
+      locale: 'zh-CN',
+      languages: Object.freeze(['zh-CN', 'zh']),
+      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
       timezoneIds: Object.freeze(['Asia/Bangkok']),
       geolocation: Object.freeze({ latitude: 13.7563, longitude: 100.5018, accuracy: 80 }),
     }),
     SG: Object.freeze({
-      locale: 'en-SG',
-      languages: Object.freeze(['en-SG', 'en', 'zh-CN']),
-      acceptLanguage: 'en-SG,en;q=0.9,zh-CN;q=0.7',
+      locale: 'en-US',
+      languages: Object.freeze(['en-US', 'en']),
+      acceptLanguage: 'en-US,en;q=0.9',
       timezoneIds: Object.freeze(['Asia/Singapore']),
       geolocation: Object.freeze({ latitude: 1.3521, longitude: 103.8198, accuracy: 60 }),
     }),
   });
 
+  const LANGUAGE_FINGERPRINT_PROFILES = Object.freeze({
+    EN: Object.freeze({
+      locale: 'en-US',
+      languages: Object.freeze(['en-US', 'en']),
+      acceptLanguage: 'en-US,en;q=0.9',
+    }),
+    ZH_CN: Object.freeze({
+      locale: 'zh-CN',
+      languages: Object.freeze(['zh-CN', 'zh']),
+      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
+    }),
+  });
+
+  const ENGLISH_LANGUAGE_REGIONS = Object.freeze(new Set([
+    'US',
+    'SG',
+    'GB',
+    'UK',
+    'CA',
+    'AU',
+    'NZ',
+    'IE',
+  ]));
+
+  const SIMPLIFIED_CHINESE_LANGUAGE_REGIONS = Object.freeze(new Set([
+    'CN',
+  ]));
+
   const REGION_NAME_ALIASES = Object.freeze({
+    AUSTRALIA: 'AU',
+    CANADA: 'CA',
+    CHINA: 'CN',
+    ENGLAND: 'GB',
+    IRELAND: 'IE',
     JAPAN: 'JP',
+    'NEW ZEALAND': 'NZ',
+    'PEOPLE REPUBLIC OF CHINA': 'CN',
+    "PEOPLE'S REPUBLIC OF CHINA": 'CN',
+    PRC: 'CN',
     THAILAND: 'TH',
     SINGAPORE: 'SG',
+    UK: 'GB',
+    'UNITED KINGDOM': 'GB',
     'UNITED STATES': 'US',
     USA: 'US',
     'UNITED STATES OF AMERICA': 'US',
@@ -131,6 +170,17 @@
     return list[Math.floor(random() * list.length) % list.length];
   }
 
+  function resolveLanguageFingerprintProfile(regionCode = '') {
+    const normalizedRegion = normalizeRegionCode(regionCode);
+    if (ENGLISH_LANGUAGE_REGIONS.has(normalizedRegion)) {
+      return LANGUAGE_FINGERPRINT_PROFILES.EN;
+    }
+    if (SIMPLIFIED_CHINESE_LANGUAGE_REGIONS.has(normalizedRegion)) {
+      return LANGUAGE_FINGERPRINT_PROFILES.ZH_CN;
+    }
+    return LANGUAGE_FINGERPRINT_PROFILES.ZH_CN;
+  }
+
   function roundCoordinate(value) {
     return Math.round(Number(value || 0) * 1000000) / 1000000;
   }
@@ -188,6 +238,7 @@
     const normalizedRegion = normalizeRegionCode(rawRegion);
     const regionCode = normalizedRegion || 'US';
     const regionDefaults = REGION_DEFAULTS[regionCode] || REGION_DEFAULTS.US;
+    const languageProfile = resolveLanguageFingerprintProfile(regionCode);
     const runId = String(
       state?.activeRunId
       || state?.runId
@@ -230,9 +281,9 @@
       rawExitRegion: rawRegion,
       exitSource: String(proxyRouting?.exitSource || '').trim().toLowerCase(),
       fallbackRegion: !normalizedRegion,
-      locale: regionDefaults.locale,
-      languages: [...regionDefaults.languages],
-      acceptLanguage: regionDefaults.acceptLanguage,
+      locale: languageProfile.locale,
+      languages: [...languageProfile.languages],
+      acceptLanguage: languageProfile.acceptLanguage,
       timezoneId,
       geolocation,
       userAgent,
@@ -558,6 +609,7 @@
   }
 
   return {
+    LANGUAGE_FINGERPRINT_PROFILES,
     REGION_DEFAULTS,
     applyBrowserFingerprintHeaderRules,
     applyBrowserFingerprintToTab,
@@ -565,6 +617,7 @@
     createBrowserFingerprintManager,
     isValidBrowserFingerprintProfile,
     normalizeRegionCode,
+    resolveLanguageFingerprintProfile,
     shouldApplyBrowserFingerprintToSource,
   };
 });
