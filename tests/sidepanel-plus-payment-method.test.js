@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+const sidepanelHtml = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
 
 function extractFunction(name) {
   const asyncStart = sidepanelSource.indexOf(`async function ${name}`);
@@ -224,6 +225,7 @@ const plusPaymentMethodCaption = { textContent: '' };
 const rowPayPalAccount = { style: { display: '' } };
 const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
 const rowHostedCheckoutManualFetch = { style: { display: 'none' } };
+const rowHostedCheckoutSecurityChallenge = { style: { display: 'none' } };
 const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
 const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
@@ -235,7 +237,7 @@ return {
   selectPlusPaymentMethod,
   rowPayPalAccount,
   plusPaymentMethodCaption,
-  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutSecurityChallenge, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
 };
 `)();
 
@@ -243,6 +245,7 @@ return {
 
   assert.equal(api.rowPayPalAccount.style.display, 'none');
   assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, '');
+  assert.equal(api.rows.rowHostedCheckoutSecurityChallenge.style.display, '');
   assert.equal(api.rows.rowHostedCheckoutPhone.style.display, '');
   assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, '');
   assert.match(api.plusPaymentMethodCaption.textContent, /无卡直绑/);
@@ -252,9 +255,39 @@ return {
 
   assert.equal(api.rowPayPalAccount.style.display, 'none');
   assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, '');
+  assert.equal(api.rows.rowHostedCheckoutSecurityChallenge.style.display, '');
   assert.equal(api.rows.rowHostedCheckoutPhone.style.display, '');
   assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, '');
   assert.match(api.plusPaymentMethodCaption.textContent, /自动闭环|Hosted/);
+});
+
+test('sidepanel PayPal hosted security challenge toggle defaults off and syncs through settings', () => {
+  const toggleMatch = sidepanelHtml.match(
+    /<input[^>]+id="input-hosted-checkout-security-challenge-enabled"[^>]*>/i
+  );
+  assert.ok(toggleMatch);
+  assert.doesNotMatch(toggleMatch[0], /\bchecked\b/i);
+  assert.match(sidepanelHtml, /row-hosted-checkout-security-challenge/);
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /hostedCheckoutSecurityChallengeEnabled:/);
+  assert.match(collectSource, /Boolean\(inputHostedCheckoutSecurityChallengeEnabled\.checked\)/);
+  assert.match(collectSource, /Boolean\(latestState\?\.hostedCheckoutSecurityChallengeEnabled\)/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(
+    applySource,
+    /inputHostedCheckoutSecurityChallengeEnabled\.checked\s*=\s*Boolean\(state\?\.hostedCheckoutSecurityChallengeEnabled\)/
+  );
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 3000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutSecurityChallengeEnabled !== undefined/);
+  assert.match(
+    dataUpdatedSnippet,
+    /inputHostedCheckoutSecurityChallengeEnabled\.checked\s*=\s*Boolean\(message\.payload\.hostedCheckoutSecurityChallengeEnabled\)/
+  );
 });
 
 test('sidepanel Plus UI restores traditional PayPal account mode when hosted final step is disabled', () => {
@@ -293,6 +326,7 @@ const plusPaymentMethodCaption = { textContent: '' };
 const rowPayPalAccount = { style: { display: 'none' } };
 const rowHostedCheckoutVerificationUrl = { style: { display: 'none' } };
 const rowHostedCheckoutManualFetch = { style: { display: 'none' } };
+const rowHostedCheckoutSecurityChallenge = { style: { display: 'none' } };
 const rowHostedCheckoutVerificationPopupDelay = { style: { display: 'none' } };
 const rowHostedCheckoutPhone = { style: { display: 'none' } };
 const rowHostedCheckoutSmsPool = { style: { display: 'none' } };
@@ -303,7 +337,7 @@ return {
   updatePlusModeUI,
   rowPayPalAccount,
   plusPaymentMethodCaption,
-  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
+  rows: { rowHostedCheckoutVerificationUrl, rowHostedCheckoutManualFetch, rowHostedCheckoutSecurityChallenge, rowHostedCheckoutVerificationPopupDelay, rowHostedCheckoutPhone, rowHostedCheckoutSmsPool, rowPlusHostedCheckoutOauthDelay },
 };
 `)();
 
@@ -311,6 +345,7 @@ return {
 
   assert.equal(api.rowPayPalAccount.style.display, '');
   assert.equal(api.rows.rowHostedCheckoutVerificationUrl.style.display, 'none');
+  assert.equal(api.rows.rowHostedCheckoutSecurityChallenge.style.display, 'none');
   assert.equal(api.rows.rowHostedCheckoutPhone.style.display, 'none');
   assert.equal(api.rows.rowPlusHostedCheckoutOauthDelay.style.display, 'none');
   assert.match(api.plusPaymentMethodCaption.textContent, /传统/);

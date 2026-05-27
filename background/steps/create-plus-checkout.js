@@ -2545,6 +2545,7 @@
     }
 
     async function getHostedPayPalState(tabId, options = {}) {
+      const securityChallengeEnabled = await resolveHostedSecurityChallengeEnabled(options);
       await waitForTabCompleteUntilStopped(tabId);
       await ensureContentScriptReadyOnTabUntilStopped(PAYPAL_SOURCE, tabId, {
         inject: PAYPAL_INJECT_FILES,
@@ -2554,7 +2555,9 @@
       const result = await sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
         type: 'PAYPAL_HOSTED_GET_STATE',
         source: 'background',
-        payload: {},
+        payload: {
+          securityChallengeEnabled,
+        },
       });
       if (result?.error) {
         throw new Error(result.error);
@@ -2573,13 +2576,17 @@
           };
         }
       }
-      if (pageState?.hostedSecurityChallengeVisible) {
+      if (securityChallengeEnabled && pageState?.hostedSecurityChallengeVisible) {
         await logHostedSecurityChallengeProbeResult(options.stepKey || '', pageState);
       }
-      return normalizeHostedSecurityChallengeState(pageState, options);
+      return normalizeHostedSecurityChallengeState(pageState, {
+        ...options,
+        securityChallengeEnabled,
+      });
     }
 
     async function runHostedPayPalStep(tabId, payload = {}, options = {}) {
+      const securityChallengeEnabled = await resolveHostedSecurityChallengeEnabled(options);
       await waitForTabCompleteUntilStopped(tabId);
       await ensureContentScriptReadyOnTabUntilStopped(PAYPAL_SOURCE, tabId, {
         inject: PAYPAL_INJECT_FILES,
@@ -2589,7 +2596,10 @@
       const result = await sendTabMessageUntilStopped(tabId, PAYPAL_SOURCE, {
         type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
         source: 'background',
-        payload,
+        payload: {
+          ...payload,
+          securityChallengeEnabled,
+        },
       });
       if (result?.error) {
         throw new Error(result.error);
@@ -2608,11 +2618,12 @@
           };
         }
       }
-      if (stepResult?.hostedSecurityChallengeVisible) {
+      if (securityChallengeEnabled && stepResult?.hostedSecurityChallengeVisible) {
         await logHostedSecurityChallengeProbeResult(options.stepKey || stepResult.stepKey || '', stepResult);
       }
       return normalizeHostedSecurityChallengeState(stepResult, {
         ...options,
+        securityChallengeEnabled,
         expectedStage: payload.expectedStage || options.expectedStage || '',
       });
     }
@@ -2782,6 +2793,20 @@
         && !pageState?.hostedSecurityChallengeVisible;
     }
 
+    async function resolveHostedSecurityChallengeEnabled(options = {}) {
+      if (Object.prototype.hasOwnProperty.call(options || {}, 'securityChallengeEnabled')) {
+        return Boolean(options.securityChallengeEnabled);
+      }
+      if (options?.state && typeof options.state === 'object') {
+        return Boolean(options.state.hostedCheckoutSecurityChallengeEnabled);
+      }
+      if (typeof getState === 'function') {
+        const latestState = await getState().catch(() => ({}));
+        return Boolean(latestState?.hostedCheckoutSecurityChallengeEnabled);
+      }
+      return false;
+    }
+
     async function logHostedSecurityChallengeProbeResult(stepKey, pageState = {}) {
       if (!pageState?.hostedSecurityChallengeVisible) {
         return;
@@ -2815,6 +2840,9 @@
     }
 
     function normalizeHostedSecurityChallengeState(pageState = {}, options = {}) {
+      if (options?.securityChallengeEnabled !== true) {
+        return pageState || {};
+      }
       if (!pageState?.hostedSecurityChallengeVisible) {
         return pageState || {};
       }

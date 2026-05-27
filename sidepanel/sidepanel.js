@@ -273,6 +273,8 @@ const inputHostedCheckoutVerificationUrl = document.getElementById('input-hosted
 const rowHostedCheckoutManualFetch = document.getElementById('row-hosted-checkout-manual-fetch');
 const btnHostedCheckoutManualFetch = document.getElementById('btn-hosted-checkout-manual-fetch');
 const displayHostedCheckoutManualCode = document.getElementById('display-hosted-checkout-manual-code');
+const rowHostedCheckoutSecurityChallenge = document.getElementById('row-hosted-checkout-security-challenge');
+const inputHostedCheckoutSecurityChallengeEnabled = document.getElementById('input-hosted-checkout-security-challenge-enabled');
 const rowHostedCheckoutVerificationPopupDelay = document.getElementById('row-hosted-checkout-verification-popup-delay');
 const inputHostedCheckoutVerificationPopupDelaySeconds = document.getElementById('input-hosted-checkout-verification-popup-delay-seconds');
 const rowHostedCheckoutPhone = document.getElementById('row-hosted-checkout-phone');
@@ -5330,6 +5332,9 @@ function collectSettingsPayload() {
     plusCheckoutOpenStableWaitSeconds: typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds
       ? normalizePlusCheckoutOpenStableWaitSeconds(inputPlusCheckoutOpenStableWaitSeconds.value)
       : defaultPlusCheckoutOpenStableWaitSeconds,
+    hostedCheckoutSecurityChallengeEnabled: typeof inputHostedCheckoutSecurityChallengeEnabled !== 'undefined' && inputHostedCheckoutSecurityChallengeEnabled
+      ? Boolean(inputHostedCheckoutSecurityChallengeEnabled.checked)
+      : Boolean(latestState?.hostedCheckoutSecurityChallengeEnabled),
     hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
       ? normalizeHostedCheckoutVerificationPopupDelaySeconds(inputHostedCheckoutVerificationPopupDelaySeconds.value)
       : DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS,
@@ -10847,6 +10852,7 @@ function updatePlusModeUI() {
   [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
     typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
+    typeof rowHostedCheckoutSecurityChallenge !== 'undefined' ? rowHostedCheckoutSecurityChallenge : null,
     typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
     typeof rowHostedCheckoutPhone !== 'undefined' ? rowHostedCheckoutPhone : null,
     typeof rowHostedCheckoutSmsPool !== 'undefined' ? rowHostedCheckoutSmsPool : null,
@@ -12061,6 +12067,9 @@ function applySettingsState(state) {
   }
   if (typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl) {
     inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(state?.hostedCheckoutVerificationUrl || '');
+  }
+  if (typeof inputHostedCheckoutSecurityChallengeEnabled !== 'undefined' && inputHostedCheckoutSecurityChallengeEnabled) {
+    inputHostedCheckoutSecurityChallengeEnabled.checked = Boolean(state?.hostedCheckoutSecurityChallengeEnabled);
   }
   if (typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds) {
     inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
@@ -17498,6 +17507,11 @@ inputHostedCheckoutVerificationPopupDelaySeconds?.addEventListener('blur', () =>
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputHostedCheckoutSecurityChallengeEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputHostedCheckoutSmsPoolAutoDisableEnabled?.addEventListener('change', () => {
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -20159,6 +20173,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputHostedCheckoutVerificationPopupDelaySeconds.value = String(
           normalizeHostedCheckoutVerificationPopupDelaySeconds(message.payload.hostedCheckoutVerificationPopupDelaySeconds)
         );
+      }
+      if (message.payload.hostedCheckoutSecurityChallengeEnabled !== undefined && inputHostedCheckoutSecurityChallengeEnabled) {
+        inputHostedCheckoutSecurityChallengeEnabled.checked = Boolean(message.payload.hostedCheckoutSecurityChallengeEnabled);
       }
       if (message.payload.hostedCheckoutSmsPoolAutoDisableEnabled !== undefined && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
         inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(message.payload.hostedCheckoutSmsPoolAutoDisableEnabled);

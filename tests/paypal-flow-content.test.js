@@ -1028,7 +1028,7 @@ test('PayPal hosted blocked page is treated as non-blocking unknown state', asyn
   const state = await harness.send({
     type: 'PAYPAL_HOSTED_GET_STATE',
     source: 'test',
-    payload: {},
+    payload: { securityChallengeEnabled: true },
   });
 
   assert.equal(state.ok, true);
@@ -1049,7 +1049,7 @@ test('PayPal hosted blocked page is treated as non-blocking unknown state', asyn
   assert.equal(harness.events.some((event) => event.type === 'click'), false);
 });
 
-test('PayPal hosted captcha overlay is removed and checkout flow continues', async () => {
+test('PayPal hosted captcha overlay is ignored by default', async () => {
   const harness = createHostedPayPalHarness({
     renderPhone: (value) => `+1 ${value}`,
   });
@@ -1059,6 +1059,27 @@ test('PayPal hosted captcha overlay is removed and checkout flow continues', asy
     type: 'PAYPAL_HOSTED_GET_STATE',
     source: 'test',
     payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'guest_checkout');
+  assert.equal(state.hostedBlocked, false);
+  assert.equal(state.hostedSecurityChallengeVisible, false);
+  assert.equal(state.hostedSecurityChallengeSelector, '');
+  assert.equal(state.hostedSecurityChallengeRemoved, false);
+  assert.equal(harness.events.some((event) => event.type === 'remove' && event.id === 'captcha-standalone'), false);
+});
+
+test('PayPal hosted captcha overlay is removed and checkout flow continues', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showCaptchaOverlay();
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: { securityChallengeEnabled: true },
   });
 
   assert.equal(state.ok, true);

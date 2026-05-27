@@ -1476,6 +1476,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
   plusCheckoutConversionProxyExitCheck: null,
+  hostedCheckoutSecurityChallengeEnabled: false,
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutSmsPoolAutoDisableEnabled: false,
   hostedCheckoutFirstDirectResendEnabled: false,
@@ -1720,6 +1721,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
+  'hostedCheckoutSecurityChallengeEnabled',
   'hostedCheckoutVerificationPopupDelaySeconds',
   'hostedCheckoutFirstDirectResendEnabled',
   'hostedCheckoutFirstResendWaitSeconds',
@@ -1748,7 +1750,7 @@ const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 const STEP6_REGISTRATION_SUCCESS_WAIT_MS = 20000;
 const ACCOUNT_BOOK_FREE_STATUS_UNKNOWN = 'unknown';
-const ACCOUNT_BOOK_FREE_STATUS_VALUES = new Set(['free', 'paid', ACCOUNT_BOOK_FREE_STATUS_UNKNOWN]);
+const ACCOUNT_BOOK_FREE_STATUS_VALUES = new Set(['free', 'paid', 'plus', ACCOUNT_BOOK_FREE_STATUS_UNKNOWN]);
 
 function normalizeAccountBookFreeStatus(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
@@ -3708,6 +3710,8 @@ function normalizePersistentSettingValue(key, value) {
     }
     case 'plusCheckoutConversionProxy711Region':
       return normalizePlusCheckoutConversionProxy711Region(value);
+    case 'hostedCheckoutSecurityChallengeEnabled':
+      return Boolean(value);
     case 'hostedCheckoutVerificationPopupDelaySeconds': {
       const numeric = Number(value);
       return Math.min(60, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 20)));
@@ -4739,6 +4743,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusCheckoutConversionProxySource', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxySource']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
   assignIfUpdated('plusCheckoutConversionProxy711Region', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxy711Region']);
+  assignIfUpdated('hostedCheckoutSecurityChallengeEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutSecurityChallengeEnabled']);
   assignIfUpdated('hostedCheckoutVerificationPopupDelaySeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPopupDelaySeconds']);
   assignIfUpdated('hostedCheckoutSmsPoolAutoDisableEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolAutoDisableEnabled']);
   assignIfUpdated('hostedCheckoutFirstDirectResendEnabled', ['flows', 'openai', 'plus', 'hostedCheckoutFirstDirectResendEnabled']);
@@ -12253,7 +12258,36 @@ async function reportCompletedStepSideEffectError(step, error) {
 
 async function runCompletedNodeSideEffects(nodeId, payload, completionState, lastNodeId) {
   await handleNodeData(nodeId, payload);
-  const postCompletionState = await getState();
+  let postCompletionState = await getState();
+  const workflowNodeIds = typeof getNodeIdsForState === 'function'
+    ? getNodeIdsForState(postCompletionState).map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const oauthNodeIndex = workflowNodeIds.indexOf('oauth-login');
+  const isPhonePlusPaymentCompletionNode = Boolean(
+    postCompletionState?.phonePlusModeEnabled
+    && oauthNodeIndex > 0
+    && workflowNodeIds[oauthNodeIndex - 1] === nodeId
+  );
+  if (isPhonePlusPaymentCompletionNode) {
+    const freeStatusDetection = {
+      freeStatus: 'plus',
+      reason: 'phone_plus_payment_completed',
+      nodeId,
+    };
+    const plusStatusUpdate = {
+      freeStatus: 'plus',
+      freeStatusDetection,
+    };
+    await setState(plusStatusUpdate);
+    broadcastDataUpdate(plusStatusUpdate);
+    postCompletionState = {
+      ...postCompletionState,
+      ...plusStatusUpdate,
+    };
+    if (typeof upsertAndBroadcastAccountBookEntry === 'function') {
+      await upsertAndBroadcastAccountBookEntry('registration_success', postCompletionState);
+    }
+  }
   if (
     (nodeId === 'wait-registration-success' || nodeId === 'kiro-complete-register-consent')
     && typeof upsertAndBroadcastAccountBookEntry === 'function'

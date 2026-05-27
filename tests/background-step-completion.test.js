@@ -51,8 +51,8 @@ function extractFunction(name) {
   return source.slice(start, end);
 }
 
-function createApi(events, lastNodeId = 'platform-verify') {
-  return new Function('events', 'lastNodeId', `
+function createApi(events, lastNodeId = 'platform-verify', options = {}) {
+  return new Function('events', 'lastNodeId', 'options', `
 let stopRequested = false;
 const LOG_PREFIX = '[test]';
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
@@ -61,6 +61,7 @@ const state = {
   accountContributionEnabled: true,
   ipProxyAppliedExitIp: '203.0.113.8',
   ipProxyAppliedExitRegion: 'JP',
+  ...(options.state || {}),
 };
 function getErrorMessage(error) {
   return error?.message || String(error || '');
@@ -71,6 +72,16 @@ async function getState() {
 }
 function getLastNodeIdForState() {
   return lastNodeId;
+}
+function getNodeIdsForState() {
+  return Array.isArray(options.nodeIds) ? options.nodeIds.slice() : [];
+}
+async function setState(updates) {
+  Object.assign(state, updates || {});
+  events.push({ type: 'set-state', updates });
+}
+function broadcastDataUpdate(payload) {
+  events.push({ type: 'broadcast', payload });
 }
 async function setNodeStatus(nodeId, status) {
   events.push({ type: 'status', nodeId, status });
@@ -106,7 +117,7 @@ ${extractFunction('runCompletedNodeSideEffects')}
 ${extractFunction('reportCompletedNodeSideEffectError')}
 ${extractFunction('completeNodeFromBackground')}
 return { completeNodeFromBackground };
-`)(events, lastNodeId);
+`)(events, lastNodeId, options);
 }
 
 test('completeNodeFromBackground releases final node before slow post-completion side effects', async () => {
@@ -171,4 +182,78 @@ test('completeNodeFromBackground writes flow-completed account book entry for fi
   await new Promise((resolve) => setTimeout(resolve, 40));
 
   assert.ok(events.some((event) => event.type === 'account-book' && event.stage === 'flow_completed'));
+});
+
+test('completeNodeFromBackground marks Phone Plus payment completion as plus before OAuth tail', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'paypal-hosted-review',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('paypal-hosted-review', { nodeId: 'paypal-hosted-review' });
+
+  const statusUpdate = events.find((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus');
+  assert.deepStrictEqual(statusUpdate?.updates, {
+    freeStatus: 'plus',
+    freeStatusDetection: {
+      freeStatus: 'plus',
+      reason: 'phone_plus_payment_completed',
+      nodeId: 'paypal-hosted-review',
+    },
+  });
+  assert.ok(events.some((event) => event.type === 'broadcast' && event.payload?.freeStatus === 'plus'));
+  assert.ok(events.some((event) => (
+    event.type === 'account-book'
+    && event.stage === 'registration_success'
+    && event.state.freeStatus === 'plus'
+  )));
+});
+
+test('completeNodeFromBackground does not mark plus for non-terminal or non-phone-plus nodes', async () => {
+  const intermediateEvents = [];
+  const intermediateApi = createApi(intermediateEvents, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-review',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await intermediateApi.completeNodeFromBackground('plus-checkout-create', { nodeId: 'plus-checkout-create' });
+  assert.equal(intermediateEvents.some((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus'), false);
+
+  const plusModeEvents = [];
+  const plusModeApi = createApi(plusModeEvents, 'platform-verify', {
+    state: {
+      plusModeEnabled: true,
+      phonePlusModeEnabled: false,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'paypal-hosted-review',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await plusModeApi.completeNodeFromBackground('paypal-hosted-review', { nodeId: 'paypal-hosted-review' });
+  assert.equal(plusModeEvents.some((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus'), false);
 });

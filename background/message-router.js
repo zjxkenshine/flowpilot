@@ -435,7 +435,7 @@
 
     function normalizeAccountBookFreeStatus(value = '') {
       const normalized = String(value || '').trim().toLowerCase();
-      return ['free', 'paid', 'unknown'].includes(normalized) ? normalized : 'unknown';
+      return ['free', 'paid', 'plus', 'unknown'].includes(normalized) ? normalized : 'unknown';
     }
 
     function findStepByNodeId(nodeId, state = {}) {
@@ -1118,7 +1118,36 @@
           await setNodeStatus(nodeId, 'completed');
           await addLog('已完成', 'ok', { nodeId });
           await handleStepData(resolvedStep, message.payload);
-          const postCompletionState = await getState();
+          let postCompletionState = await getState();
+          const workflowNodeIds = typeof getNodeIdsForState === 'function'
+            ? getNodeIdsForState(postCompletionState).map((item) => String(item || '').trim()).filter(Boolean)
+            : [];
+          const oauthNodeIndex = workflowNodeIds.indexOf('oauth-login');
+          const isPhonePlusPaymentCompletionNode = Boolean(
+            postCompletionState?.phonePlusModeEnabled
+            && oauthNodeIndex > 0
+            && workflowNodeIds[oauthNodeIndex - 1] === nodeId
+          );
+          if (isPhonePlusPaymentCompletionNode) {
+            const freeStatusDetection = {
+              freeStatus: 'plus',
+              reason: 'phone_plus_payment_completed',
+              nodeId,
+            };
+            const plusStatusUpdate = {
+              freeStatus: 'plus',
+              freeStatusDetection,
+            };
+            await setState(plusStatusUpdate);
+            broadcastDataUpdate(plusStatusUpdate);
+            postCompletionState = {
+              ...postCompletionState,
+              ...plusStatusUpdate,
+            };
+            if (typeof upsertAccountBookEntry === 'function') {
+              await upsertAccountBookEntry('registration_success', postCompletionState);
+            }
+          }
           if (
             (nodeId === 'wait-registration-success' || nodeId === 'kiro-complete-register-consent')
             && typeof upsertAccountBookEntry === 'function'

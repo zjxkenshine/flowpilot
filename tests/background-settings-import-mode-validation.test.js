@@ -470,6 +470,7 @@ return {
             plus: {
               plusModeEnabled: true,
               plusPaymentMethod: 'paypal',
+              hostedCheckoutSecurityChallengeEnabled: true,
               hostedCheckoutFirstDirectResendEnabled: true,
               hostedCheckoutFirstResendWaitSeconds: 34,
               hostedCheckoutSubsequentResendWaitSeconds: 41,
@@ -512,16 +513,20 @@ return {
     verificationUrl: 'https://example.com/verify',
   });
   assert.equal(api.getPersistedUpdates().hostedCheckoutFirstDirectResendEnabled, true);
+  assert.equal(api.getPersistedUpdates().hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(api.getPersistedUpdates().hostedCheckoutFirstResendWaitSeconds, 34);
   assert.equal(api.getPersistedUpdates().hostedCheckoutSubsequentResendWaitSeconds, 41);
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollAttempts, 11);
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationPollIntervalSeconds, 6);
   assert.equal(api.getPersistedUpdates().hostedCheckoutVerificationResendMaxAttempts, 4);
   assert.equal(api.getStateUpdates().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(api.getStateUpdates().hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(api.getStateUpdates().hostedCheckoutFirstResendWaitSeconds, 34);
   assert.equal(api.getBroadcastPayload().hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(api.getBroadcastPayload().hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(api.getBroadcastPayload().hostedCheckoutVerificationResendMaxAttempts, 4);
   assert.equal(result.hostedCheckoutSmsPoolText, '4155555678----https://example.com/verify');
+  assert.equal(result.hostedCheckoutSecurityChallengeEnabled, true);
   assert.equal(result.hostedCheckoutVerificationPollIntervalSeconds, 6);
 });
 

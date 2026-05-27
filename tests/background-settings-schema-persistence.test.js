@@ -87,6 +87,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
+  'hostedCheckoutSecurityChallengeEnabled',
   'hostedCheckoutVerificationPopupDelaySeconds',
   'hostedCheckoutFirstDirectResendEnabled',
   'hostedCheckoutFirstResendWaitSeconds',
@@ -123,6 +124,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
+  hostedCheckoutSecurityChallengeEnabled: false,
   hostedCheckoutVerificationPopupDelaySeconds: 20,
   hostedCheckoutFirstDirectResendEnabled: false,
   hostedCheckoutFirstResendWaitSeconds: 20,
@@ -438,6 +440,21 @@ test('buildPersistentSettingsPayload persists PayPal hosted checkout resend stra
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollAttempts, 9);
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollIntervalSeconds, 7);
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationResendMaxAttempts, 3);
+});
+
+test('buildPersistentSettingsPayload persists PayPal hosted security challenge switch into settings schema', () => {
+  const api = buildHarness();
+
+  const defaultPayload = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaultPayload.hostedCheckoutSecurityChallengeEnabled, false);
+  assert.equal(defaultPayload.settingsState.flows.openai.plus.hostedCheckoutSecurityChallengeEnabled, false);
+
+  const enabledPayload = api.buildPersistentSettingsPayload({
+    hostedCheckoutSecurityChallengeEnabled: true,
+  }, { fillDefaults: true });
+
+  assert.equal(enabledPayload.hostedCheckoutSecurityChallengeEnabled, true);
+  assert.equal(enabledPayload.settingsState.flows.openai.plus.hostedCheckoutSecurityChallengeEnabled, true);
 });
 
 test('buildPersistedSettingsStoragePayload omits PayPal hosted resend flat view keys', () => {

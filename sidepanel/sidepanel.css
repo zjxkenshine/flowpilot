@@ -3471,6 +3471,11 @@ header {
   color: #9a3412;
 }
 
+.account-book-free-chip.free-status-plus {
+  background: color-mix(in srgb, #0ea5e9 14%, var(--bg-surface));
+  color: #0369a1;
+}
+
 .account-book-free-chip.free-status-unknown {
   background: var(--bg-elevated);
   color: var(--text-secondary);

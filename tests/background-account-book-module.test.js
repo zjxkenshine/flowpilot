@@ -607,6 +607,53 @@ test('account book helper preserves existing free status when later state omits 
   assert.equal(storedEntries[0].freeStatus, 'free');
 });
 
+test('account book helper supports plus free status and preserves it when omitted later', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'phone-plus@example.com',
+      password: 'secret',
+      activeFlowId: 'openai',
+      freeStatus: 'free',
+    }),
+  });
+
+  const freeEntry = await helpers.upsertAccountBookEntry('registration_success');
+  assert.equal(freeEntry.freeStatus, 'free');
+
+  const plusEntry = await helpers.upsertAccountBookEntry('registration_success', {
+    email: 'phone-plus@example.com',
+    password: 'secret',
+    activeFlowId: 'openai',
+    freeStatus: 'plus',
+  });
+  assert.equal(plusEntry.freeStatus, 'plus');
+  assert.equal(storedEntries[0].freeStatus, 'plus');
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'phone-plus@example.com',
+    password: 'secret',
+    activeFlowId: 'openai',
+  });
+  assert.equal(completedEntry.freeStatus, 'plus');
+  assert.equal(storedEntries[0].freeStatus, 'plus');
+});
+
 test('account book helper clears persisted entries without touching unrelated session state', async () => {
   const source = fs.readFileSync('background/account-book.js', 'utf8');
   const globalScope = {};

@@ -3426,7 +3426,9 @@ test('PayPal hosted card node continues when security challenge is reported', as
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     fetch: async () => createHostedAddressResponse(),
-    getState: async () => createHostedRuntimeState(),
+    getState: async () => createHostedRuntimeState({
+      hostedCheckoutSecurityChallengeEnabled: true,
+    }),
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });
@@ -3479,11 +3481,81 @@ test('PayPal hosted card node continues when security challenge is reported', as
 
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), true);
+  assert.equal(
+    events.some((event) => (
+      event.type === 'tab-message'
+      && event.message?.type === 'PAYPAL_HOSTED_GET_STATE'
+      && event.message?.payload?.securityChallengeEnabled === true
+    )),
+    true
+  );
   assert.equal(events.some((event) => /HOSTED_CHECKOUT_PAYPAL_BLOCKED/.test(event.message || '')), false);
   assert.equal(
     events.some((event) => event.type === 'log' && /PayPal 安全挑战/.test(event.message) && /流程继续/.test(event.message)),
     true
   );
+});
+
+test('PayPal hosted card node sends security challenge disabled by default', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let submitCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        if (submitCount > 0) {
+          currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+          return { hostedStage: 'create_account' };
+        }
+        return { hostedStage: 'guest_checkout' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        submitCount += 1;
+        return {
+          stage: 'guest_checkout',
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: message.payload?.phone || '',
+          renderedPhoneDigits: `1${message.payload?.phone || ''}`,
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(
+    events.some((event) => (
+      event.type === 'tab-message'
+      && event.message?.type === 'PAYPAL_HOSTED_GET_STATE'
+      && event.message?.payload?.securityChallengeEnabled === false
+    )),
+    true
+  );
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
 test('PayPal hosted card node retries fresh profile when guest card error appears', async () => {

@@ -38,7 +38,7 @@
 
     function normalizeFreeStatus(value = '') {
       const normalized = normalizeString(value).toLowerCase();
-      if (normalized === 'free' || normalized === 'paid' || normalized === 'unknown') {
+      if (normalized === 'free' || normalized === 'paid' || normalized === 'plus' || normalized === 'unknown') {
         return normalized;
       }
       return 'unknown';
@@ -80,6 +80,11 @@
           return {
             label: '付费',
             className: 'free-status-paid',
+          };
+        case 'plus':
+          return {
+            label: 'Plus',
+            className: 'free-status-plus',
           };
         default:
           return {

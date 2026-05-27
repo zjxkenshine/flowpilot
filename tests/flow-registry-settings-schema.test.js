@@ -203,6 +203,24 @@ test('settings schema preserves Plus checkout wait settings in canonical state a
   assert.equal(view.plusCheckoutOpenStableWaitSeconds, 28);
 });
 
+test('settings schema preserves hosted checkout security challenge switch in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const defaults = schema.normalizeSettingsState({});
+  const defaultView = schema.buildSettingsView(defaults);
+
+  assert.equal(defaults.flows.openai.plus.hostedCheckoutSecurityChallengeEnabled, false);
+  assert.equal(defaultView.hostedCheckoutSecurityChallengeEnabled, false);
+
+  const normalized = schema.normalizeSettingsState({
+    hostedCheckoutSecurityChallengeEnabled: true,
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.flows.openai.plus.hostedCheckoutSecurityChallengeEnabled, true);
+  assert.equal(view.hostedCheckoutSecurityChallengeEnabled, true);
+});
+
 test('settings schema preserves normalized PayPal generated profile in canonical state and read view', () => {
   const { settingsSchema } = loadApis();
   const schema = settingsSchema.createSettingsSchema();
@@ -244,6 +262,7 @@ test('settings schema preserves normalized PayPal generated profile in canonical
     city: 'Chiyoda',
     region: 'Tokyo',
     postalCode: '100-0005',
+    fullAddress: '',
     generatedFromCountry: 'DE',
     generatedAt: 12345,
   };

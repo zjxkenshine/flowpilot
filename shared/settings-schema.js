@@ -268,6 +268,7 @@
               plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
               plusCheckoutConversionProxy711Region: '',
+              hostedCheckoutSecurityChallengeEnabled: false,
               hostedCheckoutVerificationPopupDelaySeconds: 20,
               hostedCheckoutFirstDirectResendEnabled: false,
               hostedCheckoutFirstResendWaitSeconds: 20,
@@ -547,6 +548,11 @@
                 ).trim().toUpperCase().replace(/[^A-Z]/g, '');
                 return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
               })(),
+              hostedCheckoutSecurityChallengeEnabled: Boolean(
+                input?.hostedCheckoutSecurityChallengeEnabled
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutSecurityChallengeEnabled
+                  ?? defaults.flows.openai.plus.hostedCheckoutSecurityChallengeEnabled
+              ),
               hostedCheckoutVerificationPopupDelaySeconds: normalizeBoundedInteger(
                 input?.hostedCheckoutVerificationPopupDelaySeconds
                   ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationPopupDelaySeconds
@@ -822,6 +828,7 @@
       next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;
+      next.hostedCheckoutSecurityChallengeEnabled = openaiState.plus.hostedCheckoutSecurityChallengeEnabled;
       next.hostedCheckoutVerificationPopupDelaySeconds = openaiState.plus.hostedCheckoutVerificationPopupDelaySeconds;
       next.hostedCheckoutFirstDirectResendEnabled = openaiState.plus.hostedCheckoutFirstDirectResendEnabled;
       next.hostedCheckoutFirstResendWaitSeconds = openaiState.plus.hostedCheckoutFirstResendWaitSeconds;

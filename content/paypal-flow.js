@@ -75,7 +75,7 @@ async function handlePayPalCommand(message) {
     case 'PAYPAL_CLICK_APPROVE':
       return clickPayPalApprove();
     case 'PAYPAL_HOSTED_GET_STATE':
-      return inspectPayPalHostedState();
+      return inspectPayPalHostedState(message.payload || {});
     case 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP':
       return runPayPalHostedCheckoutStep(message.payload || {});
     default:
@@ -578,11 +578,13 @@ function findHostedReviewConsentButton() {
   ]);
 }
 
-function detectPayPalHostedStage() {
+function detectPayPalHostedStage(options = {}) {
   if (!/paypal\./i.test(String(location?.host || ''))) {
     return PAYPAL_HOSTED_STAGE_OUTSIDE;
   }
-  probePayPalHostedSecurityChallengeOverlay();
+  if (options?.securityChallengeEnabled === true) {
+    probePayPalHostedSecurityChallengeOverlay();
+  }
   if (hasHostedVerificationInputs()) {
     return PAYPAL_HOSTED_STAGE_VERIFICATION;
   }
@@ -951,7 +953,7 @@ async function clickHostedReviewConsent() {
 }
 
 async function runPayPalHostedCheckoutStep(payload = {}) {
-  const stage = detectPayPalHostedStage();
+  const stage = detectPayPalHostedStage(payload);
   if (stage === PAYPAL_HOSTED_STAGE_GENERIC_ERROR) {
     return {
       stage,
@@ -1010,10 +1012,12 @@ async function runPayPalHostedCheckoutStep(payload = {}) {
   };
 }
 
-function inspectPayPalHostedState() {
-  const stage = detectPayPalHostedStage();
+function inspectPayPalHostedState(payload = {}) {
+  const stage = detectPayPalHostedStage(payload);
   const createAccountButton = findHostedCreateAccountButton();
-  const securityChallengeProbe = probePayPalHostedSecurityChallengeOverlay();
+  const securityChallengeProbe = payload?.securityChallengeEnabled === true
+    ? probePayPalHostedSecurityChallengeOverlay()
+    : buildPayPalHostedSecurityChallengeProbeDefaults();
   return {
     url: location.href,
     readyState: document.readyState,

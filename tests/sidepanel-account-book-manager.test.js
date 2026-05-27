@@ -167,6 +167,7 @@ test('sidepanel css keeps confirm modal above account book overlay', () => {
   assert.match(css, /\.account-book-status-chip\.status-unknown/);
   assert.match(css, /\.account-book-free-chip\.free-status-free/);
   assert.match(css, /\.account-book-free-chip\.free-status-paid/);
+  assert.match(css, /\.account-book-free-chip\.free-status-plus/);
   assert.match(css, /\.account-book-free-chip\.free-status-unknown/);
 });
 

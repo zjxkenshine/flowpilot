@@ -20,7 +20,7 @@
 
     function normalizeFreeStatus(value = '') {
       const normalized = normalizeString(value).toLowerCase();
-      if (normalized === 'free' || normalized === 'paid' || normalized === 'unknown') {
+      if (normalized === 'free' || normalized === 'paid' || normalized === 'plus' || normalized === 'unknown') {
         return normalized;
       }
       return 'unknown';

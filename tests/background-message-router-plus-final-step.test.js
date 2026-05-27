@@ -25,6 +25,13 @@ function createRouterWithFinalNode(options = {}) {
   };
   const appendCalls = [];
   const accountBookCalls = [];
+  const stateUpdates = [];
+  const broadcasts = [];
+  let latestState = {
+    plusModeEnabled: true,
+    nodeStatuses: { [finalNodeId]: 'pending' },
+    ...(options.state || {}),
+  };
 
   const router = api.createMessageRouter({
     addLog: async () => {},
@@ -38,7 +45,9 @@ function createRouterWithFinalNode(options = {}) {
     buildLocalhostCleanupPrefix: () => '',
     buildLuckmailSessionSettingsPayload: () => ({}),
     buildPersistentSettingsPayload: () => ({}),
-    broadcastDataUpdate: () => {},
+    broadcastDataUpdate: (payload) => {
+      broadcasts.push(payload);
+    },
     cancelScheduledAutoRun: async () => {},
     checkIcloudSession: async () => {},
     clearAutoRunTimerAlarm: async () => {},
@@ -64,7 +73,7 @@ function createRouterWithFinalNode(options = {}) {
     getCurrentLuckmailPurchase: () => null,
     getPendingAutoRunTimerPlan: () => null,
     getSourceLabel: () => '',
-    getState: async () => ({ plusModeEnabled: true, nodeStatuses: { [finalNodeId]: 'pending' } }),
+    getState: async () => latestState,
     getNodeIdsForState: () => nodeIds.slice(),
     getStepIdByNodeIdForState: (nodeId) => nodeStepMap[nodeId] || 0,
     getLastStepIdForState: () => Math.max(...Object.values(nodeStepMap)),
@@ -113,7 +122,10 @@ function createRouterWithFinalNode(options = {}) {
     setLuckmailPurchasePreservedState: async () => {},
     setLuckmailPurchaseUsedState: async () => {},
     setPersistentSettings: async () => {},
-    setState: async () => {},
+    setState: async (updates) => {
+      latestState = { ...latestState, ...(updates || {}) };
+      stateUpdates.push(updates);
+    },
     setNodeStatus: async () => {},
     skipAutoRunCountdown: async () => false,
     skipNode: async () => {},
@@ -127,7 +139,10 @@ function createRouterWithFinalNode(options = {}) {
   return {
     accountBookCalls,
     appendCalls,
+    broadcasts,
+    getLatestState: () => latestState,
     router,
+    stateUpdates,
   };
 }
 
@@ -210,4 +225,80 @@ test('message router appends success record when CPA session import is the final
   assert.equal(appendCalls.length, 1);
   assert.equal(appendCalls[0][0], 'success');
   assert.equal(accountBookCalls.some((call) => call[0] === 'flow_completed'), true);
+});
+
+test('message router marks Phone Plus payment completion as plus before OAuth tail', async () => {
+  const { accountBookCalls, broadcasts, router, stateUpdates } = createRouterWithFinalNode({
+    finalNodeId: 'platform-verify',
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'plus-checkout-billing',
+      'oauth-login',
+      'platform-verify',
+    ],
+    nodeStepMap: {
+      'wait-registration-success': 6,
+      'plus-checkout-create': 7,
+      'plus-checkout-billing': 8,
+      'oauth-login': 9,
+      'platform-verify': 10,
+    },
+  });
+
+  await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'plus-checkout-billing',
+    payload: { nodeId: 'plus-checkout-billing' },
+  }, {});
+
+  assert.deepStrictEqual(stateUpdates.find((update) => update?.freeStatus === 'plus'), {
+    freeStatus: 'plus',
+    freeStatusDetection: {
+      freeStatus: 'plus',
+      reason: 'phone_plus_payment_completed',
+      nodeId: 'plus-checkout-billing',
+    },
+  });
+  assert.equal(broadcasts.some((payload) => payload?.freeStatus === 'plus'), true);
+  assert.equal(accountBookCalls.some((call) => call[0] === 'registration_success' && call[1].freeStatus === 'plus'), true);
+});
+
+test('message router does not mark plus before the terminal Phone Plus payment node', async () => {
+  const { accountBookCalls, router, stateUpdates } = createRouterWithFinalNode({
+    finalNodeId: 'platform-verify',
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'plus-checkout-billing',
+      'oauth-login',
+      'platform-verify',
+    ],
+    nodeStepMap: {
+      'wait-registration-success': 6,
+      'plus-checkout-create': 7,
+      'plus-checkout-billing': 8,
+      'oauth-login': 9,
+      'platform-verify': 10,
+    },
+  });
+
+  await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'plus-checkout-create',
+    payload: { nodeId: 'plus-checkout-create' },
+  }, {});
+
+  assert.equal(stateUpdates.some((update) => update?.freeStatus === 'plus'), false);
+  assert.equal(accountBookCalls.some((call) => call[1]?.freeStatus === 'plus'), false);
 });
