@@ -1745,6 +1745,13 @@ const SETTINGS_SCHEMA_VIEW_KEY_SET = new Set(SETTINGS_SCHEMA_VIEW_KEYS);
 const SETTINGS_EXPORT_SCHEMA_VERSION = 1;
 const SETTINGS_EXPORT_FILENAME_PREFIX = 'multipage-settings';
 const STEP6_REGISTRATION_SUCCESS_WAIT_MS = 20000;
+const ACCOUNT_BOOK_FREE_STATUS_UNKNOWN = 'unknown';
+const ACCOUNT_BOOK_FREE_STATUS_VALUES = new Set(['free', 'paid', ACCOUNT_BOOK_FREE_STATUS_UNKNOWN]);
+
+function normalizeAccountBookFreeStatus(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ACCOUNT_BOOK_FREE_STATUS_VALUES.has(normalized) ? normalized : ACCOUNT_BOOK_FREE_STATUS_UNKNOWN;
+}
 
 const DEFAULT_STATE = {
   flowId: DEFAULT_ACTIVE_FLOW_ID,
@@ -1757,6 +1764,7 @@ const DEFAULT_STATE = {
   kiroRuntime: kiroStateHelpers?.buildDefaultRuntimeState?.() || null,
   ...CONTRIBUTION_RUNTIME_DEFAULTS,
   accountBookEntries: [],
+  freeStatus: ACCOUNT_BOOK_FREE_STATUS_UNKNOWN,
   accounts: [], // 已生成账号记录：{ email, password, createdAt }。
   accountRunHistory: [], // 账号运行历史快照，实际持久化在 chrome.storage.local。
   manualAliasUsage: {},
@@ -11938,6 +11946,14 @@ async function handleStepData(step, payload) {
         }
       }
       break;
+    case 6:
+      if (payload && Object.prototype.hasOwnProperty.call(payload, 'freeStatus')) {
+        await setState({
+          freeStatus: normalizeAccountBookFreeStatus(payload.freeStatus),
+          freeStatusDetection: payload.freeStatusDetection || null,
+        });
+      }
+      break;
     case 8:
       await setState({
         ...(payload.phoneVerification || payload.loginPhoneVerification ? {
@@ -15397,6 +15413,7 @@ const step6Executor = self.MultiPageBackgroundStep6?.createStep6Executor({
   chrome,
   completeNodeFromBackground,
   getErrorMessage,
+  getTabId,
   registrationSuccessWaitMs: STEP6_REGISTRATION_SUCCESS_WAIT_MS,
   sleepWithStop,
 });

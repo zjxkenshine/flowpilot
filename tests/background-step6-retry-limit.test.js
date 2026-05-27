@@ -2,23 +2,29 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-test('step 6 waits for registration success and completes from background', async () => {
+function createStep6Api() {
   const source = fs.readFileSync('background/steps/wait-registration-success.js', 'utf8');
   const globalScope = {};
-  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep6;`)(globalScope);
+  return new Function('self', `${source}; return self.MultiPageBackgroundStep6;`)(globalScope);
+}
+
+test('step 6 waits for registration success and completes from background', async () => {
+  const api = createStep6Api();
 
   const events = {
     logs: [],
     waits: [],
     completedSteps: [],
+    payloads: [],
   };
 
   const executor = api.createStep6Executor({
     addLog: async (message, level = 'info') => {
       events.logs.push({ message, level });
     },
-    completeNodeFromBackground: async (step) => {
+    completeNodeFromBackground: async (step, payload) => {
       events.completedSteps.push(step);
+      events.payloads.push(payload);
     },
     sleepWithStop: async (ms) => {
       events.waits.push(ms);
@@ -29,13 +35,12 @@ test('step 6 waits for registration success and completes from background', asyn
 
   assert.deepStrictEqual(events.waits, [20000]);
   assert.deepStrictEqual(events.completedSteps, ['wait-registration-success']);
+  assert.equal(events.payloads[0].freeStatus, 'unknown');
   assert.ok(events.logs.some(({ message }) => /等待 20 秒/.test(message)));
 });
 
 test('step 6 only clears cookies when cleanup switch is enabled', async () => {
-  const source = fs.readFileSync('background/steps/wait-registration-success.js', 'utf8');
-  const globalScope = {};
-  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep6;`)(globalScope);
+  const api = createStep6Api();
 
   const events = {
     removedCookies: [],
@@ -87,6 +92,184 @@ test('step 6 only clears cookies when cleanup switch is enabled', async () => {
   ]);
   assert.equal(events.browsingDataCalls.length, 1);
   assert.ok(events.browsingDataCalls[0].origins.includes('https://chatgpt.com'));
+});
+
+test('step 6 detects free trial status from strict chatgpt root page', async () => {
+  const api = createStep6Api();
+  const completions = [];
+  const chromeApi = {
+    scripting: {
+      executeScript: async ({ func }) => [{ result: func() }],
+    },
+  };
+  const previousLocation = globalThis.location;
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  globalThis.location = { href: 'https://chatgpt.com/' };
+  globalThis.window = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [
+      {
+        textContent: '免费试用',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+    ],
+  };
+
+  try {
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      chrome: chromeApi,
+      completeNodeFromBackground: async (step, payload) => {
+        completions.push({ step, payload });
+      },
+      getTabId: async () => 11,
+      registrationSuccessWaitMs: 0,
+      sleepWithStop: async () => {},
+    });
+
+    await executor.executeStep6();
+  } finally {
+    globalThis.location = previousLocation;
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+
+  assert.equal(completions[0].step, 'wait-registration-success');
+  assert.equal(completions[0].payload.freeStatus, 'free');
+  assert.equal(completions[0].payload.freeStatusDetection.reason, 'free_trial_action_visible');
+});
+
+test('step 6 detects paid upgrade status from strict chatgpt root page', async () => {
+  const api = createStep6Api();
+  const completions = [];
+  const chromeApi = {
+    scripting: {
+      executeScript: async ({ func }) => [{ result: func() }],
+    },
+  };
+  const previousLocation = globalThis.location;
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  globalThis.location = { href: 'https://chatgpt.com/' };
+  globalThis.window = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [
+      {
+        textContent: '升级',
+        disabled: false,
+        getAttribute: () => '',
+        getBoundingClientRect: () => ({ width: 100, height: 34 }),
+      },
+    ],
+  };
+
+  try {
+    const executor = api.createStep6Executor({
+      addLog: async () => {},
+      chrome: chromeApi,
+      completeNodeFromBackground: async (step, payload) => {
+        completions.push({ step, payload });
+      },
+      getTabId: async () => 12,
+      registrationSuccessWaitMs: 0,
+      sleepWithStop: async () => {},
+    });
+
+    await executor.executeStep6();
+  } finally {
+    globalThis.location = previousLocation;
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+
+  assert.equal(completions[0].payload.freeStatus, 'paid');
+  assert.equal(completions[0].payload.freeStatusDetection.reason, 'paid_upgrade_action_visible');
+});
+
+test('step 6 records unknown for non-root url, login button, missing tab, and injection failure', async () => {
+  const api = createStep6Api();
+
+  async function runScenario({ href = 'https://chatgpt.com/', loginButton = null, tabId = 21, throwInject = false } = {}) {
+    const completions = [];
+    const previousLocation = globalThis.location;
+    const previousDocument = globalThis.document;
+    const previousWindow = globalThis.window;
+    globalThis.location = { href };
+    globalThis.window = {
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+    };
+    globalThis.document = {
+      querySelector: () => loginButton,
+      querySelectorAll: () => [],
+    };
+
+    try {
+      const executor = api.createStep6Executor({
+        addLog: async () => {},
+        chrome: {
+          scripting: {
+            executeScript: async ({ func }) => {
+              if (throwInject) throw new Error('Cannot access tab');
+              return [{ result: func() }];
+            },
+          },
+        },
+        completeNodeFromBackground: async (step, payload) => {
+          completions.push({ step, payload });
+        },
+        getTabId: async () => tabId,
+        registrationSuccessWaitMs: 0,
+        sleepWithStop: async () => {},
+      });
+
+      await executor.executeStep6();
+    } finally {
+      globalThis.location = previousLocation;
+      globalThis.document = previousDocument;
+      globalThis.window = previousWindow;
+    }
+
+    return completions[0].payload.freeStatusDetection;
+  }
+
+  assert.deepStrictEqual(
+    await runScenario({ href: 'https://chatgpt.com/?model=gpt-4o' }),
+    {
+      freeStatus: 'unknown',
+      reason: 'not_chatgpt_root',
+      url: 'https://chatgpt.com/?model=gpt-4o',
+    }
+  );
+
+  const loginDetection = await runScenario({
+    loginButton: {
+      textContent: '登录',
+      disabled: false,
+      getAttribute: () => '',
+      getBoundingClientRect: () => ({ width: 80, height: 34 }),
+    },
+  });
+  assert.equal(loginDetection.freeStatus, 'unknown');
+  assert.equal(loginDetection.reason, 'login_button_visible');
+
+  assert.deepStrictEqual(await runScenario({ tabId: null }), {
+    freeStatus: 'unknown',
+    reason: 'signup_tab_missing',
+  });
+
+  const failureDetection = await runScenario({ throwInject: true });
+  assert.equal(failureDetection.freeStatus, 'unknown');
+  assert.equal(failureDetection.reason, 'inspection_failed');
+  assert.match(failureDetection.error, /Cannot access tab/);
 });
 
 test('step 7 retries up to configured limit and then fails', async () => {

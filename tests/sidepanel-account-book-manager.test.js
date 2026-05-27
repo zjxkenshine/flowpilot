@@ -90,8 +90,9 @@ test('sidepanel html contains account book overlay, button order, and manager sc
   assert.match(html, /id="btn-export-account-book"/);
   assert.match(html, /id="btn-clear-account-book"/);
   assert.match(html, /<th>状态<\/th>/);
+  assert.match(html, /<th>免费<\/th>/);
   assert.match(html, /<th>IP<\/th>/);
-  assert.match(html, /colspan="5"/);
+  assert.match(html, /colspan="6"/);
   assert.ok(accountIndex >= 0 && recordsIndex >= 0 && clearIndex >= 0);
   assert.ok(accountIndex < recordsIndex);
   assert.ok(recordsIndex < clearIndex);
@@ -137,6 +138,8 @@ test('account book manager renders empty signup IP as placeholder', () => {
 
   assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-registration-success/);
   assert.match(dom.accountBookBody.innerHTML, />注册成功</);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-free-chip free-status-unknown/);
+  assert.match(dom.accountBookBody.innerHTML, />未知</);
   assert.match(dom.accountBookBody.innerHTML, /<td class="mono account-book-cell account-book-ip-cell">--<\/td>/);
 });
 
@@ -162,6 +165,9 @@ test('sidepanel css keeps confirm modal above account book overlay', () => {
   assert.match(css, /\.account-book-status-chip\.status-registration-success/);
   assert.match(css, /\.account-book-status-chip\.status-flow-completed/);
   assert.match(css, /\.account-book-status-chip\.status-unknown/);
+  assert.match(css, /\.account-book-free-chip\.free-status-free/);
+  assert.match(css, /\.account-book-free-chip\.free-status-paid/);
+  assert.match(css, /\.account-book-free-chip\.free-status-unknown/);
 });
 
 test('account book manager masks passwords by default, toggles display, exports json, and clears entries', async () => {
@@ -184,6 +190,7 @@ test('account book manager masks passwords by default, toggles display, exports 
         finalFlowCompletedAt: '2026-05-24T10:05:00.000Z',
         signupIp: '203.0.113.8',
         signupRegion: 'jp',
+        freeStatus: 'paid',
       },
     ],
   };
@@ -241,6 +248,8 @@ test('account book manager masks passwords by default, toggles display, exports 
   assert.match(dom.accountBookBody.innerHTML, /\+15551234567/);
   assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-flow-completed/);
   assert.match(dom.accountBookBody.innerHTML, />导入成功</);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-free-chip free-status-paid/);
+  assert.match(dom.accountBookBody.innerHTML, />付费</);
   assert.match(dom.accountBookBody.innerHTML, /203\.0\.113\.8 \[JP\]/);
   assert.match(dom.accountBookBody.innerHTML, /••••••••/);
   assert.doesNotMatch(dom.accountBookBody.innerHTML, /secret-pass/);
@@ -264,6 +273,8 @@ test('account book manager masks passwords by default, toggles display, exports 
   assert.equal(exported.entries[0].password, 'secret-pass');
   assert.equal(exported.entries[0].captureStage, 'flow_completed');
   assert.equal(exported.entries[0].statusLabel, '导入成功');
+  assert.equal(exported.entries[0].freeStatus, 'paid');
+  assert.equal(exported.entries[0].freeStatusLabel, '付费');
   assert.equal(exported.entries[0].signupIp, '203.0.113.8');
   assert.equal(exported.entries[0].signupRegion, 'JP');
 
@@ -277,7 +288,7 @@ test('account book manager masks passwords by default, toggles display, exports 
   });
 });
 
-test('account book manager exports utf8 bom txt with readable 5-column table', async () => {
+test('account book manager exports utf8 bom txt with readable 6-column table', async () => {
   const source = fs.readFileSync('sidepanel/account-book-manager.js', 'utf8');
   const windowObject = {};
   const api = new Function('window', `${source}; return window.SidepanelAccountBookManager;`)(windowObject);
@@ -300,6 +311,7 @@ test('account book manager exports utf8 bom txt with readable 5-column table', a
             updatedAt: '2026-05-24T10:05:00.000Z',
             signupIp: '203.0.113.8',
             signupRegion: 'us',
+            freeStatus: 'free',
           },
           {
             recordId: 'empty@example.com',
@@ -337,9 +349,9 @@ test('account book manager exports utf8 bom txt with readable 5-column table', a
   assert.deepEqual(downloads[0].options, { prependUtf8Bom: true });
   assert.match(downloads[0].fileName, /^flowpilot-account-book-\d{8}-\d{6}\.txt$/);
   assert.match(downloads[0].content, /^# FlowPilot Account Book Export\r\n# schemaVersion=1\r\n# encoding=UTF-8\r\n# exportedAt=/);
-  assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\t状态\tIP\r\n/);
-  assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t导入成功\t203\.0\.113\.8 \[US\]\r\n/);
-  assert.match(downloads[0].content, /--\t--\t--\t注册成功\t--\r\n$/);
+  assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\t状态\t免费\tIP\r\n/);
+  assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t导入成功\t免费\t203\.0\.113\.8 \[US\]\r\n/);
+  assert.match(downloads[0].content, /--\t--\t--\t注册成功\t未知\t--\r\n$/);
 });
 
 test('account book manager renders all status labels with matching classes', () => {

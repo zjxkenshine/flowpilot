@@ -2534,6 +2534,12 @@ header {
   min-width: 156px;
 }
 
+.plus-checkout-conversion-proxy-source-select {
+  flex: 0 0 128px;
+  width: 128px;
+  min-width: 128px;
+}
+
 .setting-caption {
   font-size: 12px;
   font-weight: 600;
@@ -3346,11 +3352,12 @@ header {
   table-layout: fixed;
 }
 
-.account-book-table thead th:nth-child(1) { width: 23%; }
-.account-book-table thead th:nth-child(2) { width: 20%; }
-.account-book-table thead th:nth-child(3) { width: 20%; }
-.account-book-table thead th:nth-child(4) { width: 14%; }
-.account-book-table thead th:nth-child(5) { width: 23%; }
+.account-book-table thead th:nth-child(1) { width: 21%; }
+.account-book-table thead th:nth-child(2) { width: 18%; }
+.account-book-table thead th:nth-child(3) { width: 18%; }
+.account-book-table thead th:nth-child(4) { width: 13%; }
+.account-book-table thead th:nth-child(5) { width: 10%; }
+.account-book-table thead th:nth-child(6) { width: 20%; }
 
 .account-book-table thead th {
   position: sticky;
@@ -3391,6 +3398,10 @@ header {
   white-space: normal;
 }
 
+.account-book-free-cell {
+  white-space: normal;
+}
+
 .account-book-status-chip {
   display: inline-flex;
   align-items: center;
@@ -3419,6 +3430,32 @@ header {
 }
 
 .account-book-status-chip.status-unknown {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.account-book-free-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.account-book-free-chip.free-status-free {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.account-book-free-chip.free-status-paid {
+  background: color-mix(in srgb, #f97316 14%, var(--bg-surface));
+  color: #9a3412;
+}
+
+.account-book-free-chip.free-status-unknown {
   background: var(--bg-elevated);
   color: var(--text-secondary);
 }

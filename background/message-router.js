@@ -433,6 +433,11 @@
       return DEFAULT_OPENAI_NODE_BY_STEP[Number(step)] || '';
     }
 
+    function normalizeAccountBookFreeStatus(value = '') {
+      const normalized = String(value || '').trim().toLowerCase();
+      return ['free', 'paid', 'unknown'].includes(normalized) ? normalized : 'unknown';
+    }
+
     function findStepByNodeId(nodeId, state = {}) {
       const normalizedNodeId = String(nodeId || '').trim();
       if (normalizedNodeId && typeof getStepIdByNodeIdForState === 'function') {
@@ -992,6 +997,14 @@
                 await addLog('步骤 4：检测到账号已直接进入已登录态，已自动跳过步骤 5。', 'warn');
               }
             }
+          }
+          break;
+        case 6:
+          if (payload && Object.prototype.hasOwnProperty.call(payload, 'freeStatus')) {
+            await setState({
+              freeStatus: normalizeAccountBookFreeStatus(payload.freeStatus),
+              freeStatusDetection: payload.freeStatusDetection || null,
+            });
           }
           break;
         case 7:

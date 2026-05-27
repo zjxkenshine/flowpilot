@@ -370,11 +370,12 @@
       <div class="data-row" id="row-plus-checkout-conversion-proxy" style="display:none;">
         <span class="data-label">支付转换代理</span>
         <div class="data-inline" style="width:100%; flex-wrap:wrap; gap:8px;">
-          <div id="plus-checkout-conversion-proxy-source-group" class="choice-group" role="group" aria-label="支付转换代理来源">
-            <button type="button" class="choice-btn" data-plus-checkout-conversion-proxy-source="manual">手动代理</button>
-            <button type="button" class="choice-btn" data-plus-checkout-conversion-proxy-source="711proxy_pool">711临时池</button>
-            <button type="button" class="choice-btn" data-plus-checkout-conversion-proxy-source="direct">无代理</button>
-          </div>
+          <select id="select-plus-checkout-conversion-proxy-source"
+            class="data-select plus-checkout-conversion-proxy-source-select" aria-label="支付转换代理来源">
+            <option value="manual">手动代理</option>
+            <option value="711proxy_pool">711临时池</option>
+            <option value="direct">本地无代理</option>
+          </select>
           <input type="text" id="input-plus-checkout-conversion-proxy" class="data-input mono"
             placeholder="http://127.0.0.1:7890 或 socks5h://user:pass@host:port"
             title="仅在第 6 步创建/打开支付页时临时生效；留空则沿用当前网络环境" autocomplete="off" />
@@ -2277,12 +2278,13 @@
                 <th>手机号</th>
                 <th>密码</th>
                 <th>状态</th>
+                <th>免费</th>
                 <th>IP</th>
               </tr>
             </thead>
             <tbody id="account-book-body">
               <tr class="account-book-empty-row">
-                <td class="account-book-empty" colspan="5">暂无账号信息</td>
+                <td class="account-book-empty" colspan="6">暂无账号信息</td>
               </tr>
             </tbody>
           </table>

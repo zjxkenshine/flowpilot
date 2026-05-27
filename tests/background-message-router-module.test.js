@@ -147,6 +147,40 @@ test('SAVE_SETTING broadcasts free phone reuse setting updates for realtime side
   );
 });
 
+test('handleStepData stores step 6 free status for account book capture', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let state = {};
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    getStepDefinitionForState: (step) => (Number(step) === 6 ? { key: 'wait-registration-success' } : null),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  await router.handleStepData(6, {
+    freeStatus: 'paid',
+    freeStatusDetection: { freeStatus: 'paid', reason: 'paid_upgrade_action_visible' },
+  });
+
+  assert.deepStrictEqual(state, {
+    freeStatus: 'paid',
+    freeStatusDetection: { freeStatus: 'paid', reason: 'paid_upgrade_action_visible' },
+  });
+
+  await router.handleStepData(6, {
+    freeStatus: 'unexpected',
+  });
+
+  assert.equal(state.freeStatus, 'unknown');
+  assert.equal(state.freeStatusDetection, null);
+});
+
 test('SAVE_SETTING preserves phone reuse preferences while phone signup is selected', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

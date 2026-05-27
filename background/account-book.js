@@ -18,6 +18,14 @@
       return normalized.length === 2 ? normalized : '';
     }
 
+    function normalizeFreeStatus(value = '') {
+      const normalized = normalizeString(value).toLowerCase();
+      if (normalized === 'free' || normalized === 'paid' || normalized === 'unknown') {
+        return normalized;
+      }
+      return 'unknown';
+    }
+
     function normalizePhoneDigits(value = '') {
       return String(value || '').replace(/\D+/g, '');
     }
@@ -145,6 +153,7 @@
       const panelMode = normalizeString(state.panelMode || '');
       const signupIp = normalizeString(state.ipProxyAppliedExitIp || '');
       const signupRegion = normalizeSignupRegion(state.ipProxyAppliedExitRegion || '');
+      const hasFreeStatus = Object.prototype.hasOwnProperty.call(state, 'freeStatus');
 
       return {
         recordId,
@@ -159,6 +168,7 @@
         finalFlowCompletedAt: stage === 'flow_completed' ? now : '',
         signupIp,
         signupRegion,
+        ...(hasFreeStatus ? { freeStatus: normalizeFreeStatus(state.freeStatus) } : {}),
       };
     }
 
@@ -194,6 +204,7 @@
         finalFlowCompletedAt,
         signupIp: normalizeString(entry.signupIp || ''),
         signupRegion: normalizeSignupRegion(entry.signupRegion || ''),
+        freeStatus: normalizeFreeStatus(entry.freeStatus || ''),
       };
     }
 
@@ -282,6 +293,11 @@
         finalFlowCompletedAt,
         signupIp: normalizedExisting.signupIp || normalizedDraft.signupIp,
         signupRegion: normalizedExisting.signupRegion || normalizedDraft.signupRegion,
+        freeStatus: normalizeFreeStatus(
+          Object.prototype.hasOwnProperty.call(draftEntry || {}, 'freeStatus')
+            ? normalizedDraft.freeStatus
+            : normalizedExisting.freeStatus
+        ),
       };
     }
 

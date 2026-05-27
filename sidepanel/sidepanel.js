@@ -318,6 +318,7 @@ const chatGptApiSmsPoolList = document.getElementById('chatgpt-api-sms-pool-list
 const rowPlusHostedCheckoutOauthDelay = document.getElementById('row-plus-hosted-checkout-oauth-delay');
 const inputPlusHostedCheckoutOauthDelaySeconds = document.getElementById('input-plus-hosted-checkout-oauth-delay-seconds');
 const rowPlusCheckoutConversionProxy = document.getElementById('row-plus-checkout-conversion-proxy');
+const selectPlusCheckoutConversionProxySource = document.getElementById('select-plus-checkout-conversion-proxy-source');
 const plusCheckoutConversionProxySourceButtons = Array.from(document.querySelectorAll('[data-plus-checkout-conversion-proxy-source]'));
 const inputPlusCheckoutConversionProxy = document.getElementById('input-plus-checkout-conversion-proxy');
 const plusCheckoutConversionProxy711Shell = document.getElementById('plus-checkout-conversion-proxy-711-shell');
@@ -5398,7 +5399,10 @@ function collectSettingsPayload() {
       ? normalizePlusCheckoutCloudConversionApiKeyValue(inputPlusCheckoutCloudConversionApiKey.value)
       : BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
     plusCheckoutConversionProxySource: normalizePlusCheckoutConversionProxySourceInput(
-      (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)
+      (typeof selectPlusCheckoutConversionProxySource !== 'undefined' && selectPlusCheckoutConversionProxySource
+        ? selectPlusCheckoutConversionProxySource.value
+        : '')
+      || (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)
         ? plusCheckoutConversionProxySourceButtons.find((button) => button.classList.contains('active'))?.dataset.plusCheckoutConversionProxySource
         : '')
       || latestState?.plusCheckoutConversionProxySource
@@ -12138,24 +12142,8 @@ function applySettingsState(state) {
   if (typeof inputPlusCheckoutConversionProxy !== 'undefined' && inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(state?.plusCheckoutConversionProxyUrl || '');
   }
-  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
-    const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
-      ? normalizePlusCheckoutConversionProxySourceValue
-      : ((value = '') => {
-        const normalized = String(value || '').trim().toLowerCase();
-        if (normalized === '711proxy_pool') {
-          return '711proxy_pool';
-        }
-        if (normalized === 'direct') {
-          return 'direct';
-        }
-        return 'manual';
-      });
-    plusCheckoutConversionProxySourceButtons.forEach((button) => {
-      const active = normalizeSourceValue(button.dataset.plusCheckoutConversionProxySource) === normalizeSourceValue(state?.plusCheckoutConversionProxySource || 'manual');
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
+  if (typeof syncPlusCheckoutConversionProxySourceControl === 'function') {
+    syncPlusCheckoutConversionProxySourceControl(state?.plusCheckoutConversionProxySource || 'manual');
   }
   if (typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region) {
     const normalizeRegionValue = typeof normalizePlusCheckoutConversionProxy711RegionValue === 'function'
@@ -16897,9 +16885,29 @@ function getPlusCheckoutConversionProxyManualSession(state = latestState) {
     : null;
 }
 
+function syncPlusCheckoutConversionProxySourceControl(source = 'manual') {
+  const normalizedSource = normalizePlusCheckoutConversionProxySourceValue(source);
+  if (typeof selectPlusCheckoutConversionProxySource !== 'undefined' && selectPlusCheckoutConversionProxySource) {
+    selectPlusCheckoutConversionProxySource.value = normalizedSource;
+  }
+  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
+    plusCheckoutConversionProxySourceButtons.forEach((button) => {
+      const active = normalizePlusCheckoutConversionProxySourceValue(button.dataset.plusCheckoutConversionProxySource) === normalizedSource;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+  return normalizedSource;
+}
+
 function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
-  const activeButtonValue = plusCheckoutConversionProxySourceButtons.find((button) => button.classList.contains('active'))?.dataset.plusCheckoutConversionProxySource;
-  return normalizePlusCheckoutConversionProxySourceValue(activeButtonValue || state?.plusCheckoutConversionProxySource || 'manual');
+  const selectValue = typeof selectPlusCheckoutConversionProxySource !== 'undefined' && selectPlusCheckoutConversionProxySource
+    ? selectPlusCheckoutConversionProxySource.value
+    : '';
+  const activeButtonValue = typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)
+    ? plusCheckoutConversionProxySourceButtons.find((button) => button.classList.contains('active'))?.dataset.plusCheckoutConversionProxySource
+    : '';
+  return normalizePlusCheckoutConversionProxySourceValue(selectValue || activeButtonValue || state?.plusCheckoutConversionProxySource || 'manual');
 }
 
 function getCurrentPlusCheckoutConversionProxy711Region(state = latestState) {
@@ -17123,11 +17131,21 @@ function updatePlusCheckoutConversionModeUi() {
   const directMode = source === 'direct';
   const poolMode = source === '711proxy_pool';
 
-  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
+  if (typeof syncPlusCheckoutConversionProxySourceControl === 'function') {
+    syncPlusCheckoutConversionProxySourceControl(source);
+  } else if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
     plusCheckoutConversionProxySourceButtons.forEach((button) => {
       const active = normalizeSourceValue(button.dataset.plusCheckoutConversionProxySource) === source;
       button.classList.toggle('active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+  if (typeof selectPlusCheckoutConversionProxySource !== 'undefined' && selectPlusCheckoutConversionProxySource) {
+    selectPlusCheckoutConversionProxySource.disabled = cloudEnabled;
+    selectPlusCheckoutConversionProxySource.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof plusCheckoutConversionProxySourceButtons !== 'undefined' && Array.isArray(plusCheckoutConversionProxySourceButtons)) {
+    plusCheckoutConversionProxySourceButtons.forEach((button) => {
       button.disabled = cloudEnabled;
     });
   }
@@ -17488,14 +17506,21 @@ inputPlusCheckoutConversionProxy?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+selectPlusCheckoutConversionProxySource?.addEventListener('change', () => {
+  const nextSource = normalizePlusCheckoutConversionProxySourceValue(selectPlusCheckoutConversionProxySource.value);
+  syncPlusCheckoutConversionProxySourceControl(nextSource);
+  syncLatestState({ plusCheckoutConversionProxySource: nextSource });
+  updatePlusCheckoutConversionModeUi();
+  setPlusCheckoutConversionProxyTestResult('\u672a\u6d4b\u8bd5');
+  renderPlusCheckoutConversionProxyRuntimeStatus();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 plusCheckoutConversionProxySourceButtons.forEach((button) => {
   button.addEventListener('click', () => {
     const nextSource = normalizePlusCheckoutConversionProxySourceValue(button.dataset.plusCheckoutConversionProxySource);
-    plusCheckoutConversionProxySourceButtons.forEach((candidate) => {
-      const active = normalizePlusCheckoutConversionProxySourceValue(candidate.dataset.plusCheckoutConversionProxySource) === nextSource;
-      candidate.classList.toggle('active', active);
-      candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
+    syncPlusCheckoutConversionProxySourceControl(nextSource);
     syncLatestState({ plusCheckoutConversionProxySource: nextSource });
     updatePlusCheckoutConversionModeUi();
     setPlusCheckoutConversionProxyTestResult('未测试');
@@ -20412,12 +20437,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         setPlusCheckoutConversionProxyTestResult('未测试');
       }
       if (message.payload.plusCheckoutConversionProxySource !== undefined) {
-        plusCheckoutConversionProxySourceButtons.forEach((button) => {
-          const active = normalizePlusCheckoutConversionProxySourceValue(button.dataset.plusCheckoutConversionProxySource)
-            === normalizePlusCheckoutConversionProxySourceValue(message.payload.plusCheckoutConversionProxySource);
-          button.classList.toggle('active', active);
-          button.setAttribute('aria-pressed', active ? 'true' : 'false');
-        });
+        syncPlusCheckoutConversionProxySourceControl(message.payload.plusCheckoutConversionProxySource);
       }
       if (message.payload.plusCheckoutConversionProxy711Region !== undefined && inputPlusCheckoutConversionProxy711Region) {
         inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionValue(message.payload.plusCheckoutConversionProxy711Region);

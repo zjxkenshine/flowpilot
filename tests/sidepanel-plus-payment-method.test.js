@@ -526,9 +526,10 @@ let latestState = {
   plusCheckoutConversionProxySource: 'direct',
 };
 const inputPlusCheckoutConversionProxy = { value: '' };
+const selectPlusCheckoutConversionProxySource = { value: 'direct' };
 const plusCheckoutConversionProxySourceButtons = [];
 function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
-  return normalizePlusCheckoutConversionProxySourceValue(state?.plusCheckoutConversionProxySource || 'manual');
+  return normalizePlusCheckoutConversionProxySourceValue(selectPlusCheckoutConversionProxySource.value || state?.plusCheckoutConversionProxySource || 'manual');
 }
 function getCurrentPlusCheckoutConversionProxy711Region() { return ''; }
 const displayPlusCheckoutConversionProxyRuntimeStatus = {
@@ -570,6 +571,8 @@ test('sidepanel shows checkout conversion proxy next button only for 711 pool mo
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('normalizePlusCheckoutConversionProxySourceValue'),
+    extractFunction('syncPlusCheckoutConversionProxySourceControl'),
+    extractFunction('getSelectedPlusCheckoutConversionProxySource'),
     extractFunction('setPlusCheckoutConversionProxyTestResult'),
     extractFunction('isPlusCheckoutCloudConversionEnabled'),
     extractFunction('updatePlusCheckoutConversionModeUi'),
@@ -585,6 +588,7 @@ let latestState = {
 const inputPlusModeEnabled = { checked: true };
 const selectPlusPaymentMethod = { value: 'paypal' };
 const inputPlusCheckoutCloudConversionEnabled = { checked: false };
+const selectPlusCheckoutConversionProxySource = { value: 'manual', disabled: false, setAttribute(name, value) { this[name] = value; } };
 const inputPlusCheckoutConversionProxy = { style: {}, disabled: false, readOnly: false, setAttribute(name, value) { this[name] = value; } };
 const plusCheckoutConversionProxy711Shell = { style: {} };
 const inputPlusCheckoutConversionProxy711Region = { disabled: false, readOnly: false, setAttribute(name, value) { this[name] = value; } };
@@ -599,39 +603,47 @@ const displayPlusCheckoutConversionProxyTestResult = {
   title: '',
   classList: { remove() {}, add() {} },
 };
-const plusCheckoutConversionProxySourceButtons = [{
-  dataset: { plusCheckoutConversionProxySource: 'manual' },
-  classList: { toggle() {} },
-  setAttribute() {},
-  disabled: false,
-}, {
-  dataset: { plusCheckoutConversionProxySource: '711proxy_pool' },
-  classList: { toggle() {} },
-  setAttribute() {},
-  disabled: false,
-}];
-function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
-  return normalizePlusCheckoutConversionProxySourceValue(state?.plusCheckoutConversionProxySource || 'manual');
-}
+const plusCheckoutConversionProxySourceButtons = [];
 ${bundle}
 return {
   updatePlusCheckoutConversionModeUi,
+  selectPlusCheckoutConversionProxySource,
+  inputPlusCheckoutConversionProxy,
+  plusCheckoutConversionProxy711Shell,
   btnPlusCheckoutConversionProxyNext,
-  setState(nextState) { latestState = { ...latestState, ...nextState }; },
+  setSource(source) {
+    selectPlusCheckoutConversionProxySource.value = source;
+    latestState = { ...latestState, plusCheckoutConversionProxySource: source };
+  },
   setCloud(enabled) { inputPlusCheckoutCloudConversionEnabled.checked = Boolean(enabled); },
 };
 `)();
 
   api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.selectPlusCheckoutConversionProxySource.value, 'manual');
+  assert.equal(api.inputPlusCheckoutConversionProxy.style.display, '');
+  assert.equal(api.plusCheckoutConversionProxy711Shell.style.display, 'none');
   assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
 
-  api.setState({ plusCheckoutConversionProxySource: '711proxy_pool' });
+  api.setSource('711proxy_pool');
   api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.selectPlusCheckoutConversionProxySource.value, '711proxy_pool');
+  assert.equal(api.inputPlusCheckoutConversionProxy.style.display, 'none');
+  assert.equal(api.plusCheckoutConversionProxy711Shell.style.display, '');
   assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, '');
   assert.equal(api.btnPlusCheckoutConversionProxyNext.disabled, false);
 
+  api.setSource('direct');
+  api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.selectPlusCheckoutConversionProxySource.value, 'direct');
+  assert.equal(api.inputPlusCheckoutConversionProxy.style.display, 'none');
+  assert.equal(api.plusCheckoutConversionProxy711Shell.style.display, 'none');
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
+
+  api.setSource('711proxy_pool');
   api.setCloud(true);
   api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.selectPlusCheckoutConversionProxySource.disabled, true);
   assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
   assert.equal(api.btnPlusCheckoutConversionProxyNext.disabled, true);
 });
@@ -658,10 +670,8 @@ let latestState = {
   plusCheckoutConversionProxy711Region: 'US',
   plusCheckoutConversionProxyManualSession: null,
 };
-const plusCheckoutConversionProxySourceButtons = [{
-  dataset: { plusCheckoutConversionProxySource: '711proxy_pool' },
-  classList: { contains(name) { return name === 'active'; } },
-}];
+const selectPlusCheckoutConversionProxySource = { value: '711proxy_pool' };
+const plusCheckoutConversionProxySourceButtons = [];
 const inputPlusCheckoutConversionProxy711Region = { value: 'US' };
 const inputPlusCheckoutConversionProxy = { value: '' };
 const btnPlusCheckoutConversionProxyTest = { disabled: false, textContent: '测试代理' };

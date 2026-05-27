@@ -36,6 +36,14 @@
       return normalized === 'flow_completed' ? normalized : '';
     }
 
+    function normalizeFreeStatus(value = '') {
+      const normalized = normalizeString(value).toLowerCase();
+      if (normalized === 'free' || normalized === 'paid' || normalized === 'unknown') {
+        return normalized;
+      }
+      return 'unknown';
+    }
+
     function getStatusMeta(captureStage = '') {
       switch (normalizeCaptureStage(captureStage)) {
         case 'phone_verification_passed':
@@ -57,6 +65,26 @@
           return {
             label: '--',
             className: 'status-unknown',
+          };
+      }
+    }
+
+    function getFreeStatusMeta(freeStatus = '') {
+      switch (normalizeFreeStatus(freeStatus)) {
+        case 'free':
+          return {
+            label: '免费',
+            className: 'free-status-free',
+          };
+        case 'paid':
+          return {
+            label: '付费',
+            className: 'free-status-paid',
+          };
+        default:
+          return {
+            label: '未知',
+            className: 'free-status-unknown',
           };
       }
     }
@@ -83,6 +111,7 @@
           captureStage: normalizeCaptureStage(item.captureStage),
           signupIp: normalizeString(item.signupIp || ''),
           signupRegion: normalizeSignupRegion(item.signupRegion || ''),
+          freeStatus: normalizeFreeStatus(item.freeStatus || ''),
         }))
         .slice()
         .sort((left, right) => {
@@ -129,7 +158,7 @@
       if (!entries.length) {
         dom.accountBookBody.innerHTML = `
           <tr class="account-book-empty-row">
-            <td class="account-book-empty" colspan="5">暂无账号信息</td>
+            <td class="account-book-empty" colspan="6">暂无账号信息</td>
           </tr>
         `;
         return;
@@ -142,6 +171,7 @@
         const displayPassword = passwordVisible ? formatDisplayValue(passwordValue) : maskPassword(passwordValue);
         const canTogglePassword = Boolean(passwordValue);
         const statusMeta = getStatusMeta(entry.captureStage);
+        const freeStatusMeta = getFreeStatusMeta(entry.freeStatus);
 
         return `
           <tr data-account-book-row="${escapeHtml(recordId)}">
@@ -161,6 +191,9 @@
             </td>
             <td class="account-book-cell account-book-status-cell">
               <span class="account-book-status-chip ${statusMeta.className}">${escapeHtml(statusMeta.label)}</span>
+            </td>
+            <td class="account-book-cell account-book-free-cell">
+              <span class="account-book-free-chip ${freeStatusMeta.className}">${escapeHtml(freeStatusMeta.label)}</span>
             </td>
             <td class="mono account-book-cell account-book-ip-cell">${escapeHtml(formatSignupIp(entry))}</td>
           </tr>
@@ -189,6 +222,7 @@
       return entries.map((entry) => ({
         ...entry,
         statusLabel: getStatusMeta(entry.captureStage).label,
+        freeStatusLabel: getFreeStatusMeta(entry.freeStatus).label,
       }));
     }
 
@@ -213,12 +247,13 @@
         `# exportedAt=${exportedAt}`,
         `# count=${entries.length}`,
         '',
-        ['\u90ae\u7bb1', '\u624b\u673a\u53f7', '\u5bc6\u7801', '\u72b6\u6001', 'IP'].join('\t'),
+        ['\u90ae\u7bb1', '\u624b\u673a\u53f7', '\u5bc6\u7801', '\u72b6\u6001', '\u514d\u8d39', 'IP'].join('\t'),
         ...entries.map((entry) => [
           sanitizeTxtCell(entry.email),
           sanitizeTxtCell(entry.phoneNumber),
           sanitizeTxtCell(entry.password),
           sanitizeTxtCell(getStatusMeta(entry.captureStage).label),
+          sanitizeTxtCell(getFreeStatusMeta(entry.freeStatus).label),
           sanitizeTxtCell(formatSignupIp(entry)),
         ].join('\t')),
       ];

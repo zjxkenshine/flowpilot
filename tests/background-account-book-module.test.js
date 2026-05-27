@@ -42,6 +42,7 @@ test('account book helper creates a registration record and upgrades it on flow 
       panelMode: 'sub2api',
       ipProxyAppliedExitIp: ' 203.0.113.8 ',
       ipProxyAppliedExitRegion: ' jp ',
+      freeStatus: 'free',
     }),
   });
 
@@ -56,6 +57,7 @@ test('account book helper creates a registration record and upgrades it on flow 
   assert.equal(firstEntry.finalFlowCompletedAt, '');
   assert.equal(firstEntry.signupIp, '203.0.113.8');
   assert.equal(firstEntry.signupRegion, 'JP');
+  assert.equal(firstEntry.freeStatus, 'free');
   assert.equal(storedEntries.length, 1);
 
   const createdAt = firstEntry.createdAt;
@@ -71,6 +73,7 @@ test('account book helper creates a registration record and upgrades it on flow 
     panelMode: 'sub2api',
     ipProxyAppliedExitIp: '198.51.100.9',
     ipProxyAppliedExitRegion: 'US',
+    freeStatus: 'paid',
   });
   assert.equal(completedEntry.recordId, 'flow@example.com');
   assert.equal(completedEntry.email, 'flow@example.com');
@@ -81,11 +84,13 @@ test('account book helper creates a registration record and upgrades it on flow 
   assert.equal(completedEntry.createdAt, createdAt);
   assert.equal(completedEntry.signupIp, '203.0.113.8');
   assert.equal(completedEntry.signupRegion, 'JP');
+  assert.equal(completedEntry.freeStatus, 'paid');
   assert.equal(storedEntries.length, 1);
   assert.equal(storedEntries[0].recordId, 'flow@example.com');
   assert.equal(storedEntries[0].phoneNumber, '+1 (555) 123-4567');
   assert.equal(storedEntries[0].signupIp, '203.0.113.8');
   assert.equal(storedEntries[0].signupRegion, 'JP');
+  assert.equal(storedEntries[0].freeStatus, 'paid');
 });
 
 test('account book helper does not prefill auth-completed phone on registration success for email signup', async () => {
@@ -560,6 +565,46 @@ test('account book helper standardizes legacy entries with empty signup IP field
   assert.equal(entries.length, 1);
   assert.equal(entries[0].signupIp, '');
   assert.equal(entries[0].signupRegion, '');
+  assert.equal(entries[0].freeStatus, 'unknown');
+});
+
+test('account book helper preserves existing free status when later state omits it', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'keep-free@example.com',
+      password: 'secret',
+      activeFlowId: 'openai',
+      freeStatus: 'free',
+    }),
+  });
+
+  const firstEntry = await helpers.upsertAccountBookEntry('registration_success');
+  assert.equal(firstEntry.freeStatus, 'free');
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'keep-free@example.com',
+    password: 'secret',
+    activeFlowId: 'openai',
+  });
+
+  assert.equal(completedEntry.freeStatus, 'free');
+  assert.equal(storedEntries[0].freeStatus, 'free');
 });
 
 test('account book helper clears persisted entries without touching unrelated session state', async () => {

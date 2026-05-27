@@ -56,17 +56,18 @@ function createApi(events, lastNodeId = 'platform-verify') {
 let stopRequested = false;
 const LOG_PREFIX = '[test]';
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
+const state = {
+  nodeStatuses: {},
+  accountContributionEnabled: true,
+  ipProxyAppliedExitIp: '203.0.113.8',
+  ipProxyAppliedExitRegion: 'JP',
+};
 function getErrorMessage(error) {
   return error?.message || String(error || '');
 }
 async function getState() {
   events.push({ type: 'getState' });
-  return {
-    nodeStatuses: {},
-    accountContributionEnabled: true,
-    ipProxyAppliedExitIp: '203.0.113.8',
-    ipProxyAppliedExitRegion: 'JP',
-  };
+  return { ...state };
 }
 function getLastNodeIdForState() {
   return lastNodeId;
@@ -88,6 +89,10 @@ function notifyNodeComplete(nodeId, payload) {
 }
 async function handleNodeData(nodeId, payload) {
   events.push({ type: 'handle-start', nodeId, payload });
+  if (nodeId === 'wait-registration-success' && payload && Object.prototype.hasOwnProperty.call(payload, 'freeStatus')) {
+    state.freeStatus = payload.freeStatus;
+    state.freeStatusDetection = payload.freeStatusDetection || null;
+  }
   await new Promise((resolve) => setTimeout(resolve, 25));
   events.push({ type: 'handle-done', nodeId });
 }
@@ -137,7 +142,11 @@ test('completeNodeFromBackground writes registration-success account book entry 
   const events = [];
   const api = createApi(events, 'platform-verify');
 
-  await api.completeNodeFromBackground('wait-registration-success', { nodeId: 'wait-registration-success' });
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
 
   const accountBookEvent = events.find((event) => event.type === 'account-book');
   assert.deepStrictEqual(accountBookEvent, {
@@ -148,6 +157,8 @@ test('completeNodeFromBackground writes registration-success account book entry 
       accountContributionEnabled: true,
       ipProxyAppliedExitIp: '203.0.113.8',
       ipProxyAppliedExitRegion: 'JP',
+      freeStatus: 'free',
+      freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
     },
   });
 });
