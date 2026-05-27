@@ -5,18 +5,32 @@
   const STEP6_COOKIE_CLEAR_DOMAINS = [
     'chatgpt.com',
     'chat.openai.com',
+    'pay.openai.com',
     'openai.com',
     'auth.openai.com',
     'auth0.openai.com',
     'accounts.openai.com',
+    'paypal.com',
+    'stripe.com',
+    'checkout.stripe.com',
+    'meiguodizhi.com',
+    'mail-api.yuecheng.shop',
+    'yuecheng.shop',
   ];
   const STEP6_COOKIE_CLEAR_ORIGINS = [
     'https://chatgpt.com',
     'https://chat.openai.com',
+    'https://pay.openai.com',
     'https://auth.openai.com',
     'https://auth0.openai.com',
     'https://accounts.openai.com',
     'https://openai.com',
+    'https://www.paypal.com',
+    'https://paypal.com',
+    'https://checkout.stripe.com',
+    'https://www.meiguodizhi.com',
+    'https://meiguodizhi.com',
+    'https://mail-api.yuecheng.shop',
   ];
   const STEP6_FREE_STATUS_UNKNOWN = 'unknown';
   const STEP6_FREE_STATUS_VALUES = new Set(['free', 'paid', STEP6_FREE_STATUS_UNKNOWN]);

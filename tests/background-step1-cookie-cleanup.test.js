@@ -18,7 +18,7 @@ function createNoopChromeApi() {
   };
 }
 
-test('step 1 cookie cleanup queries target domains and skips browsingData sweep when direct removals succeed', async () => {
+test('step 1 cookie cleanup queries target domains and runs browsingData sweep', async () => {
   const api = loadStep1Module();
   const events = {
     getAllCalls: [],
@@ -47,6 +47,16 @@ test('step 1 cookie cleanup queries target domains and skips browsingData sweep 
               storeId: 'store-a',
               partitionKey: { topLevelSite: 'https://chatgpt.com' },
             },
+          ];
+        }
+        if (query?.domain === 'paypal.com') {
+          return [
+            { domain: '.paypal.com', path: '/', name: 'paypal-session', storeId: 'store-a' },
+          ];
+        }
+        if (query?.domain === 'checkout.stripe.com') {
+          return [
+            { domain: 'checkout.stripe.com', path: '/', name: 'stripe-session', storeId: 'store-a' },
           ];
         }
         return [];
@@ -90,13 +100,27 @@ test('step 1 cookie cleanup queries target domains and skips browsingData sweep 
       storeId: 'store-a',
       partitionKey: { topLevelSite: 'https://chatgpt.com' },
     },
+    {
+      url: 'https://paypal.com/',
+      name: 'paypal-session',
+      storeId: 'store-a',
+    },
+    {
+      url: 'https://checkout.stripe.com/',
+      name: 'stripe-session',
+      storeId: 'store-a',
+    },
   ]);
-  assert.deepStrictEqual(events.browsingDataCalls, []);
+  assert.equal(events.browsingDataCalls.length, 1);
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://www.paypal.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://pay.openai.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://checkout.stripe.com'));
   assert.deepStrictEqual(events.openedSteps, [1]);
   assert.deepStrictEqual(events.completedNodes, ['open-chatgpt']);
 });
 
-test('step 1 cookie cleanup skips browsingData sweep when no direct cookie is removed', async () => {
+test('step 1 cookie cleanup still runs browsingData sweep when no direct cookie is removed', async () => {
   const api = loadStep1Module();
   const events = {
     removedCookies: 0,
@@ -129,7 +153,8 @@ test('step 1 cookie cleanup skips browsingData sweep when no direct cookie is re
   await executor.executeStep1();
 
   assert.equal(events.removedCookies, 0);
-  assert.equal(events.browsingDataCalls.length, 0);
+  assert.equal(events.browsingDataCalls.length, 1);
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
 });
 
 test('step 1 skips proxy probe when IP proxy is disabled', async () => {

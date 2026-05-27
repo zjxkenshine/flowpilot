@@ -52,6 +52,8 @@ test('step 6 only clears cookies when cleanup switch is enabled', async () => {
       getAllCookieStores: async () => [{ id: 'store-a' }],
       getAll: async () => [
         { domain: '.chatgpt.com', path: '/auth', name: 'session', storeId: 'store-a' },
+        { domain: '.paypal.com', path: '/', name: 'paypal-session', storeId: 'store-a' },
+        { domain: 'checkout.stripe.com', path: '/', name: 'stripe-session', storeId: 'store-a' },
         { domain: '.example.com', path: '/', name: 'keep', storeId: 'store-a' },
       ],
       remove: async (details) => {
@@ -89,9 +91,23 @@ test('step 6 only clears cookies when cleanup switch is enabled', async () => {
       name: 'session',
       storeId: 'store-a',
     },
+    {
+      url: 'https://paypal.com/',
+      name: 'paypal-session',
+      storeId: 'store-a',
+    },
+    {
+      url: 'https://checkout.stripe.com/',
+      name: 'stripe-session',
+      storeId: 'store-a',
+    },
   ]);
   assert.equal(events.browsingDataCalls.length, 1);
   assert.ok(events.browsingDataCalls[0].origins.includes('https://chatgpt.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://www.paypal.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://pay.openai.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://checkout.stripe.com'));
 });
 
 test('step 6 detects free trial status from strict chatgpt root page', async () => {

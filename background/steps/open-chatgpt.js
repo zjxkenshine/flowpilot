@@ -4,10 +4,32 @@
   const STEP1_COOKIE_CLEAR_DOMAINS = [
     'chatgpt.com',
     'chat.openai.com',
+    'pay.openai.com',
     'openai.com',
     'auth.openai.com',
     'auth0.openai.com',
     'accounts.openai.com',
+    'paypal.com',
+    'stripe.com',
+    'checkout.stripe.com',
+    'meiguodizhi.com',
+    'mail-api.yuecheng.shop',
+    'yuecheng.shop',
+  ];
+  const STEP1_COOKIE_CLEAR_ORIGINS = [
+    'https://chatgpt.com',
+    'https://chat.openai.com',
+    'https://pay.openai.com',
+    'https://auth.openai.com',
+    'https://auth0.openai.com',
+    'https://accounts.openai.com',
+    'https://openai.com',
+    'https://www.paypal.com',
+    'https://paypal.com',
+    'https://checkout.stripe.com',
+    'https://www.meiguodizhi.com',
+    'https://meiguodizhi.com',
+    'https://mail-api.yuecheng.shop',
   ];
 
   function normalizeCookieDomainForStep1(domain) {
@@ -320,6 +342,17 @@
       for (const cookie of cookies) {
         if (await removeStep1Cookie(chromeApi, cookie)) {
           removedCount += 1;
+        }
+      }
+
+      if (chromeApi.browsingData?.removeCookies) {
+        try {
+          await chromeApi.browsingData.removeCookies({
+            since: 0,
+            origins: STEP1_COOKIE_CLEAR_ORIGINS,
+          });
+        } catch (error) {
+          await addLog(`步骤 1：browsingData 补扫 cookies 失败：${getStep1ErrorMessage(error)}`, 'warn');
         }
       }
 
