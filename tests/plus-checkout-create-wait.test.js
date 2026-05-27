@@ -3279,6 +3279,100 @@ test('PayPal hosted generic_error completes checkout create when refreshed sessi
   assert.equal(broadcasts.some((payload) => payload.plusManualConfirmationPending), false);
 });
 
+async function runHostedGenericErrorPlanTypeCheck(planType) {
+  const events = [];
+  const broadcasts = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tab-create', payload });
+          return { id: 778, url: payload.url, status: 'complete' };
+        },
+        get: async (tabId) => ({
+          id: tabId,
+          url: tabId === 778 ? 'https://chatgpt.com/' : 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test',
+          status: 'complete',
+        }),
+        reload: async (tabId) => events.push({ type: 'tab-reload', tabId }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState({
+      autoRunRetryPaypalCallback: false,
+    }),
+    registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return {
+          hostedStage: 'generic_error',
+          hostedGenericError: true,
+          hostedGenericErrorMessage: 'Things don\'t appear to be working at the moment.',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          accessToken: 'access-token',
+          session: {
+            user: {
+              plan_type: planType,
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  const execution = executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  return { events, broadcasts, execution };
+}
+
+for (const planType of ['free', 'Free', 'CHATGPT_FREE', 'chatgptfree']) {
+  test(`PayPal hosted generic_error treats English free plan type as non-paid: ${planType}`, async () => {
+    const { events, broadcasts, execution } = await runHostedGenericErrorPlanTypeCheck(planType);
+
+    await assert.rejects(
+      () => execution,
+      /HOSTED_CHECKOUT_GENERIC_ERROR::Things don'?t appear/
+    );
+
+    assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-checkout-create'), false);
+    assert.equal(events.some((event) => event.type === 'set-state' && event.payload?.plusManualConfirmationPending), true);
+    assert.equal(broadcasts.some((payload) => payload.plusManualConfirmationPending), true);
+  });
+}
+
+for (const planType of ['plus', 'pro', 'team', 'basic']) {
+  test(`PayPal hosted generic_error treats non-free English plan type as paid: ${planType}`, async () => {
+    const { events, broadcasts, execution } = await runHostedGenericErrorPlanTypeCheck(planType);
+
+    await execution;
+
+    const completeEvent = events.find((event) => event.type === 'complete' && event.step === 'plus-checkout-create');
+    assert.ok(completeEvent);
+    assert.equal(completeEvent.payload.plusDetectedPlanType, planType);
+    assert.equal(events.some((event) => event.type === 'set-state' && event.payload?.plusManualConfirmationPending), false);
+    assert.equal(broadcasts.some((payload) => payload.plusManualConfirmationPending), false);
+  });
+}
+
 test('PayPal hosted card node regenerates and persists a fresh guest profile before submitting guest checkout', async () => {
   const events = [];
   let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';

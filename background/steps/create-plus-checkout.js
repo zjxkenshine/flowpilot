@@ -262,7 +262,7 @@
       if (!normalized) {
         return false;
       }
-      return !/(^|[_-])(free|guest|basic|default|none|null|unknown)([_-]|$)/i.test(normalized);
+      return !normalized.includes('free');
     }
 
     function inspectPlusActivationFromSession(session = null) {
