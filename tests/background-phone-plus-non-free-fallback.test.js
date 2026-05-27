@@ -198,6 +198,9 @@ test('Phone Plus non-free fallback skips the Plus segment and keeps current pane
   assert.equal(nextState.oauthUrl, null);
   assert.equal(nextState.sub2apiSessionId, null);
   assert.equal(nextState.cpaOAuthState, null);
+  assert.equal(nextState.phonePlusFallbackReason, 'plus-checkout-non-free-trial');
+  assert.equal(nextState.phonePlusFallbackAmountLabel, '€19.33');
+  assert.equal(nextState.phonePlusFallbackDetail, '');
   assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
   assert.equal(nextState.nodeStatuses['plus-checkout-billing'], 'skipped');
   assert.equal(nextState.nodeStatuses['paypal-approve'], 'skipped');
@@ -266,4 +269,49 @@ test('Phone Plus hosted fallback skips the full hosted payment segment', async (
   assert.equal(result.nextNodeId, 'oauth-login');
   assert.equal(api.getState().nodeStatuses['paypal-hosted-review'], 'skipped');
   assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 5);
+});
+
+test('Phone Plus proxy failure fallback stores reason detail and logs proxy message', async () => {
+  const api = createApi({
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'submit-signup-email': 'completed',
+      'fill-password': 'completed',
+      'fetch-signup-code': 'completed',
+      'fill-profile': 'completed',
+      'wait-registration-success': 'completed',
+      'plus-checkout-create': 'running',
+      'plus-checkout-billing': 'pending',
+      'paypal-approve': 'pending',
+      'plus-checkout-return': 'pending',
+      'oauth-login': 'pending',
+    },
+    currentNodeId: 'plus-checkout-create',
+    plusCheckoutTabId: 42,
+    plusCheckoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test',
+    oauthUrl: 'https://old.example/oauth',
+  });
+
+  const result = await api.handlePhonePlusNonFreeTrialFallback(api.getState(), {
+    reason: 'plus-checkout-conversion-proxy-failed',
+    detail: '未检测到支付转换代理出口 IP。',
+    nodeId: 'plus-checkout-create',
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.reason, 'plus-checkout-conversion-proxy-failed');
+  assert.equal(result.nextNodeId, 'oauth-login');
+  const nextState = api.getState();
+  assert.equal(nextState.phonePlusFallbackReason, 'plus-checkout-conversion-proxy-failed');
+  assert.equal(nextState.phonePlusFallbackDetail, '未检测到支付转换代理出口 IP。');
+  assert.equal(nextState.phonePlusFallbackAmountLabel, '');
+  assert.equal(nextState.plusCheckoutTabId, null);
+  assert.equal(nextState.oauthUrl, null);
+  assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(api.events.logs.some((entry) => /支付转换代理失败/.test(entry.message)), true);
+  assert.equal(api.events.logs.some((entry) => /未检测到支付转换代理出口 IP/.test(entry.message)), true);
 });

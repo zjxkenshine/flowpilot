@@ -528,8 +528,9 @@
       };
     }
 
+    const rootScope = typeof self !== 'undefined' ? self : globalThis;
     const proxyManager = checkoutConversionProxyManager
-      || self.MultiPageBackgroundCheckoutConversionProxy?.createCheckoutConversionProxyManager?.({
+      || rootScope.MultiPageBackgroundCheckoutConversionProxy?.createCheckoutConversionProxyManager?.({
         chrome,
         getState,
         setState,
@@ -543,6 +544,69 @@
       return proxyManager.testCheckoutConversionProxy(options);
     }
 
+    function getErrorMessage(error) {
+      return String(error?.message || error || '未知错误').trim();
+    }
+
+    async function cleanupCheckoutConversionProxySessionAfterFailure(state = {}, flowType = '', nodeKey = '', error = null) {
+      if (!proxyManager) {
+        return;
+      }
+      const cleanupErrors = [];
+      try {
+        const latestState = typeof getState === 'function' ? await getState().catch(() => state) : state;
+        const session = typeof proxyManager.getStoredSession === 'function'
+          ? await proxyManager.getStoredSession(latestState)
+          : null;
+        if (session?.active && (!flowType || session.flowType === flowType)) {
+          if (typeof proxyManager.restoreSession === 'function') {
+            await proxyManager.restoreSession(session);
+          } else if (typeof proxyManager.releaseSessionForNode === 'function') {
+            await proxyManager.releaseSessionForNode(nodeKey || session.releaseNodeKey || '', latestState);
+          }
+        } else if (typeof proxyManager.releaseSessionForNode === 'function' && nodeKey) {
+          await proxyManager.releaseSessionForNode(nodeKey, latestState);
+        }
+      } catch (cleanupError) {
+        cleanupErrors.push(getErrorMessage(cleanupError));
+      }
+
+      if (cleanupErrors.length) {
+        await addLog(
+          `Phone Plus：支付转换代理失败后清理代理会话未完成，将继续切回 free auth。清理原因：${cleanupErrors.join('；')}。原始原因：${getErrorMessage(error)}`,
+          'warn'
+        );
+      }
+    }
+
+    async function handlePhonePlusConversionProxyFailure(state = {}, error = null, options = {}) {
+      if (!isPhonePlusModeState(state) || typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        return null;
+      }
+      const detail = getErrorMessage(error);
+      await cleanupCheckoutConversionProxySessionAfterFailure(
+        state,
+        String(options.flowType || '').trim(),
+        String(options.releaseNodeKey || options.nodeId || '').trim(),
+        error
+      );
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'plus-checkout-conversion-proxy-failed',
+        detail,
+        nodeId: String(options.nodeId || 'plus-checkout-create').trim() || 'plus-checkout-create',
+        phaseLabel: String(options.phaseLabel || '支付转换代理').trim(),
+      });
+      if (!fallbackResult?.handled) {
+        return null;
+      }
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+        reason: 'plus-checkout-conversion-proxy-failed',
+        detail,
+      };
+    }
+
     async function applyClassicPaypalCheckoutConversionProxySessionBeforeOpen(state = {}, paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
       if (!proxyManager?.applySessionFromState) {
         return null;
@@ -550,22 +614,35 @@
       if (normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod) !== PLUS_PAYMENT_METHOD_PAYPAL) {
         return null;
       }
-      const session = await proxyManager.applySessionFromState(state, {
-        flowType: 'classic-paypal',
-        releaseNodeKey: 'paypal-approve',
-        appliedStepKey: 'plus-checkout-create',
-      });
-      if (!session?.active) {
-        return null;
-      }
-      await addLog(`步骤 6：跳转 Plus Checkout 链接前已启用支付转换代理 ${session.displayName}。`, 'info');
-      if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
-        await proxyManager.checkCheckoutConversionProxySessionExit(session, {
-          context: 'classic-paypal',
-          requireExit: true,
+      try {
+        const session = await proxyManager.applySessionFromState(state, {
+          flowType: 'classic-paypal',
+          releaseNodeKey: 'paypal-approve',
+          appliedStepKey: 'plus-checkout-create',
         });
+        if (!session?.active) {
+          return null;
+        }
+        await addLog(`步骤 6：跳转 Plus Checkout 链接前已启用支付转换代理 ${session.displayName}。`, 'info');
+        if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
+          await proxyManager.checkCheckoutConversionProxySessionExit(session, {
+            context: 'classic-paypal',
+            requireExit: true,
+          });
+        }
+        return session;
+      } catch (error) {
+        const fallback = await handlePhonePlusConversionProxyFailure(state, error, {
+          flowType: 'classic-paypal',
+          releaseNodeKey: 'paypal-approve',
+          nodeId: 'plus-checkout-create',
+          phaseLabel: '跳转 Plus Checkout 链接前',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return fallback;
+        }
+        throw error;
       }
-      return session;
     }
 
     async function applyHostedCheckoutConversionProxySession(state = {}, stepKey = PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT) {
@@ -573,27 +650,40 @@
         return null;
       }
       const appliedStepKey = String(stepKey || PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT).trim() || PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT;
-      const session = await proxyManager.applySessionFromState(state, {
-        flowType: 'paypal-hosted',
-        releaseNodeKey: PAYPAL_HOSTED_STEP_REVIEW,
-        appliedStepKey,
-      });
-      if (!session?.active) {
-        return null;
-      }
-      const stepNumber = getHostedStepNumber(appliedStepKey);
-      await addHostedStepLog(
-        appliedStepKey,
-        `步骤 ${stepNumber}：已在提交 OpenAI hosted checkout 前启用支付转换代理 ${session.displayName}。`,
-        'info'
-      );
-      if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
-        await proxyManager.checkCheckoutConversionProxySessionExit(session, {
-          context: 'paypal-hosted',
-          requireExit: true,
+      try {
+        const session = await proxyManager.applySessionFromState(state, {
+          flowType: 'paypal-hosted',
+          releaseNodeKey: PAYPAL_HOSTED_STEP_REVIEW,
+          appliedStepKey,
         });
+        if (!session?.active) {
+          return null;
+        }
+        const stepNumber = getHostedStepNumber(appliedStepKey);
+        await addHostedStepLog(
+          appliedStepKey,
+          `步骤 ${stepNumber}：已在提交 OpenAI hosted checkout 前启用支付转换代理 ${session.displayName}。`,
+          'info'
+        );
+        if (typeof proxyManager.checkCheckoutConversionProxySessionExit === 'function') {
+          await proxyManager.checkCheckoutConversionProxySessionExit(session, {
+            context: 'paypal-hosted',
+            requireExit: true,
+          });
+        }
+        return session;
+      } catch (error) {
+        const fallback = await handlePhonePlusConversionProxyFailure(state, error, {
+          flowType: 'paypal-hosted',
+          releaseNodeKey: PAYPAL_HOSTED_STEP_REVIEW,
+          nodeId: appliedStepKey,
+          phaseLabel: '提交 OpenAI hosted checkout 前',
+        });
+        if (fallback?.phonePlusFallbackToFreeAuth) {
+          return fallback;
+        }
+        throw error;
       }
-      return session;
     }
 
     async function releaseHostedCheckoutConversionProxySessionOnFailure(stepKey = PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, error = null) {
@@ -643,7 +733,10 @@
     }
 
     async function runHostedOpenAiCheckoutWithProxySession(tabId, profile, config, state = {}, stepKey = PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT) {
-      await applyHostedCheckoutConversionProxySession(state, stepKey);
+      const proxySession = await applyHostedCheckoutConversionProxySession(state, stepKey);
+      if (proxySession?.phonePlusFallbackToFreeAuth) {
+        return proxySession;
+      }
       try {
         return await runHostedOpenAiCheckout(tabId, profile, config);
       } catch (error) {
@@ -3099,13 +3192,17 @@
           extra: `OpenAI Checkout 手机号 ${maskHostedPhoneForLog(profile.phone)}`,
         });
         await addLog(`步骤 6：正在提交 OpenAI Checkout，等待跳转到 PayPal 邮箱页（电话使用本地号码 ${profile.phone}）。`, 'info');
-        completedUrl = String(await runHostedOpenAiCheckoutWithProxySession(
+        const hostedCheckoutResult = await runHostedOpenAiCheckoutWithProxySession(
           tabId,
           profile,
           config,
           state,
           PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT
-        ) || await getHostedCurrentUrl(tabId) || '').trim();
+        );
+        if (hostedCheckoutResult?.phonePlusFallbackToFreeAuth) {
+          return;
+        }
+        completedUrl = String(hostedCheckoutResult || await getHostedCurrentUrl(tabId) || '').trim();
       }
 
       if (isPayPalUrl(completedUrl)) {
@@ -3194,6 +3291,9 @@
         state,
         stepKey
       );
+      if (transitionUrl?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
       const completedUrl = String(transitionUrl || await getHostedCurrentUrl(tabId) || '').trim();
       if (isHostedCheckoutSuccessUrl(completedUrl)) {
         await releaseHostedCheckoutConversionProxySessionIfCompleted(stepKey, completedUrl, state);
@@ -4161,7 +4261,10 @@
         return;
       }
 
-      await applyClassicPaypalCheckoutConversionProxySessionBeforeOpen(state, paymentMethod);
+      const proxySession = await applyClassicPaypalCheckoutConversionProxySessionBeforeOpen(state, paymentMethod);
+      if (proxySession?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
 
       await addLog(`步骤 6：${checkoutModeLabel} 已创建，正在打开订阅页面...`, 'ok');
       await chrome.tabs.update(tabId, { url: targetCheckoutUrl, active: true });

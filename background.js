@@ -10521,7 +10521,10 @@ function getPhonePlusPaymentSegmentNodeIds(state = {}) {
   return nodeIds.slice(registrationEndIndex + 1, authStartIndex);
 }
 
-function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '') {
+function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '', options = {}) {
+  const fallbackReason = String(options?.reason || 'plus-checkout-non-free-trial').trim()
+    || 'plus-checkout-non-free-trial';
+  const fallbackDetail = String(options?.detail || '').trim();
   return {
     plusCheckoutTabId: null,
     plusCheckoutUrl: null,
@@ -10591,8 +10594,9 @@ function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '') {
     currentPhoneVerificationCountdownWindowIndex: 0,
     currentPhoneVerificationCountdownWindowTotal: 0,
     phonePlusFallbackToFreeAuth: true,
-    phonePlusFallbackReason: 'plus-checkout-non-free-trial',
+    phonePlusFallbackReason: fallbackReason,
     phonePlusFallbackAmountLabel: String(amountLabel || '').trim(),
+    phonePlusFallbackDetail: fallbackDetail,
     phonePlusFallbackAt: Date.now(),
   };
 }
@@ -10614,13 +10618,19 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
   }
 
   const amountLabel = String(context?.amountLabel || '').trim();
+  const fallbackReason = String(context?.reason || 'plus-checkout-non-free-trial').trim()
+    || 'plus-checkout-non-free-trial';
+  const fallbackDetail = String(context?.detail || '').trim();
   const currentNodeId = String(context?.nodeId || currentState.currentNodeId || 'plus-checkout-billing').trim();
   const nodeStatuses = { ...(currentState.nodeStatuses || {}) };
   for (const nodeId of paymentSegmentNodeIds) {
     nodeStatuses[nodeId] = 'skipped';
   }
 
-  const resetPatch = buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel);
+  const resetPatch = buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel, {
+    reason: fallbackReason,
+    detail: fallbackDetail,
+  });
   const stateUpdates = {
     ...resetPatch,
     nodeStatuses,
@@ -10638,10 +10648,14 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
   }
 
   const amountSuffix = amountLabel ? `（${amountLabel}）` : '';
+  const detailSuffix = fallbackDetail ? `原因：${fallbackDetail}` : '';
+  const fallbackMessage = fallbackReason === 'plus-checkout-conversion-proxy-failed'
+    ? `Phone Plus：支付转换代理失败，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`
+    : `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
   await addLog(
-    `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`,
+    fallbackMessage,
     'warn',
-    { nodeId: currentNodeId }
+    { nodeId: currentNodeId, reason: fallbackReason }
   );
 
   const nextNodeId = getFirstUnfinishedNodeId(nodeStatuses, {
@@ -10652,6 +10666,7 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     handled: true,
     nextNodeId,
     skippedNodeIds: paymentSegmentNodeIds,
+    reason: fallbackReason,
   };
 }
 

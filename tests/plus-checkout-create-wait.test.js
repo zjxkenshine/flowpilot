@@ -700,7 +700,81 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
   );
 });
 
-test('Classic PayPal checkout create stops before opening checkout link when conversion proxy exit check fails', async () => {
+test('Phone Plus classic checkout falls back before opening checkout link when conversion proxy exit check fails', async () => {
+  const events = [];
+  const appliedSession = {
+    active: true,
+    flowType: 'classic-paypal',
+    releaseNodeKey: 'paypal-approve',
+    appliedStepKey: 'plus-checkout-create',
+    displayName: 'http://proxy.example:8080',
+    snapshot: { applied: true },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    checkoutConversionProxyManager: {
+      applySessionFromState: async () => appliedSession,
+      checkCheckoutConversionProxySessionExit: async () => {
+        throw new Error('未检测到支付转换代理出口 IP。');
+      },
+      getStoredSession: async () => appliedSession,
+      restoreSession: async (session) => {
+        events.push({ type: 'proxy-restore', session });
+        return true;
+      },
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 123 }),
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: payload.url, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'plus-checkout-billing', 'paypal-approve', 'plus-checkout-return'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+    plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+    plusCheckoutOpenStableWaitSeconds: 0,
+  });
+
+  assert.equal(events.some((event) => event.type === 'tab-update' && /checkout/.test(event.payload?.url || '')), false);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+  assert.equal(events.some((event) => event.type === 'proxy-restore'), true);
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'plus-checkout-conversion-proxy-failed');
+  assert.match(fallback?.context?.detail || '', /未检测到支付转换代理出口 IP/);
+});
+
+test('Non Phone Plus classic checkout still stops when conversion proxy exit check fails', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
@@ -753,8 +827,71 @@ test('Classic PayPal checkout create stops before opening checkout link when con
     /未检测到支付转换代理出口 IP/
   );
 
+  assert.equal(events.some((event) => event.type === 'tab-update' && /checkout/.test(event.payload?.url || '')), false);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
+test('Phone Plus classic checkout falls back when conversion proxy apply fails', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    checkoutConversionProxyManager: {
+      applySessionFromState: async () => {
+        throw new Error('代理模式不是 fixed_servers（当前为 direct）。');
+      },
+      checkCheckoutConversionProxySessionExit: async () => {
+        events.push({ type: 'proxy-exit-check' });
+      },
+    },
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 123 }),
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: payload.url, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'plus-checkout-billing', 'paypal-approve', 'plus-checkout-return'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+    plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+    plusCheckoutOpenStableWaitSeconds: 0,
+  });
+
   assert.equal(events.some((event) => event.type === 'tab-update'), false);
   assert.equal(events.some((event) => event.type === 'complete'), false);
+  assert.equal(events.some((event) => event.type === 'proxy-exit-check'), false);
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'plus-checkout-conversion-proxy-failed');
+  assert.match(fallback?.context?.detail || '', /代理模式不是 fixed_servers/);
 });
 
 test('PayPal hosted checkout create applies conversion proxy before hosted payment conversion', async () => {
@@ -861,6 +998,135 @@ test('PayPal hosted checkout create applies conversion proxy before hosted payme
   assert.equal(events[applyIndex].options.flowType, 'paypal-hosted');
   assert.equal(events.some((event) => event.type === 'proxy-restore'), false);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'), true);
+});
+
+test('Phone Plus hosted checkout falls back when conversion proxy exit check fails before hosted submit', async () => {
+  const events = [];
+  let currentUrl = 'https://chatgpt.com/';
+  const appliedSession = {
+    active: true,
+    flowType: 'paypal-hosted',
+    releaseNodeKey: 'paypal-hosted-review',
+    appliedStepKey: 'paypal-hosted-openai-checkout',
+    displayName: 'socks5://proxy.example:1080',
+    snapshot: { applied: true },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    checkoutConversionProxyManager: {
+      applySessionFromState: async (state, options = {}) => {
+        events.push({ type: 'proxy-apply', proxyUrl: state.plusCheckoutConversionProxyUrl, options });
+        return appliedSession;
+      },
+      checkCheckoutConversionProxySessionExit: async (session, options = {}) => {
+        events.push({ type: 'proxy-exit-check', session, options });
+        throw new Error('未检测到支付转换代理出口 IP。');
+      },
+      getStoredSession: async () => appliedSession,
+      restoreSession: async (session) => {
+        events.push({ type: 'proxy-restore', session });
+        return true;
+      },
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tab-create', payload });
+          return { id: 42, url: payload.url, status: 'complete' };
+        },
+        update: async (tabId, payload) => {
+          currentUrl = payload.url;
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      events.push({ type: 'complete', step, payload });
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async () => {
+      events.push({ type: 'ready' });
+    },
+    getState: async () => ({
+      phonePlusModeEnabled: true,
+      hostedCheckoutPhoneNumber: '4155551234',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      plusPaymentEmailState: {
+        current: 'saved-payment@example.com',
+        source: 'runtime:test',
+        updatedAt: 100,
+      },
+    }),
+    getPlusPaymentEmailState: () => ({
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    }),
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          preferredCheckoutUrl: 'https://pay.openai.com/c/pay/session',
+          hostedCheckoutUrl: 'https://pay.openai.com/c/pay/session',
+          checkoutUrl: 'https://pay.openai.com/c/pay/session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '$0.00',
+          },
+        };
+      }
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        throw new Error('hosted submit should not run after phone plus proxy fallback');
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+    waitForTabUrlMatchUntilStopped: async () => ({ url: currentUrl }),
+  });
+
+  await executor.executePlusCheckoutCreate({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutConversionProxyUrl: 'socks5h://user:pass@proxy.example:1080',
+    plusPaymentEmailState: {
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    },
+  });
+
+  assert.equal(events.some((event) => event.type === 'proxy-apply'), true);
+  assert.equal(events.some((event) => event.type === 'proxy-exit-check'), true);
+  assert.equal(events.some((event) => event.type === 'proxy-restore'), true);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'), false);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-checkout-create'), false);
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'plus-checkout-conversion-proxy-failed');
+  assert.match(fallback?.context?.detail || '', /未检测到支付转换代理出口 IP/);
 });
 
 test('GPC checkout create does not apply checkout conversion proxy', async () => {
