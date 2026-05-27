@@ -4005,6 +4005,180 @@ test('PayPal hosted card node retries fresh profile when guest card error appear
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
+test('PayPal hosted card node retries fresh address when PayPal reports invalid address', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let submitCount = 0;
+  let statePollCount = 0;
+  let latestState = createHostedRuntimeState();
+  let fetchCount = 0;
+  const addresses = [
+    {
+      Address: '7 Fresh St',
+      City: 'Austin',
+      State_Full: 'Texas',
+      Zip_Code: '73301',
+    },
+    {
+      Address: '8 Retry Ave',
+      City: 'Boston',
+      State_Full: 'Massachusetts',
+      Zip_Code: '02108',
+    },
+  ];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url) => {
+      events.push({ type: 'fetch', url });
+      const address = addresses[Math.min(fetchCount, addresses.length - 1)];
+      fetchCount += 1;
+      return createHostedAddressResponse(address);
+    },
+    getState: async () => latestState,
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        submitCount += 1;
+        if (submitCount >= 2) {
+          currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        }
+        return {
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: message.payload?.phone,
+          renderedPhoneDigits: `1${message.payload?.phone || ''}`,
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        if (statePollCount === 1) {
+          return { hostedStage: 'guest_checkout' };
+        }
+        if (statePollCount === 2) {
+          return {
+            hostedStage: 'guest_checkout',
+            hostedCreateAccountAddressError: true,
+            hostedCreateAccountAddressErrorMessage: 'Check the address you entered and try again.',
+          };
+        }
+        return { hostedStage: 'create_account' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'cached@example.com',
+      phone: '9999999999',
+      address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+    },
+  });
+
+  const submitEvents = events.filter((event) => (
+    event.type === 'tab-message'
+    && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
+    && event.message?.payload?.expectedStage === 'guest_checkout'
+  ));
+
+  assert.equal(submitEvents.length, 2);
+  assert.equal(submitEvents[0].message.payload.address.street, '7 Fresh St');
+  assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(latestState.plusHostedCheckoutGuestProfile.address.street, '8 Retry Ave');
+  assert.equal(latestState.hostedCheckoutGuestProfile.address.city, 'Boston');
+  assert.equal(events.some((event) => event.type === 'sleep' && event.ms === 1000), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
+});
+
+test('PayPal hosted card node stops after invalid address retry limit', async () => {
+  const events = [];
+  let latestState = createHostedRuntimeState();
+  let fetchCount = 0;
+  let statePollCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => {
+      fetchCount += 1;
+      return createHostedAddressResponse({
+        Address: `${fetchCount} Retry Ave`,
+        City: 'Austin',
+        State_Full: 'Texas',
+        Zip_Code: '73301',
+      });
+    },
+    getState: async () => latestState,
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        return {
+          submitted: true,
+          phoneMatched: true,
+          payloadPhoneDigits: message.payload?.phone,
+          renderedPhoneDigits: `1${message.payload?.phone || ''}`,
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        if (statePollCount === 1) {
+          return { hostedStage: 'guest_checkout' };
+        }
+        return {
+          hostedStage: 'guest_checkout',
+          hostedCreateAccountAddressError: true,
+          hostedCreateAccountAddressErrorMessage: 'Check the address you entered and try again.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 123,
+      plusHostedCheckoutGuestProfile: {
+        email: 'guest@example.com',
+        phone: '4155551234',
+        address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+      },
+    }),
+    /address validation failed after 3 retries|Check the address/i
+  );
+
+  const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
+  assert.equal(submitEvents.length, 4);
+  assert.equal(fetchCount, 4);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
 test('Phone Plus hosted checkout reuses current provider runtime email as isolated payment email', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/test';

@@ -3155,6 +3155,86 @@
         || /pageLevelError\.invalidAddress|invalidAddress|check\s+the\s+address\s+you\s+entered\s+and\s+try\s+again\.?|invalid\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized|unrecognized)|(?:检查|核对).*地址|地址.*(?:无效|错误|无法识别|不被识别)/i.test(message);
     }
 
+    async function retryHostedPayPalAddressError(tabId, stateInfo = {}, context = {}) {
+      if (!isHostedCheckoutPayPalCreateAccountAddressErrorState(stateInfo)) {
+        return {
+          handled: false,
+          retries: Math.max(0, Math.floor(Number(context?.retries) || 0)),
+          profile: context?.profile || {},
+          state: context?.state || {},
+        };
+      }
+
+      const stepKey = String(context?.stepKey || PAYPAL_HOSTED_STEP_CREATE_ACCOUNT).trim() || PAYPAL_HOSTED_STEP_CREATE_ACCOUNT;
+      const stepNumber = getHostedStepNumber(stepKey);
+      const retries = Math.max(0, Math.floor(Number(context?.retries) || 0));
+      const errorMessage = String(
+        stateInfo?.hostedCreateAccountAddressErrorMessage
+        || stateInfo?.error
+        || 'Check the address you entered and try again.'
+      ).trim();
+      const currentStage = String(
+        stateInfo?.hostedStage
+        || context?.expectedStage
+        || PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT
+      ).trim() || PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
+      const retryStage = currentStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+        ? PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+        : PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT;
+
+      if (retries >= HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS) {
+        throw new Error(`Step ${stepNumber}: PayPal ${retryStage} address validation failed after ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} retries: ${errorMessage}`);
+      }
+
+      const nextRetries = retries + 1;
+      const retryAddress = await fetchHostedCheckoutAddress();
+      const previousProfile = context?.profile && typeof context.profile === 'object' && !Array.isArray(context.profile)
+        ? context.profile
+        : {};
+      const nextProfile = {
+        ...previousProfile,
+        address: retryAddress,
+      };
+      const persistedProfile = await persistHostedGuestProfile(nextProfile);
+      const profile = persistedProfile && typeof persistedProfile === 'object' && !Array.isArray(persistedProfile)
+        ? persistedProfile
+        : nextProfile;
+      const previousState = context?.state && typeof context.state === 'object' && !Array.isArray(context.state)
+        ? context.state
+        : {};
+      const nextState = {
+        ...previousState,
+        plusHostedCheckoutGuestProfile: profile,
+        hostedCheckoutGuestProfile: profile,
+        plusHostedCheckoutPhoneDigits: profile.phone || previousState.plusHostedCheckoutPhoneDigits || '',
+      };
+      await addHostedStepLog(
+        stepKey,
+        `Step ${stepNumber}: PayPal ${retryStage} reported an invalid address; retrying with a fresh address (${nextRetries}/${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${errorMessage}`,
+        'warn'
+      );
+      const retryPayload = retryStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+        ? {
+          ...profile,
+          expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+          phone: profile.phone,
+        }
+        : {
+          expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+          address: retryAddress,
+        };
+      await runHostedPayPalStep(tabId, retryPayload, { stepKey });
+      await sleepWithStop(1000);
+      return {
+        handled: true,
+        retries: nextRetries,
+        profile,
+        state: nextState,
+        address: retryAddress,
+        stage: retryStage,
+      };
+    }
+
     function isHostedCheckoutOpenAiCardDeclinedState(state = {}) {
       const message = String(state?.hostedCardDeclinedErrorMessage || state?.error || '').trim();
       return Boolean(state?.hostedCardDeclinedError)
@@ -3845,6 +3925,7 @@
         };
         let profile = refreshedProfile;
         let hostedProfileSubmitted = false;
+        let hostedPayPalAddressRetries = 0;
         if (await completeHostedStepIfSuccessful(stepKey, tabId, refreshedState)) {
           return;
         }
@@ -3916,6 +3997,19 @@
               if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
                 return true;
               }
+              const addressRetryResult = await retryHostedPayPalAddressError(tabId, stateInfo, {
+                stepKey,
+                retries: hostedPayPalAddressRetries,
+                profile,
+                state: refreshedState,
+              });
+              if (addressRetryResult.handled) {
+                hostedPayPalAddressRetries = addressRetryResult.retries;
+                profile = addressRetryResult.profile;
+                refreshedState = addressRetryResult.state;
+                hostedProfileSubmitted = true;
+                return false;
+              }
               const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, refreshedState, verificationContext, stepKey);
               if (verificationResult.phonePlusFallbackToFreeAuth) {
                 return true;
@@ -3937,6 +4031,27 @@
             plusHostedCheckoutLastStage: nextState.hostedStage || '',
           });
           return;
+        }
+        const initialAddressRetryResult = await retryHostedPayPalAddressError(tabId, pageState, {
+          stepKey,
+          retries: hostedPayPalAddressRetries,
+          profile,
+          state: refreshedState,
+        });
+        if (initialAddressRetryResult.handled) {
+          hostedPayPalAddressRetries = initialAddressRetryResult.retries;
+          profile = initialAddressRetryResult.profile;
+          refreshedState = initialAddressRetryResult.state;
+          hostedProfileSubmitted = true;
+          pageState = await getHostedPayPalState(tabId, {
+            stepKey,
+            completionPayload: {
+              plusHostedCheckoutLastStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
+            },
+          });
+          if (isHostedCheckoutPlusActivationResolved(pageState)) {
+            return;
+          }
         }
         if (isHostedStageAtOrAfter(pageState.hostedStage, PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT)
           && pageState.hostedStage !== PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT) {
@@ -3980,6 +4095,19 @@
             if (isHostedCheckoutBlockedState(stateInfo)) {
               await logHostedSecurityChallengeProbeResult(stepKey, stateInfo);
               throw buildHostedCheckoutBlockedError(stateInfo);
+            }
+            const addressRetryResult = await retryHostedPayPalAddressError(tabId, stateInfo, {
+              stepKey,
+              retries: hostedPayPalAddressRetries,
+              profile,
+              state: refreshedState,
+            });
+            if (addressRetryResult.handled) {
+              hostedPayPalAddressRetries = addressRetryResult.retries;
+              profile = addressRetryResult.profile;
+              refreshedState = addressRetryResult.state;
+              hostedProfileSubmitted = true;
+              return false;
             }
             if (stateInfo?.hostedGuestPhoneError) {
               const phoneErrorResult = await handleHostedGuestPhoneErrorWithSmsPool(tabId, stateInfo, profile, stepKey);
@@ -4194,32 +4322,17 @@
           if (isHostedCheckoutPlusActivationResolved(stateInfo)) {
             return true;
           }
-          if (isHostedCheckoutPayPalCreateAccountAddressErrorState(stateInfo)) {
-            if (hostedCreateAccountAddressRetries >= HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS) {
-              throw new Error(`步骤 ${stepNumber}：PayPal 创建账号页地址校验失败已达到 ${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS} 次：${stateInfo.hostedCreateAccountAddressErrorMessage || 'Check the address you entered and try again.'}`);
-            }
-            hostedCreateAccountAddressRetries += 1;
-            const retryAddress = await fetchHostedCheckoutAddress();
-            profile = {
-              ...profile,
-              address: retryAddress,
-            };
-            createAccountState = {
-              ...createAccountState,
-              plusHostedCheckoutGuestProfile: profile,
-              hostedCheckoutGuestProfile: profile,
-            };
-              await persistHostedGuestProfile(profile);
-            await addHostedStepLog(
-              stepKey,
-              `步骤 ${stepNumber}：PayPal 创建账号页提示地址无效，已重新生成地址并重试 (${hostedCreateAccountAddressRetries}/${HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS})。错误：${stateInfo.hostedCreateAccountAddressErrorMessage || 'Check the address you entered and try again.'}`,
-              'warn'
-            );
-            await runHostedPayPalStep(tabId, {
-              expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
-              address: retryAddress,
-            }, { stepKey });
-            await sleepWithStop(1000);
+          const addressRetryResult = await retryHostedPayPalAddressError(tabId, stateInfo, {
+            stepKey,
+            retries: hostedCreateAccountAddressRetries,
+            profile,
+            state: createAccountState,
+            expectedStage: PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT,
+          });
+          if (addressRetryResult.handled) {
+            hostedCreateAccountAddressRetries = addressRetryResult.retries;
+            profile = addressRetryResult.profile;
+            createAccountState = addressRetryResult.state;
             return false;
           }
           const verificationResult = await handleHostedPayPalVerificationState(tabId, stateInfo, createAccountState, verificationContext, stepKey);
