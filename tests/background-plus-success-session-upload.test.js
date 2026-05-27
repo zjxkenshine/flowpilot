@@ -23,6 +23,9 @@ function createBarrier() {
 function createHarness(initialState = {}, options = {}) {
   const events = [];
   let state = cloneValue(initialState);
+  const checkoutConversionProxyManager = options.checkoutConversionProxyManager === undefined
+    ? null
+    : options.checkoutConversionProxyManager;
   const manager = api.createPlusSuccessSessionUploadManager({
     addLog: async (message, level = 'info', extra = {}) => {
       events.push({ type: 'log', message, level, extra });
@@ -30,6 +33,7 @@ function createHarness(initialState = {}, options = {}) {
     broadcastDataUpdate: (payload) => {
       events.push({ type: 'broadcast', payload });
     },
+    checkoutConversionProxyManager,
     completeNodeFromBackground: async (nodeId, payload) => {
       events.push({ type: 'complete', nodeId, payload });
       if (options.completeBarrier) {
@@ -211,8 +215,47 @@ test('success manager completes the current plus-checkout-create waiter immediat
     },
   });
   assert.equal(events.some((event) => event.type === 'sleep'), false);
+  assert.equal(events.some((event) => event.type === 'proxy-restore'), false);
   assert.equal(getState().plusCheckoutUrl, SUCCESS_URL);
   assert.equal(getState().plusReturnUrl, SUCCESS_URL);
+});
+
+test('success manager does not release hosted proxy before hosted review', async () => {
+  const eventsProxy = [];
+  const { events, manager } = createHarness({
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutTabId: 55,
+    currentNodeId: 'plus-checkout-create',
+    nodeStatuses: {
+      'plus-checkout-create': 'running',
+    },
+  }, {
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => {
+        eventsProxy.push({ type: 'proxy-get' });
+        return {
+          active: true,
+          flowType: 'paypal-hosted',
+          releaseNodeKey: 'paypal-hosted-review',
+          snapshot: { applied: true },
+        };
+      },
+      restoreSession: async (session) => {
+        eventsProxy.push({ type: 'proxy-restore', session });
+        return true;
+      },
+    },
+  });
+
+  await manager.handleTabUpdated(55, {
+    status: 'complete',
+    url: SUCCESS_URL,
+  }, {
+    url: SUCCESS_URL,
+  });
+
+  assert.equal(events.find((event) => event.type === 'complete')?.nodeId, 'plus-checkout-create');
+  assert.deepStrictEqual(eventsProxy, []);
 });
 
 test('success manager delays hosted review completion by the configured oauth wait', async () => {
@@ -253,6 +296,46 @@ test('success manager delays hosted review completion by the configured oauth wa
       plusHostedCheckoutOauthDelaySeconds: 3,
     },
   });
+});
+
+test('success manager releases hosted proxy before completing hosted review', async () => {
+  const proxySession = {
+    active: true,
+    flowType: 'paypal-hosted',
+    releaseNodeKey: 'paypal-hosted-review',
+    snapshot: { applied: true },
+  };
+  const { events, manager } = createHarness({
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutTabId: 55,
+    currentNodeId: 'paypal-hosted-review',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+    nodeStatuses: {
+      'paypal-hosted-review': 'running',
+    },
+  }, {
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => proxySession,
+      restoreSession: async (session) => {
+        events.push({ type: 'proxy-restore', session });
+        return true;
+      },
+    },
+  });
+
+  await manager.handleTabUpdated(55, {
+    status: 'complete',
+    url: SUCCESS_URL,
+  }, {
+    url: SUCCESS_URL,
+  });
+
+  const restoreIndex = events.findIndex((event) => event.type === 'proxy-restore');
+  const completeIndex = events.findIndex((event) => event.type === 'complete');
+  assert.ok(restoreIndex > -1);
+  assert.ok(completeIndex > restoreIndex);
+  assert.equal(events[completeIndex].nodeId, 'paypal-hosted-review');
+  assert.equal(events.filter((event) => event.type === 'proxy-restore').length, 1);
 });
 
 test('success manager falls back to the latest active hosted waiter when currentNodeId is not usable', async () => {

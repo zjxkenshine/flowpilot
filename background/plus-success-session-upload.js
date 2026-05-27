@@ -18,6 +18,7 @@
     const {
       addLog: rawAddLog = async () => {},
       broadcastDataUpdate = null,
+      checkoutConversionProxyManager = null,
       completeNodeFromBackground = null,
       getState = async () => ({}),
       setState = async () => {},
@@ -107,6 +108,29 @@
       return rawAddLog(message, level, options && typeof options === 'object' ? options : {});
     }
 
+    async function releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(state = {}, successUrl = '') {
+      if (!checkoutConversionProxyManager?.getStoredSession || !checkoutConversionProxyManager?.restoreSession) {
+        return false;
+      }
+      if (!isPaymentsSuccessUrl(successUrl)) {
+        return false;
+      }
+      const session = await checkoutConversionProxyManager.getStoredSession(state);
+      if (!session?.active || normalizeString(session.flowType) !== PLUS_PAYMENT_METHOD_PAYPAL_HOSTED) {
+        return false;
+      }
+      if (normalizeString(session.releaseNodeKey) !== PAYPAL_HOSTED_REVIEW_NODE_ID) {
+        return false;
+      }
+      await checkoutConversionProxyManager.restoreSession(session);
+      await addLog(
+        '节点 paypal-hosted-review：已检测到 PayPal hosted 授权完成，支付转换代理已释放。',
+        'info',
+        { nodeId: PAYPAL_HOSTED_REVIEW_NODE_ID }
+      );
+      return true;
+    }
+
     async function processPaymentsSuccessTab(tabId, successUrl = '') {
       const numericTabId = Number(tabId);
       const normalizedSuccessUrl = normalizeString(successUrl);
@@ -185,6 +209,7 @@
         };
         if (targetNodeId === PAYPAL_HOSTED_REVIEW_NODE_ID) {
           completionPayload.plusHostedCheckoutOauthDelaySeconds = oauthDelaySeconds;
+          await releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(finalState, normalizedSuccessUrl);
         }
 
         await completeNodeFromBackground(targetNodeId, completionPayload);

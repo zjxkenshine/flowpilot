@@ -728,8 +728,11 @@
       }
     }
 
-    async function releaseHostedCheckoutConversionProxySessionIfCompleted(stepKey, completedUrl = '', state = null) {
+    async function releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, completedUrl = '', state = null) {
       if (!proxyManager?.getStoredSession) {
+        return false;
+      }
+      if (String(stepKey || '').trim() !== PAYPAL_HOSTED_STEP_REVIEW) {
         return false;
       }
       const currentState = state && typeof state === 'object'
@@ -737,6 +740,9 @@
         : (typeof getState === 'function' ? await getState() : {});
       const session = await proxyManager.getStoredSession(currentState);
       if (!session?.active || session.flowType !== 'paypal-hosted') {
+        return false;
+      }
+      if (String(session.releaseNodeKey || '').trim() !== PAYPAL_HOSTED_STEP_REVIEW) {
         return false;
       }
       if (!isHostedCheckoutSuccessUrl(completedUrl)) {
@@ -1627,6 +1633,7 @@
         await addHostedStepLog(stepKey, `步骤 ${getHostedStepNumber(stepKey)}：支付成功后等待 ${config.oauthDelaySeconds} 秒，再继续账号接入。`, 'info');
         await sleepWithStop(config.oauthDelaySeconds * 1000);
       }
+      await releaseHostedCheckoutConversionProxySessionAfterReviewAuthorization(stepKey, currentUrl, state);
       await completeHostedStep(stepKey, tabId, {
         plusReturnUrl: currentUrl,
         plusHostedCheckoutCompleted: true,
@@ -3294,9 +3301,6 @@
       }
 
       const isAlreadySuccessful = isHostedCheckoutSuccessUrl(completedUrl);
-      if (isAlreadySuccessful) {
-        await releaseHostedCheckoutConversionProxySessionIfCompleted(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT, completedUrl, state);
-      }
       await setState({
         plusCheckoutTabId: tabId,
         plusCheckoutUrl: completedUrl,
@@ -3379,9 +3383,6 @@
         return;
       }
       const completedUrl = String(transitionUrl || await getHostedCurrentUrl(tabId) || '').trim();
-      if (isHostedCheckoutSuccessUrl(completedUrl)) {
-        await releaseHostedCheckoutConversionProxySessionIfCompleted(stepKey, completedUrl, state);
-      }
       await completeHostedStep(stepKey, tabId, {
         plusCheckoutSource: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
         plusCheckoutUrl: completedUrl,

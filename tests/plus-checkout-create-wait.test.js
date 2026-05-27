@@ -4913,6 +4913,61 @@ test('hosted checkout runtime prefers sms pool entry and records final success u
   );
 });
 
+test('PayPal hosted review releases conversion proxy only after authorization success', async () => {
+  const events = [];
+  let currentUrl = 'https://chatgpt.com/payments/success';
+  const hostedSession = {
+    active: true,
+    flowType: 'paypal-hosted',
+    releaseNodeKey: 'paypal-hosted-review',
+    appliedStepKey: 'paypal-hosted-openai-checkout',
+    displayName: 'socks5://proxy.example:1080',
+    snapshot: { applied: true },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => hostedSession,
+      restoreSession: async (session) => {
+        events.push({ type: 'proxy-restore', session });
+        return true;
+      },
+    },
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => createHostedRuntimeState({
+      plusHostedCheckoutOauthDelaySeconds: 0,
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  const restoreIndex = events.findIndex((event) => event.type === 'proxy-restore');
+  const completeIndex = events.findIndex((event) => event.type === 'complete' && event.step === 'paypal-hosted-review');
+  assert.ok(restoreIndex > -1);
+  assert.ok(completeIndex > restoreIndex);
+  assert.equal(events.filter((event) => event.type === 'proxy-restore').length, 1);
+  assert.deepStrictEqual(events[completeIndex].payload, {
+    plusCheckoutUrl: 'https://chatgpt.com/payments/success',
+    plusReturnUrl: 'https://chatgpt.com/payments/success',
+    plusHostedCheckoutCompleted: true,
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+});
+
 test('hosted checkout pool failure records lastError without incrementing useCount', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({

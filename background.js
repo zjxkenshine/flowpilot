@@ -15726,6 +15726,7 @@ const cpaSessionImportExecutor = self.MultiPageBackgroundCpaSessionImport?.creat
 const plusSuccessSessionUploadManager = self.MultiPageBackgroundPlusSuccessSessionUpload?.createPlusSuccessSessionUploadManager({
   addLog,
   broadcastDataUpdate,
+  checkoutConversionProxyManager,
   completeNodeFromBackground,
   getState,
   setState,
