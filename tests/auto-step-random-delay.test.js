@@ -45,6 +45,7 @@ const bundle = [
   'const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;',
   'const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;',
   'const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;',
+  'const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;',
   'const PERSISTED_SETTING_DEFAULTS = { autoStepDelaySeconds: null };',
   "const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([['plus-checkout-create', DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS * 1000]]);",
   'function getStepDefinitionForState(step, state = {}) { return state.definitions?.[step] || null; }',
@@ -151,6 +152,38 @@ assert.strictEqual(
   }),
   17000,
   'custom Plus checkout create pre-wait should override the default auto-run delay'
+);
+
+assert.strictEqual(
+  api.getAutoRunPreExecutionDelayMs(8, {
+    definitions: {
+      8: { key: 'paypal-hosted-card' },
+    },
+  }),
+  10000,
+  'PayPal hosted card should wait before auto-run step execution'
+);
+
+assert.strictEqual(
+  api.getAutoRunPreExecutionDelayMs(8, {
+    plusHostedCheckoutCardPreWaitSeconds: 17.8,
+    definitions: {
+      8: { key: 'paypal-hosted-card' },
+    },
+  }),
+  17000,
+  'custom PayPal hosted card pre-wait should override the default auto-run delay'
+);
+
+assert.strictEqual(
+  api.getAutoRunPreExecutionDelayMs(8, {
+    plusHostedCheckoutCardPreWaitSeconds: 0,
+    definitions: {
+      8: { key: 'paypal-hosted-card' },
+    },
+  }),
+  0,
+  'zero PayPal hosted card pre-wait should disable the fixed delay'
 );
 
 assert.strictEqual(

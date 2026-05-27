@@ -75,6 +75,19 @@ function createSuccessfulBillingResult() {
   };
 }
 
+function createRandomUserUsPayload() {
+  return {
+    results: [{
+      location: {
+        street: { number: 1600, name: 'Pennsylvania Ave NW' },
+        city: 'Washington',
+        state: 'District of Columbia',
+        postcode: 20500,
+      },
+    }],
+  };
+}
+
 function createCheckoutConversionProxyManagerHarness(events, options = {}) {
   let storedSession = options.initialSession || null;
   return {
@@ -720,16 +733,7 @@ test('Classic PayPal billing uses randomuser.me before local US address fallback
       return {
         ok: true,
         status: 200,
-        json: async () => ({
-          results: [{
-            location: {
-              street: { number: 1600, name: 'Pennsylvania Ave NW' },
-              city: 'Washington',
-              state: 'District of Columbia',
-              postcode: 20500,
-            },
-          }],
-        }),
+        json: async () => createRandomUserUsPayload(),
       };
     },
   });
@@ -1043,6 +1047,13 @@ test('Plus checkout billing normalizes legacy Korean postal code for GoPay addre
     },
     fetchImpl: async (url, init) => {
       fetchRequests.push({ url, init });
+      if (/randomuser\.me/i.test(url)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => createRandomUserUsPayload(),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -1183,7 +1194,7 @@ test('Plus checkout billing uses the autocomplete iframe for address suggestions
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
-test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a complete address', async () => {
+test('Classic PayPal billing ignores detected Germany and uses US address source', async () => {
   const fetchRequests = [];
   const { events, executor } = createExecutorHarness({
     frames: [
@@ -1208,15 +1219,7 @@ test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a
       return {
         ok: true,
         status: 200,
-        json: async () => ({
-          status: 'ok',
-          address: {
-            Address: 'Rosa-Luxemburg-Strasse 40',
-            City: 'Berlin',
-            State: 'Berlin',
-            Zip_Code: '69081',
-          },
-        }),
+        json: async () => createRandomUserUsPayload(),
       };
     },
   });
@@ -1232,21 +1235,17 @@ test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a
   assert.equal(ensureAddressMessage, undefined);
   assert.equal(combinedFillMessage.frameId, 8);
   assert.equal(combinedFillMessage.message.payload.addressSeed.skipAutocomplete, true);
-  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'meiguodizhi');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.address1, 'Rosa-Luxemburg-Strasse 40');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.city, 'Berlin');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.postalCode, '69081');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'US');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'randomuser');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.city, 'Washington');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.postalCode, '20500');
   assert.equal(fetchRequests.length, 1);
-  assert.equal(fetchRequests[0].url, 'https://www.meiguodizhi.com/api/v1/dz');
-  assert.deepEqual(JSON.parse(fetchRequests[0].init.body), {
-    city: 'Berlin',
-    path: '/de-address',
-    method: 'refresh',
-  });
+  assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
-test('Plus checkout billing uses the detected checkout country before choosing an address seed', async () => {
+test('Classic PayPal billing keeps US address seed even when checkout country is detected elsewhere', async () => {
   const requestedCountries = [];
   const fetchRequests = [];
   const { events, executor } = createExecutorHarness({
@@ -1275,13 +1274,14 @@ test('Plus checkout billing uses the detected checkout country before choosing a
         ok: true,
         status: 200,
         json: async () => ({
-          status: 'ok',
-          address: {
-            Address: '98 Ocean Street',
-            City: 'Sydney South',
-            State: 'New South Wales',
-            Zip_Code: '2000',
-          },
+          results: [{
+            location: {
+              street: { number: 1600, name: 'Pennsylvania Ave NW' },
+              city: 'Washington',
+              state: 'District of Columbia',
+              postcode: 20500,
+            },
+          }],
         }),
       };
     },
@@ -1290,17 +1290,14 @@ test('Plus checkout billing uses the detected checkout country before choosing a
   await executor.executePlusCheckoutBilling({ plusCheckoutCountry: 'DE' });
 
   const combinedFillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
-  assert.equal(requestedCountries[0], 'AU');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'AU');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.region, 'New South Wales');
-  assert.deepEqual(JSON.parse(fetchRequests[0].init.body), {
-    city: 'Sydney',
-    path: '/au-address',
-    method: 'refresh',
-  });
+  assert.equal(requestedCountries[0], 'US');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'US');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'randomuser');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.region, 'District of Columbia');
+  assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
 });
 
-test('Plus checkout billing uses meiguodizhi country paths for localized countries without local seeds', async () => {
+test('Classic PayPal billing ignores localized checkout country and keeps US address path', async () => {
   const fetchRequests = [];
   const { events, executor } = createExecutorHarness({
     frames: [
@@ -1320,6 +1317,13 @@ test('Plus checkout billing uses meiguodizhi country paths for localized countri
     },
     fetchImpl: async (url, init) => {
       fetchRequests.push({ url, init });
+      if (/randomuser\.me/i.test(url)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => createRandomUserUsPayload(),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -1340,14 +1344,10 @@ test('Plus checkout billing uses meiguodizhi country paths for localized countri
   await executor.executePlusCheckoutBilling({ plusCheckoutCountry: 'DE' });
 
   const combinedFillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'JP');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'meiguodizhi');
-  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.address1, '10-4, Shiba Daimon 2-chome, Minato-ku, Tokyo');
-  assert.deepEqual(JSON.parse(fetchRequests[0].init.body), {
-    city: 'Tokyo',
-    path: '/jp-address',
-    method: 'refresh',
-  });
+  assert.equal(combinedFillMessage.message.payload.addressSeed.countryCode, 'US');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.source, 'randomuser');
+  assert.equal(combinedFillMessage.message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
+  assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
 });
 
 test('Plus checkout billing reports when the payment iframe exists but cannot receive the content script', async () => {

@@ -362,6 +362,7 @@
         'row-plus-payment-method',
         'row-plus-checkout-create-pre-wait',
         'row-plus-checkout-open-stable-wait',
+        'row-plus-hosted-checkout-card-pre-wait',
         'row-plus-checkout-conversion-proxy',
         'row-plus-checkout-conversion-proxy-test',
       ],

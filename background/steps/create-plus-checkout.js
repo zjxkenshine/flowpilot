@@ -13,7 +13,7 @@
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
   const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
-  const HOSTED_CHECKOUT_ADDRESS_ENDPOINT = 'https://www.meiguodizhi.com/api/v1/dz';
+  const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -64,6 +64,26 @@
     [PAYPAL_HOSTED_STEP_CREATE_ACCOUNT]: { step: 9, label: '无卡直绑 PayPal 创建确认页' },
     [PAYPAL_HOSTED_STEP_REVIEW]: { step: 10, label: '无卡直绑 PayPal 授权复核页' },
   });
+  const HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES = Object.freeze([
+    Object.freeze({
+      street: '1600 Pennsylvania Ave NW',
+      city: 'Washington',
+      state: 'District of Columbia',
+      zip: '20500',
+    }),
+    Object.freeze({
+      street: '350 Fifth Avenue',
+      city: 'New York',
+      state: 'New York',
+      zip: '10118',
+    }),
+    Object.freeze({
+      street: '1 Main St',
+      city: 'Austin',
+      state: 'Texas',
+      zip: '73301',
+    }),
+  ]);
 
   function createPlusCheckoutCreateExecutor(deps = {}) {
     const {
@@ -1747,27 +1767,6 @@
       return Math.min(120, Math.max(0, Math.floor(numeric)));
     }
 
-    async function fetchHostedCheckoutAddress() {
-      const { response, data } = await fetchJsonWithTimeout(HOSTED_CHECKOUT_ADDRESS_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ path: '/', method: 'address' }),
-      }, 30000);
-      if (!response?.ok) {
-        throw new Error(`获取无卡直绑地址失败（HTTP ${response?.status || 0}）。`);
-      }
-      const address = data?.address || data || {};
-      return {
-        street: String(address.Address || address.street || '123 Main St').trim(),
-        city: String(address.City || address.city || 'New York').trim(),
-        state: String(address.State_Full || address.State || address.state || 'New York').trim(),
-        zip: String(address.Zip_Code || address.zip || '10001').trim().slice(0, 5) || '10001',
-      };
-    }
-
     function buildRandomHostedPassword() {
       const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^';
       let value = 'Aa1!';
@@ -1807,8 +1806,65 @@
       return `${localPart}@gmail.com`;
     }
 
+    function normalizeHostedUsAddress(address = {}) {
+      const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+      const location = source?.results?.[0]?.location || source?.location || {};
+      const street = location?.street || {};
+      const streetLine = firstNonEmpty(
+        [street?.number, street?.name].filter((item) => normalizeString(item)).join(' '),
+        source.Address,
+        source.Trans_Address,
+        source.street,
+        source.address1
+      );
+      const city = firstNonEmpty(source.City, source.city, location.city);
+      const state = firstNonEmpty(source.State_Full, source.State, source.state, source.region, location.state);
+      const zip = firstNonEmpty(source.Zip_Code, source.zip, source.postalCode, location.postcode)
+        .replace(/[^\d-]/g, '')
+        .slice(0, 5);
+      if (!streetLine || !city || !state || !zip) {
+        return null;
+      }
+      return {
+        street: streetLine,
+        city,
+        state,
+        zip,
+        countryCode: 'US',
+        country: 'United States',
+      };
+    }
+
+    function getFallbackHostedUsAddress() {
+      const index = Math.floor(Math.random() * HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES.length);
+      return normalizeHostedUsAddress(HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES[index] || HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES[0]);
+    }
+
+    async function fetchHostedCheckoutAddress() {
+      try {
+        const { response, data } = await fetchJsonWithTimeout(HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        }, 30000);
+        if (!response?.ok) {
+          throw new Error(`HTTP ${response?.status || 0}`);
+        }
+        const address = normalizeHostedUsAddress(data);
+        if (address) {
+          return address;
+        }
+        throw new Error('incomplete randomuser address');
+      } catch (error) {
+        await addLog(`Step 6: US hosted checkout address source unavailable, using built-in US fallback. ${error?.message || String(error || '')}`, 'warn');
+        return getFallbackHostedUsAddress();
+      }
+    }
+
     function buildHostedGuestProfile(address = {}, config = {}) {
       const card = buildHostedVisaCard();
+      const normalizedAddress = normalizeHostedUsAddress(address) || getFallbackHostedUsAddress();
       return {
         email: String(config?.email || buildRandomHostedEmail()).trim().toLowerCase(),
         password: buildRandomHostedPassword(),
@@ -1818,7 +1874,7 @@
         cardNumber: card.number,
         cardExpiry: card.expiry,
         cardCvv: card.cvv,
-        address,
+        address: normalizedAddress,
       };
     }
 

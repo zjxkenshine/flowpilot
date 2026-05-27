@@ -249,6 +249,8 @@ const rowPlusCheckoutCreatePreWait = document.getElementById('row-plus-checkout-
 const inputPlusCheckoutCreatePreWaitSeconds = document.getElementById('input-plus-checkout-create-pre-wait-seconds');
 const rowPlusCheckoutOpenStableWait = document.getElementById('row-plus-checkout-open-stable-wait');
 const inputPlusCheckoutOpenStableWaitSeconds = document.getElementById('input-plus-checkout-open-stable-wait-seconds');
+const rowPlusHostedCheckoutCardPreWait = document.getElementById('row-plus-hosted-checkout-card-pre-wait');
+const inputPlusHostedCheckoutCardPreWaitSeconds = document.getElementById('input-plus-hosted-checkout-card-pre-wait-seconds');
 const btnGpcCardKeyPurchase = document.getElementById('btn-gpc-card-key-purchase');
 const plusPaymentMethodCaption = document.getElementById('plus-payment-method-caption');
 const rowPlusAccountAccessStrategy = document.getElementById('row-plus-account-access-strategy');
@@ -693,6 +695,7 @@ const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
+const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
@@ -3420,6 +3423,14 @@ function normalizePlusCheckoutOpenStableWaitSeconds(value) {
   return Math.min(120, Math.max(0, Math.floor(numeric)));
 }
 
+function normalizePlusHostedCheckoutCardPreWaitSeconds(value) {
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS;
+  }
+  return Math.min(120, Math.max(0, Math.floor(numeric)));
+}
+
 function normalizeHostedCheckoutVerificationPopupDelaySeconds(value) {
   const numeric = Number(String(value ?? '').trim());
   if (!Number.isFinite(numeric)) {
@@ -4634,6 +4645,9 @@ function collectSettingsPayload() {
   const defaultPlusCheckoutOpenStableWaitSeconds = typeof DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS !== 'undefined'
     ? DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS
     : 20;
+  const defaultPlusHostedCheckoutCardPreWaitSeconds = typeof DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS
+    : 10;
   const normalizeYydsBaseUrlValue = typeof normalizeYydsMailBaseUrl === 'function'
     ? normalizeYydsMailBaseUrl
     : ((value) => String(value || '').trim() || 'https://maliapi.215.im/v1');
@@ -5332,6 +5346,9 @@ function collectSettingsPayload() {
     plusCheckoutOpenStableWaitSeconds: typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds
       ? normalizePlusCheckoutOpenStableWaitSeconds(inputPlusCheckoutOpenStableWaitSeconds.value)
       : defaultPlusCheckoutOpenStableWaitSeconds,
+    plusHostedCheckoutCardPreWaitSeconds: typeof inputPlusHostedCheckoutCardPreWaitSeconds !== 'undefined' && inputPlusHostedCheckoutCardPreWaitSeconds
+      ? normalizePlusHostedCheckoutCardPreWaitSeconds(inputPlusHostedCheckoutCardPreWaitSeconds.value)
+      : defaultPlusHostedCheckoutCardPreWaitSeconds,
     hostedCheckoutSecurityChallengeEnabled: typeof inputHostedCheckoutSecurityChallengeEnabled !== 'undefined' && inputHostedCheckoutSecurityChallengeEnabled
       ? Boolean(inputHostedCheckoutSecurityChallengeEnabled.checked)
       : Boolean(latestState?.hostedCheckoutSecurityChallengeEnabled),
@@ -10733,6 +10750,7 @@ function updatePlusModeUI() {
   [
     typeof rowPlusCheckoutCreatePreWait !== 'undefined' ? rowPlusCheckoutCreatePreWait : null,
     typeof rowPlusCheckoutOpenStableWait !== 'undefined' ? rowPlusCheckoutOpenStableWait : null,
+    typeof rowPlusHostedCheckoutCardPreWait !== 'undefined' ? rowPlusHostedCheckoutCardPreWait : null,
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
     typeof rowPlusCheckoutConversionProxyExit !== 'undefined' ? rowPlusCheckoutConversionProxyExit : null,
@@ -12142,6 +12160,11 @@ function applySettingsState(state) {
   if (typeof inputPlusCheckoutOpenStableWaitSeconds !== 'undefined' && inputPlusCheckoutOpenStableWaitSeconds) {
     inputPlusCheckoutOpenStableWaitSeconds.value = String(
       normalizePlusCheckoutOpenStableWaitSeconds(state?.plusCheckoutOpenStableWaitSeconds)
+    );
+  }
+  if (typeof inputPlusHostedCheckoutCardPreWaitSeconds !== 'undefined' && inputPlusHostedCheckoutCardPreWaitSeconds) {
+    inputPlusHostedCheckoutCardPreWaitSeconds.value = String(
+      normalizePlusHostedCheckoutCardPreWaitSeconds(state?.plusHostedCheckoutCardPreWaitSeconds)
     );
   }
   if (typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled) {
@@ -16825,7 +16848,7 @@ inputVpsPassword.addEventListener('blur', () => {
   });
 });
 
-[inputPlusCheckoutCreatePreWaitSeconds, inputPlusCheckoutOpenStableWaitSeconds].forEach((input) => {
+[inputPlusCheckoutCreatePreWaitSeconds, inputPlusCheckoutOpenStableWaitSeconds, inputPlusHostedCheckoutCardPreWaitSeconds].forEach((input) => {
   input?.addEventListener('input', () => {
     markSettingsDirty(true);
     scheduleSettingsAutoSave();
@@ -16835,6 +16858,8 @@ inputVpsPassword.addEventListener('blur', () => {
       input.value = String(normalizePlusCheckoutCreatePreWaitSeconds(input.value));
     } else if (input === inputPlusCheckoutOpenStableWaitSeconds) {
       input.value = String(normalizePlusCheckoutOpenStableWaitSeconds(input.value));
+    } else if (input === inputPlusHostedCheckoutCardPreWaitSeconds) {
+      input.value = String(normalizePlusHostedCheckoutCardPreWaitSeconds(input.value));
     }
     saveSettings({ silent: true }).catch(() => { });
   });
@@ -20218,6 +20243,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePlusCheckoutOpenStableWaitSeconds(message.payload.plusCheckoutOpenStableWaitSeconds)
         );
       }
+      if (message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined && inputPlusHostedCheckoutCardPreWaitSeconds) {
+        inputPlusHostedCheckoutCardPreWaitSeconds.value = String(
+          normalizePlusHostedCheckoutCardPreWaitSeconds(message.payload.plusHostedCheckoutCardPreWaitSeconds)
+        );
+      }
       if (message.payload.hostedCheckoutVerificationUrl !== undefined && inputHostedCheckoutVerificationUrl) {
         inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
         setHostedCheckoutManualCodeDisplay('未获取');
@@ -20523,6 +20553,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePlusCheckoutOpenStableWaitSeconds(message.payload.plusCheckoutOpenStableWaitSeconds)
         );
       }
+      if (message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined && inputPlusHostedCheckoutCardPreWaitSeconds) {
+        inputPlusHostedCheckoutCardPreWaitSeconds.value = String(
+          normalizePlusHostedCheckoutCardPreWaitSeconds(message.payload.plusHostedCheckoutCardPreWaitSeconds)
+        );
+      }
       if (message.payload.plusCheckoutConversionProxyUrl !== undefined && inputPlusCheckoutConversionProxy) {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
@@ -20572,6 +20607,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.plusAccountAccessStrategy !== undefined
         || message.payload.plusCheckoutCreatePreWaitSeconds !== undefined
         || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined
+        || message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
         || message.payload.gopayHelperPhoneMode !== undefined
         || message.payload.gopayHelperAutoModeEnabled !== undefined

@@ -1464,14 +1464,10 @@
         };
       }
 
-      const countryCode = checkoutCountry || savedCheckoutCountry || exitCountry || 'US';
       return {
-        countryCode,
-        requestedCountry: normalizeText(countryOverride)
-          || normalizeText(state.plusCheckoutCountry)
-          || exitCountry
-          || 'US',
-        source: checkoutCountry ? 'checkout_page' : (savedCheckoutCountry ? 'checkout_state' : (exitCountry ? 'proxy_exit' : 'paypal_fallback')),
+        countryCode: 'US',
+        requestedCountry: 'US',
+        source: 'paypal_us_default',
       };
     }
 

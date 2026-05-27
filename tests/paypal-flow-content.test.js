@@ -363,7 +363,13 @@ function createHostedPayPalHarness(options = {}) {
       setAttribute(key, nextValue) {
         attrMap.set(key, String(nextValue));
       },
-      dispatchEvent() {
+      dispatchEvent(event) {
+        events.push({
+          type: 'dispatch',
+          id: this.id,
+          event: event?.type || '',
+          value: this.value,
+        });
         return true;
       },
       focus() {},
@@ -389,7 +395,15 @@ function createHostedPayPalHarness(options = {}) {
     return element;
   }
 
-  const countrySelect = createDomElement({ tagName: 'SELECT', id: 'country', value: 'US' });
+  const countrySelect = createDomElement({
+    tagName: 'SELECT',
+    id: 'country',
+    value: 'DE',
+    options: [
+      { textContent: 'Germany', label: 'Germany', value: 'DE' },
+      { textContent: 'United States', label: 'United States', value: 'US' },
+    ],
+  });
   const emailInput = createDomElement({ tagName: 'INPUT', id: 'email', type: 'email', name: 'email' });
   const phoneInput = createDomElement({ tagName: 'INPUT', id: 'phone', type: 'tel', name: 'phone' });
   const cardNumberInput = createDomElement({ tagName: 'INPUT', id: 'cardNumber', type: 'text' });
@@ -734,6 +748,7 @@ function createHostedPayPalHarness(options = {}) {
   }
 
   return {
+    countrySelect,
     events,
     send,
     showBlockedPage,
@@ -781,6 +796,9 @@ test('PayPal hosted guest checkout verifies configured local phone before submit
   assert.equal(result.phoneMatched, true);
   assert.equal(result.payloadPhoneDigits, '4155551234');
   assert.equal(result.renderedPhoneDigits, '14155551234');
+  assert.equal(harness.countrySelect.value, 'US');
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'country' && event.event === 'input' && event.value === 'US'), true);
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'country' && event.event === 'change' && event.value === 'US'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
   assert.deepEqual(
     JSON.parse(JSON.stringify(harness.events.filter((event) => event.type === 'operation').map((event) => event.metadata))),
@@ -821,6 +839,42 @@ test('PayPal hosted guest checkout accepts profile address aliases', async () =>
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '350 Fifth Avenue'), true);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '10118'), true);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
+test('PayPal hosted guest checkout fails when visible country select cannot switch to US', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+  harness.countrySelect.value = 'DE';
+  harness.countrySelect.options = [
+    { textContent: 'Germany', label: 'Germany', value: 'DE', selected: true },
+    { textContent: 'Canada', label: 'Canada', value: 'CA' },
+  ];
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, undefined);
+  assert.match(result.error, /country dropdown does not contain United States/);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
 });
 
 test('PayPal hosted guest checkout blocks submit when rendered phone differs from config', async () => {

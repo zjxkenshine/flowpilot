@@ -635,6 +635,38 @@ function selectHostedOptionByIdText(id, value) {
   return true;
 }
 
+function selectHostedCountryById(id = 'country', countryCode = 'US') {
+  const select = document.getElementById(String(id || '').trim());
+  if (!select || !isVisibleElement(select)) {
+    return { found: Boolean(select), selected: false };
+  }
+  const expected = normalizeText(countryCode || 'US').toLowerCase();
+  const currentOption = Array.from(select.options || []).find((item) => item.selected) || null;
+  const currentText = normalizeText(currentOption?.textContent || currentOption?.label || select.value || '').toLowerCase();
+  if (currentText === expected || select.value.toLowerCase() === expected || /united\s+states|usa/i.test(currentText)) {
+    return { found: true, selected: false, value: select.value };
+  }
+  if (!isEnabledControl(select)) {
+    return { found: true, selected: false, missing: true, disabled: true };
+  }
+  const option = Array.from(select.options || []).find((item) => {
+    const optionText = normalizeText(item.textContent || item.label || '').toLowerCase();
+    const optionValue = normalizeText(item.value || '').toLowerCase();
+    return optionValue === expected
+      || optionValue === 'usa'
+      || optionText === expected
+      || /united\s+states|usa/i.test(optionText);
+  });
+  if (!option) {
+    return { found: true, selected: false, missing: true };
+  }
+  select.value = option.value;
+  option.selected = true;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  return { found: true, selected: true, value: select.value };
+}
+
 function findHostedSubmitButton() {
   return document.querySelector('button[data-testid="submit-button"]')
     || document.querySelector('button[data-testid="hosted-payment-submit-button"]')
@@ -881,10 +913,11 @@ async function submitHostedLogin(payload = {}) {
 
 async function fillHostedGuestCheckout(payload = {}) {
   await waitForDocumentComplete();
-  const countrySelect = document.getElementById('country');
-  if (countrySelect && String(countrySelect.value || '').trim().toUpperCase() !== 'US') {
-    countrySelect.value = 'US';
-    countrySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  const countryResult = selectHostedCountryById('country', 'US');
+  if (countryResult.missing) {
+    throw new Error('PayPal hosted checkout country dropdown does not contain United States.');
+  }
+  if (countryResult.selected) {
     await sleep(1000);
   }
   const generatedCard = buildHostedVisaCard();

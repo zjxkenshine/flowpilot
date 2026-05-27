@@ -84,6 +84,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusAccountAccessStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
+  'plusHostedCheckoutCardPreWaitSeconds',
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
@@ -121,6 +122,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutCreatePreWaitSeconds: 10,
   plusCheckoutOpenStableWaitSeconds: 20,
+  plusHostedCheckoutCardPreWaitSeconds: 10,
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
@@ -407,12 +409,15 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   const payload = api.buildPersistentSettingsPayload({
     plusCheckoutCreatePreWaitSeconds: ' 16.8 ',
     plusCheckoutOpenStableWaitSeconds: ' 29.2 ',
+    plusHostedCheckoutCardPreWaitSeconds: ' 11.9 ',
   }, { fillDefaults: true });
 
   assert.equal(payload.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.plusCheckoutOpenStableWaitSeconds, 29);
+  assert.equal(payload.plusHostedCheckoutCardPreWaitSeconds, 11);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 29);
+  assert.equal(payload.settingsState.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds, 11);
 });
 
 test('buildPersistentSettingsPayload persists PayPal hosted checkout resend strategy into settings schema', () => {

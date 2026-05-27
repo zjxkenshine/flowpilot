@@ -73,7 +73,13 @@ function createCheckoutContentHarness(options = {}) {
       },
       scrollIntoView() {},
       focus() {},
-      dispatchEvent() {
+      dispatchEvent(event) {
+        checkoutEvents.push({
+          type: 'dispatch',
+          id: this.id || '',
+          event: event?.type || '',
+          value: this.value,
+        });
         return true;
       },
       click() {},
@@ -94,6 +100,14 @@ function createCheckoutContentHarness(options = {}) {
   const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
   const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
+  const hostedCountrySelect = {
+    ...createElement({ tagName: 'SELECT', id: 'billingCountry', attrs: { name: 'billingCountry' } }),
+    options: [
+      { value: 'DE', textContent: 'Germany', label: 'Germany' },
+      { value: 'US', textContent: 'United States', label: 'United States' },
+    ],
+    value: 'DE',
+  };
   const termsCheckbox = createElement({ tagName: 'INPUT', id: 'termsOfServiceConsentCheckbox', type: 'checkbox', attrs: { type: 'checkbox' } });
   const hostedCardNumberInput = createElement({ tagName: 'INPUT', id: 'cardNumber', type: 'text', attrs: { name: 'cardNumber', placeholder: 'Card number' } });
   const hostedCardAccordion = createElement({
@@ -129,6 +143,7 @@ function createCheckoutContentHarness(options = {}) {
   subscribeButton.type = 'submit';
   elements.push(
     paymentButton,
+    hostedCountrySelect,
     hostedAddressInput,
     hostedCityInput,
     hostedPostalInput,
@@ -190,6 +205,7 @@ function createCheckoutContentHarness(options = {}) {
         if (text === '#billingAddressLine1') return hostedAddressInput;
         if (text === '#billingLocality') return hostedCityInput;
         if (text === '#billingPostalCode') return hostedPostalInput;
+        if (text === '#billingCountry') return hostedCountrySelect;
         if (text === '#billingAdministrativeArea') return hostedStateSelect;
         if (text === '#termsOfServiceConsentCheckbox') return termsCheckbox;
         if (text === 'button[data-testid="submit-button"]') return subscribeButton;
@@ -217,6 +233,7 @@ function createCheckoutContentHarness(options = {}) {
           return options.includeHostedCardBranch ? [hostedCardAccordion] : [];
         }
         if (text === 'input, textarea') return elements.filter((element) => element.tagName === 'INPUT');
+        if (text === 'select') return elements.filter((element) => element.tagName === 'SELECT');
         if (text.includes('button[type="submit"]')) return [subscribeButton];
         if (
           text.includes('button')
@@ -349,16 +366,33 @@ function createHostedRuntimeState(overrides = {}) {
 }
 
 function createHostedAddressResponse(address = {}) {
+  const mergedAddress = {
+    Address: '7 Fresh St',
+    City: 'Austin',
+    State_Full: 'Texas',
+    Zip_Code: '73301',
+    ...address,
+  };
+  const streetParts = String(mergedAddress.Address || '')
+    .trim()
+    .match(/^(\d+)\s+(.+)$/);
   return {
     ok: true,
     status: 200,
     json: async () => ({
+      results: [{
+        location: {
+          street: {
+            number: streetParts ? streetParts[1] : '',
+            name: streetParts ? streetParts[2] : String(mergedAddress.Address || '').trim(),
+          },
+          city: String(mergedAddress.City || '').trim(),
+          state: String(mergedAddress.State_Full || mergedAddress.State || '').trim(),
+          postcode: String(mergedAddress.Zip_Code || '').trim(),
+        },
+      }],
       address: {
-        Address: '7 Fresh St',
-        City: 'Austin',
-        State_Full: 'Texas',
-        Zip_Code: '73301',
-        ...address,
+        ...mergedAddress,
       },
     }),
   };
@@ -2367,19 +2401,13 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
     },
     fetch: async (url) => {
       events.push({ type: 'fetch', url });
-      assert.equal(url, 'https://www.meiguodizhi.com/api/v1/dz');
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          address: {
-            Address: '1 Main St',
-            City: 'New York',
-            State: 'New York',
-            Zip_Code: '10001',
-          },
-        }),
-      };
+      assert.equal(url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
+      return createHostedAddressResponse({
+        Address: '1 Main St',
+        City: 'New York',
+        State: 'New York',
+        Zip_Code: '10001',
+      });
     },
     getState: async () => {
       events.push({ type: 'get-state' });
@@ -2637,19 +2665,13 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
     },
     fetch: async (url) => {
       events.push({ type: 'fetch', url });
-      assert.equal(url, 'https://www.meiguodizhi.com/api/v1/dz');
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          address: {
-            Address: '1 Main St',
-            City: 'New York',
-            State: 'New York',
-            Zip_Code: '10001',
-          },
-        }),
-      };
+      assert.equal(url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
+      return createHostedAddressResponse({
+        Address: '1 Main St',
+        City: 'New York',
+        State: 'New York',
+        Zip_Code: '10001',
+      });
     },
     getState: async () => ({
       hostedCheckoutPhoneNumber: '(415) 555-1234',
@@ -2741,14 +2763,10 @@ test('PayPal hosted OpenAI checkout retries with a fresh address after address v
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
     fetch: async (url) => {
       events.push({ type: 'fetch', url });
-      assert.equal(url, 'https://www.meiguodizhi.com/api/v1/dz');
+      assert.equal(url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
       const address = addresses[addressIndex] || addresses.at(-1);
       addressIndex += 1;
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ address }),
-      };
+      return createHostedAddressResponse(address);
     },
     getState: async () => ({
       plusHostedCheckoutGuestProfile: {
@@ -2822,6 +2840,7 @@ test('PayPal hosted OpenAI checkout retries with a fresh address after address v
   assert.equal(submitEvents.length, 2);
   assert.equal(submitEvents[0].message.payload.address.street, '1 Main St');
   assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(submitEvents[1].message.payload.address.countryCode, 'US');
   assert.equal(events.some((event) => event.type === 'fetch'), true);
   assert.equal(events.find((event) => event.type === 'complete')?.step, 'paypal-hosted-openai-checkout');
 });
@@ -3293,6 +3312,8 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.address.city, 'Austin');
   assert.equal(profileState.address.state, 'Texas');
   assert.equal(profileState.address.zip, '73301');
+  assert.equal(profileState.address.countryCode, 'US');
+  assert.equal(profileState.address.country, 'United States');
   assert.equal(profileState.phone, '4155551234');
   assert.equal(profileState.firstName, 'James');
   assert.equal(profileState.lastName, 'Smith');
@@ -3300,6 +3321,7 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.notEqual(profileState.password, cachedProfile.password);
   assert.notEqual(profileState.cardNumber, cachedProfile.cardNumber);
   assert.equal(submitEvent.message.payload.address.street, '7 Fresh St');
+  assert.equal(submitEvent.message.payload.address.countryCode, 'US');
   assert.equal(submitEvent.message.payload.firstName, 'James');
   assert.equal(submitEvent.message.payload.lastName, 'Smith');
   assert.equal(submitEvent.message.payload.phone, '4155551234');
@@ -3365,13 +3387,14 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.ok(events.indexOf(profileEvent) < events.indexOf(completeEvent));
 });
 
-test('PayPal hosted card node fails fresh profile regeneration instead of falling back to cached data', async () => {
+test('PayPal hosted card node uses built-in US fallback when remote address source fails', async () => {
   const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
     chrome: {
       tabs: {
-        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
       },
     },
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
@@ -3388,6 +3411,15 @@ test('PayPal hosted card node fails fresh profile regeneration instead of fallin
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return { submitted: true, phoneMatched: true };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return currentUrl.includes('/create-account')
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout' };
+      }
       throw new Error(`unexpected message type ${message.type}`);
     },
     setState: async (payload) => events.push({ type: 'set-state', payload }),
@@ -3395,21 +3427,20 @@ test('PayPal hosted card node fails fresh profile regeneration instead of fallin
     waitForTabCompleteUntilStopped: async () => {},
   });
 
-  await assert.rejects(
-    () => executor.executePayPalHostedCard({
-      plusCheckoutTabId: 789,
-      plusHostedCheckoutGuestProfile: {
-        email: 'cached@example.com',
-        phone: '4155551234',
-        address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
-      },
-    }),
-    /获取无卡直绑地址失败/
-  );
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 789,
+    plusHostedCheckoutGuestProfile: {
+      email: 'cached@example.com',
+      phone: '4155551234',
+      address: { street: 'Old St', city: 'Old City', state: 'Old State', zip: '00000' },
+    },
+  });
 
-  assert.equal(events.some((event) => event.type === 'complete'), false);
-  assert.equal(events.some((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile), false);
-  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
+  const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)?.payload?.plusHostedCheckoutGuestProfile || {};
+  assert.equal(profileState.address.countryCode, 'US');
+  assert.equal(profileState.address.country, 'United States');
+  assert.equal(events.some((event) => event.type === 'log' && /built-in US fallback/.test(event.message)), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
 test('PayPal hosted card node continues when security challenge is reported', async () => {
@@ -3651,7 +3682,9 @@ test('PayPal hosted card node retries fresh profile when guest card error appear
   assert.equal(submitEvents.length, 2);
   assert.ok(profileEvents.length >= 2);
   assert.equal(submitEvents[0].message.payload.address.street, '7 Fresh St');
+  assert.equal(submitEvents[0].message.payload.address.countryCode, 'US');
   assert.equal(submitEvents[1].message.payload.address.street, '8 Retry Ave');
+  assert.equal(submitEvents[1].message.payload.address.countryCode, 'US');
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
@@ -3906,6 +3939,7 @@ test('OpenAI hosted checkout fills email before selecting PayPal and address', a
   assert.ok(emailFillIndex < paymentButtonIndex);
   assert.ok(paymentButtonIndex < addressFillIndex);
   assert.ok(addressFillIndex < submitIndex);
+  assert.equal(checkoutEvents.some((event) => event.type === 'dispatch' && event.id === 'billingCountry' && event.event === 'change' && event.value === 'US'), true);
 });
 
 test('OpenAI hosted checkout stops before PayPal selection when email input is missing', async () => {
@@ -4517,7 +4551,7 @@ test('PayPal hosted card node resends and refills after invalid verification cod
     ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
     fetch: async (url) => {
       events.push({ type: 'fetch', url });
-      if (/meiguodizhi\.com/i.test(url)) {
+      if (/randomuser\.me/i.test(url)) {
         return createHostedAddressResponse({
           Address: '11 Verify Ln',
           City: 'Phoenix',

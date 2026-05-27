@@ -257,6 +257,77 @@ function selectHostedOptionByText(selector, value) {
   return true;
 }
 
+function getHostedSelectValueText(select) {
+  if (!select) return '';
+  const selected = Array.from(select.options || []).find((option) => option.selected)
+    || select.selectedOptions?.[0]
+    || null;
+  return normalizeText(selected?.textContent || selected?.label || select.value || '');
+}
+
+function findHostedCountrySelect() {
+  const directSelectors = [
+    '#billingCountry',
+    '#billingCountryCode',
+    '#billingCountrySelect',
+    '#billingAddressCountry',
+    'select[name="billingCountry"]',
+    'select[name="billingCountryCode"]',
+    'select[name="billingAddressCountry"]',
+    'select[autocomplete="country"]',
+    'select[autocomplete="country-name"]',
+  ];
+  for (const selector of directSelectors) {
+    const select = document.querySelector(selector);
+    if (select && isVisibleElement(select) && isEnabledControl(select)) {
+      return select;
+    }
+  }
+  return Array.from(document.querySelectorAll('select')).find((select) => {
+    if (!isVisibleElement(select) || !isEnabledControl(select)) return false;
+    const text = [
+      select.id,
+      select.name,
+      select.getAttribute?.('aria-label'),
+      select.getAttribute?.('placeholder'),
+      getFieldText(select),
+    ].filter(Boolean).join(' ');
+    return /country|region/i.test(text) || /\u56fd\u5bb6|\u56fd\u5bb6\u6216\u5730\u533a/.test(text);
+  }) || null;
+}
+
+async function ensureHostedCountrySelected(countryCode = 'US') {
+  const select = findHostedCountrySelect();
+  if (!select) {
+    return { countrySelected: false, countrySelectFound: false };
+  }
+  const desired = normalizeText(countryCode || 'US') || 'US';
+  if (matchesCountryOption(getHostedSelectValueText(select) || select.value, desired)) {
+    return {
+      countrySelected: false,
+      countrySelectFound: true,
+      countryValue: getHostedSelectValueText(select) || select.value || '',
+    };
+  }
+  const option = Array.from(select.options || []).find((item) => (
+    matchesCountryOption(item.textContent || item.label || '', desired)
+    || matchesCountryOption(item.value || '', desired)
+  ));
+  if (!option) {
+    throw new Error(`OpenAI hosted checkout country option "${desired}" was not found.`);
+  }
+  select.value = option.value;
+  option.selected = true;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await sleep(500);
+  return {
+    countrySelected: true,
+    countrySelectFound: true,
+    countryValue: getHostedSelectValueText(select) || select.value || '',
+  };
+}
+
 function findHostedPayPalButton() {
   return document.querySelector('[data-testid="paypal-accordion-item-button"]')
     || document.querySelector('.paypal-accordion-item button')
@@ -482,6 +553,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
   }
 
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  await ensureHostedCountrySelected(address.countryCode || 'US');
   fillHostedInput('#billingAddressLine1', address.street || address.address1 || '');
   fillHostedInput('#billingLocality', address.city || '');
   fillHostedInput('#billingPostalCode', address.zip || address.postalCode || '');
@@ -1420,6 +1492,12 @@ async function clickAddressSuggestion(seed = {}) {
 }
 
 async function fillAddressQuery(seed = {}) {
+  if (seed.forceCountrySelectionBeforeAutocomplete && seed.countryCode) {
+    const countryDropdown = findCountryDropdown();
+    if (countryDropdown) {
+      await selectCountryDropdown(countryDropdown, seed.countryCode);
+    }
+  }
   const addressInput = await findAddressSearchInput();
   fillInput(addressInput, seed.query || 'Berlin Mitte');
   await sleep(800);

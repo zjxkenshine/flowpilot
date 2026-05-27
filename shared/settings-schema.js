@@ -265,6 +265,7 @@
               plusAccountAccessStrategy: 'oauth',
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
+              plusHostedCheckoutCardPreWaitSeconds: 10,
               plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
               plusCheckoutConversionProxy711Region: '',
@@ -523,6 +524,14 @@
                   ?? defaults.flows.openai.plus.plusCheckoutOpenStableWaitSeconds
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusCheckoutOpenStableWaitSeconds)));
+              })(),
+              plusHostedCheckoutCardPreWaitSeconds: (() => {
+                const numeric = Number(
+                  input?.plusHostedCheckoutCardPreWaitSeconds
+                  ?? nested?.flows?.openai?.plus?.plusHostedCheckoutCardPreWaitSeconds
+                  ?? defaults.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds
+                );
+                return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds)));
               })(),
               plusCheckoutConversionProxySource: String(
                 input?.plusCheckoutConversionProxySource
@@ -825,6 +834,7 @@
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
+      next.plusHostedCheckoutCardPreWaitSeconds = openaiState.plus.plusHostedCheckoutCardPreWaitSeconds;
       next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;

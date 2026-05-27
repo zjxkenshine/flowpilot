@@ -846,15 +846,18 @@ test('sidepanel normalizes Plus checkout wait settings to bounded integer second
   const bundle = [
     extractFunction('normalizePlusCheckoutCreatePreWaitSeconds'),
     extractFunction('normalizePlusCheckoutOpenStableWaitSeconds'),
+    extractFunction('normalizePlusHostedCheckoutCardPreWaitSeconds'),
   ].join('\n');
 
   const api = new Function(`
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
+const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
 ${bundle}
 return {
   normalizePlusCheckoutCreatePreWaitSeconds,
   normalizePlusCheckoutOpenStableWaitSeconds,
+  normalizePlusHostedCheckoutCardPreWaitSeconds,
 };
 `)();
 
@@ -863,6 +866,9 @@ return {
   assert.equal(api.normalizePlusCheckoutCreatePreWaitSeconds(''), 0);
   assert.equal(api.normalizePlusCheckoutOpenStableWaitSeconds(' 28.7 '), 28);
   assert.equal(api.normalizePlusCheckoutOpenStableWaitSeconds('-5'), 0);
+  assert.equal(api.normalizePlusHostedCheckoutCardPreWaitSeconds(' 11.9 '), 11);
+  assert.equal(api.normalizePlusHostedCheckoutCardPreWaitSeconds('abc'), 10);
+  assert.equal(api.normalizePlusHostedCheckoutCardPreWaitSeconds('999'), 120);
 });
 
 test('sidepanel Plus UI can hide Plus controls when the shared flow capability registry disables them', () => {

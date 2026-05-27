@@ -42,6 +42,7 @@ test('flow registry exposes canonical flow and target metadata', () => {
       'row-plus-payment-method',
       'row-plus-checkout-create-pre-wait',
       'row-plus-checkout-open-stable-wait',
+      'row-plus-hosted-checkout-card-pre-wait',
       'row-plus-checkout-conversion-proxy',
       'row-plus-checkout-conversion-proxy-test',
     ]
@@ -194,13 +195,16 @@ test('settings schema preserves Plus checkout wait settings in canonical state a
   const normalized = schema.normalizeSettingsState({
     plusCheckoutCreatePreWaitSeconds: ' 15.9 ',
     plusCheckoutOpenStableWaitSeconds: ' 28.4 ',
+    plusHostedCheckoutCardPreWaitSeconds: ' 11.6 ',
   });
   const view = schema.buildSettingsView(normalized);
 
   assert.equal(normalized.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 15);
   assert.equal(normalized.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 28);
+  assert.equal(normalized.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds, 11);
   assert.equal(view.plusCheckoutCreatePreWaitSeconds, 15);
   assert.equal(view.plusCheckoutOpenStableWaitSeconds, 28);
+  assert.equal(view.plusHostedCheckoutCardPreWaitSeconds, 11);
 });
 
 test('settings schema preserves hosted checkout security challenge switch in canonical state and read view', () => {

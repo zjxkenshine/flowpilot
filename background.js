@@ -841,6 +841,7 @@ const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
+const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 const PERSISTENT_ALIAS_STATE_KEYS = [
@@ -1469,6 +1470,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutCreatePreWaitSeconds: DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
   plusCheckoutOpenStableWaitSeconds: DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
+  plusHostedCheckoutCardPreWaitSeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS,
   plusCheckoutCloudConversionEnabled: false,
   plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
   plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
@@ -1718,6 +1720,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusAccountAccessStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
+  'plusHostedCheckoutCardPreWaitSeconds',
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
@@ -3664,6 +3667,10 @@ function normalizePersistentSettingValue(key, value) {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS)));
     }
+    case 'plusHostedCheckoutCardPreWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS)));
+    }
     case 'plusCheckoutCloudConversionEnabled':
       return Boolean(value);
     case 'plusCheckoutCloudConversionApiUrl':
@@ -4740,6 +4747,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
+  assignIfUpdated('plusHostedCheckoutCardPreWaitSeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutCardPreWaitSeconds']);
   assignIfUpdated('plusCheckoutConversionProxySource', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxySource']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
   assignIfUpdated('plusCheckoutConversionProxy711Region', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxy711Region']);
@@ -12183,14 +12191,34 @@ function doesStepUseCompletionSignal(step, state = {}) {
 
 function getAutoRunPreExecutionDelayMsForNode(nodeId, state = {}) {
   const executionKey = getNodeExecutionKeyForState(nodeId, state);
-  if ((executionKey || nodeId) === 'plus-checkout-create') {
+  const normalizedExecutionKey = executionKey || nodeId;
+  if (normalizedExecutionKey === 'plus-checkout-create') {
     const numeric = Number(state?.plusCheckoutCreatePreWaitSeconds);
     const waitSeconds = Number.isFinite(numeric)
       ? Math.min(120, Math.max(0, Math.floor(numeric)))
       : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS;
     return waitSeconds * 1000;
   }
-  return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(executionKey || nodeId) || 0;
+  if (normalizedExecutionKey === 'paypal-hosted-card') {
+    const numeric = Number(state?.plusHostedCheckoutCardPreWaitSeconds);
+    const waitSeconds = Number.isFinite(numeric)
+      ? Math.min(120, Math.max(0, Math.floor(numeric)))
+      : DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS;
+    return waitSeconds * 1000;
+  }
+  return AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY.get(normalizedExecutionKey) || 0;
+}
+
+function getAutoRunPreExecutionDelayReasonForNode(nodeId, state = {}) {
+  const executionKey = getNodeExecutionKeyForState(nodeId, state);
+  const normalizedExecutionKey = executionKey || nodeId;
+  if (normalizedExecutionKey === 'plus-checkout-create') {
+    return '确保 Plus Checkout 创建前页面稳定';
+  }
+  if (normalizedExecutionKey === 'paypal-hosted-card') {
+    return '确保无卡直绑 PayPal 资料页稳定';
+  }
+  return '确保页面稳定';
 }
 
 function getAutoRunPreExecutionDelayMs(step, state = {}) {
@@ -13244,7 +13272,7 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
   const preExecutionDelayMs = getAutoRunPreExecutionDelayMsForNode(normalizedNodeId, executionState);
   if (preExecutionDelayMs > 0) {
     await addLog(
-      `自动运行：节点 ${normalizedNodeId} 执行前固定等待 ${Math.round(preExecutionDelayMs / 1000)} 秒，确保 Plus Checkout 创建前页面稳定。`,
+      `自动运行：节点 ${normalizedNodeId} 执行前固定等待 ${Math.round(preExecutionDelayMs / 1000)} 秒，${getAutoRunPreExecutionDelayReasonForNode(normalizedNodeId, executionState)}。`,
       'info'
     );
     await sleepWithStop(preExecutionDelayMs);
