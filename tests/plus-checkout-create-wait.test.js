@@ -522,8 +522,8 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
           checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
-          country: 'DE',
-          currency: 'EUR',
+          country: 'US',
+          currency: 'USD',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -2034,8 +2034,8 @@ test('Phone Plus classic checkout falls back at step 6 when checkout amount is n
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
           checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test',
-          country: 'DE',
-          currency: 'EUR',
+          country: 'US',
+          currency: 'USD',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {

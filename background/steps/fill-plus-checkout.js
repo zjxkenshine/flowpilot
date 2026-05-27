@@ -5,10 +5,8 @@
   const PLUS_CHECKOUT_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/plus-checkout.js'];
   const PLUS_CHECKOUT_URL_PATTERN = /^https:\/\/chatgpt\.com\/checkout(?:\/|$)/i;
   const PLUS_CHECKOUT_FRAME_READY_DELAY_MS = 500;
-  const PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS = 5;
+  const PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS = 3;
   const PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS = 10000;
-  const CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS = 8000;
-  const CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES = 3;
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
@@ -50,6 +48,7 @@
     },
   };
   const MEIGUODIZHI_ADDRESS_ENDPOINT = 'https://www.meiguodizhi.com/api/v1/dz';
+  const RANDOMUSER_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
   const MEIGUODIZHI_COUNTRY_CONFIG = {
     AR: { path: '/ar-address', city: 'Buenos Aires', aliases: ['ar', 'argentina', '阿根廷'] },
     AU: { path: '/au-address', city: 'Sydney', aliases: ['au', 'aus', 'australia', '澳大利亚'] },
@@ -1360,6 +1359,89 @@
       };
     }
 
+    function generateRandomNumericQuery(length = 4) {
+      const digits = Math.max(1, Math.min(8, Math.floor(Number(length) || 4)));
+      const min = 10 ** Math.max(0, digits - 1);
+      const max = (10 ** digits) - 1;
+      return String(Math.floor((Math.random() * ((max - min) + 1)) + min));
+    }
+
+    function buildPayPalUsAutocompleteSeed() {
+      const localSeed = getLocalAddressSeed('US') || {
+        countryCode: 'US',
+        query: 'New York NY',
+        fallback: {
+          address1: '3450 Broadway',
+          city: 'New York',
+          region: 'New York',
+          postalCode: '10031',
+        },
+      };
+      return {
+        ...localSeed,
+        countryCode: 'US',
+        query: generateRandomNumericQuery(4),
+        numericQueryDigits: 4,
+        randomSuggestion: true,
+        forceCountrySelectionBeforeAutocomplete: true,
+        autoCheckAgreement: true,
+        source: 'paypal_us_google_autocomplete',
+        fallback: {
+          ...(localSeed.fallback || {}),
+          address1: normalizeText(localSeed?.fallback?.address1 || '3450 Broadway'),
+          city: normalizeText(localSeed?.fallback?.city || 'New York'),
+          region: normalizeText(localSeed?.fallback?.region || 'New York'),
+          postalCode: normalizeText(localSeed?.fallback?.postalCode || '10031'),
+        },
+      };
+    }
+
+    function buildRandomUserAddressSeed(payload = {}, fallbackSeed = null) {
+      const location = payload?.results?.[0]?.location || payload?.location || {};
+      const street = location?.street || {};
+      const streetNumber = normalizeText(street?.number);
+      const streetName = normalizeText(street?.name);
+      const address1 = normalizeText([streetNumber, streetName].filter(Boolean).join(' '));
+      const city = normalizeText(location?.city);
+      const region = normalizeText(location?.state);
+      const postalCode = normalizeText(location?.postcode);
+      if (!address1 || !city || !postalCode) {
+        return null;
+      }
+      return {
+        ...(fallbackSeed || {}),
+        countryCode: 'US',
+        query: [address1, city].filter(Boolean).join(', '),
+        source: 'randomuser',
+        skipAutocomplete: true,
+        autoCheckAgreement: true,
+        fallback: {
+          ...(fallbackSeed?.fallback || {}),
+          address1,
+          city,
+          region,
+          postalCode,
+        },
+      };
+    }
+
+    async function fetchRandomUserUsAddressSeed(fallbackSeed = null) {
+      if (typeof fetchImpl !== 'function') {
+        return null;
+      }
+      const response = await fetchImpl(RANDOMUSER_ADDRESS_ENDPOINT, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+      if (!response?.ok) {
+        throw new Error(`HTTP ${response?.status || 0}`);
+      }
+      const data = await response.json();
+      return buildRandomUserAddressSeed(data, fallbackSeed);
+    }
+
     function resolveBillingAddressCountry(state = {}, countryOverride = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
       const normalizedPaymentMethod = normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod);
       const checkoutCountry = resolveMeiguodizhiCountryCode(countryOverride);
@@ -1382,19 +1464,27 @@
         };
       }
 
-      const countryCode = checkoutCountry || savedCheckoutCountry || exitCountry || 'DE';
+      const countryCode = checkoutCountry || savedCheckoutCountry || exitCountry || 'US';
       return {
         countryCode,
         requestedCountry: normalizeText(countryOverride)
           || normalizeText(state.plusCheckoutCountry)
           || exitCountry
-          || 'DE',
+          || 'US',
         source: checkoutCountry ? 'checkout_page' : (savedCheckoutCountry ? 'checkout_state' : (exitCountry ? 'proxy_exit' : 'paypal_fallback')),
       };
     }
 
     async function resolveBillingAddressSeed(state = {}, countryOverride = '', options = {}) {
       const paymentMethod = normalizePlusPaymentMethod(options.paymentMethod || state?.plusPaymentMethod);
+      const enablePayPalUsAutocompleteMode = Boolean(
+        options.paypalUsAutocompleteModeEnabled
+        || state?.paypalCheckoutUsAutocompleteModeEnabled
+      );
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && enablePayPalUsAutocompleteMode) {
+        await addLog('步骤 7：PayPal 将按扩展式地址模式填写：先切到 United States，再输入 4 位数字并随机选择 Google 地址建议。', 'info');
+        return buildPayPalUsAutocompleteSeed();
+      }
       const countryResolution = resolveBillingAddressCountry(state, countryOverride, paymentMethod);
       const countryCode = countryResolution.countryCode;
       const requestedCountry = countryResolution.requestedCountry;
@@ -1402,6 +1492,21 @@
         await addLog(`步骤 7：GoPay 账单地址将按当前代理出口地区 ${countryCode} 填写。`, 'info');
       }
       const localSeed = getLocalAddressSeed(countryCode);
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && countryCode === 'US') {
+        try {
+          const randomUserSeed = await fetchRandomUserUsAddressSeed(localSeed);
+          if (hasCompleteAddressFallback(randomUserSeed)) {
+            await addLog(
+              `步骤 7：已从 randomuser.me 获取美国账单地址（${randomUserSeed.fallback.city} / ${randomUserSeed.fallback.postalCode}），将直接填写账单表单。`,
+              'info'
+            );
+            return randomUserSeed;
+          }
+          await addLog('步骤 7：randomuser.me 返回的美国地址字段不完整，回退到其他地址来源。', 'warn');
+        } catch (error) {
+          await addLog(`步骤 7：randomuser.me 地址接口不可用，回退到其他地址来源：${error?.message || String(error || '')}`, 'warn');
+        }
+      }
       const lookupSeed = localSeed || buildMeiguodizhiLookupSeed(countryCode);
       if (!lookupSeed) {
         throw new Error(`步骤 7：无法识别账单国家或地区：${requestedCountry || '空'}`);
@@ -1960,117 +2065,6 @@
       throw new Error(`步骤 7：多次检测订阅按钮后仍未跳转到 ${paymentConfig.label}。${lastSubmitError}`);
     }
 
-    async function runClassicPaypalCheckoutHalfFlow(options = {}) {
-      const {
-        state = {},
-        tabId,
-        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
-        paymentConfig = getPaymentMethodConfig(paymentMethod),
-        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
-        paymentFrame = {},
-        billingFrame = {},
-        billingState = {},
-        fullName = '',
-      } = options;
-
-      await ensureClassicPaypalCheckoutConversionProxySession(state);
-      await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
-      const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
-        type: paymentConfig.selectMessageType,
-        source: 'background',
-        payload: { paymentMethod },
-      });
-      if (paymentResult?.error) {
-        throw new Error(paymentResult.error);
-      }
-
-      const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
-      const billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
-      const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
-        phaseLabel: '提交订阅前',
-      });
-      if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
-        return {
-          billingResult,
-          preSubmitAmountCheck,
-          skipped: true,
-        };
-      }
-
-      return {
-        billingResult,
-        preSubmitAmountCheck,
-        skipped: false,
-      };
-    }
-
-    async function submitClassicPaypalCheckoutBilling(options = {}) {
-      const {
-        state = {},
-        tabId,
-        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
-        paymentConfig = getPaymentMethodConfig(paymentMethod),
-        subscribeFrameCandidates = [{ frameId: 0, url: '' }],
-        runCheckoutHalfFlow = async () => ({ billingResult: null, skipped: false }),
-      } = options;
-      const totalAttempts = CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES + 1;
-      const timeoutSeconds = Math.round(CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS / 1000);
-      let lastSubmitError = '';
-      let latestBillingResult = null;
-
-      for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
-        if (attempt === 1) {
-          await addLog('步骤 7：开始执行 PayPal 付款后半段，等待 3 秒让 checkout 完成校验...', 'info');
-        } else {
-          await addLog(
-            `步骤 7：开始第 ${attempt - 1}/${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新执行 PayPal 付款后半段并重试订阅...`,
-            'warn'
-          );
-        }
-        const halfFlowResult = await runCheckoutHalfFlow();
-        latestBillingResult = halfFlowResult?.billingResult || latestBillingResult;
-        if (halfFlowResult?.skipped) {
-          return {
-            billingResult: latestBillingResult,
-            skipped: true,
-          };
-        }
-        await sleepWithStop(3000);
-
-        const submitAttempt = await attemptCheckoutSubscribeAndWaitForRedirect({
-          tabId,
-          paymentMethod,
-          paymentConfig,
-          subscribeFrameCandidates,
-          attempt,
-          totalAttempts,
-          beforeClickDelayMs: attempt === 1 ? 700 : 1200,
-          redirectTimeoutMs: CLASSIC_PAYPAL_SUBMIT_REDIRECT_TIMEOUT_MS,
-          ensurePaymentActive: true,
-        });
-        if (submitAttempt.subscribeResult?.error) {
-          lastSubmitError = submitAttempt.lastSubmitError;
-          await addLog(`步骤 7：点击订阅失败（${attempt}/${totalAttempts}）：${lastSubmitError}`, 'warn');
-          continue;
-        }
-
-        if (submitAttempt.redirectedToPayment) {
-          return {
-            billingResult: latestBillingResult,
-            skipped: false,
-          };
-        }
-        lastSubmitError = submitAttempt.lastSubmitError;
-        if (attempt < totalAttempts) {
-          await addLog(`步骤 7：${lastSubmitError}，将重新执行 PayPal 付款后半段。`, 'warn');
-        }
-      }
-
-      throw new Error(
-        `步骤 7：点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}，已重试 ${CLASSIC_PAYPAL_ADDRESS_RESUBMIT_MAX_RETRIES} 次重新执行 PayPal 付款后半段后仍失败。${lastSubmitError ? `最后一次结果：${lastSubmitError}` : ''}`
-      );
-    }
-
     async function getCheckoutTabId(state = {}) {
       const registeredTabId = await getTabId(PLUS_CHECKOUT_SOURCE);
       if (registeredTabId && await isTabAlive(PLUS_CHECKOUT_SOURCE)) {
@@ -2134,6 +2128,19 @@
 
         const randomName = generateRandomName();
         const fullName = [randomName.firstName, randomName.lastName].filter(Boolean).join(' ');
+
+        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
+          await ensureClassicPaypalCheckoutConversionProxySession(state);
+          await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
+          const paymentResult = await sendFrameMessage(tabId, paymentFrame.frameId, {
+            type: paymentConfig.selectMessageType,
+            source: 'background',
+            payload: { paymentMethod },
+          });
+          if (paymentResult?.error) {
+            throw new Error(paymentResult.error);
+          }
+        }
 
         if (paymentMethod !== PLUS_PAYMENT_METHOD_PAYPAL) {
           await addLog(`步骤 7：正在切换 ${paymentConfig.label} 付款方式...`, 'info');
@@ -2218,31 +2225,22 @@
 
         const subscribeFrameCandidates = buildSubscribeFrameCandidates(paymentFrame, billingFrame);
         if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
-          const classicSubmitResult = await submitClassicPaypalCheckoutBilling({
-            state,
+          const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });
+          const billingResult = await fillBillingAddressForCheckout(tabId, billingFrame, fullName, addressSeed);
+          const preSubmitAmountCheck = await ensureFreeTrialAmount(tabId, state, {
+            phaseLabel: '提交订阅前',
+          });
+          if (preSubmitAmountCheck?.phonePlusFallbackToFreeAuth) {
+            return;
+          }
+          await submitStandardCheckoutBilling({
             tabId,
             paymentMethod,
             paymentConfig,
             subscribeFrameCandidates,
-            runCheckoutHalfFlow: async () => {
-              return runClassicPaypalCheckoutHalfFlow({
-                state,
-                tabId,
-                paymentMethod,
-                paymentConfig,
-                subscribeFrameCandidates,
-                paymentFrame,
-                billingFrame,
-                billingState,
-                fullName,
-              });
-            },
           });
-          if (classicSubmitResult?.skipped) {
-            return;
-          }
           await completeNodeFromBackground('plus-checkout-billing', {
-            plusBillingCountryText: classicSubmitResult?.billingResult?.countryText || '',
+            plusBillingCountryText: billingResult?.countryText || '',
           });
         } else {
           const addressSeed = await resolveBillingAddressSeed(billingState, billingFrame.countryText, { paymentMethod });

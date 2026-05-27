@@ -674,6 +674,41 @@ test('PayPal hosted guest checkout verifies configured local phone before submit
   );
 });
 
+test('PayPal hosted guest checkout accepts profile address aliases', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      firstName: 'James',
+      lastName: 'Smith',
+      address: {
+        address1: '350 Fifth Avenue',
+        city: 'New York',
+        region: 'New York',
+        postalCode: '10118',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingLine1' && event.value === '350 Fifth Avenue'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '10118'), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
 test('PayPal hosted guest checkout blocks submit when rendered phone differs from config', async () => {
   const harness = createHostedPayPalHarness({
     renderPhone: () => '9999999999',

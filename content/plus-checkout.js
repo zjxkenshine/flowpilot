@@ -17,8 +17,8 @@ const PLUS_CHECKOUT_PAYLOAD_BASE = {
 const PLUS_CHECKOUT_CONFIGS = {
   paypal: {
     billing_details: {
-      country: 'DE',
-      currency: 'EUR',
+      country: 'US',
+      currency: 'USD',
     },
     checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_ie/',
     paymentLabel: 'PayPal',
@@ -43,8 +43,8 @@ const PAYMENT_METHOD_CONFIGS = {
     diagnosticLabel: 'PayPal',
     checkoutMerchantPath: 'openai_ie',
     billingDetails: {
-      country: 'DE',
-      currency: 'EUR',
+      country: 'US',
+      currency: 'USD',
     },
     patterns: [/paypal/i],
   },

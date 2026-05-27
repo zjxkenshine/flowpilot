@@ -10,14 +10,14 @@ function loadPlusCheckoutBillingModule() {
 
 function createAddressSeed() {
   return {
-    countryCode: 'DE',
-    query: 'Berlin Mitte',
+    countryCode: 'US',
+    query: 'New York NY',
     suggestionIndex: 1,
     fallback: {
-      address1: 'Unter den Linden',
-      city: 'Berlin',
-      region: 'Berlin',
-      postalCode: '10117',
+      address1: '3450 Broadway',
+      city: 'New York',
+      region: 'New York',
+      postalCode: '10031',
     },
   };
 }
@@ -66,11 +66,11 @@ function createKrAddressSeed() {
 
 function createSuccessfulBillingResult() {
   return {
-    countryText: 'Germany',
+    countryText: 'United States',
     structuredAddress: {
-      address1: 'Unter den Linden',
-      city: 'Berlin',
-      postalCode: '10117',
+      address1: '3450 Broadway',
+      city: 'New York',
+      postalCode: '10031',
     },
   };
 }
@@ -357,7 +357,7 @@ test('Phone Plus zero amount keeps the original checkout flow', async () => {
 
   assert.equal(events.messages.some((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE'), true);
   assert.deepStrictEqual(events.completed, [
-    { step: 'plus-checkout-billing', payload: { plusBillingCountryText: 'Germany' } },
+    { step: 'plus-checkout-billing', payload: { plusBillingCountryText: 'United States' } },
   ]);
 });
 
@@ -436,7 +436,7 @@ test('Plus checkout billing waits on processing subscribe text before clicking a
   }
 });
 
-test('Classic PayPal billing reruns the checkout half-flow after an 8-second redirect timeout', async () => {
+test('Classic PayPal billing retries submit without rerunning the checkout half-flow', async () => {
   const originalNow = Date.now;
   let now = 0;
   let clickCalls = 0;
@@ -474,13 +474,12 @@ test('Classic PayPal billing reruns the checkout half-flow after an 8-second red
     const selectMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL');
     const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
     const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
-    assert.equal(selectMessages.length, 2);
-    assert.equal(fillMessages.length, 2);
+    assert.equal(selectMessages.length, 1);
+    assert.equal(fillMessages.length, 1);
     assert.equal(subscribeMessages.length, 2);
-    assert.equal(subscribeMessages[1].message.payload.ensurePaymentActive, true);
-    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 16, true);
-    assert.equal(events.logs.some((entry) => /8 秒内未跳转到 PayPal/.test(entry.message)), true);
-    assert.equal(events.logs.some((entry) => /重新执行 PayPal 付款后半段/.test(entry.message)), true);
+    assert.equal(subscribeMessages.some((entry) => entry.message.payload.ensurePaymentActive !== undefined), false);
+    assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 20, true);
+    assert.equal(events.logs.some((entry) => /重新检测订阅按钮/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
   } finally {
     Date.now = originalNow;
@@ -544,7 +543,7 @@ test('Classic PayPal billing reuses an active checkout conversion proxy session 
       plusCheckoutConversionProxyUrl: 'socks5h://proxy.example:1080',
     });
 
-    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 2);
+    assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL').length, 1);
     assert.deepStrictEqual(proxyEvents.proxy, []);
     assert.equal(events.logs.some((entry) => /复用已启用的支付转换代理/.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
@@ -585,7 +584,7 @@ test('Classic PayPal billing falls back to applying checkout conversion proxy wh
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
 });
 
-test('Classic PayPal billing releases proxy once after 3 refill retries still fail to redirect', async () => {
+test('Classic PayPal billing releases proxy once after 3 submit attempts still fail to redirect', async () => {
   const originalNow = Date.now;
   let now = 0;
   Date.now = () => now;
@@ -622,13 +621,15 @@ test('Classic PayPal billing releases proxy once after 3 refill retries still fa
         plusPaymentMethod: 'paypal',
         plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
       }),
-      /8 秒内未跳转到 PayPal，已重试 3 次重新执行 PayPal 付款后半段/
+      /多次检测订阅按钮后仍未跳转到 PayPal/
     );
 
     const selectMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_SELECT_PAYPAL');
     const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
-    assert.equal(selectMessages.length, 4);
-    assert.equal(fillMessages.length, 4);
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    assert.equal(selectMessages.length, 1);
+    assert.equal(fillMessages.length, 1);
+    assert.equal(subscribeMessages.length, 3);
     assert.deepStrictEqual(proxyEvents.proxy.map((entry) => entry.type), ['apply', 'restore']);
     assert.equal(proxyEvents.proxy[1].flowType, 'classic-paypal');
   } finally {
@@ -692,6 +693,136 @@ test('Plus checkout billing sends the billing command to the iframe that contain
   assert.equal(subscribeMessage.frameId, 0);
   assert.equal(events.logs.some((entry) => /checkout iframe/.test(entry.message)), true);
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
+});
+
+test('Classic PayPal billing uses randomuser.me before local US address fallback', async () => {
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+      { frameId: 9, url: 'https://js.stripe.com/v3/elements-inner-autocompl.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'United States',
+      },
+      9: { hasPayPal: false, paypalCandidates: [] },
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: [{
+            location: {
+              street: { number: 1600, name: 'Pennsylvania Ave NW' },
+              city: 'Washington',
+              state: 'District of Columbia',
+              postcode: 20500,
+            },
+          }],
+        }),
+      };
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({});
+
+  const fillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(fetchRequests.length, 1);
+  assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
+  assert.equal(fillMessage.message.payload.addressSeed.countryCode, 'US');
+  assert.equal(fillMessage.message.payload.addressSeed.source, 'randomuser');
+  assert.equal(fillMessage.message.payload.addressSeed.skipAutocomplete, true);
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.city, 'Washington');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.postalCode, '20500');
+});
+
+test('Classic PayPal billing falls back to local US seed when randomuser.me fails', async () => {
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'United States',
+      },
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      };
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({});
+
+  const fillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(fetchRequests.length, 2);
+  assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
+  assert.equal(fetchRequests[1].url, 'https://www.meiguodizhi.com/api/v1/dz');
+  assert.equal(fillMessage.message.payload.addressSeed.countryCode, 'US');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.address1, '3450 Broadway');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.city, 'New York');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.postalCode, '10031');
+});
+
+test('Classic PayPal billing can use the US 4-digit autocomplete seed mode', async () => {
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'United States',
+      },
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      throw new Error('network should not be used for autocomplete mode');
+    },
+  });
+
+  await executor.executePlusCheckoutBilling({ paypalCheckoutUsAutocompleteModeEnabled: true });
+
+  const fillQueryMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_ADDRESS_QUERY');
+  const combinedFillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(fetchRequests.length, 0);
+  const addressSeed = (fillQueryMessage || combinedFillMessage).message.payload.addressSeed;
+  assert.equal(addressSeed.countryCode, 'US');
+  assert.match(addressSeed.query, /^\d{4}$/);
+  assert.equal(addressSeed.numericQueryDigits, 4);
+  assert.equal(addressSeed.randomSuggestion, true);
+  assert.equal(addressSeed.forceCountrySelectionBeforeAutocomplete, true);
+  assert.equal(addressSeed.source, 'paypal_us_google_autocomplete');
 });
 
 test('Plus checkout billing uses proxy exit country for GoPay address when available', async () => {
@@ -1064,7 +1195,12 @@ test('Plus checkout billing skips Google autocomplete when meiguodizhi returns a
     stateByFrame: {
       0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
       7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
-      8: { hasPayPal: false, paypalCandidates: [], billingFieldsVisible: true },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'Germany',
+      },
       9: { hasPayPal: false, paypalCandidates: [] },
     },
     fetchImpl: async (url, init) => {

@@ -223,6 +223,32 @@ test('PayPal profile generator falls back to selected PayPal account email and U
   assert.equal(profile.city, 'New York');
 });
 
+test('PayPal profile generator defaults to a local US address seed without proxy country', () => {
+  const requestedSeeds = [];
+  const { generator } = createGenerator({
+    getAddressSeedForCountry: (countryCode, options) => {
+      requestedSeeds.push({ countryCode, options });
+      return {
+        countryCode,
+        fallback: {
+          address1: '3450 Broadway',
+          city: 'New York',
+          region: 'New York',
+          postalCode: '10031',
+        },
+      };
+    },
+  });
+
+  const profile = generator.generateProfile();
+
+  assert.deepEqual(requestedSeeds, [{ countryCode: 'US', options: { fallbackCountry: 'US' } }]);
+  assert.equal(profile.countryCode, 'US');
+  assert.equal(profile.generatedFromCountry, 'US');
+  assert.equal(profile.address1, '3450 Broadway');
+  assert.equal(profile.city, 'New York');
+});
+
 test('PayPal profile generator persists generated profile and copies full profile in fixed order', async () => {
   const { btnCopyProfile, btnGenerateProfile, events, generator, getLatestState } = createGenerator({
     initialState: {

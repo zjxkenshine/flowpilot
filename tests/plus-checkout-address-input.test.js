@@ -104,7 +104,7 @@ function createPlusCheckoutMessageHarness({ checkoutSessionId = 'cs_test_123', c
   return { send, fetchCalls };
 }
 
-test('CREATE_PLUS_CHECKOUT keeps PayPal on DE/EUR and openai_ie merchant path by default', async () => {
+test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_ie merchant path by default', async () => {
   const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_paypal' });
 
   const result = await harness.send({
@@ -115,8 +115,8 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on DE/EUR and openai_ie merchant path by
 
   assert.equal(result.ok, true);
   assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_paypal');
-  assert.equal(result.country, 'DE');
-  assert.equal(result.currency, 'EUR');
+  assert.equal(result.country, 'US');
+  assert.equal(result.currency, 'USD');
 
   const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
   assert.ok(checkoutCall);
@@ -124,7 +124,7 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on DE/EUR and openai_ie merchant path by
   assert.equal(checkoutCall.options.headers.Authorization, 'Bearer test-access-token');
   const payload = JSON.parse(checkoutCall.options.body);
   assert.equal(payload.plan_name, 'chatgptplusplan');
-  assert.deepEqual(payload.billing_details, { country: 'DE', currency: 'EUR' });
+  assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
 });
 
 test('CREATE_PLUS_CHECKOUT uses ID/IDR and openai_llc merchant path for GoPay', async () => {
