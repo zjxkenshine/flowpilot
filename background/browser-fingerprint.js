@@ -49,6 +49,13 @@
       timezoneIds: Object.freeze(['Asia/Singapore']),
       geolocation: Object.freeze({ latitude: 1.3521, longitude: 103.8198, accuracy: 60 }),
     }),
+    BR: Object.freeze({
+      locale: 'en-US',
+      languages: Object.freeze(['en-US', 'en']),
+      acceptLanguage: 'en-US,en;q=0.9',
+      timezoneIds: Object.freeze(['America/Sao_Paulo']),
+      geolocation: Object.freeze({ latitude: -23.5505, longitude: -46.6333, accuracy: 90 }),
+    }),
   });
 
   const LANGUAGE_FINGERPRINT_PROFILES = Object.freeze({
@@ -67,6 +74,7 @@
   const ENGLISH_LANGUAGE_REGIONS = Object.freeze(new Set([
     'US',
     'SG',
+    'BR',
     'GB',
     'UK',
     'CA',
@@ -81,6 +89,8 @@
 
   const REGION_NAME_ALIASES = Object.freeze({
     AUSTRALIA: 'AU',
+    BRASIL: 'BR',
+    BRAZIL: 'BR',
     CANADA: 'CA',
     CHINA: 'CN',
     ENGLAND: 'GB',
