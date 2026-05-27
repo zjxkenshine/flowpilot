@@ -178,7 +178,7 @@ test('completeNodeFromBackground writes registration-success account book entry 
   });
 });
 
-test('completeNodeFromBackground skips Phone Plus payment after non-free registration status', async () => {
+test('completeNodeFromBackground keeps Phone Plus payment after non-free registration status', async () => {
   const events = [];
   const api = createApi(events, 'platform-verify', {
     state: {
@@ -202,16 +202,9 @@ test('completeNodeFromBackground skips Phone Plus payment after non-free registr
   });
 
   const accountBookIndex = events.findIndex((event) => event.type === 'account-book');
-  const fallbackIndex = events.findIndex((event) => event.type === 'fallback');
   assert.ok(accountBookIndex >= 0);
-  assert.ok(fallbackIndex > accountBookIndex);
   assert.equal(events[accountBookIndex].state.freeStatus, 'unknown');
-  assert.deepStrictEqual(events[fallbackIndex].context, {
-    reason: 'phone-plus-registration-non-free',
-    detail: 'freeStatus=unknown',
-    nodeId: 'wait-registration-success',
-  });
-  assert.equal(events[fallbackIndex].state.freeStatus, 'unknown');
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
 });
 
 test('completeNodeFromBackground keeps Phone Plus payment after free registration status', async () => {

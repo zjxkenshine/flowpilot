@@ -1604,7 +1604,7 @@ test('NODE_COMPLETE records registration-success account book entry when wait-re
   assert.equal(accountBookCalls[0][1].ipProxyAppliedExitRegion, 'JP');
 });
 
-test('NODE_COMPLETE skips Phone Plus payment segment after non-free registration status', async () => {
+test('NODE_COMPLETE keeps Phone Plus payment segment after non-free registration status', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };
   const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
@@ -1698,13 +1698,7 @@ test('NODE_COMPLETE skips Phone Plus payment segment after non-free registration
   assert.equal(accountBookCalls.length, 1);
   assert.equal(accountBookCalls[0][0], 'registration_success');
   assert.equal(accountBookCalls[0][1].freeStatus, 'unknown');
-  assert.equal(fallbackCalls.length, 1);
-  assert.equal(fallbackCalls[0][0].freeStatus, 'unknown');
-  assert.deepStrictEqual(fallbackCalls[0][1], {
-    reason: 'phone-plus-registration-non-free',
-    detail: 'freeStatus=unknown',
-    nodeId: 'wait-registration-success',
-  });
+  assert.equal(fallbackCalls.length, 0);
 });
 
 test('NODE_COMPLETE records registration-success account book entry when kiro register finalization completes', async () => {

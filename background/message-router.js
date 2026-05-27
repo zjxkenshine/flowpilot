@@ -1155,22 +1155,6 @@
           ) {
             await upsertAccountBookEntry('registration_success', postCompletionState);
           }
-          const shouldSkipPhonePlusPaymentAfterRegistration = Boolean(
-            nodeId === 'wait-registration-success'
-            && postCompletionState?.phonePlusModeEnabled
-            && String(postCompletionState?.freeStatus || '').trim().toLowerCase() !== 'free'
-          );
-          if (
-            shouldSkipPhonePlusPaymentAfterRegistration
-            && typeof handlePhonePlusNonFreeTrialFallback === 'function'
-          ) {
-            const freeStatus = String(postCompletionState?.freeStatus || '').trim().toLowerCase() || 'unknown';
-            await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
-              reason: 'phone-plus-registration-non-free',
-              detail: `freeStatus=${freeStatus}`,
-              nodeId,
-            });
-          }
           if (isFinalNode && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
