@@ -2921,6 +2921,7 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
     }
   }
   const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : IP_PROXY_FETCH_TIMEOUT_MS;
+  const pullPool = async () => {
   const response = await fetchWithTimeout(requestUrl, {
     method: 'GET',
     cache: 'no-store',
@@ -2952,6 +2953,8 @@ async function pullIpProxyPoolFromApi(state = {}, options = {}) {
   }
   const maxItems = Math.max(1, Math.min(500, Number(options.maxItems) || 100));
   return pool.slice(0, maxItems);
+  };
+  return runWithIpProxyApiFetchRoute(state, provider, pullPool);
 }
 
 function installIpProxyAuthListener() {
@@ -3185,6 +3188,116 @@ function resolveIpProxyApiRouteFallback(entry = {}, routeMode = DEFAULT_IP_PROXY
     return resolveIpProxyPacProxyEndpoint(entry) || 'DIRECT';
   }
   return 'DIRECT';
+}
+
+function canUseChromeProxySettingsForIpProxyApiFetch() {
+  return Boolean(chrome?.proxy?.settings?.get && chrome?.proxy?.settings?.set && chrome?.proxy?.settings?.clear);
+}
+
+function buildIpProxyApiFetchPacScript(fallback = 'DIRECT') {
+  const safeFallback = String(fallback || 'DIRECT').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `
+function FindProxyForURL(url, host) {
+  return "${safeFallback}";
+}`.trim();
+}
+
+async function restoreChromeProxySettingsSnapshotForIpProxyApiFetch(snapshot = null) {
+  if (!canUseChromeProxySettingsForIpProxyApiFetch()) {
+    return false;
+  }
+  const value = snapshot?.value;
+  if (value && value.mode) {
+    await callChromeProxySettings('set', {
+      value,
+      scope: IP_PROXY_SETTINGS_SCOPE,
+    });
+    return true;
+  }
+  await callChromeProxySettings('clear', { scope: IP_PROXY_SETTINGS_SCOPE });
+  return true;
+}
+
+function resolveIpProxyApiFetchRouteValue(state = {}, provider = DEFAULT_IP_PROXY_SERVICE) {
+  const routeMode = normalizeIpProxyApiRouteMode(state?.ipProxyApiRouteMode);
+  if (routeMode === 'direct') {
+    return { mode: 'direct' };
+  }
+  const runtime = getIpProxyRuntimeSnapshot(state, normalizeIpProxyMode(state?.ipProxyMode), provider);
+  const entry = runtime?.current || getIpProxyCurrentEntryFromState(state) || null;
+  const fallback = resolveIpProxyApiRouteFallback(entry, routeMode);
+  if (!fallback || fallback === 'DIRECT') {
+    return { mode: 'direct' };
+  }
+  return {
+    mode: 'pac_script',
+    pacScript: {
+      data: buildIpProxyApiFetchPacScript(fallback),
+      mandatory: true,
+    },
+  };
+}
+
+function resolveIpProxyApiFetchAuthEntry(state = {}, provider = DEFAULT_IP_PROXY_SERVICE) {
+  const routeMode = normalizeIpProxyApiRouteMode(state?.ipProxyApiRouteMode);
+  if (routeMode !== 'provider_proxy') {
+    return null;
+  }
+  const runtime = getIpProxyRuntimeSnapshot(state, normalizeIpProxyMode(state?.ipProxyMode), provider);
+  const entry = runtime?.current || getIpProxyCurrentEntryFromState(state) || null;
+  if (!entry?.host || !entry?.port || !String(entry?.username || '').trim()) {
+    return null;
+  }
+  return {
+    host: String(entry.host || '').trim(),
+    port: normalizeIpProxyPort(entry.port),
+    username: String(entry.username || '').trim(),
+    password: String(entry.password || ''),
+  };
+}
+
+async function runWithIpProxyApiFetchRoute(state = {}, provider = DEFAULT_IP_PROXY_SERVICE, operation = async () => null) {
+  if (provider !== '711proxy'
+    || normalizeIpProxyMode(state?.ipProxyMode) !== 'api'
+    || !canUseChromeProxySettingsForIpProxyApiFetch()) {
+    return operation();
+  }
+
+  const previousSnapshot = await getChromeProxySettings({ incognito: false });
+  const previousAuthEntry = currentIpProxyAuthEntry ? { ...currentIpProxyAuthEntry } : null;
+  const routeAuthEntry = resolveIpProxyApiFetchAuthEntry(state, provider);
+  let operationError = null;
+  let operationResult;
+  try {
+    currentIpProxyAuthEntry = routeAuthEntry || null;
+    await callChromeProxySettings('set', {
+      value: resolveIpProxyApiFetchRouteValue(state, provider),
+      scope: IP_PROXY_SETTINGS_SCOPE,
+    });
+    operationResult = await operation();
+  } catch (error) {
+    operationError = error;
+  }
+
+  let restoreError = null;
+  try {
+    await restoreChromeProxySettingsSnapshotForIpProxyApiFetch(previousSnapshot);
+  } catch (error) {
+    restoreError = error;
+  } finally {
+    currentIpProxyAuthEntry = previousAuthEntry;
+  }
+
+  if (operationError) {
+    if (restoreError) {
+      operationError.message = `${operationError.message || String(operationError)} Proxy restore failed after 711 API fetch: ${restoreError?.message || String(restoreError)}`;
+    }
+    throw operationError;
+  }
+  if (restoreError) {
+    throw new Error(`711 API fetch succeeded, but proxy restore failed: ${restoreError?.message || String(restoreError)}`);
+  }
+  return operationResult;
 }
 
 function buildIpProxyPacScript(entry, options = {}) {

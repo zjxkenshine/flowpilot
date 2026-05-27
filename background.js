@@ -15627,6 +15627,7 @@ const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPa
   checkoutConversionProxyManager,
   completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
+  getState,
   queryTabsInAutomationWindow,
   getTabId,
   isTabAlive,
@@ -15657,7 +15658,9 @@ const goPayApproveExecutor = self.MultiPageBackgroundGoPayApprove?.createGoPayAp
 });
 const plusReturnConfirmExecutor = self.MultiPageBackgroundPlusReturnConfirm?.createPlusReturnConfirmExecutor({
   addLog,
+  checkoutConversionProxyManager,
   completeNodeFromBackground,
+  getState,
   getTabId,
   isTabAlive,
   setState,

@@ -9,7 +9,9 @@
   function createPlusReturnConfirmExecutor(deps = {}) {
     const {
       addLog,
+      checkoutConversionProxyManager = null,
       completeNodeFromBackground,
+      getState = null,
       getTabId,
       isTabAlive,
       setState,
@@ -42,12 +44,28 @@
         && !/paypal\.|gopay|gojek|midtrans|xendit|stripe/i.test(String(url || ''));
     }
 
+    async function releaseClassicCheckoutConversionProxySession(state = {}) {
+      if (!checkoutConversionProxyManager?.releaseSessionForNode) {
+        return false;
+      }
+      const latestState = typeof getState === 'function'
+        ? await getState().catch(() => state)
+        : state;
+      const result = await checkoutConversionProxyManager.releaseSessionForNode('paypal-approve', latestState);
+      if (result?.released) {
+        await addLog('Step 9: released residual checkout conversion proxy after return confirmation.', 'info');
+        return true;
+      }
+      return false;
+    }
+
     async function executePlusReturnConfirm(state = {}) {
       const tabId = await resolveReturnTabId(state);
       await addLog('步骤 9：正在等待支付授权后回跳到 ChatGPT / OpenAI 页面...', 'info');
       const tab = await waitForTabUrlMatchUntilStopped(tabId, isReturnUrl);
       await addLog('步骤 9：已检测到订阅回跳页面，固定等待 20 秒让页面完成加载。', 'info');
       await sleepWithStop(PLUS_RETURN_SETTLE_WAIT_MS);
+      await releaseClassicCheckoutConversionProxySession(state);
 
       await setState({
         plusCheckoutTabId: tabId,

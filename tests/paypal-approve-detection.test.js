@@ -16,9 +16,11 @@ function createExecutor({
   submitResults,
   tabUrls = [],
   getTabId = async (source) => (source === 'paypal-flow' ? 1 : null),
+  getState = async () => ({}),
   isTabAlive = async () => true,
   queryTabs = [],
   queryTabsInAutomationWindow = null,
+  checkoutConversionProxyManager = null,
 }) {
   const api = loadModule();
   const events = {
@@ -59,7 +61,9 @@ function createExecutor({
     completeNodeFromBackground: async (step, payload) => {
       events.completed.push({ step, payload });
     },
+    checkoutConversionProxyManager,
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState,
     getTabId,
     isTabAlive,
     ...(typeof queryTabsInAutomationWindow === 'function' ? { queryTabsInAutomationWindow } : {}),
@@ -261,6 +265,29 @@ test('PayPal approve keeps original combined email and password login path', asy
   assert.equal(events.submittedPayloads.length, 1);
   assert.deepEqual(events.completed.map((item) => item.step), ['paypal-approve']);
   assert.equal(events.messages.includes('PAYPAL_CLICK_APPROVE'), true);
+});
+
+test('PayPal approve releases checkout conversion proxy before completing node', async () => {
+  const releaseEvents = [];
+  const { executor, events } = createExecutor({
+    pageStates: [
+      { needsLogin: false, approveReady: true },
+    ],
+    submitResults: [],
+    getState: async () => ({ plusCheckoutConversionProxySession: { active: true } }),
+    checkoutConversionProxyManager: {
+      releaseSessionForNode: async (nodeKey, state) => {
+        releaseEvents.push({ nodeKey, state });
+        return { released: true };
+      },
+    },
+  });
+
+  await executor.executePayPalApprove({});
+
+  assert.deepEqual(releaseEvents.map((item) => item.nodeKey), ['paypal-approve']);
+  assert.equal(events.completed.length, 1);
+  assert.equal(events.logs.some(({ message }) => /released checkout conversion proxy/i.test(message)), true);
 });
 
 test('PayPal content routes email and approve page operations through the operation delay gate', async () => {

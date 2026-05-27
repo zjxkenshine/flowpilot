@@ -681,6 +681,131 @@ test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snap
   assert.equal(pool[0].protocol, 'http');
 });
 
+function installProxySettingsMock(api, initialValue = { mode: 'pac_script', pacScript: { data: 'original' } }) {
+  const events = [];
+  let currentValue = structuredClone(initialValue);
+  api.chrome.runtime = {};
+  api.chrome.proxy = {
+    settings: {
+      get(details, callback) {
+        events.push({ type: 'get', details });
+        callback({ levelOfControl: 'controlled_by_this_extension', value: structuredClone(currentValue) });
+      },
+      set(details, callback) {
+        events.push({ type: 'set', details: structuredClone(details) });
+        currentValue = structuredClone(details.value);
+        callback();
+      },
+      clear(details, callback) {
+        events.push({ type: 'clear', details: structuredClone(details) });
+        currentValue = {};
+        callback();
+      },
+    },
+  };
+  return {
+    events,
+    get currentValue() {
+      return currentValue;
+    },
+  };
+}
+
+async function pull711PoolWithRoute(routeMode, extraState = {}, fetchImpl = null) {
+  const api = loadIpProxyCore();
+  const proxyMock = installProxySettingsMock(api);
+  const originalFetch = global.fetch;
+  global.fetch = fetchImpl || (async () => ({
+    ok: true,
+    text: async () => '1.2.3.4:8080:user:pass',
+  }));
+
+  try {
+    const pool = await api.pullIpProxyPoolFromApi({
+      ipProxyService: '711proxy',
+      ipProxyMode: 'api',
+      ipProxyApiRouteMode: routeMode,
+      ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=1&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+      ...extraState,
+    });
+    return { api, pool, proxyMock };
+  } catch (error) {
+    error.proxyMock = proxyMock;
+    throw error;
+  } finally {
+    if (originalFetch === undefined) {
+      delete global.fetch;
+    } else {
+      global.fetch = originalFetch;
+    }
+  }
+}
+
+test('pullIpProxyPoolFromApi routes 711 API fetch direct and restores previous proxy settings', async () => {
+  const { pool, proxyMock } = await pull711PoolWithRoute('direct');
+
+  const setEvents = proxyMock.events.filter((event) => event.type === 'set');
+  assert.equal(pool.length, 1);
+  assert.equal(setEvents.length, 2);
+  assert.deepEqual(setEvents[0].details.value, { mode: 'direct' });
+  assert.deepEqual(setEvents[1].details.value, { mode: 'pac_script', pacScript: { data: 'original' } });
+});
+
+test('pullIpProxyPoolFromApi routes 711 API fetch through local proxy and restores previous proxy settings', async () => {
+  const { proxyMock } = await pull711PoolWithRoute('local_proxy');
+
+  const setEvents = proxyMock.events.filter((event) => event.type === 'set');
+  assert.equal(setEvents.length, 2);
+  assert.equal(setEvents[0].details.value.mode, 'pac_script');
+  assert.match(setEvents[0].details.value.pacScript.data, /PROXY 127\.0\.0\.1:7897/);
+  assert.deepEqual(setEvents[1].details.value, { mode: 'pac_script', pacScript: { data: 'original' } });
+});
+
+test('pullIpProxyPoolFromApi routes 711 API fetch through current provider proxy and restores previous proxy settings', async () => {
+  const { proxyMock } = await pull711PoolWithRoute('provider_proxy', {
+    ipProxyApiPool: [
+      {
+        host: 'global.rotgb.711proxy.com',
+        port: 10000,
+        username: 'user',
+        password: 'pass',
+        protocol: 'http',
+        provider: '711proxy',
+      },
+    ],
+    ipProxyApiCurrentIndex: 0,
+  });
+
+  const setEvents = proxyMock.events.filter((event) => event.type === 'set');
+  assert.equal(setEvents.length, 2);
+  assert.equal(setEvents[0].details.value.mode, 'pac_script');
+  assert.match(setEvents[0].details.value.pacScript.data, /PROXY global\.rotgb\.711proxy\.com:10000/);
+  assert.deepEqual(setEvents[1].details.value, { mode: 'pac_script', pacScript: { data: 'original' } });
+});
+
+test('pullIpProxyPoolFromApi restores previous proxy settings after 711 API fetch failure', async () => {
+  let thrown = null;
+  await assert.rejects(
+    async () => {
+      try {
+        await pull711PoolWithRoute('local_proxy', {}, async () => ({
+          ok: false,
+          status: 500,
+          text: async () => '',
+        }));
+      } catch (error) {
+        thrown = error;
+        throw error;
+      }
+    },
+    /HTTP 500/
+  );
+  const setEvents = thrown.proxyMock.events.filter((event) => event.type === 'set');
+  assert.equal(setEvents.length, 2);
+  assert.match(setEvents[0].details.value.pacScript.data, /PROXY 127\.0\.0\.1:7897/);
+  assert.deepEqual(setEvents[1].details.value, { mode: 'pac_script', pacScript: { data: 'original' } });
+});
+
 test('pullIpProxyPoolFromApi preserves duplicate entries for 711 API mode', async () => {
   const api = loadIpProxyCore();
   const originalFetch = global.fetch;

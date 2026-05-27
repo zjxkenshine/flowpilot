@@ -11,8 +11,10 @@
     const {
       addLog,
       chrome,
+      checkoutConversionProxyManager = null,
       completeNodeFromBackground,
       ensureContentScriptReadyOnTabUntilStopped,
+      getState = null,
       getTabId,
       isTabAlive,
       queryTabsInAutomationWindow = null,
@@ -229,6 +231,21 @@
       return Boolean(result?.clicked);
     }
 
+    async function releaseClassicCheckoutConversionProxySession(state = {}) {
+      if (!checkoutConversionProxyManager?.releaseSessionForNode) {
+        return false;
+      }
+      const latestState = typeof getState === 'function'
+        ? await getState().catch(() => state)
+        : state;
+      const result = await checkoutConversionProxyManager.releaseSessionForNode('paypal-approve', latestState);
+      if (result?.released) {
+        await addLog('Step 8: released checkout conversion proxy after PayPal approval.', 'info');
+        return true;
+      }
+      return false;
+    }
+
     async function executePayPalApprove(state = {}) {
       const tabId = await resolvePayPalTabId(state);
       await ensurePayPalReady(tabId);
@@ -294,6 +311,7 @@
         await sleepWithStop(500);
       }
 
+      await releaseClassicCheckoutConversionProxySession(state);
       await completeNodeFromBackground('paypal-approve', {
         plusPaypalApprovedAt: Date.now(),
       });
