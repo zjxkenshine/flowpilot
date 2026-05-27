@@ -412,8 +412,9 @@ async function resendVerificationCode(step, timeout = 45000) {
 }
 
 function is405MethodNotAllowedPage() {
-  const pageText = document.body?.textContent || '';
-  return AUTH_ROUTE_ERROR_PATTERN.test(pageText);
+  const pageText = String(document.body?.textContent || '').replace(/\s+/g, ' ').trim();
+  const title = String(document?.title || '');
+  return AUTH_ROUTE_ERROR_PATTERN.test(pageText) || AUTH_ROUTE_ERROR_PATTERN.test(title);
 }
 
 function getStep405RecoveryStateKey(step) {
@@ -2876,7 +2877,7 @@ const ADD_EMAIL_PAGE_PATTERN = /add[\s-]*email|添加(?:电子邮件|邮箱)|要
 const STEP5_SUBMIT_ERROR_PATTERN = /无法根据该信息创建帐户|请重试|アカウントを作成できません|アカウント作成に失敗|もう一度お試し|問題が発生しました|無効な(?:生年月日|誕生日|日付)|生年月日|誕生日|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|something\s+went\s+wrong|invalid\s+(?:birthday|birth|date)|生日|出生日期/i;
 const AUTH_TIMEOUT_ERROR_TITLE_PATTERN = /糟糕，出错了|問題が発生しました|エラーが発生しました|something\s+went\s+wrong|oops/i;
 const AUTH_TIMEOUT_ERROR_DETAIL_PATTERN = /operation\s+timed\s+out|timed\s+out|请求超时|操作超时|タイムアウト|failed\s+to\s+fetch|network\s+error|fetch\s+failed|ネットワークエラー|取得に失敗/i;
-const AUTH_ROUTE_ERROR_PATTERN = /405\s+method\s+not\s+allowed|route\s+error.*405|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/email-verification/i;
+const AUTH_ROUTE_ERROR_PATTERN = /405\s+method\s+not\s+allowed|route\s+error.*405|route\s+error.*400.*invalid\s+content\s+type|400\s+invalid\s+content\s+type|invalid\s+content\s+type:\s*text\/html|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/email-verification/i;
 const STEP4_405_RECOVERY_ERROR_PREFIX = 'STEP4_405_RECOVERY_LIMIT::';
 const STEP4_405_RECOVERY_LIMIT = 3;
 const SIGNUP_USER_ALREADY_EXISTS_ERROR_PREFIX = 'SIGNUP_USER_ALREADY_EXISTS::';
@@ -3820,7 +3821,8 @@ function getAuthTimeoutErrorPageState(options = {}) {
   const titleMatched = AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(text)
     || AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(document.title || '');
   const detailMatched = AUTH_TIMEOUT_ERROR_DETAIL_PATTERN.test(text);
-  const routeErrorMatched = AUTH_ROUTE_ERROR_PATTERN.test(text);
+  const routeErrorMatched = AUTH_ROUTE_ERROR_PATTERN.test(text)
+    || AUTH_ROUTE_ERROR_PATTERN.test(document.title || '');
   const fetchFailedMatched = /failed\s+to\s+fetch|network\s+error|fetch\s+failed/i.test(text);
   const maxCheckAttemptsBlocked = /max_check_attempts/i.test(text);
   const emailInUseBlocked = /email_in_use/i.test(text);

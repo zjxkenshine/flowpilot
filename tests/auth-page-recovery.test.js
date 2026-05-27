@@ -60,7 +60,7 @@ function createRecoveryApi(state) {
     isVisibleElement: () => true,
     log: () => {},
     performOperationWithDelay: state.performOperationWithDelay,
-    routeErrorPattern: /405\s+method\s+not\s+allowed|route\s+error.*405|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/email-verification/i,
+    routeErrorPattern: /405\s+method\s+not\s+allowed|route\s+error.*405|route\s+error.*400.*invalid\s+content\s+type|400\s+invalid\s+content\s+type|invalid\s+content\s+type:\s*text\/html|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/email-verification/i,
     simulateClick: () => {
       state.clickCount += 1;
       if (Array.isArray(state.events)) {
@@ -114,6 +114,46 @@ test('auth page recovery detects route error retry page on email verification ro
     pathname: '/email-verification',
     retryVisible: true,
     title: '',
+  };
+  const api = createRecoveryApi(state);
+
+  const snapshot = api.getAuthTimeoutErrorPageState({
+    pathPatterns: [/\/email-verification(?:[/?#]|$)/i],
+  });
+
+  assert.equal(Boolean(snapshot), true);
+  assert.equal(snapshot.titleMatched, false);
+  assert.equal(snapshot.detailMatched, false);
+  assert.equal(snapshot.routeErrorMatched, true);
+});
+
+test('auth page recovery detects invalid content type route error retry page', () => {
+  const state = {
+    clickCount: 0,
+    pageText: 'Route Error (400 Invalid content type: text/html; charset=UTF-8): "Invalid content type: text/html; charset=UTF-8"',
+    pathname: '/email-verification',
+    retryVisible: true,
+    title: '',
+  };
+  const api = createRecoveryApi(state);
+
+  const snapshot = api.getAuthTimeoutErrorPageState({
+    pathPatterns: [/\/email-verification(?:[/?#]|$)/i],
+  });
+
+  assert.equal(Boolean(snapshot), true);
+  assert.equal(snapshot.titleMatched, false);
+  assert.equal(snapshot.detailMatched, false);
+  assert.equal(snapshot.routeErrorMatched, true);
+});
+
+test('auth page recovery detects route error from document title', () => {
+  const state = {
+    clickCount: 0,
+    pageText: '',
+    pathname: '/email-verification',
+    retryVisible: true,
+    title: 'Route Error (400 Invalid content type: text/html; charset=UTF-8)',
   };
   const api = createRecoveryApi(state);
 

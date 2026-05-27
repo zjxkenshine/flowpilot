@@ -449,6 +449,92 @@ test('phone auth resend stops with PHONE_ROUTE_405_RECOVERY_FAILED instead of en
   }
 });
 
+test('phone auth treats invalid content type route error as recoverable retry page', async () => {
+  const originalDocument = global.document;
+  const originalLocation = global.location;
+  const originalWindow = global.window;
+
+  let retryClicks = 0;
+  const fakeRetryButton = {
+    getAttribute(name) {
+      if (name === 'data-dd-action-name') return 'Try again';
+      return '';
+    },
+    click() {
+      retryClicks += 1;
+    },
+    textContent: 'Try again',
+  };
+  const fakePhoneForm = {
+    querySelectorAll(selector) {
+      if (selector === 'button, input[type="submit"], input[type="button"]') {
+        return [fakeRetryButton];
+      }
+      return [];
+    },
+  };
+
+  global.document = {
+    title: 'Route Error (400 Invalid content type: text/html; charset=UTF-8)',
+    querySelector(selector) {
+      if (selector === 'button[data-dd-action-name="Try again"]') {
+        return fakeRetryButton;
+      }
+      if (selector === 'form[action*="/phone-verification" i]') {
+        return fakePhoneForm;
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'button, [role="button"], input[type="submit"], input[type="button"]') {
+        return [fakeRetryButton];
+      }
+      return [];
+    },
+  };
+  global.location = {
+    href: 'https://auth.openai.com/phone-verification',
+    pathname: '/phone-verification',
+  };
+  global.window = global;
+
+  const helpers = api.createPhoneAuthHelpers({
+    fillInput: () => {},
+    getActionText: (element) => String(element?.textContent || ''),
+    getPageTextSnapshot: () => (
+      'Route Error (400 Invalid content type: text/html; charset=UTF-8): "Invalid content type: text/html; charset=UTF-8"'
+    ),
+    getVerificationErrorText: () => '',
+    humanPause: async () => {},
+    isActionEnabled: () => true,
+    isAddPhonePageReady: () => false,
+    isConsentReady: () => false,
+    isPhoneVerificationPageReady: () => true,
+    isVisibleElement: () => true,
+    simulateClick: (element) => {
+      element?.click?.();
+    },
+    sleep: async () => {},
+    throwIfStopped: () => {},
+    waitForElement: async () => null,
+  });
+
+  try {
+    await assert.rejects(
+      () => helpers.resendPhoneVerificationCode(4000),
+      /PHONE_ROUTE_405_RECOVERY_FAILED::/i
+    );
+    assert.ok(
+      retryClicks > 0 && retryClicks <= 6,
+      `expected bounded retry clicks (1..6), got ${retryClicks}`
+    );
+  } finally {
+    global.document = originalDocument;
+    global.location = originalLocation;
+    global.window = originalWindow;
+  }
+});
+
 test('phone auth probes WhatsApp resend channel without clicking', async () => {
   const originalDocument = global.document;
   const originalLocation = global.location;

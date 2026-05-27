@@ -68,7 +68,7 @@
         ? detailPattern.test(text)
         : false;
       const routeErrorMatched = routeErrorPattern instanceof RegExp
-        ? routeErrorPattern.test(text)
+        ? routeErrorPattern.test(text) || routeErrorPattern.test(title)
         : false;
       const maxCheckAttemptsBlocked = /max_check_attempts/i.test(text);
       const userAlreadyExistsBlocked = /user_already_exists/i.test(text);
