@@ -136,9 +136,23 @@
 
     const freeTrialPattern = /免费|free/i;
     const paidPattern = /升级|upgrade/i;
-    let paidMatch = '';
+    const actionCandidates = getActionCandidates();
 
-    for (const element of getActionCandidates()) {
+    for (const element of actionCandidates) {
+      if (!isVisibleElement(element)) continue;
+      const text = getElementText(element);
+      if (!text) continue;
+      if (paidPattern.test(text)) {
+        return {
+          freeStatus: 'paid',
+          reason: 'paid_upgrade_action_visible',
+          url,
+          matchedText: text,
+        };
+      }
+    }
+
+    for (const element of actionCandidates) {
       if (!isVisibleElement(element)) continue;
       const text = getElementText(element);
       if (!text) continue;
@@ -150,18 +164,6 @@
           matchedText: text,
         };
       }
-      if (!paidMatch && paidPattern.test(text)) {
-        paidMatch = text;
-      }
-    }
-
-    if (paidMatch) {
-      return {
-        freeStatus: 'paid',
-        reason: 'paid_upgrade_action_visible',
-        url,
-        matchedText: paidMatch,
-      };
     }
 
     return {
