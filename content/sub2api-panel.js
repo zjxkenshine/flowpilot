@@ -416,6 +416,26 @@ function buildDraftAccountName(groupName) {
   return `${prefix}-${stamp}-${random}`;
 }
 
+function resolveOpenAiOAuthAccountPhoneName(payload = {}, backgroundState = {}) {
+  const sources = [payload, backgroundState];
+  for (const source of sources) {
+    const accountIdentifierType = String(source?.accountIdentifierType || '').trim().toLowerCase();
+    const phoneName = [
+      source?.signupPhoneNumber,
+      source?.signupPhoneCompletedActivation?.phoneNumber,
+      source?.signupPhoneActivation?.phoneNumber,
+      accountIdentifierType === 'phone' ? source?.accountIdentifier : '',
+      source?.sub2apiReloginCurrentAccount?.phone,
+    ]
+      .map((value) => String(value || '').trim())
+      .find(Boolean) || '';
+    if (phoneName) {
+      return phoneName;
+    }
+  }
+  return '';
+}
+
 function extractStateFromAuthUrl(authUrl) {
   try {
     return new URL(authUrl).searchParams.get('state') || '';
@@ -642,7 +662,9 @@ async function step9_submitOpenAiCallback(payload = {}) {
   if (!groupIds.length) {
     throw new Error('SUB2API 返回的目标分组 ID 无效。');
   }
-  const accountName = resolvedEmail
+  const accountPhoneName = resolveOpenAiOAuthAccountPhoneName(payload, backgroundState);
+  const accountName = accountPhoneName
+    || resolvedEmail
     || flowEmail
     || String(payload.sub2apiDraftName || backgroundState.sub2apiDraftName || '').trim()
     || buildDraftAccountName(payload.sub2apiGroupName || backgroundState.sub2apiGroupName || SUB2API_DEFAULT_GROUP_NAME);

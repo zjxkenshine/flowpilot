@@ -181,6 +181,52 @@ test('SUB2API step 10 uses the same proxy for code exchange and account creation
   assert.equal(context.completed[0].payload.visibleStep, 10);
 });
 
+test('SUB2API step 10 creates OAuth account with signup phone as account name', async () => {
+  const fetchCalls = [];
+  const context = createSub2ApiPanelContext(fetchCalls);
+
+  await vm.runInContext(`
+    step9_submitOpenAiCallback({
+      localhostUrl: 'http://localhost:1455/auth/callback?code=callback-code&state=oauth-state',
+      sub2apiUrl: 'https://sub.example/admin/accounts',
+      sub2apiEmail: 'admin@example.com',
+      sub2apiPassword: 'secret',
+      sub2apiGroupName: 'codex',
+      sub2apiSessionId: 'session-1',
+      sub2apiOAuthState: 'oauth-state',
+      sub2apiGroupId: 5,
+      signupPhoneNumber: '+15551234567'
+    })
+  `, context);
+
+  const createCall = fetchCalls.find((call) => call.path === '/api/v1/admin/accounts');
+
+  assert.equal(createCall.body.name, '+15551234567');
+  assert.equal(createCall.body.credentials.email, 'flow@example.com');
+});
+
+test('SUB2API step 10 falls back to exchanged email when no phone is available', async () => {
+  const fetchCalls = [];
+  const context = createSub2ApiPanelContext(fetchCalls);
+
+  await vm.runInContext(`
+    step9_submitOpenAiCallback({
+      localhostUrl: 'http://localhost:1455/auth/callback?code=callback-code&state=oauth-state',
+      sub2apiUrl: 'https://sub.example/admin/accounts',
+      sub2apiEmail: 'admin@example.com',
+      sub2apiPassword: 'secret',
+      sub2apiGroupName: 'codex',
+      sub2apiSessionId: 'session-1',
+      sub2apiOAuthState: 'oauth-state',
+      sub2apiGroupId: 5
+    })
+  `, context);
+
+  const createCall = fetchCalls.find((call) => call.path === '/api/v1/admin/accounts');
+
+  assert.equal(createCall.body.name, 'flow@example.com');
+});
+
 test('SUB2API panel accepts Plus platform verify step 13', async () => {
   const fetchCalls = [];
   const context = createSub2ApiPanelContext(fetchCalls);

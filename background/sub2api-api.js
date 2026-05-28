@@ -345,6 +345,17 @@
       return `${prefix}-${stamp}-${random}`;
     }
 
+    function resolveOpenAiOAuthAccountPhoneName(state = {}) {
+      const accountIdentifierType = normalizeString(state?.accountIdentifierType).toLowerCase();
+      return [
+        state?.signupPhoneNumber,
+        state?.signupPhoneCompletedActivation?.phoneNumber,
+        state?.signupPhoneActivation?.phoneNumber,
+        accountIdentifierType === 'phone' ? state?.accountIdentifier : '',
+        state?.sub2apiReloginCurrentAccount?.phone,
+      ].map(normalizeString).find(Boolean) || '';
+    }
+
     function normalizeCodexSessionObject(value) {
       return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
     }
@@ -680,7 +691,9 @@
         throw new Error('SUB2API 返回的目标分组 ID 无效。');
       }
 
-      const accountName = resolvedEmail
+      const accountPhoneName = resolveOpenAiOAuthAccountPhoneName(state);
+      const accountName = accountPhoneName
+        || resolvedEmail
         || flowEmail
         || normalizeString(state.sub2apiDraftName)
         || buildDraftAccountName(state.sub2apiGroupName || DEFAULT_SUB2API_GROUP_NAME);
@@ -803,6 +816,7 @@
       buildCodexSessionImportContent,
       buildOpenAiCredentials,
       buildOpenAiExtra,
+      resolveOpenAiOAuthAccountPhoneName,
       buildProxyDisplayName,
       extractStateFromAuthUrl,
       generateOpenAiAuthUrl,
