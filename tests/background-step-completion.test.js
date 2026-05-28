@@ -178,7 +178,7 @@ test('completeNodeFromBackground writes registration-success account book entry 
   });
 });
 
-test('completeNodeFromBackground keeps Phone Plus payment after non-free registration status', async () => {
+test('completeNodeFromBackground skips Phone Plus payment after unknown registration status', async () => {
   const events = [];
   const api = createApi(events, 'platform-verify', {
     state: {
@@ -204,7 +204,38 @@ test('completeNodeFromBackground keeps Phone Plus payment after non-free registr
   const accountBookIndex = events.findIndex((event) => event.type === 'account-book');
   assert.ok(accountBookIndex >= 0);
   assert.equal(events[accountBookIndex].state.freeStatus, 'unknown');
-  assert.equal(events.some((event) => event.type === 'fallback'), false);
+  const fallbackEvent = events.find((event) => event.type === 'fallback');
+  assert.equal(fallbackEvent?.context.reason, 'phone-plus-registration-non-free');
+  assert.equal(fallbackEvent?.context.detail, 'freeStatus=unknown');
+  assert.equal(fallbackEvent?.context.nodeId, 'wait-registration-success');
+});
+
+test('completeNodeFromBackground skips Phone Plus payment after paid registration status', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      currentNodeId: 'wait-registration-success',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'paid',
+    freeStatusDetection: { freeStatus: 'paid', reason: 'paid_upgrade_action_visible' },
+  });
+
+  const fallbackEvent = events.find((event) => event.type === 'fallback');
+  assert.equal(fallbackEvent?.context.reason, 'phone-plus-registration-non-free');
+  assert.equal(fallbackEvent?.context.detail, 'freeStatus=paid');
+  assert.ok(events.some((event) => event.type === 'account-book' && event.state.freeStatus === 'paid'));
 });
 
 test('completeNodeFromBackground keeps Phone Plus payment after free registration status', async () => {

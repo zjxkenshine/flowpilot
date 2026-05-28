@@ -12881,6 +12881,22 @@ async function reportCompletedStepSideEffectError(step, error) {
 async function runCompletedNodeSideEffects(nodeId, payload, completionState, lastNodeId) {
   await handleNodeData(nodeId, payload);
   let postCompletionState = await getState();
+  const registrationFreeStatus = String(postCompletionState?.freeStatus || 'unknown').trim().toLowerCase() || 'unknown';
+  if (
+    nodeId === 'wait-registration-success'
+    && postCompletionState?.phonePlusModeEnabled
+    && registrationFreeStatus !== 'free'
+    && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+  ) {
+    const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
+      reason: 'phone-plus-registration-non-free',
+      detail: `freeStatus=${registrationFreeStatus}`,
+      nodeId,
+    });
+    if (fallbackResult?.handled) {
+      postCompletionState = await getState();
+    }
+  }
   const workflowNodeIds = typeof getNodeIdsForState === 'function'
     ? getNodeIdsForState(postCompletionState).map((item) => String(item || '').trim()).filter(Boolean)
     : [];
