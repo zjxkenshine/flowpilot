@@ -232,6 +232,95 @@
       });
     }
 
+    function isStep2PhoneLandingWaitError(errorLike) {
+      const message = getErrorMessage(errorLike);
+      return /等待注册身份提交后的页面跳转超时|注册身份提交后未能识别当前页面|当前页面没有可用的手机号注册入口|等待进入密码页超时/i.test(message);
+    }
+
+    async function recoverSignupPhoneSigninIssueOnce(tabId, phoneNumber, activation, options = {}) {
+      if (!Number.isInteger(tabId) || !phoneNumber) {
+        return {
+          recovered: false,
+          reason: 'missing_tab_or_phone',
+        };
+      }
+
+      const result = await sendToContentScriptResilient('signup-page', {
+        type: 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE',
+        step: 2,
+        source: 'background',
+        payload: {
+          signupMethod: 'phone',
+          phoneNumber,
+          countryId: activation?.countryId ?? null,
+          countryLabel: String(activation?.countryLabel || '').trim(),
+          returnTimeoutMs: options.returnTimeoutMs || 25000,
+        },
+      }, {
+        timeoutMs: options.timeoutMs || 45000,
+        retryDelayMs: options.retryDelayMs || 700,
+        logMessage: '步骤 2：正在检查是否出现手机号注册 Oops 异常页...',
+      });
+
+      if (result?.error) {
+        return {
+          recovered: false,
+          reason: 'content_error',
+          error: result.error,
+        };
+      }
+
+      return result || {
+        recovered: false,
+        reason: 'empty_result',
+      };
+    }
+
+    async function ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(tabId, phoneNumber, activation, step2Result) {
+      if (!step2Result?.alreadyOnPasswordPage) {
+        try {
+          return await ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
+            skipUrlWait: false,
+            timeoutMs: 8000,
+          });
+        } catch (earlyLandingError) {
+          if (!isStep2PhoneLandingWaitError(earlyLandingError)) {
+            throw earlyLandingError;
+          }
+
+          await addLog('步骤 2：手机号提交后短时间内未进入下一页，正在检查是否为 Oops 登录异常页...', 'warn');
+          const earlyRecoveryResult = await recoverSignupPhoneSigninIssueOnce(tabId, phoneNumber, activation);
+          if (earlyRecoveryResult?.recovered) {
+            await addLog('步骤 2：已从 Oops 异常页返回并复用当前手机号重新提交，继续等待下一页...', 'warn');
+            return ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
+              skipUrlWait: Boolean(earlyRecoveryResult?.alreadyOnPasswordPage),
+            });
+          }
+        }
+      }
+
+      try {
+        return await ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
+          skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
+        });
+      } catch (landingError) {
+        if (!isStep2PhoneLandingWaitError(landingError)) {
+          throw landingError;
+        }
+
+        await addLog('步骤 2：手机号提交后未进入下一页，正在检测是否为 Oops 登录异常页...', 'warn');
+        const recoveryResult = await recoverSignupPhoneSigninIssueOnce(tabId, phoneNumber, activation);
+        if (!recoveryResult?.recovered) {
+          throw landingError;
+        }
+
+        await addLog('步骤 2：已从 Oops 异常页返回并复用当前手机号重新提交，继续等待下一页...', 'warn');
+        return ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
+          skipUrlWait: Boolean(recoveryResult?.alreadyOnPasswordPage),
+        });
+      }
+    }
+
     async function ensureSignupTabForStep2() {
       let signupTabId = await getTabId('signup-page');
       if (!signupTabId || !(await isTabAlive('signup-page'))) {
@@ -414,9 +503,12 @@
       }
 
       await addLog(`步骤 2：手机号 ${phoneNumber} 已提交，正在等待页面加载并确认下一步入口...`);
-      const landingResult = await ensureSignupPostIdentityPageReadyInTab(signupTabId, 2, {
-        skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
-      });
+      const landingResult = await ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(
+        signupTabId,
+        phoneNumber,
+        activation,
+        step2Result
+      );
 
       await completeNodeFromBackground('submit-signup-email', {
         accountIdentifierType: 'phone',

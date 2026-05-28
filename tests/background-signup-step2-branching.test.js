@@ -184,6 +184,180 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   ]);
 });
 
+test('step 2 recovers phone signup Oops page once and reuses the same activation', async () => {
+  const completedPayloads = [];
+  const sequence = [];
+  const sentPayloads = [];
+  const logs = [];
+  let prepareCalls = 0;
+  let landingCalls = 0;
+  let recoveryCalls = 0;
+  const activation = {
+    activationId: 'signup-oops-activation',
+    phoneNumber: '+15551234567',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 187,
+    countryLabel: 'United States',
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async (message, level) => {
+      logs.push({ message, level });
+    },
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async (step, payload) => {
+      completedPayloads.push({ step, payload });
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 144 }),
+    ensureSignupPostIdentityPageReadyInTab: async () => {
+      landingCalls += 1;
+      if (landingCalls === 1) {
+        throw new Error('等待注册身份提交后的页面跳转超时，请检查页面是否仍停留在输入页。');
+      }
+      return {
+        state: 'phone_verification_page',
+        url: 'https://auth.openai.com/phone-verification',
+      };
+    },
+    getTabId: async () => 144,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      prepareSignupPhoneActivation: async () => {
+        prepareCalls += 1;
+        sequence.push('prepareSignupPhoneActivation');
+        return activation;
+      },
+      cancelSignupPhoneActivation: async () => {
+        throw new Error('activation should not be cancelled on recovered success');
+      },
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        sequence.push('ensureSignupPhoneEntryReady');
+        return { ready: true, state: 'phone_entry' };
+      }
+      if (message.type === 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE') {
+        recoveryCalls += 1;
+        sequence.push('recoverSignupPhoneSigninIssue');
+        sentPayloads.push(message.payload);
+        return {
+          recovered: true,
+          submitted: true,
+          deferredSubmit: true,
+          phoneNumber: message.payload.phoneNumber,
+        };
+      }
+      sequence.push('submitSignupPhone');
+      sentPayloads.push(message.payload);
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({ signupMethod: 'phone' });
+
+  assert.deepStrictEqual(sequence, [
+    'ensureSignupPhoneEntryReady',
+    'prepareSignupPhoneActivation',
+    'submitSignupPhone',
+    'recoverSignupPhoneSigninIssue',
+  ]);
+  assert.equal(prepareCalls, 1);
+  assert.equal(recoveryCalls, 1);
+  assert.equal(landingCalls, 2);
+  assert.deepStrictEqual(sentPayloads, [
+    {
+      signupMethod: 'phone',
+      phoneNumber: '+15551234567',
+      countryId: 187,
+      countryLabel: 'United States',
+    },
+    {
+      signupMethod: 'phone',
+      phoneNumber: '+15551234567',
+      countryId: 187,
+      countryLabel: 'United States',
+      returnTimeoutMs: 25000,
+    },
+  ]);
+  assert.deepStrictEqual(completedPayloads, [
+    {
+      step: 'submit-signup-email',
+      payload: {
+        accountIdentifierType: 'phone',
+        accountIdentifier: '+15551234567',
+        signupPhoneNumber: '+15551234567',
+        signupPhoneActivation: activation,
+        nextSignupState: 'phone_verification_page',
+        nextSignupUrl: 'https://auth.openai.com/phone-verification',
+        skippedPasswordStep: true,
+      },
+    },
+  ]);
+  assert.equal(logs.some(({ message }) => /Oops 异常页返回并复用当前手机号重新提交/.test(message)), true);
+});
+
+test('step 2 attempts phone Oops recovery only once when landing remains stuck', async () => {
+  let recoveryCalls = 0;
+  let prepareCalls = 0;
+  const activation = {
+    activationId: 'signup-oops-stuck',
+    phoneNumber: '+15559876543',
+    countryId: 187,
+    countryLabel: 'United States',
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async () => {
+      throw new Error('step should not complete when recovered landing also fails');
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 145 }),
+    ensureSignupPostIdentityPageReadyInTab: async () => {
+      throw new Error('等待注册身份提交后的页面跳转超时，请检查页面是否仍停留在输入页。');
+    },
+    getTabId: async () => 145,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      prepareSignupPhoneActivation: async () => {
+        prepareCalls += 1;
+        return activation;
+      },
+      cancelSignupPhoneActivation: async () => {},
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        return { ready: true, state: 'phone_entry' };
+      }
+      if (message.type === 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE') {
+        recoveryCalls += 1;
+        return { recovered: true, submitted: true };
+      }
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await assert.rejects(
+    () => executor.executeStep2({ signupMethod: 'phone' }),
+    /等待注册身份提交后的页面跳转超时/
+  );
+  assert.equal(prepareCalls, 1);
+  assert.equal(recoveryCalls, 1);
+});
+
 test('step 2 reuses existing signup phone activation without acquiring a new number', async () => {
   const completedPayloads = [];
   const sequence = [];

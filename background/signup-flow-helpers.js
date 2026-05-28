@@ -140,12 +140,13 @@
 
     async function ensureSignupPostIdentityPageReadyInTab(tabId, step = 2, options = {}) {
       const { skipUrlWait = false } = options;
+      const timeoutMs = Math.max(1000, Math.floor(Number(options.timeoutMs) || 45000));
       let landingUrl = '';
       let landingState = '';
 
       if (!skipUrlWait) {
         const matchedTab = await waitForTabUrlMatch(tabId, (url) => Boolean(resolveSignupPostIdentityState(url)), {
-          timeoutMs: 45000,
+          timeoutMs,
           retryDelayMs: 300,
         });
         if (!matchedTab) {

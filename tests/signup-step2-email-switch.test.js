@@ -2268,3 +2268,228 @@ return {
   assert.deepEqual(api.getClicks(), ['Continue with phone number', 'Continue']);
   assert.deepEqual(api.getFilled(), [{ target: 'phone', value: '959916439' }]);
 });
+
+test('recoverSignupPhoneSigninIssue clicks English Back and resubmits the same phone', async () => {
+  const api = new Function(`
+const clicks = [];
+const filled = [];
+let phase = 'oops';
+
+const backButton = {
+  textContent: 'Back',
+  value: '',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+const phoneInput = { value: '', getAttribute(name) { return name === 'type' ? 'tel' : ''; } };
+const continueButton = {
+  textContent: 'Continue',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'type') return 'submit';
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+
+const document = {
+  title: '',
+  body: {
+    textContent: 'Oops! We ran into an issue while signing you in, please take a break and try again soon.',
+    innerText: 'Oops! We ran into an issue while signing you in, please take a break and try again soon.',
+  },
+  querySelector(selector) {
+    if (selector === SIGNUP_PHONE_INPUT_SELECTOR) return phase === 'phone' ? phoneInput : null;
+    if (selector === SIGNUP_EMAIL_INPUT_SELECTOR) return null;
+    if (selector === 'button[type="submit"], input[type="submit"]') return phase === 'phone' ? continueButton : null;
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return phase === 'oops' ? [backButton] : [continueButton];
+    }
+    if (selector === 'button, a, [role="button"], [role="link"]') return [];
+    if (selector === 'a, button, [role="button"], [role="link"]') return [];
+    if (selector === 'input') return phase === 'phone' ? [phoneInput] : [];
+    return [];
+  },
+};
+const location = { href: 'https://auth.openai.com/u/signup/error' };
+const window = { setTimeout(callback) { callback(); } };
+const Date = { now() { return 0; } };
+
+${extractConst('SIGNUP_ENTRY_TRIGGER_PATTERN')}
+${extractConst('SIGNUP_EMAIL_INPUT_SELECTOR')}
+${extractConst('SIGNUP_PHONE_INPUT_SELECTOR')}
+${extractConst('SIGNUP_SWITCH_TO_EMAIL_PATTERN')}
+${extractConst('SIGNUP_SWITCH_ACTION_PATTERN')}
+${extractConst('SIGNUP_EMAIL_ACTION_PATTERN')}
+${extractConst('SIGNUP_WORK_EMAIL_PATTERN')}
+${extractConst('SIGNUP_PHONE_ACTION_PATTERN')}
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_PATTERN')}
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_DETAIL_PATTERN')}
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN')}
+${extractConst('SIGNUP_SWITCH_TO_PHONE_PATTERN')}
+${extractConst('SIGNUP_MORE_OPTIONS_PATTERN')}
+
+function getOperationDelayRunner() { return async (_metadata, operation) => operation(); }
+function isVisibleElement(el) { return Boolean(el); }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+}
+function getPageTextSnapshot() { return phase === 'oops' ? document.body.textContent : ''; }
+function getSignupPasswordInput() { return null; }
+function isSignupPasswordPage() { return false; }
+function getSignupPasswordSubmitButton() { return null; }
+function findSignupEntryTrigger() { return null; }
+function getSignupPasswordDisplayedEmail() { return ''; }
+function throwIfStopped() {}
+function isStopError() { return false; }
+function log() {}
+async function humanPause() {}
+async function sleep() {}
+function simulateClick(target) {
+  clicks.push(getActionText(target));
+  if (target === backButton) phase = 'phone';
+}
+function fillInput(target, value) {
+  target.value = value;
+  filled.push(value);
+}
+
+${extractFunction('getSignupEmailInput')}
+${extractFunction('getSignupPhoneInput')}
+${extractFunction('findSignupUseEmailTrigger')}
+${extractFunction('findSignupUsePhoneTrigger')}
+${extractFunction('findSignupMoreOptionsTrigger')}
+${extractFunction('isSignupPhoneSigninIssuePage')}
+${extractFunction('findSignupPhoneSigninIssueBackButton')}
+${extractFunction('getSignupEmailContinueButton')}
+${extractFunction('inspectSignupEntryState')}
+${extractFunction('getSignupEntryStateSummary')}
+function getSignupEntryDiagnostics() { return {}; }
+${extractFunction('normalizePhoneDigits')}
+${extractFunction('extractDialCodeFromText')}
+${extractFunction('dispatchSignupPhoneFieldEvents')}
+${extractFunction('normalizeSignupCountryLabel')}
+${extractFunction('getSignupCountryLabelAliases')}
+${extractFunction('getSignupPhoneOptionLabel')}
+${extractFunction('normalizeSignupCountryOptionValue')}
+${extractFunction('getSignupRegionDisplayName')}
+${extractFunction('getSignupPhoneCountryMatchLabels')}
+${extractFunction('isSameSignupCountryOption')}
+${extractFunction('getSignupPhoneForm')}
+${extractFunction('getSignupPhoneControlRoots')}
+${extractFunction('querySignupPhoneCountryElements')}
+${extractFunction('isSignupPhoneCountrySelect')}
+${extractFunction('getSignupPhoneCountrySelect')}
+${extractFunction('getSignupPhoneSelectedCountryOption')}
+${extractFunction('getSignupPhoneCountryButtonText')}
+${extractFunction('getSignupPhoneCountryButton')}
+${extractFunction('getSignupPhoneDisplayedDialCode')}
+${extractFunction('getSignupPhoneHiddenNumberInput')}
+${extractFunction('resolveSignupPhoneDialCodeFromNumber')}
+${extractFunction('resolveSignupPhoneTargetDialCode')}
+${extractFunction('getSignupPhoneCountryTargetLabels')}
+${extractFunction('doesSignupPhoneCountryTextMatchTarget')}
+${extractFunction('isSignupPhoneCountrySelectionSynced')}
+${extractFunction('findSignupPhoneCountryOptionByLabel')}
+${extractFunction('findSignupPhoneCountryOptionByPhoneNumber')}
+${extractFunction('trySelectSignupPhoneCountryOption')}
+${extractFunction('getVisibleSignupPhoneCountryListboxOptions')}
+${extractFunction('findSignupPhoneCountryListboxOption')}
+${extractFunction('trySelectSignupPhoneCountryListboxOption')}
+${extractFunction('ensureSignupPhoneCountrySelected')}
+${extractFunction('toNationalPhoneNumber')}
+${extractFunction('toE164PhoneNumber')}
+${extractFunction('resolveSignupPhoneDialCode')}
+${extractFunction('waitForSignupPhoneEntryState')}
+${extractFunction('submitSignupPhoneNumberAndContinue')}
+${extractFunction('recoverSignupPhoneSigninIssue')}
+
+return {
+  clicks,
+  filled,
+  run() { return recoverSignupPhoneSigninIssue({ phoneNumber: '+15551234567' }); },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.recovered, true);
+  assert.equal(result.retried, true);
+  assert.deepEqual(api.clicks, ['Back', 'Continue']);
+  assert.deepEqual(api.filled, ['5551234567']);
+});
+
+test('findSignupPhoneSigninIssueBackButton recognizes Chinese back copy', () => {
+  const api = new Function(`
+const button = {
+  textContent: '返回上一步',
+  value: '',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+const document = {
+  querySelectorAll(selector) {
+    return selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+      ? [button]
+      : [];
+  },
+};
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN')}
+function isVisibleElement(el) { return Boolean(el); }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; }
+function getActionText(el) { return [el?.textContent, el?.value].filter(Boolean).join(' ').trim(); }
+${extractFunction('findSignupPhoneSigninIssueBackButton')}
+return { found: findSignupPhoneSigninIssueBackButton() === button };
+`)();
+
+  assert.equal(api.found, true);
+});
+
+test('recoverSignupPhoneSigninIssue no-ops outside the Oops signin issue page', async () => {
+  const api = new Function(`
+let clicked = false;
+const document = {
+  title: '',
+  body: { textContent: 'Create your account', innerText: 'Create your account' },
+  querySelectorAll() { return []; },
+};
+const location = { href: 'https://auth.openai.com/u/signup/phone' };
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_PATTERN')}
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_DETAIL_PATTERN')}
+${extractConst('SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN')}
+function getOperationDelayRunner() { return async (_metadata, operation) => operation(); }
+function getPageTextSnapshot() { return document.body.textContent; }
+function getActionText() { return ''; }
+function isVisibleElement() { return false; }
+function isActionEnabled() { return false; }
+function throwIfStopped() {}
+function log() {}
+async function humanPause() {}
+function simulateClick() { clicked = true; }
+${extractFunction('isSignupPhoneSigninIssuePage')}
+${extractFunction('findSignupPhoneSigninIssueBackButton')}
+function submitSignupPhoneNumberAndContinue() { throw new Error('should not resubmit'); }
+${extractFunction('recoverSignupPhoneSigninIssue')}
+return {
+  clicked() { return clicked; },
+  run() { return recoverSignupPhoneSigninIssue({ phoneNumber: '+15551234567' }); },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.recovered, false);
+  assert.equal(result.reason, 'not_signin_issue_page');
+  assert.equal(api.clicked(), false);
+});

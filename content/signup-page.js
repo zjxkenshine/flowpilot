@@ -47,6 +47,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'RETURN_TO_ADD_PHONE'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY'
+      || message.type === 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
     ) {
       resetStopState();
@@ -173,6 +174,8 @@ async function handleCommand(message) {
       return await ensureSignupEntryReady();
     case 'ENSURE_SIGNUP_PHONE_ENTRY_READY':
       return await ensureSignupPhoneEntryReady();
+    case 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE':
+      return await recoverSignupPhoneSigninIssue(message.payload || {});
     case 'ENSURE_SIGNUP_PASSWORD_PAGE_READY':
       return await ensureSignupPasswordPageReady();
     case 'STEP8_FIND_AND_CLICK':
@@ -564,6 +567,9 @@ const SIGNUP_SWITCH_TO_EMAIL_PATTERN = new RegExp([
 const SIGNUP_SWITCH_ACTION_PATTERN = /\u7ee7\u7eed\u4f7f\u7528|\u6539\u7528|continue|use|sign\s*(?:in|up)|続行|続ける|使用|ログイン|サイン(?:イン|アップ)/i;
 const SIGNUP_EMAIL_ACTION_PATTERN = /\u7535\u5b50\u90ae\u4ef6|\u90ae\u7bb1|email|メールアドレス|メール|電子メール/i;
 const SIGNUP_PHONE_ACTION_PATTERN = /手机|手机号|电话号码|phone|telephone|mobile|電話番号|電話|携帯電話|携帯/i;
+const SIGNUP_PHONE_SIGNIN_ISSUE_PATTERN = /oops/i;
+const SIGNUP_PHONE_SIGNIN_ISSUE_DETAIL_PATTERN = /(?:ran\s+into\s+an?\s+issue|issue|problem|error).{0,120}(?:signing\s+you\s+in|sign\s*in)|signing\s+you\s+in.{0,120}(?:issue|problem|error)|take\s+a\s+break|try\s+again\s+soon/i;
+const SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN = /^(?:返回|返回上一页|返回上一步|回到上一页|后退|上一步|back|go\s+back|return|previous|戻る|前へ|前のページ)$/i;
 const SIGNUP_SWITCH_TO_PHONE_PATTERN = new RegExp([
   String.raw`\u7ee7\u7eed\u4f7f\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?\u767b\u5f55`,
   String.raw`\u6539\u7528(?:\u624b\u673a|\u624b\u673a\u53f7|\u7535\u8bdd\u53f7\u7801)(?:\u53f7\u7801)?\u767b\u5f55`,
@@ -660,6 +666,37 @@ function findSignupMoreOptionsTrigger() {
     const expanded = String(el.getAttribute?.('aria-expanded') || '').trim().toLowerCase();
     const state = String(el.getAttribute?.('data-state') || '').trim().toLowerCase();
     return expanded !== 'true' && state !== 'open';
+  }) || null;
+}
+
+function isSignupPhoneSigninIssuePage() {
+  const text = typeof getPageTextSnapshot === 'function'
+    ? getPageTextSnapshot()
+    : String(document.body?.innerText || document.body?.textContent || '');
+  const title = String(document.title || '');
+  const combined = `${title} ${text}`.replace(/\s+/g, ' ').trim();
+  return SIGNUP_PHONE_SIGNIN_ISSUE_PATTERN.test(combined)
+    && SIGNUP_PHONE_SIGNIN_ISSUE_DETAIL_PATTERN.test(combined);
+}
+
+function findSignupPhoneSigninIssueBackButton(options = {}) {
+  const { allowDisabled = false } = options;
+  const normalizeBackActionText = (value = '') => String(value || '')
+    .replace(/[←‹«↩⟵⟨]/g, ' ')
+    .replace(/^[\s<]+|[\s>]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const candidates = document.querySelectorAll(
+    'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]'
+  );
+  return Array.from(candidates).find((el) => {
+    if (!isVisibleElement(el) || (!allowDisabled && !isActionEnabled(el))) return false;
+    const text = normalizeBackActionText(getActionText(el));
+    if (text && SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN.test(text)) {
+      return true;
+    }
+    const actionName = normalizeBackActionText(el.getAttribute?.('data-dd-action-name') || el.getAttribute?.('data-testid') || '');
+    return Boolean(actionName && SIGNUP_PHONE_SIGNIN_ISSUE_BACK_PATTERN.test(actionName));
   }) || null;
 }
 
@@ -2725,6 +2762,80 @@ async function submitSignupPhoneNumberAndContinue(payload = {}) {
     phoneNumber,
     phoneInputValue: snapshot.phoneInput?.value || inputValue,
     url: location.href,
+  };
+}
+
+async function recoverSignupPhoneSigninIssue(payload = {}) {
+  const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
+    ? getOperationDelayRunner()
+    : async (metadata, operation) => {
+        const rootScope = typeof window !== 'undefined' ? window : globalThis;
+        const gate = rootScope?.CodexOperationDelay?.performOperationWithDelay;
+        return typeof gate === 'function' ? gate(metadata, operation) : operation();
+      };
+  const phoneNumber = String(payload.phoneNumber || '').trim();
+  if (!phoneNumber) {
+    throw new Error('步骤 2：恢复手机号登录异常页时缺少原手机号，无法复用重提。');
+  }
+
+  if (!isSignupPhoneSigninIssuePage()) {
+    return {
+      recovered: false,
+      reason: 'not_signin_issue_page',
+      url: location.href,
+    };
+  }
+
+  const backButton = findSignupPhoneSigninIssueBackButton({ allowDisabled: true });
+  if (!backButton) {
+    return {
+      recovered: false,
+      reason: 'missing_back_button',
+      issuePage: true,
+      url: location.href,
+    };
+  }
+  if (!isActionEnabled(backButton)) {
+    return {
+      recovered: false,
+      reason: 'back_button_disabled',
+      issuePage: true,
+      url: location.href,
+    };
+  }
+
+  log(`步骤 2：检测到手机号注册登录异常页，正在点击“${getActionText(backButton).slice(0, 40) || '返回'}”后复用当前手机号重试...`, 'warn');
+  await humanPause(350, 900);
+  await performOperationWithDelay({ stepKey: 'signup-phone-entry', kind: 'click', label: 'signup-phone-signin-issue-back' }, async () => {
+    simulateClick(backButton);
+  });
+
+  const readySnapshot = await waitForSignupPhoneEntryState({
+    timeout: Math.max(1000, Math.floor(Number(payload.returnTimeoutMs) || 25000)),
+    step: 2,
+  });
+  if (readySnapshot.state !== 'phone_entry' || !readySnapshot.phoneInput) {
+    return {
+      recovered: false,
+      reason: 'phone_entry_not_ready',
+      issuePage: true,
+      backClicked: true,
+      state: readySnapshot.state || 'unknown',
+      url: readySnapshot.url || location.href,
+    };
+  }
+
+  const retryResult = await submitSignupPhoneNumberAndContinue({
+    ...payload,
+    phoneNumber,
+  });
+  return {
+    ...retryResult,
+    recovered: true,
+    issuePage: true,
+    backClicked: true,
+    retried: Boolean(retryResult?.submitted),
+    url: retryResult?.url || location.href,
   };
 }
 
