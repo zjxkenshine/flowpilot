@@ -7,7 +7,8 @@
   const PLUS_CHECKOUT_FRAME_READY_DELAY_MS = 500;
   const PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS = 3;
   const PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS = 10000;
-  const PLUS_CHECKOUT_ADDRESS_TAX_REDIRECT_PROBE_MS = 5000;
+  const PLUS_CHECKOUT_POST_ADDRESS_CHECK_REDIRECT_WAIT_MS = 20000;
+  const PLUS_CHECKOUT_MISSED_CLICK_RETRY_MAX_ATTEMPTS = 1;
   const PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS = 2;
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -1767,6 +1768,18 @@
       }) || null;
     }
 
+    function findReadySubscribeButtonInspection(inspections = []) {
+      return inspections.find((item) => {
+        if (!item?.result?.hasSubscribeButton || item.frame?.ready === false) {
+          return false;
+        }
+        const status = normalizeText(item.result.subscribeButtonStatus || '').toLowerCase();
+        return status === 'ready'
+          && item.result.subscribeButtonEnabled === true
+          && item.result.subscribeButtonBusy !== true;
+      }) || null;
+    }
+
     async function inspectCheckoutAmountSummary(tabId) {
       const frames = await getReadyCheckoutFrames(tabId);
       const inspections = await inspectCheckoutFrames(tabId, frames);
@@ -1991,11 +2004,14 @@
         ensurePaymentActive = false,
         addressTaxRetryContext = null,
         addressEmptyRetryContext = null,
+        missedClickRetryContext = null,
         state = {},
         billingFrame = null,
         fullName = '',
       } = options;
-      const timeoutSeconds = Math.round(Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS) / 1000);
+      const effectiveRedirectTimeoutMs = Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS);
+      const postAddressCheckRedirectWaitMs = Math.max(0, PLUS_CHECKOUT_POST_ADDRESS_CHECK_REDIRECT_WAIT_MS);
+      const timeoutSeconds = Math.round((effectiveRedirectTimeoutMs + postAddressCheckRedirectWaitMs) / 1000);
 
       await addLog('步骤 7：正在定位订阅按钮...', 'info');
       const subscribeFrame = await waitForSubscribeFrame(tabId, subscribeFrameCandidates);
@@ -2027,9 +2043,7 @@
         await addLog(`步骤 7：订阅按钮当前为「${buttonStateLabel}」，本轮未点击，正在等待页面是否跳转到 ${paymentConfig.label}（${attempt}/${totalAttempts}）...`, 'warn');
       }
 
-      const effectiveRedirectTimeoutMs = Math.max(1000, Number(redirectTimeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS);
-      const initialRedirectWaitMs = Math.min(effectiveRedirectTimeoutMs, PLUS_CHECKOUT_ADDRESS_TAX_REDIRECT_PROBE_MS);
-      let redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, initialRedirectWaitMs);
+      let redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, effectiveRedirectTimeoutMs);
       if (redirectedToPayment) {
         return {
           redirectedToPayment,
@@ -2042,9 +2056,17 @@
         };
       }
 
+      let inspectionsAfterInitialWait = null;
+      const getInspectionsAfterInitialWait = async () => {
+        if (!inspectionsAfterInitialWait) {
+          const frames = await getReadyCheckoutFrames(tabId);
+          inspectionsAfterInitialWait = await inspectCheckoutFrames(tabId, frames);
+        }
+        return inspectionsAfterInitialWait;
+      };
+
       if (addressEmptyRetryContext && billingFrame && fullName) {
-        const frames = await getReadyCheckoutFrames(tabId);
-        const inspections = await inspectCheckoutFrames(tabId, frames);
+        const inspections = await getInspectionsAfterInitialWait();
         const emptyAddressInspection = findEmptyBillingAddressInspection(inspections);
         if (emptyAddressInspection) {
           const retryCount = Math.max(0, Math.floor(Number(addressEmptyRetryContext.count) || 0));
@@ -2090,8 +2112,7 @@
       }
 
       if (addressTaxRetryContext && paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL) {
-        const frames = await getReadyCheckoutFrames(tabId);
-        const inspections = await inspectCheckoutFrames(tabId, frames);
+        const inspections = await getInspectionsAfterInitialWait();
         const addressTaxInspection = findAddressTaxErrorInspection(inspections);
         if (addressTaxInspection) {
           const retryCount = Math.max(0, Math.floor(Number(addressTaxRetryContext.count) || 0));
@@ -2150,9 +2171,36 @@
         }
       }
 
-      const remainingRedirectWaitMs = Math.max(0, effectiveRedirectTimeoutMs - initialRedirectWaitMs);
-      if (remainingRedirectWaitMs > 0) {
-        redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, remainingRedirectWaitMs);
+      if (missedClickRetryContext) {
+        const inspections = await getInspectionsAfterInitialWait();
+        const readySubscribeInspection = findReadySubscribeButtonInspection(inspections);
+        if (readySubscribeInspection) {
+          const retryCount = Math.max(0, Math.floor(Number(missedClickRetryContext.count) || 0));
+          if (retryCount < PLUS_CHECKOUT_MISSED_CLICK_RETRY_MAX_ATTEMPTS) {
+            const nextRetryCount = retryCount + 1;
+            missedClickRetryContext.count = nextRetryCount;
+            const readyButtonText = normalizeText(readySubscribeInspection.result?.subscribeButtonText || subscribeButtonText || '');
+            await addLog(
+              `Step 7: subscribe button is ready again after the initial ${Math.round(effectiveRedirectTimeoutMs / 1000)}s redirect wait; previous click may not have landed, retrying subscribe click (${nextRetryCount}/${PLUS_CHECKOUT_MISSED_CLICK_RETRY_MAX_ATTEMPTS}).`,
+              'warn'
+            );
+            return {
+              redirectedToPayment: false,
+              subscribeResult,
+              subscribeClicked,
+              subscribeButtonText: readyButtonText || subscribeButtonText,
+              subscribeButtonStatus: 'ready_after_click_timeout',
+              subscribeMissedClickRetried: true,
+              subscribeMissedClickRetryCount: nextRetryCount,
+              lastSubmitError: `subscribe button was still ready after ${Math.round(effectiveRedirectTimeoutMs / 1000)} seconds; retrying click ${nextRetryCount}/${PLUS_CHECKOUT_MISSED_CLICK_RETRY_MAX_ATTEMPTS}`,
+              timeoutSeconds,
+            };
+          }
+        }
+      }
+
+      if (postAddressCheckRedirectWaitMs > 0) {
+        redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, postAddressCheckRedirectWaitMs);
       }
       const lastSubmitError = subscribeClicked
         ? `点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`
@@ -2183,6 +2231,8 @@
       let lastSubmitError = '';
       const addressTaxRetryContext = { count: 0 };
       const addressEmptyRetryContext = { count: 0 };
+      const missedClickRetryContext = { count: 0 };
+      let skipNextPreSubmitWait = false;
 
       for (let attempt = 1; attempt <= PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
         await addLog(
@@ -2191,7 +2241,12 @@
             : `步骤 7：准备第 ${attempt}/${PLUS_CHECKOUT_SUBMIT_MAX_ATTEMPTS} 次重新检测订阅按钮...`,
           attempt === 1 ? 'info' : 'warn'
         );
-        await sleepWithStop(3000);
+        if (skipNextPreSubmitWait) {
+          skipNextPreSubmitWait = false;
+          await addLog('Step 7: subscribe button is still ready after the previous click; retrying the subscribe click immediately.', 'warn');
+        } else {
+          await sleepWithStop(3000);
+        }
 
         const submitAttempt = await attemptCheckoutSubscribeAndWaitForRedirect({
           tabId,
@@ -2204,6 +2259,7 @@
           redirectTimeoutMs: PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
           addressTaxRetryContext,
           addressEmptyRetryContext,
+          missedClickRetryContext,
           state,
           billingFrame,
           fullName,
@@ -2227,6 +2283,12 @@
         }
         if (submitAttempt.addressTaxRetried) {
           lastSubmitError = submitAttempt.lastSubmitError;
+          attempt -= 1;
+          continue;
+        }
+        if (submitAttempt.subscribeMissedClickRetried) {
+          lastSubmitError = submitAttempt.lastSubmitError;
+          skipNextPreSubmitWait = true;
           attempt -= 1;
           continue;
         }

@@ -180,7 +180,7 @@ function createExecutorHarness({
         },
         sendMessage: async (tabId, message, options = {}) => {
           const frameId = Number.isInteger(options.frameId) ? options.frameId : 0;
-          events.messages.push({ tabId, message, frameId });
+          events.messages.push({ tabId, message, frameId, atMs: Date.now() });
           const hasConfiguredState = Object.prototype.hasOwnProperty.call(stateByFrame, frameId);
           if (message.type === 'PING') {
             if (readyByFrame[frameId] === false) {
@@ -516,6 +516,49 @@ test('Classic PayPal billing retries submit without rerunning the checkout half-
   }
 });
 
+test('Classic PayPal billing does not inspect address again when first subscribe click redirects within 10 seconds', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+        },
+      },
+      onClickSubscribe: async ({ checkoutTab }) => {
+        checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: 'Subscribe',
+        };
+      },
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+    const subscribeMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    const stateMessagesAfterSubscribe = events.messages.filter((entry) => (
+      entry.message.type === 'PLUS_CHECKOUT_GET_STATE'
+      && entry.atMs > subscribeMessage.atMs
+    ));
+    assert.equal(stateMessagesAfterSubscribe.length, 0);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('Classic PayPal billing retries address autocomplete after address tax error and then succeeds', async () => {
   const originalNow = Date.now;
   let now = 0;
@@ -582,6 +625,7 @@ test('Classic PayPal billing retries address autocomplete after address tax erro
     assert.equal(subscribeMessages.length, 2);
     assert.equal(retryMessages.length, 1);
     assert.equal(retryMessages[0].frameId, 3);
+    assert.equal(retryMessages[0].atMs - subscribeMessages[0].atMs >= 10000, true);
     assert.equal(subscribeMessages.every((entry) => entry.frameId === 0), true);
     assert.equal(events.sleeps.filter((ms) => ms === 500).length >= 10, true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
@@ -672,6 +716,7 @@ test('Classic PayPal billing refills a fresh address when subscribe clears addre
     assert.equal(subscribeMessages.length, 2);
     assert.equal(fillMessages.length, 2);
     assert.equal(fillMessages[1].frameId, 3);
+    assert.equal(fillMessages[1].atMs - subscribeMessages[0].atMs >= 10000, true);
     assert.equal(fillMessages[1].message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
     assert.equal(events.logs.some((entry) => /billing address is empty|cleared the billing address/i.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
@@ -721,6 +766,109 @@ test('Classic PayPal billing stops after two address tax autocomplete retries', 
     assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE').length, 2);
     assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE').length, 3);
     assert.equal(events.completed.length, 0);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing retries subscribe once when the button is ready again after the 10 second redirect wait', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+          subscribeButtonStatus: 'ready',
+          subscribeButtonEnabled: true,
+          subscribeButtonBusy: false,
+          subscribeButtonText: 'Subscribe',
+        },
+      },
+      onClickSubscribe: async ({ checkoutTab }) => {
+        clickCalls += 1;
+        if (clickCalls === 2) {
+          checkoutTab.url = 'https://www.paypal.com/checkoutnow';
+        }
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: 'Subscribe',
+        };
+      },
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    assert.equal(subscribeMessages.length, 2);
+    assert.equal(subscribeMessages[1].atMs - subscribeMessages[0].atMs >= 10000, true);
+    assert.equal(subscribeMessages[1].atMs - subscribeMessages[0].atMs < 20000, true);
+    assert.equal(events.logs.some((entry) => /previous click may not have landed|retrying subscribe click/i.test(entry.message)), true);
+    assert.equal(events.completed[0].step, 'plus-checkout-billing');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing keeps waiting after the 10 second address check when there is no address or subscribe-click issue', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let checkoutTabRef = null;
+  let eventsRef = null;
+  Date.now = () => now;
+  try {
+    const harness = createExecutorHarness({
+      frames: [{ frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' }],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          billingFieldsVisible: true,
+          hasSubscribeButton: true,
+          subscribeButtonStatus: 'processing',
+          subscribeButtonEnabled: false,
+          subscribeButtonBusy: true,
+          subscribeButtonText: 'Processing',
+        },
+      },
+      onClickSubscribe: async () => ({
+        clicked: true,
+        subscribeButtonStatus: 'clicked',
+        subscribeButtonText: 'Subscribe',
+      }),
+      sleepWithStop: async (ms) => {
+        eventsRef.sleeps.push(ms);
+        now += ms;
+        if (checkoutTabRef && now >= 23000) {
+          checkoutTabRef.url = 'https://www.paypal.com/checkoutnow';
+        }
+      },
+    });
+    checkoutTabRef = harness.checkoutTab;
+    eventsRef = harness.events;
+
+    await harness.executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+    const subscribeMessages = harness.events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    const postSubscribeStateMessages = harness.events.messages.filter((entry) => (
+      entry.message.type === 'PLUS_CHECKOUT_GET_STATE'
+      && entry.atMs > subscribeMessages[0].atMs
+    ));
+    assert.equal(subscribeMessages.length, 1);
+    assert.equal(postSubscribeStateMessages.length > 0, true);
+    assert.equal(postSubscribeStateMessages[0].atMs - subscribeMessages[0].atMs >= 10000, true);
+    assert.equal(harness.events.completed[0].step, 'plus-checkout-billing');
   } finally {
     Date.now = originalNow;
   }
