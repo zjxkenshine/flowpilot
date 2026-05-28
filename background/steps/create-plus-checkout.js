@@ -85,6 +85,7 @@
   const HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
   const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
+  const PHONE_PLUS_CHECK_MAX_ATTEMPTS = 3;
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
@@ -5614,6 +5615,166 @@
       };
     }
 
+    function buildPhonePlusCheckFailureReason(inspection = null, fallback = '') {
+      const detail = normalizeString(
+        inspection?.planType
+          ? `planType=${inspection.planType}`
+          : (inspection?.planSignalPath ? `planSignalPath=${inspection.planSignalPath}` : '')
+      );
+      return detail || normalizeString(fallback) || '未检测到 Plus 激活信号';
+    }
+
+    async function requestPhonePlusCheckRetry(state = {}, options = {}) {
+      const reason = normalizeString(options.reason || 'Plus Check 未确认 Plus 状态');
+      const attemptCount = Math.max(1, Math.floor(Number(options.attemptCount) || 1));
+      await setState({
+        phonePlusCheckAttemptCount: attemptCount,
+        phonePlusCheckLastCheckedAt: Date.now(),
+        phonePlusCheckLastFailureReason: reason,
+        phonePlusCheckVerifiedAt: 0,
+        plusHostedCheckoutVerified: false,
+        plusHostedCheckoutVerificationFailed: true,
+        plusHostedCheckoutVerificationFailureStrategy: PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY,
+        plusHostedCheckoutVerificationFailureReason: reason,
+        plusHostedCheckoutVerificationFailureAt: Date.now(),
+        plusCheckoutVerificationRetryRequested: true,
+        plusCheckoutVerificationRetryReason: reason,
+        plusCheckoutVerificationRetryAt: Date.now(),
+        plusCheckoutVerificationRetryNodeId: 'plus-check',
+        plusCheckoutRetryCleanupRequested: true,
+        plusCheckoutRetryCleanupReason: reason,
+      });
+      await addLog(
+        `Plus Check：第 ${attemptCount}/${PHONE_PLUS_CHECK_MAX_ATTEMPTS} 次未确认 Plus 生效，准备重建 Plus Checkout 后再次检查。原因：${reason}`,
+        'warn',
+        { nodeId: 'plus-check' }
+      );
+      await completeNodeFromBackground('plus-check', {
+        phonePlusCheckAttemptCount: attemptCount,
+        plusHostedCheckoutVerified: false,
+        plusHostedCheckoutVerificationFailed: true,
+        plusCheckoutVerificationRetryRequested: true,
+        plusCheckoutVerificationRetryReason: reason,
+        plusCheckoutVerificationRetryNodeId: 'plus-check',
+      });
+    }
+
+    async function fallbackPhonePlusCheckRetryExhausted(state = {}, options = {}) {
+      const attemptCount = Math.max(PHONE_PLUS_CHECK_MAX_ATTEMPTS, Math.floor(Number(options.attemptCount) || 0));
+      const reason = normalizeString(options.reason || 'Plus Check 已达到检查上限');
+      await setState({
+        phonePlusCheckAttemptCount: attemptCount,
+        phonePlusCheckLastCheckedAt: Date.now(),
+        phonePlusCheckLastFailureReason: reason,
+        phonePlusCheckVerifiedAt: 0,
+        plusHostedCheckoutVerified: false,
+        plusHostedCheckoutVerificationFailed: true,
+        plusHostedCheckoutVerificationFailureStrategy: 'skip_phone_plus',
+        plusHostedCheckoutVerificationFailureReason: reason,
+        plusHostedCheckoutVerificationFailureAt: Date.now(),
+        plusCheckoutVerificationRetryRequested: false,
+        plusCheckoutVerificationRetryReason: '',
+        plusCheckoutVerificationRetryAt: 0,
+        plusCheckoutVerificationRetryNodeId: '',
+      });
+      if (typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        throw new Error(`Plus Check 已连续 ${PHONE_PLUS_CHECK_MAX_ATTEMPTS} 次未确认 Plus 生效，但 Phone Plus fallback 能力不可用。原因：${reason}`);
+      }
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'phone-plus-check-retry-exhausted',
+        detail: reason,
+        nodeId: 'plus-check',
+      });
+      if (!fallbackResult?.handled) {
+        throw new Error(`Plus Check 已连续 ${PHONE_PLUS_CHECK_MAX_ATTEMPTS} 次未确认 Plus 生效，但跳过 Phone Plus 支付段失败：${fallbackResult?.reason || 'unknown'}。原因：${reason}`);
+      }
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+      };
+    }
+
+    async function executePhonePlusCheck(state = {}) {
+      if (!isPhonePlusModeState(state)) {
+        await addLog('Plus Check：当前不是 Phone Plus 模式，直接跳过检查。', 'info', { nodeId: 'plus-check' });
+        await completeNodeFromBackground('plus-check', {
+          phonePlusCheckSkipped: true,
+          phonePlusCheckSkipReason: 'not-phone-plus',
+        });
+        return;
+      }
+
+      const currentAttempt = Math.max(0, Math.floor(Number(state?.phonePlusCheckAttemptCount) || 0)) + 1;
+      const attemptCount = Math.min(PHONE_PLUS_CHECK_MAX_ATTEMPTS, currentAttempt);
+      await addLog(
+        `Plus Check：正在刷新 ChatGPT 会话并确认 Plus 状态（${attemptCount}/${PHONE_PLUS_CHECK_MAX_ATTEMPTS}）。`,
+        'info',
+        { nodeId: 'plus-check' }
+      );
+
+      let inspection = null;
+      let failureReason = '';
+      try {
+        inspection = await refreshChatGptSessionAndInspectPlusActivation();
+      } catch (error) {
+        failureReason = getErrorMessage(error);
+      }
+
+      if (inspection?.active) {
+        const checkedAt = Date.now();
+        await setState({
+          phonePlusCheckAttemptCount: attemptCount,
+          phonePlusCheckLastCheckedAt: checkedAt,
+          phonePlusCheckLastFailureReason: '',
+          phonePlusCheckVerifiedAt: checkedAt,
+          plusHostedCheckoutVerified: true,
+          plusHostedCheckoutVerificationFailed: false,
+          plusHostedCheckoutVerificationFailureReason: '',
+          plusHostedCheckoutVerificationFailureAt: 0,
+          plusCheckoutVerificationRetryRequested: false,
+          plusCheckoutVerificationRetryReason: '',
+          plusCheckoutVerificationRetryAt: 0,
+          plusCheckoutVerificationRetryNodeId: '',
+          plusCheckoutRetryCleanupRequested: false,
+          plusCheckoutRetryCleanupReason: '',
+          plusCheckoutTabId: inspection.tabId || state?.plusCheckoutTabId || null,
+        });
+        await addLog(
+          `Plus Check：已确认 Plus 生效${inspection.planType ? `（planType=${inspection.planType}）` : ''}，继续 OAuth 流程。`,
+          'ok',
+          { nodeId: 'plus-check' }
+        );
+        await completeNodeFromBackground('plus-check', {
+          phonePlusCheckAttemptCount: attemptCount,
+          phonePlusCheckVerifiedAt: checkedAt,
+          plusHostedCheckoutVerified: true,
+          plusHostedCheckoutVerificationFailed: false,
+          plusDetectedPlanType: inspection.planType || '',
+          plusCheckoutTabId: inspection.tabId || null,
+        });
+        return;
+      }
+
+      const reason = buildPhonePlusCheckFailureReason(inspection, failureReason);
+      if (attemptCount >= PHONE_PLUS_CHECK_MAX_ATTEMPTS) {
+        await addLog(
+          `Plus Check：已连续 ${PHONE_PLUS_CHECK_MAX_ATTEMPTS} 次未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth。原因：${reason}`,
+          'warn',
+          { nodeId: 'plus-check' }
+        );
+        await fallbackPhonePlusCheckRetryExhausted(state, {
+          attemptCount,
+          reason,
+        });
+        return;
+      }
+
+      await requestPhonePlusCheckRetry(state, {
+        attemptCount,
+        reason,
+      });
+    }
+
     async function generateCloudCheckoutFromApi(accessToken = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, state = {}) {
       const token = String(accessToken || '').trim();
       if (!token) {
@@ -5953,6 +6114,7 @@
       executePayPalHostedCard,
       executePayPalHostedCreateAccount,
       executePayPalHostedReview,
+      executePhonePlusCheck,
       fetchHostedCheckoutVerificationCodeManually,
       testCheckoutConversionProxy,
     };

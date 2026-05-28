@@ -13,6 +13,7 @@
       isConsentReady,
       isPhoneVerificationPageReady,
       isVisibleElement,
+      log: injectedLog = null,
       performOperationWithDelay: injectedPerformOperationWithDelay,
       simulateClick,
       sleep,
@@ -40,6 +41,105 @@
     async function performOperationWithDelay(metadata, operation) {
       const gate = injectedPerformOperationWithDelay || rootScope?.CodexOperationDelay?.performOperationWithDelay;
       return typeof gate === 'function' ? gate(metadata, operation) : operation();
+    }
+
+    function emitPhoneRouteDiagnosticLog(message, level = 'warn') {
+      const logger = typeof injectedLog === 'function'
+        ? injectedLog
+        : (typeof rootScope?.log === 'function' ? rootScope.log : null);
+      if (logger) {
+        try {
+          logger(message, level, { stepKey: 'phone-verification' });
+          return;
+        } catch {
+          // Fall through to console logging. Diagnostics must not affect auth recovery.
+        }
+      }
+      try {
+        (level === 'error' ? console.error : console.warn)?.('[FlowPilot:phone-route]', message);
+      } catch {
+        // Ignore logging failures.
+      }
+    }
+
+    function abbreviatePhoneRouteDiagnosticText(value = '', maxLength = 120) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      const limit = Math.max(16, Math.floor(Number(maxLength) || 120));
+      return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+    }
+
+    function detectPhoneRouteErrorType(text = '', title = '') {
+      const haystack = `${String(title || '')} ${String(text || '')}`;
+      if (/400\s+invalid\s+content\s+type|invalid\s+content\s+type:\s*text\/html|route\s+error.*400.*invalid\s+content\s+type/i.test(haystack)) {
+        return 'invalid_content_type_html';
+      }
+      if (/405\s+method\s+not\s+allowed|route\s+error.*405|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/phone-verification/i.test(haystack)) {
+        return 'route_method_or_action';
+      }
+      return 'route_error';
+    }
+
+    function getChromeMajorFromUserAgent(userAgent = '') {
+      const match = String(userAgent || '').match(/(?:Chrome|Chromium)\/(\d+)/i);
+      return match?.[1] || '';
+    }
+
+    async function getPhoneRouteFingerprintDiagnostics() {
+      let state = null;
+      try {
+        const runtime = rootScope?.chrome?.runtime || globalThis?.chrome?.runtime || null;
+        if (runtime?.sendMessage) {
+          state = await runtime.sendMessage({
+            type: 'GET_STATE',
+            source: 'phone-auth',
+          });
+        }
+      } catch {
+        state = null;
+      }
+
+      const profile = state?.browserFingerprintProfile || {};
+      const enabled = state
+        ? state?.settingsState?.flows?.openai?.browserFingerprint?.enabled !== false
+          && state?.browserFingerprintEnabled !== false
+        : Boolean(rootScope?.__FLOWPILOT_BROWSER_FINGERPRINT__ || globalThis?.__FLOWPILOT_BROWSER_FINGERPRINT__);
+      const level = String(
+        state?.browserFingerprintLevel
+        ?? state?.settingsState?.flows?.openai?.browserFingerprint?.level
+        ?? rootScope?.__FLOWPILOT_BROWSER_FINGERPRINT__?.level
+        ?? globalThis?.__FLOWPILOT_BROWSER_FINGERPRINT__?.level
+        ?? ''
+      ).trim();
+      const userAgent = String(profile.userAgent || rootScope?.navigator?.userAgent || globalThis?.navigator?.userAgent || '').trim();
+      const acceptLanguage = String(profile.acceptLanguage || '').trim();
+
+      return {
+        enabled,
+        level,
+        profileId: String(profile.profileId || '').trim(),
+        exitRegion: String(profile.exitRegion || state?.browserFingerprintExitRegion || '').trim(),
+        acceptLanguage,
+        userAgentMajor: getChromeMajorFromUserAgent(userAgent),
+      };
+    }
+
+    async function logPhoneRouteRecoveryDiagnostic(options = {}) {
+      const text = String(options.text || getPageTextSnapshot?.() || '');
+      const title = String(options.title || document?.title || '');
+      const diagnostics = await getPhoneRouteFingerprintDiagnostics();
+      const parts = [
+        `error=${detectPhoneRouteErrorType(text, title)}`,
+        `attempt=${Math.max(0, Math.floor(Number(options.clicked) || 0))}/${Math.max(1, Math.floor(Number(options.maxRetryClicks) || PHONE_ROUTE_405_MAX_RECOVERY_CLICKS))}`,
+        `url=${abbreviatePhoneRouteDiagnosticText(location?.href || '', 140)}`,
+        `title=${abbreviatePhoneRouteDiagnosticText(title || '', 80)}`,
+        `fingerprint=${diagnostics.enabled ? 'on' : 'off'}`,
+        `level=${diagnostics.level || 'unknown'}`,
+        `profile=${diagnostics.profileId || 'none'}`,
+        `region=${diagnostics.exitRegion || 'unknown'}`,
+        `acceptLanguage=${diagnostics.acceptLanguage || 'unknown'}`,
+        `uaMajor=${diagnostics.userAgentMajor || 'unknown'}`,
+      ];
+      emitPhoneRouteDiagnosticLog(`Phone verification route recovery diagnostics: ${parts.join(', ')}`, 'warn');
     }
 
     function dispatchInputEvents(element) {
@@ -679,6 +779,10 @@
               `${PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX}Phone verification route stayed on 405 after ${clicked} retry click(s). URL: ${location.href}`
             );
           }
+          await logPhoneRouteRecoveryDiagnostic({
+            clicked: clicked + 1,
+            maxRetryClicks,
+          });
           clicked += 1;
           await humanPause(200, 500);
           await performOperationWithDelay({ stepKey: 'phone-auth', kind: 'click', label: 'phone-route-retry' }, async () => {

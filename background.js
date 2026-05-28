@@ -1869,6 +1869,10 @@ const DEFAULT_STATE = {
   failedSignupPhoneReuseActivation: null,
   plusCheckoutRetryCleanupRequested: false,
   plusCheckoutRetryCleanupReason: '',
+  phonePlusCheckAttemptCount: 0,
+  phonePlusCheckLastCheckedAt: 0,
+  phonePlusCheckLastFailureReason: '',
+  phonePlusCheckVerifiedAt: 0,
   autoRunning: false, // 当前是否处于自动运行中。
   autoRunPhase: 'idle', // 当前自动运行阶段。
   autoRunCurrentRun: 0, // 自动运行当前执行到第几轮。
@@ -5451,6 +5455,11 @@ function buildFreshAutoRunKeepState(prevState = {}) {
   keepState.browserFingerprintAppliedAt = 0;
   keepState.browserFingerprintExitIp = '';
   keepState.browserFingerprintExitRegion = '';
+  if (Object.prototype.hasOwnProperty.call(sourceState, 'failedSignupPhoneReuseActivation')) {
+    keepState.failedSignupPhoneReuseActivation = normalizeFailedSignupPhoneReuseActivation(
+      sourceState.failedSignupPhoneReuseActivation
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(sourceState, 'panelMode')) {
     keepState.panelMode = normalizePanelMode(sourceState.panelMode);
   }
@@ -5988,7 +5997,8 @@ function normalizeFailedSignupPhoneReuseActivation(record = null, options = {}) 
   }
   return {
     ...normalizedActivation,
-    source: 'signup-page-ready-timeout-reuse',
+    source: String(options?.source || record?.source || 'signup-protected-step-failure-reuse').trim()
+      || 'signup-protected-step-failure-reuse',
     reason: String(options?.reason || record?.reason || '').trim(),
     recordedAt: Math.max(0, Math.floor(Number(options?.recordedAt || record?.recordedAt) || Date.now())),
   };
@@ -5997,6 +6007,46 @@ function normalizeFailedSignupPhoneReuseActivation(record = null, options = {}) 
 function isSignupVerificationPageReadyTimeoutFailure(error) {
   const message = getErrorMessage(error);
   return /步骤\s*4：等待注册验证码页面就绪超时，请刷新认证页后重试|等待注册验证码页面就绪超时或自动恢复失败/i.test(message);
+}
+
+function isProtectedSignupPhoneReuseNode(nodeId = '') {
+  return ['fill-password', 'fetch-signup-code', 'fill-profile'].includes(String(nodeId || '').trim());
+}
+
+function isSignupPhoneCodeNotReceivedFailure(error) {
+  const message = getErrorMessage(error);
+  return /PHONE_CODE_TIMEOUT::|waiting\s+for\s+(?:the\s+)?phone\s+(?:verification\s+)?code\s+(?:timed\s+out|timeout)|phone\s+(?:verification\s+)?code.*(?:not|never).*(?:received|fetched|obtained)|(?:未获取到|未能成功获取|等待).*手机.*验证码|手机.*验证码.*(?:超时|未收到|未获取)|短信.*验证码.*(?:超时|未收到|未获取)/i.test(message);
+}
+
+function isSignupPhoneKnownBadNumberFailure(error) {
+  const message = getErrorMessage(error);
+  return /PHONE_RESEND_BANNED_NUMBER::|SIGNUP_PHONE_PASSWORD_MISMATCH::|unable\s+to\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number|can(?:not|'t)\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number|account.*associated.*phone.*already\s+exists|phone.*password.*mismatch|手机号\/密码不匹配|无法向此(?:电话|手机)号码发送短信|无法发送短信到此(?:电话|手机)号码|手机号.*(?:已关联|已存在)/i.test(message);
+}
+
+function shouldPreserveSignupPhoneForProtectedStepFailure(nodeId = '', error = null) {
+  if (!isProtectedSignupPhoneReuseNode(nodeId)) {
+    return false;
+  }
+  if (isStopError(error)
+    || error?.skipFailedSignupPhoneReusePreserve
+    || error?.signupProfileSubmitted
+    || isSignupPhoneCodeNotReceivedFailure(error)
+    || isSignupPhoneKnownBadNumberFailure(error)
+    || isSignupPhoneRetryFromStep2Failure(error)
+    || isSignupUserAlreadyExistsFailure(error)) {
+    return false;
+  }
+  return true;
+}
+
+function resolveFailedSignupPhoneReuseSourceActivation(state = {}, nodeId = '') {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const completedActivation = normalizePhonePreferredActivation(state?.signupPhoneCompletedActivation);
+  if (normalizedNodeId === 'fill-profile' && completedActivation) {
+    return completedActivation;
+  }
+  return normalizePhonePreferredActivation(state?.signupPhoneActivation)
+    || completedActivation;
 }
 
 async function clearFailedSignupPhoneReuseActivation(options = {}) {
@@ -6009,9 +6059,19 @@ async function clearFailedSignupPhoneReuseActivation(options = {}) {
   return { ok: true, failedSignupPhoneReuseActivation: null };
 }
 
-async function preserveFailedSignupPhoneReuseActivationFromState(state = {}, error = null) {
-  const activation = normalizeFailedSignupPhoneReuseActivation(state?.signupPhoneActivation, {
+async function preserveFailedSignupPhoneReuseActivationFromState(state = {}, error = null, options = {}) {
+  const nodeId = String(options?.nodeId || '').trim();
+  const sourceActivation = options?.activation
+    || resolveFailedSignupPhoneReuseSourceActivation(state, nodeId);
+  const source = String(
+    options?.source
+    || (isSignupVerificationPageReadyTimeoutFailure(error)
+      ? 'signup-page-ready-timeout-reuse'
+      : 'signup-protected-step-failure-reuse')
+  ).trim();
+  const activation = normalizeFailedSignupPhoneReuseActivation(sourceActivation, {
     reason: getErrorMessage(error),
+    source,
   });
   if (!activation) {
     return null;
@@ -6024,6 +6084,13 @@ async function preserveFailedSignupPhoneReuseActivationFromState(state = {}, err
     'warn'
   );
   return activation;
+}
+
+async function preserveFailedSignupPhoneReuseActivationForProtectedStep(nodeId = '', state = {}, error = null) {
+  if (!shouldPreserveSignupPhoneForProtectedStepFailure(nodeId, error)) {
+    return null;
+  }
+  return preserveFailedSignupPhoneReuseActivationFromState(state, error, { nodeId });
 }
 
 function buildAccountContributionState(enabled, persistedSettings = {}, currentState = {}, options = {}) {
@@ -11066,6 +11133,7 @@ function isPlusCheckoutRestartStep(step, stepExecutionKey = '', state = {}) {
     'plus-checkout-create',
     'plus-checkout-billing',
     'gopay-subscription-confirm',
+    'plus-check',
   ]);
   if (restartStepKeys.has(normalizedKey)) {
     return true;
@@ -11121,6 +11189,16 @@ function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '', options 
     plusCheckoutAlreadyPaidDetail: '',
     plusCheckoutRetryCleanupRequested: false,
     plusCheckoutRetryCleanupReason: '',
+    plusCheckoutVerificationRetryRequested: false,
+    plusCheckoutVerificationRetryReason: '',
+    plusCheckoutVerificationRetryAt: 0,
+    plusCheckoutVerificationRetryNodeId: '',
+    plusHostedCheckoutVerified: false,
+    plusHostedCheckoutVerificationFailed: false,
+    plusHostedCheckoutVerificationFailureStrategy: '',
+    plusHostedCheckoutVerificationFailureReason: '',
+    plusHostedCheckoutVerificationFailurePreview: '',
+    plusHostedCheckoutVerificationFailureAt: 0,
     plusBillingCountryText: '',
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
@@ -11245,6 +11323,8 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     fallbackMessage = `Phone Plus：PayPal 无卡直绑资料页 phone 输入框多次重填后仍为空，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
   } else if (fallbackReason === 'hosted-checkout-generic-error') {
     fallbackMessage = `Phone Plus：PayPal Checkout 返回 genericError，已跳过 Plus 支付段，继续后续 OAuth 流程。${detailSuffix}`;
+  } else if (fallbackReason === 'phone-plus-check-retry-exhausted') {
+    fallbackMessage = `Phone Plus：Plus Check 已连续 3 次未确认 Plus 生效，已跳过 Plus 支付段，继续 OAuth 流程。${detailSuffix}`;
   } else {
     fallbackMessage = `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
   }
@@ -11412,6 +11492,16 @@ function getDownstreamStateResets(step, state = {}) {
     plusCheckoutAlreadyPaid: false,
     plusCheckoutAlreadyPaidAt: 0,
     plusCheckoutAlreadyPaidDetail: '',
+    plusCheckoutVerificationRetryRequested: false,
+    plusCheckoutVerificationRetryReason: '',
+    plusCheckoutVerificationRetryAt: 0,
+    plusCheckoutVerificationRetryNodeId: '',
+    plusHostedCheckoutVerified: false,
+    plusHostedCheckoutVerificationFailed: false,
+    plusHostedCheckoutVerificationFailureStrategy: '',
+    plusHostedCheckoutVerificationFailureReason: '',
+    plusHostedCheckoutVerificationFailurePreview: '',
+    plusHostedCheckoutVerificationFailureAt: 0,
     plusBillingCountryText: '',
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
@@ -11455,6 +11545,10 @@ function getDownstreamStateResets(step, state = {}) {
   if (step <= 1) {
     return {
       ...plusRuntimeResets,
+      phonePlusCheckAttemptCount: 0,
+      phonePlusCheckLastCheckedAt: 0,
+      phonePlusCheckLastFailureReason: '',
+      phonePlusCheckVerifiedAt: 0,
       oauthUrl: null,
       cpaOAuthState: null,
       cpaManagementOrigin: null,
@@ -11486,6 +11580,10 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 2) {
     return {
       ...plusRuntimeResets,
+      phonePlusCheckAttemptCount: 0,
+      phonePlusCheckLastCheckedAt: 0,
+      phonePlusCheckLastFailureReason: '',
+      phonePlusCheckVerifiedAt: 0,
       password: null,
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
@@ -11505,6 +11603,10 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 3 || step === 4) {
     return {
       ...plusRuntimeResets,
+      phonePlusCheckAttemptCount: 0,
+      phonePlusCheckLastCheckedAt: 0,
+      phonePlusCheckLastFailureReason: '',
+      phonePlusCheckVerifiedAt: 0,
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
       loginVerificationRequestedAt: null,
@@ -11523,6 +11625,12 @@ function getDownstreamStateResets(step, state = {}) {
   if (step === 5 || step === 6 || step === 7 || step === 8) {
     return {
       ...(step <= 6 ? plusRuntimeResets : {}),
+      ...(step <= 5 ? {
+        phonePlusCheckAttemptCount: 0,
+        phonePlusCheckLastCheckedAt: 0,
+        phonePlusCheckLastFailureReason: '',
+        phonePlusCheckVerifiedAt: 0,
+      } : {}),
       ...(step === 7 ? {
         plusBillingCountryText: '',
         plusBillingAddress: null,
@@ -12661,6 +12769,7 @@ const AUTO_RUN_BACKGROUND_COMPLETED_STEP_KEYS = new Set([
   'plus-checkout-billing',
   'paypal-approve',
   'plus-checkout-return',
+  'plus-check',
   'sub2api-session-import',
   'cpa-session-import',
   'oauth-login',
@@ -12901,10 +13010,14 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
     ? getNodeIdsForState(postCompletionState).map((item) => String(item || '').trim()).filter(Boolean)
     : [];
   const oauthNodeIndex = workflowNodeIds.indexOf('oauth-login');
+  const nodeBeforeOauth = oauthNodeIndex > 0 ? workflowNodeIds[oauthNodeIndex - 1] : '';
+  const hasPhonePlusCheckNode = workflowNodeIds.includes('plus-check');
   const isPhonePlusPaymentCompletionNode = Boolean(
     postCompletionState?.phonePlusModeEnabled
     && oauthNodeIndex > 0
-    && workflowNodeIds[oauthNodeIndex - 1] === nodeId
+    && (hasPhonePlusCheckNode
+      ? nodeId === 'plus-check' && nodeBeforeOauth === 'plus-check'
+      : nodeBeforeOauth === nodeId)
   );
   const hasUnverifiedPlusHostedCheckout = Boolean(
     payload?.plusHostedCheckoutVerified === false
@@ -13487,6 +13600,7 @@ function isSpecialDomainDirectFallbackCandidateNode(nodeId, state = {}) {
     'gopay-subscription-confirm',
     'paypal-approve',
     'plus-checkout-return',
+    'plus-check',
   ]);
   const normalizedNodeId = String(nodeId || '').trim();
   const step = typeof getStepIdByNodeIdForState === 'function'
@@ -13578,6 +13692,7 @@ function getSpecialDomainFallbackTabSourcesForNode(nodeId, state = {}) {
     'gopay-subscription-confirm',
     'paypal-approve',
     'plus-checkout-return',
+    'plus-check',
   ].includes(key));
   return hasPaymentKey
     ? ['plus-checkout', 'paypal-flow', 'gopay-flow']
@@ -13923,6 +14038,7 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
   }
 
   if (normalizedNodeId === 'fill-profile') {
+    await clearFailedSignupPhoneReuseActivation({ silent: true });
     const signupTabId = await getTabId('signup-page');
     if (signupTabId) {
       await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
@@ -13935,6 +14051,8 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
       try {
         await validateStep5PostCompletion(signupTabId, completionPayload || {});
       } catch (step5ValidationError) {
+        step5ValidationError.skipFailedSignupPhoneReusePreserve = true;
+        step5ValidationError.signupProfileSubmitted = true;
         await setNodeStatus(normalizedNodeId, 'failed');
         await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { nodeId: normalizedNodeId });
         throw step5ValidationError;
@@ -14416,6 +14534,7 @@ const AUTO_RUN_NODE_DELAYS = Object.freeze({
   'gopay-subscription-confirm': 2000,
   'paypal-approve': 2000,
   'plus-checkout-return': 1000,
+  'plus-check': 1000,
   'sub2api-session-import': 0,
   'cpa-session-import': 0,
   'oauth-login': 2000,
@@ -15909,6 +16028,7 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           restartFromStep1WithCurrentEmail = true;
           continue;
         }
+        await preserveFailedSignupPhoneReuseActivationForProtectedStep('fill-password', latestState, err);
         throw err;
       }
     }
@@ -16055,9 +16175,7 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           await restartSignupPhonePasswordMismatchAttemptFromNode('fetch-signup-code', step4RestartCount, err);
         } else {
           const preservedState = await getState();
-          if (isSignupVerificationPageReadyTimeoutFailure(err)) {
-            await preserveFailedSignupPhoneReuseActivationFromState(preservedState, err);
-          }
+          await preserveFailedSignupPhoneReuseActivationForProtectedStep('fetch-signup-code', preservedState, err);
           const preservedEmail = String(preservedState.email || '').trim();
           const preservedPassword = String(preservedState.password || '').trim();
           const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
@@ -16108,6 +16226,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         const addPhoneUrl = restartDecision.authState?.url || 'https://auth.openai.com/add-phone';
         const authChainStartNodeId = String(getNodeIdByStepForState(restartDecision.restartStep, await getState()) || 'oauth-login').trim();
         await addLog(`节点 ${getNodeLabel(nodeId, latestState)}：检测到认证流程进入 add-phone（${addPhoneUrl}），停止自动回到节点 ${authChainStartNodeId} 重开。`, 'warn');
+      }
+      if (isProtectedSignupPhoneReuseNode(nodeId)) {
+        await preserveFailedSignupPhoneReuseActivationForProtectedStep(nodeId, latestState, err);
       }
       throw err;
     }
@@ -16918,6 +17039,7 @@ const stepExecutorsByKey = {
     ? goPayApproveExecutor.executeGoPayApprove(state)
     : payPalApproveExecutor.executePayPalApprove(state),
   'plus-checkout-return': (state) => plusReturnConfirmExecutor.executePlusReturnConfirm(state),
+  'plus-check': (state) => plusCheckoutCreateExecutor.executePhonePlusCheck(state),
   'sub2api-session-import': (state) => sub2ApiSessionImportExecutor.executeSub2ApiSessionImport(state),
   'cpa-session-import': (state) => cpaSessionImportExecutor.executeCpaSessionImport(state),
   'oauth-login': (state) => step7Executor.executeStep7(state),

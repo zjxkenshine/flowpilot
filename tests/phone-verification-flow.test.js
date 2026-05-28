@@ -804,8 +804,8 @@ test('signup phone helper completes signup SMS verification without touching add
   assert.equal(currentState.signupPhoneActivation, null);
   assert.equal(currentState.signupPhoneVerificationPurpose, '');
   assert.equal(currentState.currentPhoneVerificationCode, '');
-  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
-  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
+  assert.equal(currentState.failedSignupPhoneReuseActivation, undefined);
+  assert.equal(setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'failedSignupPhoneReuseActivation')), false);
   assert.equal(currentState.currentPhoneActivation.activationId, 'add-phone-activation');
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
@@ -979,11 +979,11 @@ test('signup phone helper does not generate phone-prefixed email when code submi
     /invalid code/
   );
   assert.equal(phoneEmailCalls, 0);
-  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
-  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'failed-reuse-invalid');
+  assert.equal(setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'failedSignupPhoneReuseActivation')), false);
 });
 
-test('signup phone helper clears failed reuse slot when code submit throws', async () => {
+test('signup phone helper preserves failed reuse slot when code submit throws', async () => {
   const setStateCalls = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
@@ -1053,8 +1053,8 @@ test('signup phone helper clears failed reuse slot when code submit throws', asy
     () => helpers.completeSignupPhoneVerificationFlow(77, { state: currentState }),
     /submit failed/
   );
-  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
-  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'failed-reuse-throws');
+  assert.equal(setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'failedSignupPhoneReuseActivation')), false);
 });
 
 test('signup phone helper writes account book entry before email-verification handoff continues', async () => {
@@ -8176,7 +8176,7 @@ test('phone verification helper replaces number immediately when resend is throt
   assert.equal(messages.includes('RETURN_TO_ADD_PHONE'), true);
 });
 
-test('phone verification helper replaces number immediately when phone-verification route is stuck on 405 retry page', async () => {
+test('phone verification helper replaces number immediately when phone-verification route is stuck on invalid content-type retry page', async () => {
   const requests = [];
   const messages = [];
   let resendCalls = 0;
@@ -8239,7 +8239,7 @@ test('phone verification helper replaces number immediately when phone-verificat
       }
       if (message.type === 'RESEND_PHONE_VERIFICATION_CODE') {
         resendCalls += 1;
-        throw new Error('PHONE_ROUTE_405_RECOVERY_FAILED::Phone verification route stayed on 405 after 3 retry click(s). URL: https://auth.openai.com/phone-verification');
+        throw new Error('Route Error (400 Invalid content type: text/html; charset=UTF-8): "Invalid content type: text/html; charset=UTF-8". URL: https://auth.openai.com/phone-verification');
       }
       if (message.type === 'RETURN_TO_ADD_PHONE') {
         return {

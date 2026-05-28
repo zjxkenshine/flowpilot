@@ -244,7 +244,16 @@
       registrationSteps.length + 1,
       (registrationSteps.length + 1) * 10
     );
-    const tailStartId = registrationSteps.length + paymentSegment.length + 1;
+    const plusCheckStep = {
+      id: registrationSteps.length + paymentSegment.length + 1,
+      order: (registrationSteps.length + paymentSegment.length + 1) * 10,
+      key: 'plus-check',
+      title: '确认 Plus 状态',
+      sourceId: 'plus-checkout',
+      driverId: 'background/plus-check',
+      command: 'plus-check',
+    };
+    const tailStartId = plusCheckStep.id + 1;
     const tailSteps = createOpenAiAuthTail(
       tailStartId,
       tailStartId * 10,
@@ -254,6 +263,7 @@
     return [
       ...registrationSteps,
       ...paymentSegment,
+      plusCheckStep,
       ...tailSteps,
     ];
   }

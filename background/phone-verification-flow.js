@@ -2523,7 +2523,7 @@
       if (message.startsWith(PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX)) {
         return true;
       }
-      return /route\s+error.*405|405\s+method\s+not\s+allowed|post\s+request\s+to\s+["']?\/phone-verification|did\s+not\s+provide\s+an?\s+[`'"]?action/i.test(message);
+      return /route\s+error.*405|405\s+method\s+not\s+allowed|route\s+error.*400.*invalid\s+content\s+type|400\s+invalid\s+content\s+type|invalid\s+content\s+type:\s*text\/html|post\s+request\s+to\s+["']?\/phone-verification|did\s+not\s+provide\s+an?\s+[`'"]?action/i.test(message);
     }
 
     function isPhoneActivationOrderMissingError(error, provider = '') {
@@ -7477,13 +7477,9 @@
             });
 
             let submitResult = null;
-            try {
-              submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
-                signupProfile: options.signupProfile || null,
-              });
-            } finally {
-              await setPhoneRuntimeState({ failedSignupPhoneReuseActivation: null });
-            }
+            submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
+              signupProfile: options.signupProfile || null,
+            });
 
             if (submitResult.invalidCode) {
               const invalidErrorText = String(submitResult.errorText || submitResult.url || '未知错误').trim();
@@ -7541,10 +7537,14 @@
           if (shouldCancelActivation && activation) {
             await cancelSignupPhoneActivation(state, activation).catch(() => {});
           }
+          const shouldClearFailedReuseCache = isPhoneCodeTimeoutError(error)
+            || isPhoneResendBannedNumberError(error)
+            || isStaleSignupPhoneEmailVerificationError(error);
           await setPhoneRuntimeState({
             [PHONE_VERIFICATION_CODE_STATE_KEY]: '',
             signupPhoneVerificationRequestedAt: null,
             signupPhoneVerificationPurpose: '',
+            ...(shouldClearFailedReuseCache ? { failedSignupPhoneReuseActivation: null } : {}),
           });
           throw sanitizePhoneCodeTimeoutError(error);
         }

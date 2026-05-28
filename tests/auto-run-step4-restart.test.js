@@ -148,14 +148,23 @@ const bundle = [
   'const AUTO_RUN_STEP_IDLE_LOG_CHECK_INTERVAL_MS = 5000;',
   'const AUTO_RUN_STEP_IDLE_RESTART_MAX_ATTEMPTS = 3;',
   "const AUTO_RUN_STEP_IDLE_RESTART_ERROR_PREFIX = 'AUTO_RUN_STEP_IDLE_RESTART::';",
+  "const DEFAULT_PHONE_SMS_PROVIDER = 'hero-sms';",
+  "function normalizePhoneSmsProvider(value = '') { return String(value || '').trim().toLowerCase() || DEFAULT_PHONE_SMS_PROVIDER; }",
   extractFunction('isAddPhoneAuthUrl'),
   extractFunction('isAddPhoneAuthState'),
   extractFunction('isMail2925ThreadTerminatedError'),
   extractFunction('isSignupPhonePasswordMismatchFailure'),
   extractFunction('isSignupPhoneRetryFromStep2Failure'),
+  extractFunction('normalizePhonePreferredActivation'),
   extractFunction('normalizeFailedSignupPhoneReuseActivation'),
   extractFunction('isSignupVerificationPageReadyTimeoutFailure'),
+  extractFunction('isProtectedSignupPhoneReuseNode'),
+  extractFunction('isSignupPhoneCodeNotReceivedFailure'),
+  extractFunction('isSignupPhoneKnownBadNumberFailure'),
+  extractFunction('shouldPreserveSignupPhoneForProtectedStepFailure'),
+  extractFunction('resolveFailedSignupPhoneReuseSourceActivation'),
   extractFunction('preserveFailedSignupPhoneReuseActivationFromState'),
+  extractFunction('preserveFailedSignupPhoneReuseActivationForProtectedStep'),
   extractFunction('getSignupPhonePasswordMismatchRestartPayload'),
   extractFunction('restartSignupPhoneRetryFromStep2AttemptFromNode'),
   extractFunction('restartSignupPhonePasswordMismatchAttemptFromNode'),
@@ -223,6 +232,7 @@ const events = {
   invalidations: [],
   logs: [],
   setStateCalls: [],
+  broadcasts: [],
 };
 
 async function addLog(message, level = 'info') {
@@ -248,6 +258,10 @@ async function setState(updates) {
     stepStatuses: updates.stepStatuses ? { ...updates.stepStatuses } : currentState.stepStatuses,
   };
   events.setStateCalls.push(updates);
+}
+
+function broadcastDataUpdate(payload) {
+  events.broadcasts.push(payload);
 }
 
 function isStopError(error) {
@@ -332,7 +346,10 @@ return {
   assert.deepStrictEqual(events.steps, [1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(currentState.email, 'keep@example.com');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(currentState.failedSignupPhoneReuseActivation, undefined);
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'ordinary-step4-error-act');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.phoneNumber, '+56988840000');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-protected-step-failure-reuse');
+  assert.match(currentState.failedSignupPhoneReuseActivation.reason, /页面异常/);
   assert.equal(events.logs.some(({ message }) => /沿用当前邮箱回到节点 open-chatgpt 重新开始/.test(message)), true);
 });
 

@@ -7372,6 +7372,134 @@ test('PayPal hosted review requests Plus checkout recreation when verification f
   assert.equal(complete.payload.plusCheckoutVerificationRetryReason, 'free-or-upgrade-visible');
 });
 
+function createPhonePlusCheckHarness(options = {}) {
+  const events = [];
+  const tabId = Math.max(1, Math.floor(Number(options.tabId) || 901));
+  let latestState = {
+    phonePlusModeEnabled: true,
+    phonePlusCheckAttemptCount: Math.max(0, Math.floor(Number(options.initialAttemptCount) || 0)),
+    ...(options.state || {}),
+  };
+  const sessionResult = options.sessionResult || {
+    accessToken: 'access-token',
+    session: {
+      user: {
+        plan_type: options.planType || 'free',
+      },
+    },
+  };
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', logOptions = {}) => events.push({ type: 'log', message, level, options: logOptions }),
+    chrome: {
+      tabs: {
+        reload: async (targetTabId) => events.push({ type: 'tab-reload', tabId: targetTabId }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    createAutomationTab: async (payload) => {
+      events.push({ type: 'tab-create', payload });
+      return { id: tabId, url: payload.url, status: 'complete' };
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async (source, targetTabId, readyOptions) => {
+      events.push({ type: 'ready', source, tabId: targetTabId, options: readyOptions });
+    },
+    registerTab: async (source, targetTabId) => events.push({ type: 'register', source, tabId: targetTabId }),
+    sendTabMessageUntilStopped: async (targetTabId, source, message) => {
+      events.push({ type: 'tab-message', tabId: targetTabId, source, message });
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return sessionResult;
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...(payload || {}) };
+    },
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async (targetTabId) => events.push({ type: 'tab-complete', tabId: targetTabId }),
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      if (typeof options.handleFallback === 'function') {
+        return options.handleFallback(state, context);
+      }
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'plus-checkout-billing', 'plus-check'],
+      };
+    },
+  });
+  return {
+    events,
+    executor,
+    getState: () => latestState,
+  };
+}
+
+test('Phone Plus plus-check completes when refreshed session confirms Plus', async () => {
+  const { events, executor, getState } = createPhonePlusCheckHarness({ planType: 'plus' });
+
+  await executor.executePhonePlusCheck(getState());
+
+  const complete = events.find((event) => event.type === 'complete' && event.step === 'plus-check');
+  assert.ok(complete);
+  assert.equal(complete.payload.phonePlusCheckAttemptCount, 1);
+  assert.equal(complete.payload.plusHostedCheckoutVerified, true);
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailed, false);
+  assert.equal(complete.payload.plusDetectedPlanType, 'plus');
+  assert.equal(getState().plusCheckoutVerificationRetryRequested, false);
+  assert.equal(getState().plusHostedCheckoutVerified, true);
+  assert.equal(getState().phonePlusCheckVerifiedAt > 0, true);
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+for (const initialAttemptCount of [0, 1]) {
+  test(`Phone Plus plus-check failed attempt ${initialAttemptCount + 1} requests checkout recreation`, async () => {
+    const { events, executor, getState } = createPhonePlusCheckHarness({
+      initialAttemptCount,
+      planType: 'free',
+    });
+
+    await executor.executePhonePlusCheck(getState());
+
+    const complete = events.find((event) => event.type === 'complete' && event.step === 'plus-check');
+    assert.ok(complete);
+    assert.equal(complete.payload.phonePlusCheckAttemptCount, initialAttemptCount + 1);
+    assert.equal(complete.payload.plusHostedCheckoutVerified, false);
+    assert.equal(complete.payload.plusHostedCheckoutVerificationFailed, true);
+    assert.equal(complete.payload.plusCheckoutVerificationRetryRequested, true);
+    assert.equal(complete.payload.plusCheckoutVerificationRetryNodeId, 'plus-check');
+    assert.match(complete.payload.plusCheckoutVerificationRetryReason, /planType=free/);
+    assert.equal(getState().plusCheckoutVerificationRetryRequested, true);
+    assert.equal(getState().plusCheckoutRetryCleanupRequested, true);
+    assert.equal(getState().phonePlusCheckVerifiedAt, 0);
+    assert.equal(events.some((event) => event.type === 'fallback'), false);
+  });
+}
+
+test('Phone Plus plus-check third failed attempt falls back to OAuth without checkout recreation', async () => {
+  const { events, executor, getState } = createPhonePlusCheckHarness({
+    initialAttemptCount: 2,
+    planType: 'free',
+  });
+
+  await executor.executePhonePlusCheck(getState());
+
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.ok(fallback);
+  assert.equal(fallback.context.reason, 'phone-plus-check-retry-exhausted');
+  assert.equal(fallback.context.nodeId, 'plus-check');
+  assert.match(fallback.context.detail, /planType=free/);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-check'), false);
+  assert.equal(getState().phonePlusCheckAttemptCount, 3);
+  assert.equal(getState().plusCheckoutVerificationRetryRequested, false);
+  assert.equal(getState().plusHostedCheckoutVerificationFailed, true);
+  assert.equal(
+    events.some((event) => event.type === 'log' && /已连续 3 次未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth/.test(event.message)),
+    true
+  );
+});
+
 test('hosted checkout pool failure records lastError without incrementing useCount', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({

@@ -140,6 +140,91 @@ return {
   );
 });
 
+test('step 5 completion clears failed phone reuse and marks post-validation errors as non-reusable', async () => {
+  const api = new Function(`
+const events = {
+  logs: [],
+  setStateCalls: [],
+  broadcasts: [],
+};
+let currentState = {
+  failedSignupPhoneReuseActivation: {
+    activationId: 'previous-reuse',
+    phoneNumber: '+56988845555',
+    provider: 'hero-sms',
+  },
+  nodeStatuses: { 'fill-profile': 'pending' },
+};
+
+async function addLog(message, level, meta) {
+  events.logs.push({ message, level, meta });
+}
+async function getState() {
+  return currentState;
+}
+async function setState(updates) {
+  currentState = {
+    ...currentState,
+    ...updates,
+    nodeStatuses: updates.nodeStatuses ? { ...updates.nodeStatuses } : currentState.nodeStatuses,
+  };
+  events.setStateCalls.push(updates);
+}
+function broadcastDataUpdate(payload) {
+  events.broadcasts.push(payload);
+}
+function getErrorMessage(error) {
+  return error?.message || String(error || '');
+}
+function normalizeAutoStepDelaySeconds() { return 0; }
+function getAutoRunPreExecutionDelayMsForNode() { return 0; }
+function getAutoRunPreExecutionDelayReasonForNode() { return ''; }
+function getStepIdByNodeIdForState(nodeId) { return nodeId === 'fill-profile' ? 5 : null; }
+function doesNodeUseBackgroundCompletion() { return false; }
+function doesNodeUseCompletionSignal(nodeId) { return nodeId === 'fill-profile'; }
+function getNodeCompletionSignalTimeoutMs() { return 150000; }
+async function executeNodeViaCompletionSignal() { return { submitted: true }; }
+async function executeNode() {}
+async function getTabId() { return 77; }
+async function waitForTabStableComplete() {}
+async function validateStep5PostCompletion() {
+  throw new Error('profile post-submit validation failed');
+}
+async function setNodeStatus(nodeId, status) {
+  await setState({
+    nodeStatuses: { ...(currentState.nodeStatuses || {}), [nodeId]: status },
+    currentNodeId: nodeId,
+  });
+}
+async function sleepWithStop() {}
+function throwIfStopped() {}
+
+${extractFunction('clearFailedSignupPhoneReuseActivation')}
+${extractFunction('executeNodeAndWait')}
+
+return {
+  async run() {
+    let thrown = null;
+    try {
+      await executeNodeAndWait('fill-profile', 0);
+    } catch (error) {
+      thrown = error;
+    }
+    return { thrown, events, currentState };
+  },
+};
+`)();
+
+  const { thrown, events, currentState } = await api.run();
+
+  assert.match(thrown?.message || '', /profile post-submit validation failed/);
+  assert.equal(thrown.skipFailedSignupPhoneReusePreserve, true);
+  assert.equal(thrown.signupProfileSubmitted, true);
+  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
+  assert.equal(events.setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null), true);
+  assert.equal(events.broadcasts.some((payload) => payload.failedSignupPhoneReuseActivation === null), true);
+});
+
 test('step 5 post-completion validation accepts phone signup callback error landing', async () => {
   const api = new Function(`
 const messages = [];

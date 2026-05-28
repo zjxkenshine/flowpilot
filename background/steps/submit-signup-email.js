@@ -419,6 +419,9 @@
         throw new Error('手机号注册流程不可用：接码模块尚未初始化。');
       }
       const activation = await phoneVerificationHelpers.prepareSignupPhoneActivation(state);
+      if (state?.failedSignupPhoneReuseActivation && typeof setState === 'function') {
+        await setState({ failedSignupPhoneReuseActivation: null });
+      }
       return {
         phoneNumber: activation.phoneNumber,
         activation,

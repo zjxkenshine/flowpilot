@@ -3640,6 +3640,7 @@ const phoneAuthHelpers = self.MultiPagePhoneAuth?.createPhoneAuthHelpers?.({
   isConsentReady: isStep8Ready,
   isPhoneVerificationPageReady,
   isVisibleElement,
+  log,
   simulateClick,
   sleep,
   throwIfStopped,

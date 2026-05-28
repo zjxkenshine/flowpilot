@@ -227,7 +227,7 @@ test('message router appends success record when CPA session import is the final
   assert.equal(accountBookCalls.some((call) => call[0] === 'flow_completed'), true);
 });
 
-test('message router marks Phone Plus payment completion as plus before OAuth tail', async () => {
+test('message router marks Phone Plus plus-check completion as plus before OAuth tail', async () => {
   const { accountBookCalls, broadcasts, router, stateUpdates } = createRouterWithFinalNode({
     finalNodeId: 'platform-verify',
     state: {
@@ -239,6 +239,7 @@ test('message router marks Phone Plus payment completion as plus before OAuth ta
       'wait-registration-success',
       'plus-checkout-create',
       'plus-checkout-billing',
+      'plus-check',
       'oauth-login',
       'platform-verify',
     ],
@@ -246,15 +247,19 @@ test('message router marks Phone Plus payment completion as plus before OAuth ta
       'wait-registration-success': 6,
       'plus-checkout-create': 7,
       'plus-checkout-billing': 8,
-      'oauth-login': 9,
-      'platform-verify': 10,
+      'plus-check': 9,
+      'oauth-login': 10,
+      'platform-verify': 11,
     },
   });
 
   await router.handleMessage({
     type: 'NODE_COMPLETE',
-    nodeId: 'plus-checkout-billing',
-    payload: { nodeId: 'plus-checkout-billing' },
+    nodeId: 'plus-check',
+    payload: {
+      nodeId: 'plus-check',
+      plusHostedCheckoutVerified: true,
+    },
   }, {});
 
   assert.deepStrictEqual(stateUpdates.find((update) => update?.freeStatus === 'plus'), {
@@ -262,7 +267,7 @@ test('message router marks Phone Plus payment completion as plus before OAuth ta
     freeStatusDetection: {
       freeStatus: 'plus',
       reason: 'phone_plus_payment_completed',
-      nodeId: 'plus-checkout-billing',
+      nodeId: 'plus-check',
     },
   });
   assert.equal(broadcasts.some((payload) => payload?.freeStatus === 'plus'), true);
@@ -281,6 +286,7 @@ test('message router skips Phone Plus plus marking when hosted checkout verifica
       'wait-registration-success',
       'plus-checkout-create',
       'plus-checkout-billing',
+      'plus-check',
       'oauth-login',
       'platform-verify',
     ],
@@ -288,16 +294,17 @@ test('message router skips Phone Plus plus marking when hosted checkout verifica
       'wait-registration-success': 6,
       'plus-checkout-create': 7,
       'plus-checkout-billing': 8,
-      'oauth-login': 9,
-      'platform-verify': 10,
+      'plus-check': 9,
+      'oauth-login': 10,
+      'platform-verify': 11,
     },
   });
 
   await router.handleMessage({
     type: 'NODE_COMPLETE',
-    nodeId: 'plus-checkout-billing',
+    nodeId: 'plus-check',
     payload: {
-      nodeId: 'plus-checkout-billing',
+      nodeId: 'plus-check',
       plusHostedCheckoutVerified: false,
       plusHostedCheckoutVerificationFailed: true,
     },
@@ -320,6 +327,7 @@ test('message router does not mark plus before the terminal Phone Plus payment n
       'wait-registration-success',
       'plus-checkout-create',
       'plus-checkout-billing',
+      'plus-check',
       'oauth-login',
       'platform-verify',
     ],
@@ -327,15 +335,16 @@ test('message router does not mark plus before the terminal Phone Plus payment n
       'wait-registration-success': 6,
       'plus-checkout-create': 7,
       'plus-checkout-billing': 8,
-      'oauth-login': 9,
-      'platform-verify': 10,
+      'plus-check': 9,
+      'oauth-login': 10,
+      'platform-verify': 11,
     },
   });
 
   await router.handleMessage({
     type: 'NODE_COMPLETE',
-    nodeId: 'plus-checkout-create',
-    payload: { nodeId: 'plus-checkout-create' },
+    nodeId: 'plus-checkout-billing',
+    payload: { nodeId: 'plus-checkout-billing' },
   }, {});
 
   assert.equal(stateUpdates.some((update) => update?.freeStatus === 'plus'), false);

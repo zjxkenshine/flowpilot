@@ -52,6 +52,26 @@ function extractFunction(source, name) {
 }
 
 const helperBundle = [
+  "const DEFAULT_ACTIVE_FLOW_ID = 'openai';",
+  "const DEFAULT_PHONE_SMS_PROVIDER = 'hero-sms';",
+  "const kiroStateHelpers = null;",
+  "const runtimeStateHelpers = null;",
+  "function isPlainObjectValue(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }",
+  "function normalizePhoneSmsProvider(value = '') { return String(value || '').trim().toLowerCase() || 'hero-sms'; }",
+  "function buildPersistentSettingsPayload(input = {}) { return { autoRunPreserveIssueLogsOnRestart: Boolean(input.autoRunPreserveIssueLogsOnRestart), settingsState: input.settingsState || {}, ...(input.signupMethod !== undefined ? { signupMethod: input.signupMethod } : {}), ...(input.mailProvider !== undefined ? { mailProvider: input.mailProvider } : {}), ...(input.emailGenerator !== undefined ? { emailGenerator: input.emailGenerator } : {}), ...(input.gmailBaseEmail !== undefined ? { gmailBaseEmail: input.gmailBaseEmail } : {}), ...(input.mail2925BaseEmail !== undefined ? { mail2925BaseEmail: input.mail2925BaseEmail } : {}), ...(input.reusablePhoneActivation !== undefined ? { reusablePhoneActivation: input.reusablePhoneActivation } : {}) }; }",
+  "function collectAutoRunFreshResetRuntimeSettingKeys() { return new Set(['signupPhoneNumber', 'signupPhoneActivation', 'signupPhoneCompletedActivation', 'signupPhoneVerificationRequestedAt', 'signupPhoneVerificationPurpose', 'accountIdentifierType', 'accountIdentifier', 'resolvedSignupMethod']); }",
+  extractFunction(helperSource, 'normalizePhonePreferredActivation'),
+  extractFunction(helperSource, 'normalizeFailedSignupPhoneReuseActivation'),
+  extractFunction(helperSource, 'cloneAutoRunKeepStateValue'),
+  extractFunction(helperSource, 'mergeAutoRunKeepStateValue'),
+  extractFunction(helperSource, 'normalizePanelMode'),
+  extractFunction(helperSource, 'hasStepExecutionRangeShape'),
+  extractFunction(helperSource, 'normalizePositiveStepNumber'),
+  extractFunction(helperSource, 'normalizeStepExecutionRangeEntry'),
+  extractFunction(helperSource, 'normalizeStepExecutionRangeByFlow'),
+  extractFunction(helperSource, 'buildAutoRunFreshResetSettingsState'),
+  extractFunction(helperSource, 'filterAutoRunIssueLogsForRestart'),
+  extractFunction(helperSource, 'buildFreshAutoRunKeepState'),
   extractFunction(helperSource, 'clearStopRequest'),
   extractFunction(helperSource, 'normalizeAutoRunSessionId'),
   extractFunction(helperSource, 'throwIfStopped'),
@@ -146,6 +166,13 @@ let currentState = {
   signupPhoneNumber: '+6612345',
   signupPhoneActivation: { activationId: 'signup-activation', phoneNumber: '+6612345' },
   signupPhoneCompletedActivation: { activationId: 'signup-completed', phoneNumber: '+6612345' },
+  failedSignupPhoneReuseActivation: {
+    activationId: 'protected-reuse',
+    phoneNumber: '+6612999',
+    source: 'signup-protected-step-failure-reuse',
+    reason: 'step 5 profile submit failed before click',
+    recordedAt: 123456789,
+  },
   signupPhoneVerificationRequestedAt: 123456,
   signupPhoneVerificationPurpose: 'signup',
   phoneNoSupplyFailureStreak: 2,
@@ -378,6 +405,7 @@ const controller = self.MultiPageBackgroundAutoRunController.createAutoRunContro
   AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS,
   broadcastAutoRunStatus,
   broadcastStopToContentScripts,
+  buildFreshAutoRunKeepState,
   cancelPendingCommands,
   clearStopRequest,
   createAutoRunSessionId,
@@ -440,6 +468,22 @@ return {
   assert.strictEqual(snapshot.currentState.signupPhoneNumber, '', 'signup phone number should be runtime-only');
   assert.strictEqual(snapshot.currentState.signupPhoneActivation, null, 'signup phone activation should be runtime-only');
   assert.strictEqual(snapshot.currentState.signupPhoneCompletedActivation, null, 'completed signup phone activation should be runtime-only');
+  assert.deepStrictEqual(
+    snapshot.currentState.failedSignupPhoneReuseActivation,
+    {
+      activationId: 'protected-reuse',
+      phoneNumber: '+6612999',
+      provider: 'hero-sms',
+      countryId: null,
+      countryLabel: '',
+      successfulUses: 0,
+      maxUses: 1,
+      source: 'signup-protected-step-failure-reuse',
+      reason: 'step 5 profile submit failed before click',
+      recordedAt: 123456789,
+    },
+    'protected signup phone reuse cache should survive fresh-attempt reset'
+  );
   assert.strictEqual(snapshot.currentState.signupPhoneVerificationRequestedAt, null, 'signup phone request time should be runtime-only');
   assert.strictEqual(snapshot.currentState.signupPhoneVerificationPurpose, '', 'signup phone purpose should be runtime-only');
   assert.strictEqual(snapshot.currentState.phoneNoSupplyFailureStreak, 0, 'no-supply streak should not survive a fresh-attempt reset');

@@ -96,6 +96,7 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   const completedPayloads = [];
   const sequence = [];
   const sentPayloads = [];
+  const stateUpdates = [];
   const activation = {
     activationId: 'signup-activation',
     phoneNumber: '66959916439',
@@ -150,10 +151,18 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
       sentPayloads.push(message.payload);
       return { submitted: true };
     },
+    setState: async (updates) => {
+      stateUpdates.push(updates);
+    },
     SIGNUP_PAGE_INJECT_FILES: [],
   });
 
-  await executor.executeStep2({ signupMethod: 'phone' });
+  await executor.executeStep2({
+    signupMethod: 'phone',
+    failedSignupPhoneReuseActivation: {
+      reason: 'stale malformed reuse cache',
+    },
+  });
 
   assert.deepStrictEqual(sequence, [
     'ensureSignupPhoneEntryReady',
@@ -181,6 +190,9 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
         skippedPasswordStep: true,
       },
     },
+  ]);
+  assert.deepStrictEqual(stateUpdates, [
+    { failedSignupPhoneReuseActivation: null },
   ]);
 });
 

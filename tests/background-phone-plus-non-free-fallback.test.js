@@ -15,6 +15,7 @@ const PHONE_PLUS_PAYPAL_NODES = [
   'plus-checkout-billing',
   'paypal-approve',
   'plus-checkout-return',
+  'plus-check',
   'oauth-login',
   'fetch-login-code',
   'bind-email',
@@ -35,6 +36,7 @@ const PHONE_PLUS_PAYPAL_HOSTED_NODES = [
   'paypal-hosted-card',
   'paypal-hosted-create-account',
   'paypal-hosted-review',
+  'plus-check',
   'oauth-login',
   'fetch-login-code',
   'bind-email',
@@ -160,6 +162,7 @@ test('Phone Plus non-free fallback skips the Plus segment and keeps current pane
       'plus-checkout-billing': 'running',
       'paypal-approve': 'pending',
       'plus-checkout-return': 'pending',
+      'plus-check': 'pending',
       'oauth-login': 'pending',
     },
     currentNodeId: 'plus-checkout-billing',
@@ -185,6 +188,7 @@ test('Phone Plus non-free fallback skips the Plus segment and keeps current pane
     'plus-checkout-billing',
     'paypal-approve',
     'plus-checkout-return',
+    'plus-check',
   ]);
   assert.equal(result.nextNodeId, 'oauth-login');
 
@@ -205,8 +209,9 @@ test('Phone Plus non-free fallback skips the Plus segment and keeps current pane
   assert.equal(nextState.nodeStatuses['plus-checkout-billing'], 'skipped');
   assert.equal(nextState.nodeStatuses['paypal-approve'], 'skipped');
   assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-check'], 'skipped');
   assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
-  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 4);
+  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 5);
   assert.equal(api.events.logs.some((entry) => /free auth/.test(entry.message)), true);
 });
 
@@ -246,6 +251,7 @@ test('Phone Plus hosted fallback skips the full hosted payment segment', async (
       'paypal-hosted-card': 'pending',
       'paypal-hosted-create-account': 'pending',
       'paypal-hosted-review': 'pending',
+      'plus-check': 'pending',
       'oauth-login': 'pending',
     },
     currentNodeId: 'plus-checkout-create',
@@ -265,10 +271,12 @@ test('Phone Plus hosted fallback skips the full hosted payment segment', async (
     'paypal-hosted-card',
     'paypal-hosted-create-account',
     'paypal-hosted-review',
+    'plus-check',
   ]);
   assert.equal(result.nextNodeId, 'oauth-login');
   assert.equal(api.getState().nodeStatuses['paypal-hosted-review'], 'skipped');
-  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 5);
+  assert.equal(api.getState().nodeStatuses['plus-check'], 'skipped');
+  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 6);
 });
 
 test('Phone Plus registration non-free fallback skips payment segment with dedicated log', async () => {
@@ -287,6 +295,7 @@ test('Phone Plus registration non-free fallback skips payment segment with dedic
       'plus-checkout-billing': 'pending',
       'paypal-approve': 'pending',
       'plus-checkout-return': 'pending',
+      'plus-check': 'pending',
       'oauth-login': 'pending',
     },
     currentNodeId: 'wait-registration-success',
@@ -310,6 +319,7 @@ test('Phone Plus registration non-free fallback skips payment segment with dedic
     'plus-checkout-billing',
     'paypal-approve',
     'plus-checkout-return',
+    'plus-check',
   ]);
   const nextState = api.getState();
   assert.equal(nextState.phonePlusFallbackReason, 'phone-plus-registration-non-free');
@@ -317,6 +327,7 @@ test('Phone Plus registration non-free fallback skips payment segment with dedic
   assert.equal(nextState.phonePlusFallbackAmountLabel, '');
   assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
   assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-check'], 'skipped');
   assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
   assert.equal(api.events.logs.some((entry) => /第 6 步账号类型不是 free/.test(entry.message)), true);
   assert.equal(api.events.logs.some((entry) => /今日|today due|Checkout/.test(entry.message)), false);
@@ -338,6 +349,7 @@ test('Phone Plus proxy failure fallback stores reason detail and logs proxy mess
       'plus-checkout-billing': 'pending',
       'paypal-approve': 'pending',
       'plus-checkout-return': 'pending',
+      'plus-check': 'pending',
       'oauth-login': 'pending',
     },
     currentNodeId: 'plus-checkout-create',
@@ -363,6 +375,7 @@ test('Phone Plus proxy failure fallback stores reason detail and logs proxy mess
   assert.equal(nextState.oauthUrl, null);
   assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
   assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-check'], 'skipped');
   assert.equal(api.events.logs.some((entry) => /支付转换代理失败/.test(entry.message)), true);
   assert.equal(api.events.logs.some((entry) => /未检测到支付转换代理出口 IP/.test(entry.message)), true);
 });
@@ -384,6 +397,7 @@ test('Phone Plus hosted generic error fallback skips payment segment and keeps O
       'paypal-hosted-card': 'running',
       'paypal-hosted-create-account': 'pending',
       'paypal-hosted-review': 'pending',
+      'plus-check': 'pending',
       'oauth-login': 'pending',
     },
     currentNodeId: 'paypal-hosted-card',
@@ -406,6 +420,7 @@ test('Phone Plus hosted generic error fallback skips payment segment and keeps O
     'paypal-hosted-card',
     'paypal-hosted-create-account',
     'paypal-hosted-review',
+    'plus-check',
   ]);
   const nextState = api.getState();
   assert.equal(nextState.phonePlusFallbackReason, 'hosted-checkout-generic-error');
@@ -413,6 +428,7 @@ test('Phone Plus hosted generic error fallback skips payment segment and keeps O
   assert.equal(nextState.plusCheckoutTabId, null);
   assert.equal(nextState.oauthUrl, null);
   assert.equal(nextState.nodeStatuses['paypal-hosted-card'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-check'], 'skipped');
   assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
   assert.equal(api.events.logs.some((entry) => /genericError/.test(entry.message)), true);
   assert.equal(api.events.logs.some((entry) => /OAuth/.test(entry.message)), true);

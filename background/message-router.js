@@ -1270,10 +1270,14 @@
             ? getNodeIdsForState(postCompletionState).map((item) => String(item || '').trim()).filter(Boolean)
             : [];
           const oauthNodeIndex = workflowNodeIds.indexOf('oauth-login');
+          const nodeBeforeOauth = oauthNodeIndex > 0 ? workflowNodeIds[oauthNodeIndex - 1] : '';
+          const hasPhonePlusCheckNode = workflowNodeIds.includes('plus-check');
           const isPhonePlusPaymentCompletionNode = Boolean(
             postCompletionState?.phonePlusModeEnabled
             && oauthNodeIndex > 0
-            && workflowNodeIds[oauthNodeIndex - 1] === nodeId
+            && (hasPhonePlusCheckNode
+              ? nodeId === 'plus-check' && nodeBeforeOauth === 'plus-check'
+              : nodeBeforeOauth === nodeId)
           );
           const hasUnverifiedPlusHostedCheckout = Boolean(
             message.payload?.plusHostedCheckoutVerified === false

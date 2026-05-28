@@ -454,6 +454,7 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
         'paypal-hosted-card',
         'paypal-hosted-create-account',
         'paypal-hosted-review',
+        'plus-check',
         'oauth-login',
         'fetch-login-code',
         'bind-email',
@@ -477,6 +478,7 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
         'paypal-hosted-card',
         'paypal-hosted-create-account',
         'paypal-hosted-review',
+        'plus-check',
         'oauth-login',
         'fetch-login-code',
         'bind-email',
@@ -497,6 +499,7 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
         'wait-registration-success',
         'plus-checkout-create',
         'gopay-subscription-confirm',
+        'plus-check',
         'oauth-login',
         'fetch-login-code',
         'bind-email',
@@ -517,6 +520,7 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
         'wait-registration-success',
         'plus-checkout-create',
         'plus-checkout-billing',
+        'plus-check',
         'oauth-login',
         'fetch-login-code',
         'bind-email',
@@ -529,15 +533,27 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
 
   cases.forEach(({ label, options, expectedKeys }) => {
     const steps = api.getSteps(options);
+    const nodes = api.getNodes(options);
     const stepKeys = steps.map((step) => step.key);
+    const nodeIds = nodes.map((node) => node.nodeId);
     const expectedIds = Array.from({ length: expectedKeys.length }, (_, index) => index + 1);
     const waitIndex = stepKeys.indexOf('wait-registration-success');
 
     assert.deepStrictEqual(stepKeys, expectedKeys, `${label} keys should follow phone registration, payment, OAuth tail`);
+    assert.deepStrictEqual(nodeIds, expectedKeys, `${label} node ids should follow phone registration, payment, OAuth tail`);
     assert.deepStrictEqual(api.getStepIds(options), expectedIds, `${label} ids should be contiguous`);
     assert.equal(api.getLastStepId(options), expectedIds.at(-1), `${label} last step id should match the tail`);
+    assert.deepStrictEqual(nodes.map((node) => node.displayOrder), expectedIds, `${label} display order should be contiguous`);
     assert.equal(waitIndex >= 0, true, `${label} should keep wait-registration-success`);
     assert.equal(stepKeys[waitIndex + 1], 'plus-checkout-create', `${label} should start payment after registration success`);
+    assert.equal(stepKeys[stepKeys.indexOf('oauth-login') - 1], 'plus-check', `${label} should check Plus before OAuth`);
+    nodes.forEach((node, index) => {
+      assert.deepStrictEqual(
+        node.next,
+        index < expectedKeys.length - 1 ? [expectedKeys[index + 1]] : [],
+        `${label} node ${node.nodeId} should link to the next node`
+      );
+    });
   });
 });
 
@@ -558,7 +574,9 @@ test('Phone Plus always uses OAuth tail even when a session import strategy is r
 
       assert.equal(stepKeys.includes('sub2api-session-import'), false, `${plusPaymentMethod} should not import SUB2API sessions`);
       assert.equal(stepKeys.includes('cpa-session-import'), false, `${plusPaymentMethod} should not import CPA sessions`);
+      assert.equal(stepKeys.includes('plus-check'), true, `${plusPaymentMethod} should check Plus before OAuth`);
       assert.equal(stepKeys.includes('oauth-login'), true, `${plusPaymentMethod} should keep OAuth login`);
+      assert.equal(stepKeys[stepKeys.indexOf('oauth-login') - 1], 'plus-check', `${plusPaymentMethod} should run plus-check before OAuth`);
       assert.equal(stepKeys.includes('bind-email'), true, `${plusPaymentMethod} should keep phone signup bind-email tail`);
       assert.equal(stepKeys.includes('platform-verify'), true, `${plusPaymentMethod} should keep platform verification`);
     });

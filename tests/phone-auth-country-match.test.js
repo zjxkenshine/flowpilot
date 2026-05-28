@@ -453,6 +453,7 @@ test('phone auth treats invalid content type route error as recoverable retry pa
   const originalDocument = global.document;
   const originalLocation = global.location;
   const originalWindow = global.window;
+  const originalChrome = global.chrome;
 
   let retryClicks = 0;
   const fakeRetryButton = {
@@ -496,7 +497,27 @@ test('phone auth treats invalid content type route error as recoverable retry pa
     href: 'https://auth.openai.com/phone-verification',
     pathname: '/phone-verification',
   };
+  global.chrome = {
+    runtime: {
+      sendMessage: async (message) => {
+        if (message?.type !== 'GET_STATE') {
+          return {};
+        }
+        return {
+          browserFingerprintEnabled: true,
+          browserFingerprintLevel: 'standard',
+          browserFingerprintProfile: {
+            profileId: 'fp-route-test',
+            exitRegion: 'US',
+            acceptLanguage: 'en-US,en;q=0.9',
+            userAgent: 'Mozilla/5.0 Chrome/124.0.0.0 Safari/537.36',
+          },
+        };
+      },
+    },
+  };
   global.window = global;
+  const logs = [];
 
   const helpers = api.createPhoneAuthHelpers({
     fillInput: () => {},
@@ -511,6 +532,7 @@ test('phone auth treats invalid content type route error as recoverable retry pa
     isConsentReady: () => false,
     isPhoneVerificationPageReady: () => true,
     isVisibleElement: () => true,
+    log: (message, level, options) => logs.push({ message, level, options }),
     simulateClick: (element) => {
       element?.click?.();
     },
@@ -528,9 +550,18 @@ test('phone auth treats invalid content type route error as recoverable retry pa
       retryClicks > 0 && retryClicks <= 6,
       `expected bounded retry clicks (1..6), got ${retryClicks}`
     );
+    assert.equal(logs.some(({ message }) => (
+      /Phone verification route recovery diagnostics/.test(message)
+      && /error=invalid_content_type_html/.test(message)
+      && /fingerprint=on/.test(message)
+      && /profile=fp-route-test/.test(message)
+      && /region=US/.test(message)
+      && /uaMajor=124/.test(message)
+    )), true);
   } finally {
     global.document = originalDocument;
     global.location = originalLocation;
+    global.chrome = originalChrome;
     global.window = originalWindow;
   }
 });
