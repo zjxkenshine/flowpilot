@@ -249,6 +249,8 @@ const selectBrowserFingerprintLevel = document.getElementById('select-browser-fi
 const browserFingerprintCaption = document.getElementById('browser-fingerprint-caption');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
+const rowPlusCheckoutVerificationFailureStrategy = document.getElementById('row-plus-verification-failure-strategy');
+const selectPlusCheckoutVerificationFailureStrategy = document.getElementById('select-plus-checkout-verification-failure-strategy');
 const rowPlusCheckoutCreatePreWait = document.getElementById('row-plus-checkout-create-pre-wait');
 const inputPlusCheckoutCreatePreWaitSeconds = document.getElementById('input-plus-checkout-create-pre-wait-seconds');
 const rowPlusCheckoutOpenStableWait = document.getElementById('row-plus-checkout-open-stable-wait');
@@ -710,6 +712,7 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_sessio
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX_SESSION_UI = 'codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY = 'continue';
 const DEFAULT_BROWSER_FINGERPRINT_LEVEL = 'standard';
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
@@ -3407,6 +3410,12 @@ function normalizePlusPaymentMethod(value = '') {
   return normalized === gopayValue ? gopayValue : paypalValue;
 }
 
+function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
+  return String(value || '').trim().toLowerCase() === 'retry'
+    ? 'retry'
+    : DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY;
+}
+
 function normalizeBrowserFingerprintLevel(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'basic' || normalized === 'enhanced') {
@@ -5466,6 +5475,9 @@ function collectSettingsPayload() {
     plusAccountAccessStrategy: effectivePhonePlusModeEnabled
       ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
       : requestedPlusAccountAccessStrategy,
+    plusCheckoutVerificationFailureStrategy: typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy
+      ? normalizePlusCheckoutVerificationFailureStrategy(selectPlusCheckoutVerificationFailureStrategy.value)
+      : normalizePlusCheckoutVerificationFailureStrategy(latestState?.plusCheckoutVerificationFailureStrategy),
     plusCheckoutCreatePreWaitSeconds: typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds
       ? normalizePlusCheckoutCreatePreWaitSeconds(inputPlusCheckoutCreatePreWaitSeconds.value)
       : defaultPlusCheckoutCreatePreWaitSeconds,
@@ -10895,6 +10907,14 @@ function updatePlusModeUI() {
     }
     row.style.display = enabled ? '' : 'none';
   });
+  if (typeof rowPlusCheckoutVerificationFailureStrategy !== 'undefined' && rowPlusCheckoutVerificationFailureStrategy) {
+    rowPlusCheckoutVerificationFailureStrategy.style.display = hostedRowsVisible ? '' : 'none';
+  }
+  if (typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy) {
+    selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
+      latestState?.plusCheckoutVerificationFailureStrategy
+    );
+  }
   if (typeof updatePlusCheckoutConversionModeUi === 'function') {
     updatePlusCheckoutConversionModeUi();
   }
@@ -12155,6 +12175,11 @@ function applySettingsState(state) {
   if (typeof selectPlusAccountAccessStrategy !== 'undefined' && selectPlusAccountAccessStrategy) {
     selectPlusAccountAccessStrategy.dataset.requestedValue = currentPlusAccountAccessStrategy;
     selectPlusAccountAccessStrategy.value = normalizePlusAccountAccessStrategyUiValue(currentPlusAccountAccessStrategy);
+  }
+  if (typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy) {
+    selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
+      state?.plusCheckoutVerificationFailureStrategy
+    );
   }
   if (typeof inputGpcHelperApi !== 'undefined' && inputGpcHelperApi) {
     const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
@@ -18235,6 +18260,7 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
   inputGoPayPhone,
   inputGoPayOtp,
   inputGoPayPin,
+  selectPlusCheckoutVerificationFailureStrategy,
   inputHostedCheckoutVerificationUrl,
   inputHostedCheckoutPhone,
   inputPlusHostedCheckoutOauthDelaySeconds,
@@ -20578,6 +20604,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePlusHostedCheckoutCardPreWaitSeconds(message.payload.plusHostedCheckoutCardPreWaitSeconds)
         );
       }
+      if (message.payload.plusCheckoutVerificationFailureStrategy !== undefined && selectPlusCheckoutVerificationFailureStrategy) {
+        selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
+          message.payload.plusCheckoutVerificationFailureStrategy
+        );
+      }
       if (message.payload.hostedCheckoutVerificationUrl !== undefined && inputHostedCheckoutVerificationUrl) {
         inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
         setHostedCheckoutManualCodeDisplay('未获取');
@@ -20900,6 +20931,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           normalizePlusHostedCheckoutCardPreWaitSeconds(message.payload.plusHostedCheckoutCardPreWaitSeconds)
         );
       }
+      if (message.payload.plusCheckoutVerificationFailureStrategy !== undefined && selectPlusCheckoutVerificationFailureStrategy) {
+        selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
+          message.payload.plusCheckoutVerificationFailureStrategy
+        );
+      }
       if (message.payload.plusCheckoutConversionProxyUrl !== undefined && inputPlusCheckoutConversionProxy) {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
@@ -20947,6 +20983,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.phonePlusModeEnabled !== undefined
         || message.payload.plusPaymentMethod !== undefined
         || message.payload.plusAccountAccessStrategy !== undefined
+        || message.payload.plusCheckoutVerificationFailureStrategy !== undefined
         || message.payload.plusCheckoutCreatePreWaitSeconds !== undefined
         || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined
         || message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined

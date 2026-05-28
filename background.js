@@ -92,6 +92,8 @@ const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
+const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE = 'continue';
+const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY = 'retry';
 const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   plusModeEnabled: false,
@@ -1487,6 +1489,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusHostedCheckoutIsFinalStep: true,
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutVerificationFailureStrategy: PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE,
   plusCheckoutCreatePreWaitSeconds: DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
   plusCheckoutOpenStableWaitSeconds: DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
   plusHostedCheckoutCardPreWaitSeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS,
@@ -1741,6 +1744,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusPaymentMethod',
   'plusHostedCheckoutIsFinalStep',
   'plusAccountAccessStrategy',
+  'plusCheckoutVerificationFailureStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
@@ -2443,6 +2447,12 @@ function normalizePlusAccountAccessStrategy(value = '') {
     return PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION;
   }
   return PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+}
+
+function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
+  return String(value || '').trim().toLowerCase() === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
+    ? PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
+    : PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE;
 }
 
 function normalizePlusCheckoutConversionProxySource(value = '') {
@@ -3704,6 +3714,8 @@ function normalizePersistentSettingValue(key, value) {
       return Boolean(value);
     case 'plusAccountAccessStrategy':
       return normalizePlusAccountAccessStrategy(value);
+    case 'plusCheckoutVerificationFailureStrategy':
+      return normalizePlusCheckoutVerificationFailureStrategy(value);
     case 'plusCheckoutCreatePreWaitSeconds': {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS)));
@@ -4797,6 +4809,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusHostedCheckoutIsFinalStep', ['flows', 'openai', 'plus', 'plusHostedCheckoutIsFinalStep']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
+  assignIfUpdated('plusCheckoutVerificationFailureStrategy', ['flows', 'openai', 'plus', 'plusCheckoutVerificationFailureStrategy']);
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutCardPreWaitSeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutCardPreWaitSeconds']);
@@ -12428,7 +12441,13 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
     && oauthNodeIndex > 0
     && workflowNodeIds[oauthNodeIndex - 1] === nodeId
   );
-  if (isPhonePlusPaymentCompletionNode) {
+  const hasUnverifiedPlusHostedCheckout = Boolean(
+    payload?.plusHostedCheckoutVerified === false
+    || payload?.plusHostedCheckoutVerificationFailed === true
+    || postCompletionState?.plusHostedCheckoutVerified === false
+    || postCompletionState?.plusHostedCheckoutVerificationFailed === true
+  );
+  if (isPhonePlusPaymentCompletionNode && !hasUnverifiedPlusHostedCheckout) {
     const freeStatusDetection = {
       freeStatus: 'plus',
       reason: 'phone_plus_payment_completed',
@@ -15162,6 +15181,49 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       switchResult,
     };
   }
+  const restartPlusCheckoutAfterVerificationRetryRequest = async (nodeId) => {
+    const latestState = await getState();
+    if (!latestState?.plusCheckoutVerificationRetryRequested) {
+      return false;
+    }
+    const retryNodeId = String(latestState.plusCheckoutVerificationRetryNodeId || '').trim();
+    if (retryNodeId && retryNodeId !== nodeId) {
+      return false;
+    }
+
+    plusCheckoutRestartCount += 1;
+    const reason = String(
+      latestState.plusCheckoutVerificationRetryReason
+      || latestState.plusHostedCheckoutVerificationFailureReason
+      || 'Plus final verification was not confirmed.'
+    ).trim();
+    await addLog(
+      `节点 ${getNodeLabel(nodeId, latestState)}：Plus 最终状态验证未确认，按配置回到 plus-checkout-create 重建 Plus Checkout（第 ${plusCheckoutRestartCount} 次）。原因：${reason}`,
+      'warn'
+    );
+    await resetPaymentProxyAndSwitchIpBeforeCheckoutRetry(latestState, {
+      checkoutLabel: 'Plus Checkout',
+      retryCount: plusCheckoutRestartCount,
+    });
+    await setState({
+      plusCheckoutVerificationRetryRequested: false,
+      plusCheckoutVerificationRetryReason: '',
+      plusCheckoutVerificationRetryAt: 0,
+      plusCheckoutVerificationRetryNodeId: '',
+    });
+    const checkoutResetAnchorNodeId = getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile';
+    await invalidateDownstreamAfterAutoRunNodeRestart(checkoutResetAnchorNodeId, {
+      logLabel: `节点 ${nodeId} Plus 最终验证未确认后回到 plus-checkout-create 重试（第 ${plusCheckoutRestartCount} 次）`,
+    });
+    await setState({
+      plusCheckoutVerificationRetryRequested: false,
+      plusCheckoutVerificationRetryReason: '',
+      plusCheckoutVerificationRetryAt: 0,
+      plusCheckoutVerificationRetryNodeId: '',
+    });
+    setRestartNode('plus-checkout-create');
+    return true;
+  };
   const restartCurrentNodeAfterIdle = async (nodeId, error) => {
     if (!isAutoRunStepIdleRestartError(error)) {
       return false;
@@ -15235,6 +15297,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           nodeIndex += 1;
           continue;
         }
+        if (await restartPlusCheckoutAfterVerificationRetryRequest(nodeId)) {
+          latestState = await getState();
+          nodeIds = getAutoRunWorkflowNodeIds(latestState);
+          nodeIndex = Math.max(0, getNodeIndex(latestState, currentStartNodeId));
+          continue;
+        }
 
         const currentStatus = getNodeStatusForNode(latestState, nodeId);
         if (isStepDoneStatus(currentStatus)) {
@@ -15245,6 +15313,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
 
         try {
           await executeNodeAndWaitWithAutoRunIdleLogWatchdog(nodeId, getAutoRunNodeDelayMs(nodeId));
+          if (await restartPlusCheckoutAfterVerificationRetryRequest(nodeId)) {
+            latestState = await getState();
+            nodeIds = getAutoRunWorkflowNodeIds(latestState);
+            nodeIndex = Math.max(0, getNodeIndex(latestState, currentStartNodeId));
+            continue;
+          }
           nodeIndex += 1;
         } catch (err) {
           attachFailedNode(err, nodeId, latestState);
@@ -15278,6 +15352,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   if (await shouldRunNamedNode('open-chatgpt')) {
     try {
       await executeNodeAndWaitWithAutoRunIdleLogWatchdog('open-chatgpt', getAutoRunNodeDelayMs('open-chatgpt'));
+      if (await restartPlusCheckoutAfterVerificationRetryRequest('open-chatgpt')) {
+        continue;
+      }
     } catch (err) {
       attachFailedNode(err, 'open-chatgpt', await getState());
       if (isStopError(err)) {
@@ -15300,6 +15377,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         }
         await executeNodeAndWait('submit-signup-email', getAutoRunNodeDelayMs('submit-signup-email'));
       });
+      if (await restartPlusCheckoutAfterVerificationRetryRequest('submit-signup-email')) {
+        continue;
+      }
     } catch (err) {
       attachFailedNode(err, 'submit-signup-email', await getState());
       if (isStopError(err)) {
@@ -15328,6 +15408,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     } else {
       try {
         await executeNodeAndWaitWithAutoRunIdleLogWatchdog('fill-password', getAutoRunNodeDelayMs('fill-password'));
+        if (await restartPlusCheckoutAfterVerificationRetryRequest('fill-password')) {
+          continue;
+        }
       } catch (err) {
         attachFailedNode(err, 'fill-password', latestState);
         if (isStopError(err)) {
@@ -15386,6 +15469,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       nodeIndex += 1;
       continue;
     }
+    if (await restartPlusCheckoutAfterVerificationRetryRequest(nodeId)) {
+      loopState = await getState();
+      nodeIds = getAutoRunWorkflowNodeIds(loopState);
+      nodeIndex = Math.max(0, getNodeIndex(loopState, currentStartNodeId));
+      continue;
+    }
     const currentStatus = getNodeStatusForNode(latestState, nodeId);
     if (isStepDoneStatus(currentStatus)) {
       await addLog(`自动运行：节点 ${nodeId} 当前状态为 ${currentStatus}，将直接继续后续流程。`, 'info');
@@ -15394,6 +15483,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     }
     try {
       await executeNodeAndWaitWithAutoRunIdleLogWatchdog(nodeId, getAutoRunNodeDelayMs(nodeId));
+      if (await restartPlusCheckoutAfterVerificationRetryRequest(nodeId)) {
+        loopState = await getState();
+        nodeIds = getAutoRunWorkflowNodeIds(loopState);
+        nodeIndex = Math.max(0, getNodeIndex(loopState, currentStartNodeId));
+        continue;
+      }
       nodeIndex += 1;
     } catch (err) {
       attachFailedNode(err, nodeId, latestState);

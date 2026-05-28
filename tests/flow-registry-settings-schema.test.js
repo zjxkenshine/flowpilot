@@ -40,6 +40,7 @@ test('flow registry exposes canonical flow and target metadata', () => {
       'row-plus-mode',
       'row-plus-account-access-strategy',
       'row-plus-payment-method',
+      'row-plus-verification-failure-strategy',
       'row-plus-checkout-create-pre-wait',
       'row-plus-checkout-open-stable-wait',
       'row-plus-hosted-checkout-card-pre-wait',
@@ -238,6 +239,28 @@ test('settings schema preserves Plus checkout wait settings in canonical state a
   assert.equal(view.plusCheckoutCreatePreWaitSeconds, 15);
   assert.equal(view.plusCheckoutOpenStableWaitSeconds, 28);
   assert.equal(view.plusHostedCheckoutCardPreWaitSeconds, 11);
+});
+
+test('settings schema normalizes Plus checkout verification failure strategy', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+
+  const defaults = schema.normalizeSettingsState({});
+  const defaultView = schema.buildSettingsView(defaults);
+  assert.equal(defaults.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
+  assert.equal(defaultView.plusCheckoutVerificationFailureStrategy, 'continue');
+
+  const retry = schema.normalizeSettingsState({
+    plusCheckoutVerificationFailureStrategy: ' retry ',
+  });
+  const retryView = schema.buildSettingsView(retry);
+  assert.equal(retry.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'retry');
+  assert.equal(retryView.plusCheckoutVerificationFailureStrategy, 'retry');
+
+  const invalid = schema.normalizeSettingsState({
+    plusCheckoutVerificationFailureStrategy: 'fail',
+  });
+  assert.equal(invalid.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
 });
 
 test('settings schema preserves hosted checkout security challenge switch in canonical state and read view', () => {

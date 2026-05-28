@@ -269,6 +269,45 @@ test('message router marks Phone Plus payment completion as plus before OAuth ta
   assert.equal(accountBookCalls.some((call) => call[0] === 'registration_success' && call[1].freeStatus === 'plus'), true);
 });
 
+test('message router skips Phone Plus plus marking when hosted checkout verification failed', async () => {
+  const { accountBookCalls, broadcasts, router, stateUpdates } = createRouterWithFinalNode({
+    finalNodeId: 'platform-verify',
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'plus-checkout-billing',
+      'oauth-login',
+      'platform-verify',
+    ],
+    nodeStepMap: {
+      'wait-registration-success': 6,
+      'plus-checkout-create': 7,
+      'plus-checkout-billing': 8,
+      'oauth-login': 9,
+      'platform-verify': 10,
+    },
+  });
+
+  await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'plus-checkout-billing',
+    payload: {
+      nodeId: 'plus-checkout-billing',
+      plusHostedCheckoutVerified: false,
+      plusHostedCheckoutVerificationFailed: true,
+    },
+  }, {});
+
+  assert.equal(stateUpdates.some((update) => update?.freeStatus === 'plus'), false);
+  assert.equal(broadcasts.some((payload) => payload?.freeStatus === 'plus'), false);
+  assert.equal(accountBookCalls.some((call) => call[0] === 'registration_success' && call[1]?.freeStatus === 'plus'), false);
+});
+
 test('message router does not mark plus before the terminal Phone Plus payment node', async () => {
   const { accountBookCalls, router, stateUpdates } = createRouterWithFinalNode({
     finalNodeId: 'platform-verify',

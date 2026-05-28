@@ -1258,7 +1258,13 @@
             && oauthNodeIndex > 0
             && workflowNodeIds[oauthNodeIndex - 1] === nodeId
           );
-          if (isPhonePlusPaymentCompletionNode) {
+          const hasUnverifiedPlusHostedCheckout = Boolean(
+            message.payload?.plusHostedCheckoutVerified === false
+            || message.payload?.plusHostedCheckoutVerificationFailed === true
+            || postCompletionState?.plusHostedCheckoutVerified === false
+            || postCompletionState?.plusHostedCheckoutVerificationFailed === true
+          );
+          if (isPhonePlusPaymentCompletionNode && !hasUnverifiedPlusHostedCheckout) {
             const freeStatusDetection = {
               freeStatus: 'plus',
               reason: 'phone_plus_payment_completed',

@@ -57,6 +57,9 @@
       }
       return 'oauth';
     };
+    const normalizePlusCheckoutVerificationFailureStrategy = (value = '') => (
+      String(value || '').trim().toLowerCase() === 'retry' ? 'retry' : 'continue'
+    );
     const normalizeBrowserFingerprintLevel = (value = '') => {
       const normalized = String(value || '').trim().toLowerCase();
       if (normalized === 'basic' || normalized === 'enhanced') {
@@ -280,6 +283,7 @@
               plusPaymentMethod: 'paypal',
               plusHostedCheckoutIsFinalStep: true,
               plusAccountAccessStrategy: 'oauth',
+              plusCheckoutVerificationFailureStrategy: 'continue',
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
               plusHostedCheckoutCardPreWaitSeconds: 10,
@@ -540,6 +544,11 @@
                 input?.plusAccountAccessStrategy
                 ?? nested?.flows?.openai?.plus?.plusAccountAccessStrategy
                 ?? defaults.flows.openai.plus.plusAccountAccessStrategy
+              ),
+              plusCheckoutVerificationFailureStrategy: normalizePlusCheckoutVerificationFailureStrategy(
+                input?.plusCheckoutVerificationFailureStrategy
+                ?? nested?.flows?.openai?.plus?.plusCheckoutVerificationFailureStrategy
+                ?? defaults.flows.openai.plus.plusCheckoutVerificationFailureStrategy
               ),
               plusCheckoutCreatePreWaitSeconds: (() => {
                 const numeric = Number(
@@ -889,6 +898,7 @@
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
+      next.plusCheckoutVerificationFailureStrategy = openaiState.plus.plusCheckoutVerificationFailureStrategy;
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
       next.plusHostedCheckoutCardPreWaitSeconds = openaiState.plus.plusHostedCheckoutCardPreWaitSeconds;

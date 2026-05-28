@@ -84,6 +84,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phonePlusModeEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
+  'plusCheckoutVerificationFailureStrategy',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
@@ -127,6 +128,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
+  plusCheckoutVerificationFailureStrategy: 'continue',
   plusCheckoutCreatePreWaitSeconds: 10,
   plusCheckoutOpenStableWaitSeconds: 20,
   plusHostedCheckoutCardPreWaitSeconds: 10,
@@ -193,6 +195,8 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE = 'continue';
+const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY = 'retry';
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 function isPlainObjectValue(value) {
@@ -235,6 +239,7 @@ function normalizeBrowserFingerprintLevel(value = '') {
   return normalized === 'basic' || normalized === 'enhanced' ? normalized : 'standard';
 }
 ${extractFunction('normalizePlusAccountAccessStrategy')}
+${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}
 ${extractFunction('normalizePlusCheckoutConversionProxySource')}
 ${extractFunction('normalizePlusCheckoutConversionProxy711Region')}
 function normalizeSub2ApiGroupNames(value) {
@@ -504,17 +509,26 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   const api = buildHarness();
 
   const payload = api.buildPersistentSettingsPayload({
+    plusCheckoutVerificationFailureStrategy: 'retry',
     plusCheckoutCreatePreWaitSeconds: ' 16.8 ',
     plusCheckoutOpenStableWaitSeconds: ' 29.2 ',
     plusHostedCheckoutCardPreWaitSeconds: ' 11.9 ',
   }, { fillDefaults: true });
 
+  assert.equal(payload.plusCheckoutVerificationFailureStrategy, 'retry');
   assert.equal(payload.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.plusCheckoutOpenStableWaitSeconds, 29);
   assert.equal(payload.plusHostedCheckoutCardPreWaitSeconds, 11);
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'retry');
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutCreatePreWaitSeconds, 16);
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutOpenStableWaitSeconds, 29);
   assert.equal(payload.settingsState.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds, 11);
+
+  const invalid = api.buildPersistentSettingsPayload({
+    plusCheckoutVerificationFailureStrategy: 'fail',
+  }, { fillDefaults: true });
+  assert.equal(invalid.plusCheckoutVerificationFailureStrategy, 'continue');
+  assert.equal(invalid.settingsState.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
 });
 
 test('buildPersistentSettingsPayload persists PayPal hosted checkout resend strategy into settings schema', () => {

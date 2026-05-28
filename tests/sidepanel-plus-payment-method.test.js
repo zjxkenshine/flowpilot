@@ -290,6 +290,35 @@ test('sidepanel PayPal hosted security challenge toggle defaults off and syncs t
   );
 });
 
+test('sidepanel Plus verification failure strategy renders and syncs through settings', () => {
+  assert.match(sidepanelHtml, /id="row-plus-verification-failure-strategy"/);
+  assert.match(sidepanelHtml, /id="select-plus-checkout-verification-failure-strategy"/);
+  assert.match(sidepanelHtml, /<option value="continue">继续<\/option>/);
+  assert.match(sidepanelHtml, /<option value="retry">重试<\/option>/);
+
+  const normalizeSource = extractFunction('normalizePlusCheckoutVerificationFailureStrategy');
+  const normalize = new Function(`
+const DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY = 'continue';
+${normalizeSource}
+return normalizePlusCheckoutVerificationFailureStrategy;
+`)();
+  assert.equal(normalize('retry'), 'retry');
+  assert.equal(normalize('bad'), 'continue');
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /plusCheckoutVerificationFailureStrategy:/);
+  assert.match(collectSource, /selectPlusCheckoutVerificationFailureStrategy\.value/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /selectPlusCheckoutVerificationFailureStrategy\.value\s*=\s*normalizePlusCheckoutVerificationFailureStrategy/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 12000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckoutVerificationFailureStrategy !== undefined/);
+  assert.match(dataUpdatedSnippet, /selectPlusCheckoutVerificationFailureStrategy\.value\s*=\s*normalizePlusCheckoutVerificationFailureStrategy/);
+});
+
 test('sidepanel PayPal hosted sms pool max uses renders and syncs through settings', () => {
   const inputMatch = sidepanelHtml.match(
     /<input[^>]+id="input-hosted-checkout-sms-pool-max-uses"[^>]*>/i

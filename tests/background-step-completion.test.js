@@ -278,6 +278,33 @@ test('completeNodeFromBackground marks Phone Plus payment completion as plus bef
   )));
 });
 
+test('completeNodeFromBackground skips Plus marking when hosted checkout verification failed', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'paypal-hosted-review',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('paypal-hosted-review', {
+    nodeId: 'paypal-hosted-review',
+    plusHostedCheckoutVerified: false,
+    plusHostedCheckoutVerificationFailed: true,
+  });
+
+  assert.equal(events.some((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus'), false);
+  assert.equal(events.some((event) => event.type === 'broadcast' && event.payload?.freeStatus === 'plus'), false);
+  assert.equal(events.some((event) => event.type === 'account-book' && event.stage === 'registration_success' && event.state.freeStatus === 'plus'), false);
+});
+
 test('completeNodeFromBackground does not mark plus for non-terminal or non-phone-plus nodes', async () => {
   const intermediateEvents = [];
   const intermediateApi = createApi(intermediateEvents, 'platform-verify', {

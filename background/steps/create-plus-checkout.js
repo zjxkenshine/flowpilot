@@ -21,7 +21,8 @@
   const HOSTED_CHECKOUT_HOME_FALLBACK_URL = 'https://chatgpt.com/';
   const HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS = 2;
   const HOSTED_CHECKOUT_HOME_FALLBACK_RETRY_DELAY_MS = 3000;
-  const HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED_PREFIX = 'HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED::';
+  const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE = 'continue';
+  const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY = 'retry';
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
   const HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS = 5000;
@@ -166,6 +167,12 @@
         return PLUS_PAYMENT_METHOD_GPC_HELPER;
       }
       return normalized === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_PAYMENT_METHOD_GOPAY : PLUS_PAYMENT_METHOD_PAYPAL;
+    }
+
+    function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
+      return String(value || '').trim().toLowerCase() === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
+        ? PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
+        : PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE;
     }
 
     function isHostedCheckoutFinalStepEnabled(state = {}) {
@@ -2220,6 +2227,66 @@
       };
     }
 
+    function buildHostedCheckoutVerificationFailurePayload(strategy, fallbackResult = {}, stepKey = '') {
+      const reason = String(
+        fallbackResult?.detail
+        || fallbackResult?.fallback?.reason
+        || 'ChatGPT home fallback did not confirm Plus activation.'
+      ).trim() || 'ChatGPT home fallback did not confirm Plus activation.';
+      const failedAt = Date.now();
+      const payload = {
+        plusHostedCheckoutVerificationFailed: true,
+        plusHostedCheckoutVerificationFailureStrategy: strategy,
+        plusHostedCheckoutVerificationFailureReason: reason,
+        plusHostedCheckoutVerificationFailurePreview: String(fallbackResult?.fallback?.accountAreaTextPreview || '').slice(0, 300),
+        plusHostedCheckoutVerificationFailureAt: failedAt,
+        plusHostedCheckoutCompleted: true,
+        plusHostedCheckoutVerified: false,
+      };
+      if (strategy === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY) {
+        payload.plusCheckoutVerificationRetryRequested = true;
+        payload.plusCheckoutVerificationRetryReason = reason;
+        payload.plusCheckoutVerificationRetryAt = failedAt;
+        payload.plusCheckoutVerificationRetryNodeId = String(stepKey || '').trim();
+      }
+      return payload;
+    }
+
+    async function completeHostedCheckoutAfterVerificationFailure(stepKey, tabId, state = {}, fallbackResult = {}, options = {}) {
+      const strategy = normalizePlusCheckoutVerificationFailureStrategy(
+        options.plusCheckoutVerificationFailureStrategy ?? state?.plusCheckoutVerificationFailureStrategy
+      );
+      const payload = buildHostedCheckoutVerificationFailurePayload(strategy, fallbackResult, stepKey);
+      const reason = payload.plusHostedCheckoutVerificationFailureReason || 'unknown';
+
+      if (strategy === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY) {
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：Plus 最终状态验证未确认，按配置请求回到 plus-checkout-create 重建 Checkout。原因：${reason}`,
+          'warn'
+        );
+        await completeHostedStep(stepKey, tabId, payload);
+        return true;
+      }
+
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${getHostedStepNumber(stepKey)}：Plus 最终状态验证未确认，按配置继续后续流程；本次不会把账号簿标记为 Plus。原因：${reason}`,
+        'warn'
+      );
+      return await completeHostedSuccessfulPayment(
+        stepKey,
+        tabId,
+        state,
+        fallbackResult.currentUrl || await getHostedCurrentUrl(tabId) || HOSTED_CHECKOUT_HOME_FALLBACK_URL,
+        {
+          ...options,
+          successFallback: true,
+          completionPayload: payload,
+        }
+      );
+    }
+
     async function completeHostedStepIfSuccessful(stepKey, tabId, state = {}, options = {}) {
       const currentUrl = await getHostedCurrentUrl(tabId);
       if (isHostedCheckoutSuccessUrl(currentUrl)) {
@@ -2231,7 +2298,7 @@
       const fallbackResult = await inspectHostedCheckoutHomeFallback(tabId, stepKey, state);
       if (!fallbackResult.success) {
         if (options.throwOnHomeFallbackFailure) {
-          throw new Error(`${HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED_PREFIX}${fallbackResult.detail || 'ChatGPT home fallback did not confirm Plus activation.'}`);
+          return await completeHostedCheckoutAfterVerificationFailure(stepKey, tabId, state, fallbackResult, options);
         }
         return false;
       }

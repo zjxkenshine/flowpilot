@@ -621,6 +621,7 @@ test('sidepanel html exposes Plus mode, PayPal, and GoPay settings', () => {
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
   assert.match(html, /id="input-plus-mode-enabled"/);
   assert.match(html, /id="select-plus-payment-method"/);
+  assert.match(html, /id="select-plus-checkout-verification-failure-strategy"/);
   assert.match(html, /id="input-browser-fingerprint-enabled"/);
   assert.match(html, /id="select-browser-fingerprint-level"/);
   assert.match(html, /id="select-paypal-account"/);

@@ -6984,7 +6984,7 @@ test('PayPal hosted review completes from ChatGPT home account area fallback whe
   assert.equal(complete.payload.plusHostedCheckoutSuccessFallback, true);
 });
 
-test('PayPal hosted review throws retryable fallback error after two failed ChatGPT home checks', async () => {
+test('PayPal hosted review continues by default after two failed ChatGPT home checks', async () => {
   const events = [];
   let currentUrl = 'https://www.paypal.com/checkoutweb/review?token=EC-test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -7037,16 +7037,92 @@ test('PayPal hosted review throws retryable fallback error after two failed Chat
     waitForTabCompleteUntilStopped: async () => {},
   });
 
-  await assert.rejects(
-    () => executor.executePayPalHostedReview({
-      plusCheckoutTabId: 456,
-      plusHostedCheckoutOauthDelaySeconds: 0,
-    }),
-    /HOSTED_CHECKOUT_SUCCESS_FALLBACK_FAILED::free-or-upgrade-visible/
-  );
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
 
   assert.equal(events.filter((event) => event.type === 'tab-message' && event.message.type === 'PLUS_CHECKOUT_GET_STATE').length, 2);
-  assert.equal(events.some((event) => event.type === 'complete'), false);
+  const complete = events.find((event) => event.type === 'complete' && event.step === 'paypal-hosted-review');
+  assert.ok(complete);
+  assert.equal(complete.payload.plusHostedCheckoutCompleted, true);
+  assert.equal(complete.payload.plusHostedCheckoutVerified, false);
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailed, true);
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailureStrategy, 'continue');
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailureReason, 'free-or-upgrade-visible');
+  assert.equal(complete.payload.plusCheckoutVerificationRetryRequested, undefined);
+});
+
+test('PayPal hosted review requests Plus checkout recreation when verification failure strategy is retry', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/review?token=EC-test';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+        update: async (tabId, payload) => {
+          currentUrl = payload.url;
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+        reload: async (tabId) => {
+          events.push({ type: 'tab-reload', tabId });
+          return { id: tabId, url: currentUrl, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => createHostedRuntimeState({
+      plusCheckoutVerificationFailureStrategy: 'retry',
+      plusHostedCheckoutOauthDelaySeconds: 0,
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return { hostedStage: 'review_consent' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://chatgpt.com/';
+        return { hostedStage: 'outside_paypal', submitted: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          url: 'https://chatgpt.com/',
+          homePlanFallback: {
+            checked: true,
+            successLikely: false,
+            blockingText: 'Upgrade',
+            accountAreaTextPreview: 'Upgrade plan',
+            reason: 'free-or-upgrade-visible',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+    plusCheckoutVerificationFailureStrategy: 'retry',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  assert.equal(events.filter((event) => event.type === 'tab-message' && event.message.type === 'PLUS_CHECKOUT_GET_STATE').length, 2);
+  const complete = events.find((event) => event.type === 'complete' && event.step === 'paypal-hosted-review');
+  assert.ok(complete);
+  assert.equal(complete.payload.plusHostedCheckoutCompleted, true);
+  assert.equal(complete.payload.plusHostedCheckoutVerified, false);
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailed, true);
+  assert.equal(complete.payload.plusHostedCheckoutVerificationFailureStrategy, 'retry');
+  assert.equal(complete.payload.plusCheckoutVerificationRetryRequested, true);
+  assert.equal(complete.payload.plusCheckoutVerificationRetryNodeId, 'paypal-hosted-review');
+  assert.equal(complete.payload.plusCheckoutVerificationRetryReason, 'free-or-upgrade-visible');
 });
 
 test('hosted checkout pool failure records lastError without incrementing useCount', async () => {
