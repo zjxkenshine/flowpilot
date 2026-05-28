@@ -1065,9 +1065,12 @@ test('step 7 waits after opening refreshed OAuth before login automation', async
   const globalScope = {};
   const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
   const events = [];
+  const logs = [];
 
   const executor = api.createStep7Executor({
-    addLog: async () => {},
+    addLog: async (message) => {
+      logs.push(message);
+    },
     completeNodeFromBackground: async () => {},
     getErrorMessage: (error) => error?.message || String(error || ''),
     getLoginAuthStateLabel: (state) => state || 'unknown',
@@ -1101,6 +1104,9 @@ test('step 7 waits after opening refreshed OAuth before login automation', async
     'sleep:5000',
     'send',
   ]);
+  const waitLog = logs.find((message) => message.includes('OAuth 链接已打开'));
+  assert.equal(waitLog, 'OAuth 链接已打开，等待 5 秒后继续登录操作...');
+  assert.doesNotMatch(waitLog, /\u95be\u70ac\u5e34|\u951b|\u9427\u8bf2\u7d8d|\u93bf\u5d84\u7d94|\u7ec9\u6391\u6097/u);
 });
 
 test('step 7 skips OAuth open wait when configured to zero', async () => {

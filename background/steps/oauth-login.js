@@ -356,7 +356,7 @@
             ? Math.max(0, Math.floor(Number(await getOAuthOpenAfterRefreshWaitSeconds(currentState)) || 0))
             : 0;
           if (openAfterRefreshWaitSeconds > 0 && typeof sleepWithStop === 'function') {
-            await addLog(`OAuth 閾炬帴宸叉墦寮€锛岀瓑寰?${openAfterRefreshWaitSeconds} 绉掑悗缁х画鐧诲綍鎿嶄綔...`, 'info', {
+            await addLog(`OAuth 链接已打开，等待 ${openAfterRefreshWaitSeconds} 秒后继续登录操作...`, 'info', {
               step: completionStep,
               stepKey: 'oauth-login',
             });
