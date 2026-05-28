@@ -34,6 +34,80 @@ function buildHeroSmsStatusV2Payload({ smsCode = '', smsText = '', callCode = ''
   });
 }
 
+async function collectHeroSmsTierGetNumberTrace(options = {}) {
+  const {
+    acquirePriority = 'country',
+    preferredPrice = '',
+    countryPrices = {
+      52: [0.05, 0.12],
+      16: [0.08],
+    },
+    successAt = 3,
+    tierUpgradeLimit = 2,
+  } = options;
+  const requests = [];
+  let getNumberCalls = 0;
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const country = parsedUrl.searchParams.get('country');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        const prices = countryPrices[String(country)] || [];
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            [country]: {
+              dr: Object.fromEntries(prices.map((price, index) => [
+                `tier_${String.fromCharCode(97 + index)}`,
+                { cost: price, count: 100, physicalCount: 100 },
+              ])),
+            },
+          }),
+        };
+      }
+      if (action === 'getNumber') {
+        getNumberCalls += 1;
+        if (getNumberCalls === successAt) {
+          return {
+            ok: true,
+            text: async () => `ACCESS_NUMBER:${country}${String(maxPrice || '').replace(/\D+/g, '')}:44795500${country}`,
+          };
+        }
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      if (action === 'getNumberV2') {
+        return { ok: true, text: async () => 'NO_NUMBERS' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action} @ country ${country}`);
+    },
+    getState: async () => ({ heroSmsApiKey: 'demo-key', heroSmsCountryId: 52 }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    heroSmsCountryFallback: [{ id: 16, label: 'United Kingdom' }],
+    heroSmsAcquirePriority: acquirePriority,
+    heroSmsPreferredPrice: preferredPrice,
+    phoneActivationRetryRounds: 1,
+    phoneActivationTierUpgradeLimit: tierUpgradeLimit,
+  });
+
+  return requests
+    .filter((requestUrl) => requestUrl.searchParams.get('action') === 'getNumber')
+    .map((requestUrl) => `${requestUrl.searchParams.get('country')}:${requestUrl.searchParams.get('maxPrice') || ''}`);
+}
+
 test('phone verification helper requests HeroSMS numbers with fixed OpenAI and Thailand parameters', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
@@ -2170,6 +2244,65 @@ test('phone verification helper honors price-priority acquisition mode across se
     'getPrices:52',
     'getPrices:16',
     'getNumber:16',
+  ]);
+});
+
+test('phone verification helper sorts HeroSMS tiers by country when country priority is selected', async () => {
+  const getNumberTrace = await collectHeroSmsTierGetNumberTrace({
+    acquirePriority: 'country',
+    successAt: 3,
+  });
+
+  assert.deepStrictEqual(getNumberTrace, [
+    '52:0.05',
+    '52:0.12',
+    '16:0.08',
+  ]);
+});
+
+test('phone verification helper sorts HeroSMS tiers by ascending price across countries', async () => {
+  const getNumberTrace = await collectHeroSmsTierGetNumberTrace({
+    acquirePriority: 'price',
+    successAt: 3,
+  });
+
+  assert.deepStrictEqual(getNumberTrace, [
+    '52:0.05',
+    '16:0.08',
+    '52:0.12',
+  ]);
+});
+
+test('phone verification helper sorts HeroSMS tiers by descending price across countries', async () => {
+  const getNumberTrace = await collectHeroSmsTierGetNumberTrace({
+    acquirePriority: 'price_high',
+    successAt: 3,
+  });
+
+  assert.deepStrictEqual(getNumberTrace, [
+    '52:0.12',
+    '16:0.08',
+    '52:0.05',
+  ]);
+});
+
+test('phone verification helper tries preferred HeroSMS tier across countries before normal sorting', async () => {
+  const getNumberTrace = await collectHeroSmsTierGetNumberTrace({
+    acquirePriority: 'price',
+    preferredPrice: '0.08',
+    countryPrices: {
+      52: [0.05, 0.08, 0.12],
+      16: [0.08, 0.09],
+    },
+    successAt: 4,
+    tierUpgradeLimit: 3,
+  });
+
+  assert.deepStrictEqual(getNumberTrace, [
+    '52:0.08',
+    '16:0.08',
+    '52:0.05',
+    '16:0.09',
   ]);
 });
 
@@ -9314,7 +9447,7 @@ test('phone verification helper propagates stop errors instead of swallowing res
   assert.equal(messages.includes('RETURN_TO_ADD_PHONE'), false);
 });
 
-test('phone verification helper falls back to the next country after repeated sms timeout on the same country', async () => {
+test('phone verification helper falls back to the next country when timed-out country has no higher tier', async () => {
   const requests = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
@@ -9433,7 +9566,7 @@ test('phone verification helper falls back to the next country after repeated sm
   const getNumberCountries = requests
     .filter((requestUrl) => requestUrl.searchParams.get('action') === 'getNumber')
     .map((requestUrl) => requestUrl.searchParams.get('country'));
-  assert.deepStrictEqual(getNumberCountries, ['52', '52', '16']);
+  assert.deepStrictEqual(getNumberCountries, ['52', '16']);
 });
 
 test('phone verification helper escalates HeroSMS price tier in the same country after sms timeout before changing country', async () => {
@@ -9599,7 +9732,7 @@ test('phone verification helper parses currency-formatted HeroSMS tiers and retr
     currentPhoneActivation: null,
     reusablePhoneActivation: null,
     heroSmsMaxPrice: '0.12',
-    heroSmsAcquirePriority: 'price',
+    heroSmsAcquirePriority: 'country',
   };
 
   let thailandAcquireIndex = 0;

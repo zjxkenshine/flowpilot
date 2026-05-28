@@ -954,44 +954,103 @@
         getCountryId = (attempt) => attempt?.countryConfig?.id,
         getCountryLabel = (attempt) => String(attempt?.countryConfig?.label || getCountryId(attempt) || '').trim(),
         getPrices = () => [],
+        acquirePriority = HERO_SMS_ACQUIRE_PRIORITY_COUNTRY,
         preferredPrice = null,
       } = options;
-      const queue = [];
+      const tiers = [];
       const seenKeys = new Set();
+      const normalizedAcquirePriority = normalizeHeroSmsAcquirePriority(acquirePriority);
       const normalizedPreferred = normalizeHeroSmsPriceLimit(preferredPrice);
-      const pushTier = (attempt, price, source = 'auto') => {
+      const getSortPrice = (price) => normalizeHeroSmsPriceLimit(price);
+      const comparePrice = (left, right) => {
+        const leftPrice = getSortPrice(left?.price);
+        const rightPrice = getSortPrice(right?.price);
+        const leftHasPrice = leftPrice !== null;
+        const rightHasPrice = rightPrice !== null;
+        if (leftHasPrice !== rightHasPrice) {
+          return leftHasPrice ? -1 : 1;
+        }
+        if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
+          return normalizedAcquirePriority === HERO_SMS_ACQUIRE_PRIORITY_PRICE_HIGH
+            ? rightPrice - leftPrice
+            : leftPrice - rightPrice;
+        }
+        return 0;
+      };
+      const compareCountryOrder = (left, right) => {
+        if (left.countryOrderIndex !== right.countryOrderIndex) {
+          return left.countryOrderIndex - right.countryOrderIndex;
+        }
+        if (left.priceOrderIndex !== right.priceOrderIndex) {
+          return left.priceOrderIndex - right.priceOrderIndex;
+        }
+        return 0;
+      };
+      const comparePricedAvailability = (left, right) => {
+        const leftHasPrice = getSortPrice(left?.price) !== null;
+        const rightHasPrice = getSortPrice(right?.price) !== null;
+        if (leftHasPrice === rightHasPrice) {
+          return 0;
+        }
+        return leftHasPrice ? -1 : 1;
+      };
+      const compareAutoTiers = (left, right) => {
+        const pricedAvailabilityOrder = comparePricedAvailability(left, right);
+        if (pricedAvailabilityOrder) {
+          return pricedAvailabilityOrder;
+        }
+        if (normalizedAcquirePriority === HERO_SMS_ACQUIRE_PRIORITY_COUNTRY) {
+          return compareCountryOrder(left, right) || comparePrice(left, right);
+        }
+        return comparePrice(left, right) || compareCountryOrder(left, right);
+      };
+      const pushTier = (attempt, price, source, countryOrderIndex, priceOrderIndex) => {
         const countryId = getCountryId(attempt);
         const key = buildPhoneActivationTierKey(provider, countryId, price);
         if (seenKeys.has(key)) {
           return;
         }
         seenKeys.add(key);
-        queue.push({
+        tiers.push({
           attempt,
           price,
           source,
           key,
           countryId,
           countryLabel: getCountryLabel(attempt),
+          countryOrderIndex,
+          priceOrderIndex,
         });
       };
 
-      if (normalizedPreferred !== null) {
-        for (const attempt of countryAttempts) {
-          const prices = Array.isArray(getPrices(attempt)) ? getPrices(attempt) : [];
-          if (prices.some((price) => Number(price) === Number(normalizedPreferred))) {
-            pushTier(attempt, normalizedPreferred, 'preferred');
-            break;
-          }
-        }
-      }
-
-      for (const attempt of countryAttempts) {
+      (Array.isArray(countryAttempts) ? countryAttempts : []).forEach((attempt, attemptIndex) => {
+        const rawCountryOrderIndex = Number(attempt?.countryOrderIndex ?? attempt?.index);
+        const countryOrderIndex = Number.isFinite(rawCountryOrderIndex)
+          ? rawCountryOrderIndex
+          : attemptIndex;
         const prices = Array.isArray(getPrices(attempt)) ? getPrices(attempt) : [];
-        prices.forEach((price) => pushTier(attempt, price, 'auto'));
-      }
+        prices.forEach((price, priceOrderIndex) => {
+          const sortPrice = getSortPrice(price);
+          const source = normalizedPreferred !== null
+            && sortPrice !== null
+            && Number(sortPrice) === Number(normalizedPreferred)
+            ? 'preferred'
+            : 'auto';
+          pushTier(attempt, price, source, countryOrderIndex, priceOrderIndex);
+        });
+      });
 
-      return queue;
+      const preferredTiers = normalizedPreferred === null
+        ? []
+        : tiers
+          .filter((tier) => tier.source === 'preferred')
+          .sort(compareCountryOrder);
+      const preferredKeys = new Set(preferredTiers.map((tier) => tier.key));
+      const autoTiers = tiers
+        .filter((tier) => !preferredKeys.has(tier.key))
+        .sort(compareAutoTiers);
+
+      return [...preferredTiers, ...autoTiers];
     }
 
     function formatAttemptedTierCount(maxTierCount, eligibleQueueLength) {
@@ -3923,6 +3982,7 @@
         getCountryId: (attempt) => attempt?.countryCode,
         getCountryLabel: (attempt) => attempt?.countryLabel,
         getPrices: (attempt) => attempt?.pricesToTry,
+        acquirePriority,
         preferredPrice: preferredPriceTier,
       });
 
@@ -4363,6 +4423,7 @@
         getCountryId: (attempt) => attempt?.countryId,
         getCountryLabel: (attempt) => attempt?.countryLabel,
         getPrices: (attempt) => attempt?.pricesToTry,
+        acquirePriority,
         preferredPrice: preferredPriceTier,
       });
 
@@ -4731,6 +4792,7 @@
         getCountryId: (attempt) => attempt?.countryIdKey,
         getCountryLabel: (attempt) => attempt?.countryLabel,
         getPrices: (attempt) => attempt?.pricesToTry,
+        acquirePriority,
         preferredPrice: preferredPriceTier,
       });
 

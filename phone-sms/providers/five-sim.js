@@ -726,39 +726,88 @@
   }
 
   function createTierQueue(countryAttempts = [], preferredPrice = null) {
-    const queue = [];
+    const tiers = [];
     const seen = new Set();
     const preferred = normalizePrice(preferredPrice);
-    const pushTier = (attempt, price, source = 'auto') => {
+    const acquirePriority = String(countryAttempts?.[0]?.acquirePriority || 'country').trim().toLowerCase();
+    const normalizedAcquirePriority = acquirePriority === 'price_high'
+      ? 'price_high'
+      : (acquirePriority === 'price' ? 'price' : 'country');
+    const getSortPrice = (price) => normalizePrice(price);
+    const compareCountryOrder = (left, right) => {
+      if (left.countryOrderIndex !== right.countryOrderIndex) {
+        return left.countryOrderIndex - right.countryOrderIndex;
+      }
+      if (left.priceOrderIndex !== right.priceOrderIndex) {
+        return left.priceOrderIndex - right.priceOrderIndex;
+      }
+      return 0;
+    };
+    const comparePrice = (left, right) => {
+      const leftPrice = getSortPrice(left?.price);
+      const rightPrice = getSortPrice(right?.price);
+      const leftHasPrice = leftPrice !== null;
+      const rightHasPrice = rightPrice !== null;
+      if (leftHasPrice !== rightHasPrice) {
+        return leftHasPrice ? -1 : 1;
+      }
+      if (leftHasPrice && rightHasPrice && leftPrice !== rightPrice) {
+        return normalizedAcquirePriority === 'price_high'
+          ? rightPrice - leftPrice
+          : leftPrice - rightPrice;
+      }
+      return 0;
+    };
+    const compareAutoTiers = (left, right) => {
+      if (normalizedAcquirePriority === 'country') {
+        return compareCountryOrder(left, right) || comparePrice(left, right);
+      }
+      return comparePrice(left, right) || compareCountryOrder(left, right);
+    };
+    const pushTier = (attempt, price, source, countryOrderIndex, priceOrderIndex) => {
       const key = buildTierKey(attempt?.countryConfig?.id, price);
       if (seen.has(key)) {
         return;
       }
       seen.add(key);
-      queue.push({
+      tiers.push({
         attempt,
         price,
         source,
         key,
+        countryOrderIndex,
+        priceOrderIndex,
       });
     };
 
-    if (preferred !== null) {
-      for (const attempt of countryAttempts) {
-        const prices = Array.isArray(attempt?.pricePlan?.prices) ? attempt.pricePlan.prices : [];
-        if (prices.some((price) => Number(price) === Number(preferred))) {
-          pushTier(attempt, preferred, 'preferred');
-          break;
-        }
-      }
-    }
-
-    for (const attempt of countryAttempts) {
+    (Array.isArray(countryAttempts) ? countryAttempts : []).forEach((attempt, attemptIndex) => {
+      const rawCountryOrderIndex = Number(attempt?.countryOrderIndex ?? attempt?.index);
+      const countryOrderIndex = Number.isFinite(rawCountryOrderIndex)
+        ? rawCountryOrderIndex
+        : attemptIndex;
       const prices = Array.isArray(attempt?.pricePlan?.prices) ? attempt.pricePlan.prices : [];
-      prices.forEach((price) => pushTier(attempt, price, 'auto'));
-    }
+      prices.forEach((price, priceOrderIndex) => {
+        const sortPrice = getSortPrice(price);
+        const source = preferred !== null
+          && sortPrice !== null
+          && Number(sortPrice) === Number(preferred)
+          ? 'preferred'
+          : 'auto';
+        pushTier(attempt, price, source, countryOrderIndex, priceOrderIndex);
+      });
+    });
 
-    return queue;
+    const preferredTiers = preferred === null
+      ? []
+      : tiers
+        .filter((tier) => tier.source === 'preferred')
+        .sort(compareCountryOrder);
+    const preferredKeys = new Set(preferredTiers.map((tier) => tier.key));
+    const autoTiers = tiers
+      .filter((tier) => !preferredKeys.has(tier.key))
+      .sort(compareAutoTiers);
+
+    return [...preferredTiers, ...autoTiers];
   }
 
   function assertMaxPriceCompatibleWithOperator(state = {}) {
@@ -837,21 +886,27 @@
       }
     }
 
-    const acquirePriority = String(state?.heroSmsAcquirePriority || 'country').trim().toLowerCase() === 'price' ? 'price' : 'country';
+    const rawAcquirePriority = String(state?.heroSmsAcquirePriority || 'country').trim().toLowerCase();
+    const acquirePriority = rawAcquirePriority === 'price_high'
+      ? 'price_high'
+      : (rawAcquirePriority === 'price' ? 'price' : 'country');
     const countryAttempts = countryCandidates.map((countryConfig, index) => ({
       index,
       countryConfig,
       pricePlan: null,
       orderingPrice: Number.POSITIVE_INFINITY,
+      acquirePriority,
     }));
 
-    if (acquirePriority === 'price') {
+    if (acquirePriority === 'price' || acquirePriority === 'price_high') {
       for (const attempt of countryAttempts) {
         const pricePlan = await resolvePricePlan(state, attempt.countryConfig, deps);
         const numericPrices = Array.isArray(pricePlan?.prices)
           ? pricePlan.prices.map(Number).filter((value) => Number.isFinite(value) && value >= 0)
           : [];
-        const minCandidatePrice = numericPrices.length ? Math.min(...numericPrices) : null;
+        const candidateOrderingPrice = numericPrices.length
+          ? (acquirePriority === 'price_high' ? Math.max(...numericPrices) : Math.min(...numericPrices))
+          : null;
         const cappedByUserLimit = (
           pricePlan?.userLimit !== null
           && pricePlan?.userLimit !== undefined
@@ -862,13 +917,16 @@
         attempt.pricePlan = pricePlan;
         attempt.orderingPrice = cappedByUserLimit
           ? Number.POSITIVE_INFINITY
-          : (minCandidatePrice !== null ? minCandidatePrice : Number.POSITIVE_INFINITY);
+          : (candidateOrderingPrice !== null ? candidateOrderingPrice : Number.POSITIVE_INFINITY);
       }
-      countryAttempts.sort((left, right) => (
-        left.orderingPrice !== right.orderingPrice
-          ? left.orderingPrice - right.orderingPrice
-          : left.index - right.index
-      ));
+      countryAttempts.sort((left, right) => {
+        if (left.orderingPrice !== right.orderingPrice) {
+          return acquirePriority === 'price_high'
+            ? right.orderingPrice - left.orderingPrice
+            : left.orderingPrice - right.orderingPrice;
+        }
+        return left.index - right.index;
+      });
     }
 
     for (const attempt of countryAttempts) {

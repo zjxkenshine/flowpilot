@@ -386,6 +386,127 @@ test('5sim provider falls back from preferred tier and counts the upgrade', asyn
   assert.deepStrictEqual(buyPrices, ['0.08', '0.05']);
 });
 
+test('5sim provider sorts price-priority tiers across countries', async () => {
+  const requests = [];
+  const buyTrace = [];
+  let buyCount = 0;
+  const provider = api.createProvider({
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      requests.push({ url: parsed });
+      const productMatch = parsed.pathname.match(/^\/v1\/guest\/products\/([^/]+)\/any$/);
+      if (productMatch) {
+        return createTextResponse({});
+      }
+      if (parsed.pathname === '/v1/guest/prices') {
+        const country = parsed.searchParams.get('country');
+        const prices = country === 'thailand' ? [0.05, 0.12] : [0.08];
+        return createTextResponse({
+          [country]: {
+            any: {
+              openai: Object.fromEntries(prices.map((price, index) => [
+                `tier_${String.fromCharCode(97 + index)}`,
+                { cost: price, count: 2 },
+              ])),
+            },
+          },
+        });
+      }
+      if (parsed.pathname.includes('/v1/user/buy/activation/')) {
+        buyCount += 1;
+        const country = parsed.pathname.split('/')[5];
+        const maxPrice = parsed.searchParams.get('maxPrice');
+        buyTrace.push(`${country}:${maxPrice}`);
+        if (buyCount < 3) {
+          return createTextResponse({ message: 'no free phones' }, false);
+        }
+        return createTextResponse({ id: 3003, phone: '+66900000003', country, operator: 'any' });
+      }
+      throw new Error(`unexpected ${parsed.pathname}`);
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await provider.requestActivation({
+    fiveSimApiKey: 'demo-key',
+    fiveSimCountryId: 'thailand',
+    fiveSimCountryLabel: 'Thailand',
+    fiveSimCountryFallback: [{ id: 'vietnam', label: 'Vietnam' }],
+    fiveSimOperator: 'any',
+    heroSmsAcquirePriority: 'price',
+    phoneActivationRetryRounds: 1,
+    phoneActivationTierUpgradeLimit: 2,
+  });
+
+  assert.equal(activation.activationId, '3003');
+  assert.deepStrictEqual(buyTrace, [
+    'thailand:0.05',
+    'vietnam:0.08',
+    'thailand:0.12',
+  ]);
+});
+
+test('5sim provider tries preferred tier across countries before price sorting', async () => {
+  const buyTrace = [];
+  let buyCount = 0;
+  const provider = api.createProvider({
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.match(/^\/v1\/guest\/products\/([^/]+)\/any$/)) {
+        return createTextResponse({});
+      }
+      if (parsed.pathname === '/v1/guest/prices') {
+        const country = parsed.searchParams.get('country');
+        const prices = country === 'thailand' ? [0.05, 0.08, 0.12] : [0.08, 0.09];
+        return createTextResponse({
+          [country]: {
+            any: {
+              openai: Object.fromEntries(prices.map((price, index) => [
+                `tier_${String.fromCharCode(97 + index)}`,
+                { cost: price, count: 2 },
+              ])),
+            },
+          },
+        });
+      }
+      if (parsed.pathname.includes('/v1/user/buy/activation/')) {
+        buyCount += 1;
+        const country = parsed.pathname.split('/')[5];
+        const maxPrice = parsed.searchParams.get('maxPrice');
+        buyTrace.push(`${country}:${maxPrice}`);
+        if (buyCount < 4) {
+          return createTextResponse({ message: 'no free phones' }, false);
+        }
+        return createTextResponse({ id: 3004, phone: '+84900000004', country, operator: 'any' });
+      }
+      throw new Error(`unexpected ${parsed.pathname}`);
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await provider.requestActivation({
+    fiveSimApiKey: 'demo-key',
+    fiveSimCountryId: 'thailand',
+    fiveSimCountryLabel: 'Thailand',
+    fiveSimCountryFallback: [{ id: 'vietnam', label: 'Vietnam' }],
+    fiveSimOperator: 'any',
+    heroSmsAcquirePriority: 'price',
+    heroSmsPreferredPrice: '0.08',
+    phoneActivationRetryRounds: 1,
+    phoneActivationTierUpgradeLimit: 3,
+  });
+
+  assert.equal(activation.activationId, '3004');
+  assert.deepStrictEqual(buyTrace, [
+    'thailand:0.08',
+    'vietnam:0.08',
+    'thailand:0.05',
+    'vietnam:0.09',
+  ]);
+});
+
 test('5sim provider does not climb above configured max price', async () => {
   const requests = [];
   const provider = api.createProvider({
