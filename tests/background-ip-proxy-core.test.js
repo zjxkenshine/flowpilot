@@ -70,6 +70,7 @@ return {
   resolveTargetReachabilityEndpoints,
   shouldEnableIpProxyLeakGuardForStatus,
   switch711ApiProxyUntilExitChanged,
+  switchIpProxyUntilExitRegionMatches,
   validate711ProxyApiConfig,
 };
 `)();
@@ -1031,6 +1032,161 @@ test('711 API different-exit rotation restores old exit state when every candida
     else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
     if (originalAddLog === undefined) delete globalThis.addLog;
     else globalThis.addLog = originalAddLog;
+  }
+});
+
+test('IP proxy region-match rotation skips mismatched exit country and accepts matching exit', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+    { host: '10.0.0.2', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyAccountPool: pool,
+    ipProxyAccountCurrentIndex: 0,
+    ipProxyAccountCurrent: pool[0],
+  };
+  let switchCalls = 0;
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+
+    const result = await api.switchIpProxyUntilExitRegionMatches({
+      state,
+      switchProxyFn: async () => {
+        switchCalls += 1;
+        const current = pool[Math.min(switchCalls - 1, pool.length - 1)];
+        state = {
+          ...state,
+          ipProxyAccountCurrentIndex: switchCalls - 1,
+          ipProxyAccountCurrent: current,
+        };
+        return {
+          mode: 'account',
+          provider: '711proxy',
+          count: pool.length,
+          index: switchCalls - 1,
+          current,
+          display: `${current.host}:${current.port} [${current.region}]`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: current.host,
+            port: current.port,
+            region: current.region,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: switchCalls === 1 ? '198.51.100.10' : '203.0.113.10',
+            exitRegion: switchCalls === 1 ? 'DE' : 'US',
+            exitSource: 'page_context',
+          },
+        };
+      },
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.exitRegionMatched, true);
+    assert.equal(result.expectedRegion, 'US');
+    assert.equal(result.attemptedCount, 2);
+    assert.equal(result.proxyRouting.exitRegion, 'US');
+    assert.equal(switchCalls, 2);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+  }
+});
+
+test('IP proxy region-match rotation reports skipped when exit country never matches', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+    { host: '10.0.0.2', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyAccountPool: pool,
+    ipProxyAccountCurrentIndex: 0,
+    ipProxyAccountCurrent: pool[0],
+  };
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+
+    const result = await api.switchIpProxyUntilExitRegionMatches({
+      state,
+      switchProxyFn: async (_direction, options = {}) => {
+        const currentIndex = Number(options?.state?.ipProxyAccountCurrentIndex || 0);
+        const nextIndex = (currentIndex + 1) % pool.length;
+        const current = pool[nextIndex];
+        state = {
+          ...state,
+          ipProxyAccountCurrentIndex: nextIndex,
+          ipProxyAccountCurrent: current,
+        };
+        return {
+          mode: 'account',
+          provider: '711proxy',
+          count: pool.length,
+          index: nextIndex,
+          current,
+          display: `${current.host}:${current.port} [${current.region}]`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: current.host,
+            port: current.port,
+            region: current.region,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: '198.51.100.10',
+            exitRegion: 'DE',
+            exitSource: 'page_context',
+          },
+        };
+      },
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'region_mismatch');
+    assert.equal(result.exitRegionMatched, false);
+    assert.equal(result.expectedRegion, 'US');
+    assert.equal(result.attemptedCount, 2);
+    assert.match(result.error, /期望 US，实际 DE/);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
   }
 });
 

@@ -4117,6 +4117,250 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
   };
 }
 
+function buildIpProxyExitRegionMatchCheck(result = {}, fallbackState = {}) {
+  const routing = result?.proxyRouting || {};
+  const currentEntry = result?.current || getIpProxyCurrentEntryFromState(fallbackState) || null;
+  const expectedRegion = String(
+    result?.expectedRegion
+    || currentEntry?.region
+    || routing?.region
+    || ''
+  ).trim();
+  const exitIp = String(routing?.exitIp || '').trim();
+  const exitRegion = String(routing?.exitRegion || '').trim();
+  const reason = String(routing?.reason || result?.reason || '').trim().toLowerCase();
+  const failedReason = [
+    'connectivity_failed',
+    'apply_failed',
+    'missing_proxy_entry',
+    'proxy_api_unavailable',
+    'disabled',
+    'disabled_probe_only',
+  ].includes(reason);
+
+  if (!routing || typeof routing !== 'object' || routing.applied === false || failedReason) {
+    return {
+      ok: false,
+      code: 'connectivity_failed',
+      expectedRegion,
+      exitIp,
+      exitRegion,
+      detail: String(
+        routing?.exitError
+        || routing?.error
+        || result?.reason
+        || reason
+        || '代理出口不可用'
+      ).trim(),
+    };
+  }
+
+  if (!exitIp) {
+    return {
+      ok: false,
+      code: 'missing_exit_ip',
+      expectedRegion,
+      exitIp,
+      exitRegion,
+      detail: '未检测到可用出口 IP',
+    };
+  }
+
+  if (expectedRegion && !exitRegion) {
+    return {
+      ok: false,
+      code: 'missing_exit_region',
+      expectedRegion,
+      exitIp,
+      exitRegion,
+      detail: `已检测到出口 IP ${exitIp}，但地区探测未返回国家/地区代码，无法校验期望国家 ${expectedRegion}`,
+    };
+  }
+
+  if (expectedRegion && hasProxyExitRegionMismatch(expectedRegion, exitRegion)) {
+    return {
+      ok: false,
+      code: 'region_mismatch',
+      expectedRegion,
+      exitIp,
+      exitRegion,
+      detail: `代理出口国家与配置不一致：期望 ${expectedRegion}，实际 ${exitRegion || 'unknown'}，出口 IP ${exitIp}`,
+    };
+  }
+
+  return {
+    ok: true,
+    code: expectedRegion ? 'matched' : 'no_expected_region',
+    expectedRegion,
+    exitIp,
+    exitRegion,
+    detail: '',
+  };
+}
+
+function buildIpProxyExitRegionMatchFailureMessage(check = {}, stats = {}) {
+  const attemptedCount = Math.max(0, Number(stats?.attemptedCount) || 0);
+  const prefix = attemptedCount > 0
+    ? `已尝试 ${attemptedCount} 次切换 IP 代理`
+    : '未能切换 IP 代理';
+  const expected = String(check?.expectedRegion || '').trim();
+  const actual = String(check?.exitRegion || '').trim();
+  const exitIp = String(check?.exitIp || '').trim();
+  const detail = String(check?.detail || '').trim();
+  if (check?.code === 'region_mismatch') {
+    return `${prefix}，出口国家仍与代理配置不一致：期望 ${expected || 'unknown'}，实际 ${actual || 'unknown'}${exitIp ? `，出口 IP ${exitIp}` : ''}。`;
+  }
+  if (check?.code === 'missing_exit_region') {
+    return `${prefix}，检测到出口 IP ${exitIp || 'unknown'}，但没有返回国家/地区代码，无法校验期望国家 ${expected || 'unknown'}。`;
+  }
+  if (check?.code === 'missing_exit_ip') {
+    return `${prefix}，仍未检测到可用出口 IP。`;
+  }
+  return `${prefix}，IP 代理出口不可用${detail ? `：${detail}` : '。'}`;
+}
+
+async function switchIpProxyUntilExitRegionMatches(options = {}) {
+  const originalState = options.state || await getState();
+  if (!originalState?.ipProxyEnabled) {
+    throw new Error('请先启用 IP 代理。');
+  }
+
+  const mode = normalizeIpProxyMode(options.mode || originalState?.ipProxyMode);
+  const provider = normalizeIpProxyProviderValue(originalState?.ipProxyService);
+  const maxItems = Math.max(
+    1,
+    Math.min(500, Number(options.maxItems) || resolveIpProxyPoolTargetCountForMode(originalState, mode))
+  );
+  const switchProxy = typeof options.switchProxyFn === 'function' ? options.switchProxyFn : switchIpProxy;
+  const refreshPool = typeof options.refreshPoolFn === 'function' ? options.refreshPoolFn : refreshIpProxyPool;
+  const allowRefreshOnExhausted = options.allowRefreshOnExhausted === undefined
+    ? Boolean(originalState?.ipProxyAutoRefreshPoolOnExhausted || mode === 'api')
+    : Boolean(options.allowRefreshOnExhausted);
+  const runtime = getIpProxyRuntimeSnapshot(originalState, mode, provider);
+  const accountPool = mode === 'account'
+    ? getAccountModeProxyPoolFromState(originalState, provider)
+    : [];
+  const poolLength = mode === 'account'
+    ? accountPool.length
+    : runtime.pool.length;
+  const defaultAttempts = poolLength > 0
+    ? Math.min(maxItems, poolLength)
+    : 1;
+  const maxAttempts = Math.max(
+    1,
+    Math.min(maxItems, Number(options.maxAttempts) || defaultAttempts)
+  );
+  const stats = {
+    attemptedCount: 0,
+    refreshedPool: false,
+    mismatchCount: 0,
+    missingExitCount: 0,
+    missingRegionCount: 0,
+    connectivityFailureCount: 0,
+  };
+  let latestState = originalState;
+  let lastResult = null;
+  let lastCheck = null;
+
+  const acceptOrRecord = async (result = {}, stateForCheck = latestState) => {
+    lastResult = result;
+    const check = buildIpProxyExitRegionMatchCheck(result, stateForCheck);
+    lastCheck = check;
+    if (check.ok) {
+      return {
+        ...result,
+        exitRegionMatched: Boolean(check.expectedRegion),
+        expectedRegion: check.expectedRegion,
+        exitCheck: check,
+        attemptedCount: stats.attemptedCount,
+        refreshedPool: stats.refreshedPool,
+      };
+    }
+    if (check.code === 'region_mismatch') {
+      stats.mismatchCount += 1;
+    } else if (check.code === 'missing_exit_ip') {
+      stats.missingExitCount += 1;
+    } else if (check.code === 'missing_exit_region') {
+      stats.missingRegionCount += 1;
+    } else {
+      stats.connectivityFailureCount += 1;
+    }
+    return null;
+  };
+
+  const attemptSwitches = async (attemptLimit = maxAttempts, switchState = latestState) => {
+    latestState = switchState;
+    for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
+      const switched = await switchProxy('next', {
+        mode,
+        state: latestState,
+        forceRefresh: true,
+        skipExitProbe: false,
+        maxItems,
+      });
+      stats.attemptedCount += 1;
+      const accepted = await acceptOrRecord(switched, latestState);
+      if (accepted) {
+        return accepted;
+      }
+      latestState = await getState();
+    }
+    return null;
+  };
+
+  const firstPass = await attemptSwitches(maxAttempts, originalState);
+  if (firstPass) {
+    return firstPass;
+  }
+
+  if (mode === 'api' && allowRefreshOnExhausted) {
+    const refreshed = await refreshPool({
+      mode,
+      state: latestState,
+      forceRefresh: true,
+      skipExitProbe: false,
+      maxItems,
+      timeoutMs: options.timeoutMs,
+    });
+    stats.refreshedPool = true;
+    stats.attemptedCount += 1;
+    const refreshedAccepted = await acceptOrRecord(refreshed, latestState);
+    if (refreshedAccepted) {
+      return refreshedAccepted;
+    }
+    latestState = await getState();
+    const refreshedPoolLength = Math.max(
+      0,
+      getIpProxyRuntimeSnapshot(latestState, mode, provider).pool.length
+    );
+    const secondPassLimit = Math.max(0, Math.min(maxItems, refreshedPoolLength - 1));
+    if (secondPassLimit > 0) {
+      const secondPass = await attemptSwitches(secondPassLimit, latestState);
+      if (secondPass) {
+        return secondPass;
+      }
+    }
+  }
+
+  return {
+    ...(lastResult || {}),
+    proxyRouting: lastResult?.proxyRouting || null,
+    skipped: true,
+    reason: lastCheck?.code || 'exit_region_match_failed',
+    skippedReason: lastCheck?.code || 'exit_region_match_failed',
+    exitRegionMatched: false,
+    expectedRegion: String(lastCheck?.expectedRegion || '').trim(),
+    exitCheck: lastCheck,
+    attemptedCount: stats.attemptedCount,
+    refreshedPool: stats.refreshedPool,
+    mismatchCount: stats.mismatchCount,
+    missingExitCount: stats.missingExitCount,
+    missingRegionCount: stats.missingRegionCount,
+    connectivityFailureCount: stats.connectivityFailureCount,
+    error: buildIpProxyExitRegionMatchFailureMessage(lastCheck || {}, stats),
+  };
+}
+
 async function refreshIpProxyPool(options = {}) {
   const state = options.state || await getState();
   const mode = normalizeIpProxyMode(options.mode || state?.ipProxyMode);

@@ -371,6 +371,44 @@ async function switchIpProxy(direction, options = {}) {
     },
   };
 }
+async function switchIpProxyUntilExitRegionMatches(options = {}) {
+  let lastResult = null;
+  const maxAttempts = Math.max(1, Number(options.maxAttempts) || 4);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await switchIpProxy('next', {
+      ...options,
+      forceRefresh: true,
+      skipExitProbe: false,
+    });
+    const routing = result?.proxyRouting || {};
+    const withCheck = result?.exitCheck
+      ? result
+      : {
+          ...result,
+          expectedRegion: result?.expectedRegion || routing.region || '',
+          exitCheck: {
+            ok: Boolean(routing?.applied !== false && routing?.exitIp),
+            expectedRegion: result?.expectedRegion || routing.region || '',
+            exitIp: routing?.exitIp || '',
+            exitRegion: routing?.exitRegion || '',
+            detail: routing?.exitError || routing?.error || '',
+          },
+        };
+    lastResult = {
+      ...withCheck,
+      attemptedCount: withCheck?.attemptedCount || attempt,
+    };
+    if (lastResult?.exitCheck?.ok || lastResult?.skipped) {
+      return lastResult;
+    }
+  }
+  return {
+    ...(lastResult || {}),
+    skipped: true,
+    reason: lastResult?.exitCheck?.code || 'exit_region_match_failed',
+    error: lastResult?.exitCheck?.detail || '出口国家校验未通过',
+  };
+}
 function isHostedCheckoutFinalStepEnabled(state = {}) {
   const normalized = String(state?.plusPaymentMethod || '').trim().toLowerCase();
   if (normalized === PLUS_PAYMENT_METHOD_PAYPAL_HOSTED || normalized === 'paypal_direct' || normalized === 'paypal-direct') {
@@ -905,6 +943,128 @@ test('auto-run classic PayPal retry releases residual checkout conversion proxy 
   assert.deepStrictEqual(events.order, ['restore', 'switch', 'invalidate']);
 });
 
+test('auto-run Plus retry keeps switching when IP exit country does not match proxy region', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    8: { key: 'paypal-approve' },
+    9: { key: 'plus-checkout-return' },
+    10: { key: 'oauth-login' },
+  };
+  let switchCalls = 0;
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：账单页卡住，请重新创建 checkout。',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+      ipProxyEnabled: true,
+      plusCheckoutConversionProxySession: {
+        active: true,
+        flowType: 'classic-paypal',
+        displayName: 'http://pay-proxy.example:8080',
+        snapshot: { applied: true },
+        appliedAt: 1,
+      },
+    },
+    switchIpProxyImpl: async (_direction, _options, events) => {
+      switchCalls += 1;
+      const matched = switchCalls >= 2;
+      return {
+        display: matched ? 'proxy-us' : 'proxy-de',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: matched ? '203.0.113.20' : '198.51.100.20',
+          exitRegion: matched ? 'US' : 'DE',
+          region: 'US',
+        },
+        expectedRegion: 'US',
+        exitCheck: matched
+          ? {
+              ok: true,
+              expectedRegion: 'US',
+              exitIp: '203.0.113.20',
+              exitRegion: 'US',
+            }
+          : {
+              ok: false,
+              code: 'region_mismatch',
+              expectedRegion: 'US',
+              exitIp: '198.51.100.20',
+              exitRegion: 'DE',
+              detail: '代理出口国家与配置不一致：期望 US，实际 DE',
+            },
+        attemptedCount: switchCalls,
+      };
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.proxySwitches.map((entry) => entry.direction), ['next', 'next']);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.deepStrictEqual(events.order, ['restore', 'switch', 'switch', 'invalidate']);
+  assert.ok(events.logs.some(({ message }) => /期望国家 US/.test(message) && /共尝试 2 次/.test(message)));
+});
+
+test('auto-run Plus retry stops before invalidation when IP exit country never matches', async () => {
+  const plusPaypalSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'plus-checkout-billing' },
+    10: { key: 'oauth-login' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：账单页卡住，请重新创建 checkout。',
+    stepDefinitions: plusPaypalSteps,
+    finalOAuthChainStartStep: 10,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal',
+      ipProxyEnabled: true,
+    },
+    switchIpProxyImpl: async () => ({
+      display: 'proxy-de',
+      skipped: true,
+      reason: 'region_mismatch',
+      error: '已尝试 2 次切换 IP 代理，出口国家仍与代理配置不一致：期望 US，实际 DE。',
+      proxyRouting: {
+        applied: true,
+        reason: 'applied',
+        exitIp: '198.51.100.20',
+        exitRegion: 'DE',
+        region: 'US',
+      },
+      expectedRegion: 'US',
+      exitCheck: {
+        ok: false,
+        code: 'region_mismatch',
+        expectedRegion: 'US',
+        exitIp: '198.51.100.20',
+        exitRegion: 'DE',
+        detail: '代理出口国家与配置不一致：期望 US，实际 DE',
+      },
+      attemptedCount: 2,
+    }),
+  });
+
+  const result = await harness.runAndCaptureError();
+
+  assert.ok(result?.error);
+  assert.match(result.error.message, /出口国家校验未通过/);
+  assert.equal(result.events.invalidations.length, 0);
+  assert.deepStrictEqual(result.events.order, ['switch']);
+});
+
 test('auto-run Plus retry releases checkout conversion proxy without switching IP when IP proxy is disabled', async () => {
   const plusHostedSteps = {
     6: { key: 'plus-checkout-create' },
@@ -976,7 +1136,7 @@ test('auto-run Plus retry stops when IP proxy switch fails', async () => {
   const result = await harness.runAndCaptureError();
 
   assert.ok(result?.error);
-  assert.match(result.error.message, /切换 IP 代理失败/);
+  assert.match(result.error.message, /切换并校验 IP 代理失败/);
   assert.equal(result.events.invalidations.length, 0);
   assert.deepStrictEqual(result.events.order, ['switch']);
 });

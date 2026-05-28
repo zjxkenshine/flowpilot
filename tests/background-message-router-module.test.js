@@ -131,7 +131,8 @@ function createExecuteNodeRouterHarness(options = {}) {
     setState: async (updates) => {
       state = { ...state, ...updates };
     },
-    switchIpProxy: options.switchIpProxy || (async (direction, switchOptions = {}) => {
+    switchIpProxyUntilExitRegionMatches: options.switchIpProxyUntilExitRegionMatches || (async (switchOptions = {}) => {
+      const direction = 'next';
       events.push({ type: 'switch', direction, options: switchOptions });
       return {
         display: 'http://ip-proxy.example:8000',
@@ -141,8 +142,17 @@ function createExecuteNodeRouterHarness(options = {}) {
           exitIp: '203.0.113.9',
           exitRegion: 'US',
         },
+        expectedRegion: 'US',
+        exitCheck: {
+          ok: true,
+          expectedRegion: 'US',
+          exitIp: '203.0.113.9',
+          exitRegion: 'US',
+        },
+        attemptedCount: 1,
       };
     }),
+    switchIpProxy: options.switchIpProxy,
   });
 
   return { router, events, getState: () => state };
@@ -160,7 +170,8 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy and switches I
       }),
       restoreSession: async (session) => events.push({ type: 'restore', session }),
     },
-    switchIpProxy: async (direction, switchOptions = {}) => {
+    switchIpProxyUntilExitRegionMatches: async (switchOptions = {}) => {
+      const direction = 'next';
       events.push({ type: 'switch', direction, options: switchOptions });
       return {
         display: 'http://ip-proxy.example:8000',
@@ -170,6 +181,14 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy and switches I
           exitIp: '203.0.113.9',
           exitRegion: 'US',
         },
+        expectedRegion: 'US',
+        exitCheck: {
+          ok: true,
+          expectedRegion: 'US',
+          exitIp: '203.0.113.9',
+          exitRegion: 'US',
+        },
+        attemptedCount: 1,
       };
     },
   });
@@ -194,8 +213,6 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy and switches I
   ]);
   const switchEvent = events.find((event) => event.type === 'switch');
   assert.equal(switchEvent.direction, 'next');
-  assert.equal(switchEvent.options.forceRefresh, true);
-  assert.equal(switchEvent.options.skipExitProbe, false);
   assert.equal(switchEvent.options.state.ipProxyEnabled, true);
 });
 
@@ -208,7 +225,7 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy without switch
       getStoredSession: async () => ({ active: true, displayName: 'http://pay-proxy.example:8080' }),
       restoreSession: async (session) => events.push({ type: 'restore', session }),
     },
-    switchIpProxy: async () => {
+    switchIpProxyUntilExitRegionMatches: async () => {
       events.push({ type: 'switch' });
       throw new Error('should not switch');
     },
@@ -234,13 +251,21 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy without switch
 
 test('EXECUTE_NODE plus checkout create stops before execute when switched IP has no exit', async () => {
   const harness = createExecuteNodeRouterHarness({
-    switchIpProxy: async (direction, switchOptions = {}) => {
+    switchIpProxyUntilExitRegionMatches: async (switchOptions = {}) => {
+      const direction = 'next';
       harness.events.push({ type: 'switch', direction, options: switchOptions });
       return {
+        skipped: true,
+        reason: 'missing_exit_ip',
         proxyRouting: {
           applied: true,
           reason: 'connectivity_failed',
           exitError: 'no exit',
+        },
+        exitCheck: {
+          ok: false,
+          code: 'missing_exit_ip',
+          detail: 'no exit',
         },
       };
     },
@@ -253,6 +278,86 @@ test('EXECUTE_NODE plus checkout create stops before execute when switched IP ha
       payload: { nodeId: 'plus-checkout-create' },
     }, {}),
     /Plus Checkout/
+  );
+  assert.equal(harness.events.some((event) => event.type === 'execute'), false);
+});
+
+test('EXECUTE_NODE plus checkout create continues after IP exit country retry matches proxy region', async () => {
+  let helperCalls = 0;
+  const harness = createExecuteNodeRouterHarness({
+    state: { ipProxyEnabled: true },
+    switchIpProxyUntilExitRegionMatches: async (switchOptions = {}) => {
+      helperCalls += 1;
+      harness.events.push({ type: 'switch', direction: 'next', options: switchOptions });
+      return {
+        display: 'http://ip-proxy-us.example:8000',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '203.0.113.77',
+          exitRegion: 'US',
+        },
+        expectedRegion: 'US',
+        exitCheck: {
+          ok: true,
+          expectedRegion: 'US',
+          exitIp: '203.0.113.77',
+          exitRegion: 'US',
+        },
+        attemptedCount: 2,
+      };
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    payload: { nodeId: 'plus-checkout-create' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(helperCalls, 1);
+  assert.equal(harness.events.some((event) => event.type === 'execute'), true);
+  assert.ok(harness.events.some((event) => event.type === 'log' && /期望国家 US/.test(event.message) && /共尝试 2 次/.test(event.message)));
+});
+
+test('EXECUTE_NODE plus checkout create stops when IP exit country never matches proxy region', async () => {
+  const harness = createExecuteNodeRouterHarness({
+    state: { ipProxyEnabled: true },
+    switchIpProxyUntilExitRegionMatches: async (switchOptions = {}) => {
+      harness.events.push({ type: 'switch', direction: 'next', options: switchOptions });
+      return {
+        display: 'http://ip-proxy-de.example:8000',
+        skipped: true,
+        reason: 'region_mismatch',
+        error: '已尝试 2 次切换 IP 代理，出口国家仍与代理配置不一致：期望 US，实际 DE。',
+        proxyRouting: {
+          applied: true,
+          reason: 'applied',
+          exitIp: '198.51.100.77',
+          exitRegion: 'DE',
+        },
+        expectedRegion: 'US',
+        exitCheck: {
+          ok: false,
+          code: 'region_mismatch',
+          expectedRegion: 'US',
+          exitIp: '198.51.100.77',
+          exitRegion: 'DE',
+          detail: '代理出口国家与配置不一致：期望 US，实际 DE',
+        },
+        attemptedCount: 2,
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => harness.router.handleMessage({
+      type: 'EXECUTE_NODE',
+      source: 'sidepanel',
+      payload: { nodeId: 'plus-checkout-create' },
+    }, {}),
+    /出口国家校验未通过/
   );
   assert.equal(harness.events.some((event) => event.type === 'execute'), false);
 });
@@ -294,7 +399,7 @@ test('EXECUTE_NODE plus checkout create skips proxy preparation for GoPay and GP
         },
         restoreSession: async () => harness.events.push({ type: 'restore' }),
       },
-      switchIpProxy: async () => {
+      switchIpProxyUntilExitRegionMatches: async () => {
         harness.events.push({ type: 'switch' });
         return { proxyRouting: { applied: true, exitIp: '203.0.113.10' } };
       },

@@ -15106,55 +15106,51 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       };
     }
 
-    if (typeof switchIpProxy !== 'function') {
-      throw new Error('自动运行：已启用 IP 代理，但切换能力不可用，停止重建 Plus Checkout。');
+    if (typeof switchIpProxyUntilExitRegionMatches !== 'function') {
+      throw new Error('自动运行：已启用 IP 代理，但出口国家校验能力不可用，停止重建 Plus Checkout。');
     }
 
     const checkoutLabel = String(options.checkoutLabel || 'Plus Checkout').trim() || 'Plus Checkout';
     const retryCount = Math.max(0, Math.floor(Number(options.retryCount) || 0));
     await addLog(
-      `自动运行：${checkoutLabel} 重试前正在切换 IP 代理${retryCount ? `（第 ${retryCount} 次重建）` : ''}...`,
+      `自动运行：${checkoutLabel} 重试前正在切换 IP 代理并校验出口国家${retryCount ? `（第 ${retryCount} 次重建）` : ''}...`,
       'info'
     );
 
     let switchResult = null;
     try {
-      switchResult = await switchIpProxy('next', {
+      switchResult = await switchIpProxyUntilExitRegionMatches({
         state: latestState,
-        forceRefresh: true,
-        skipExitProbe: false,
       });
     } catch (error) {
-      throw new Error(`自动运行：Plus Checkout 重试前切换 IP 代理失败，已停止重建 checkout：${getErrorMessage(error)}`);
+      throw new Error(`自动运行：Plus Checkout 重试前切换并校验 IP 代理失败，已停止重建 checkout：${getErrorMessage(error)}`);
     }
 
     const routing = switchResult?.proxyRouting || {};
-    const reason = String(routing?.reason || '').trim().toLowerCase();
     const exitIp = String(routing?.exitIp || '').trim();
     const exitRegion = String(routing?.exitRegion || '').trim();
-    const failedReason = [
-      'connectivity_failed',
-      'apply_failed',
-      'missing_proxy_entry',
-      'proxy_api_unavailable',
-      'disabled',
-      'disabled_probe_only',
-    ].includes(reason);
-    if (!routing || routing.applied === false || !exitIp || failedReason) {
+    const exitCheck = switchResult?.exitCheck || {};
+    if (switchResult?.skipped || !exitCheck?.ok) {
       const detail = String(
-        routing?.exitError
+        switchResult?.error
+        || exitCheck?.detail
+        || routing?.exitError
         || routing?.error
         || switchResult?.reason
-        || reason
+        || exitCheck?.code
         || '未检测到可用出口'
       ).trim();
-      throw new Error(`自动运行：Plus Checkout 重试前切换 IP 代理后出口不可用，已停止重建 checkout：${detail}`);
+      throw new Error(`自动运行：Plus Checkout 重试前切换 IP 代理后出口国家校验未通过，已停止重建 checkout：${detail}`);
     }
 
     const display = String(switchResult?.display || '').trim();
     const displaySuffix = display ? `（${display}）` : '';
     const exitSuffix = exitRegion ? `${exitIp} [${exitRegion}]` : exitIp;
-    await addLog(`自动运行：Plus Checkout 重试前已切换 IP 代理${displaySuffix}，当前出口 ${exitSuffix}。`, 'ok');
+    const expectedRegion = String(switchResult?.expectedRegion || exitCheck?.expectedRegion || '').trim();
+    const expectedSuffix = expectedRegion ? `，期望国家 ${expectedRegion}` : '';
+    const attempts = Math.max(0, Number(switchResult?.attemptedCount) || 0);
+    const attemptSuffix = attempts > 1 ? `，共尝试 ${attempts} 次` : '';
+    await addLog(`自动运行：Plus Checkout 重试前已切换 IP 代理${displaySuffix}，当前出口 ${exitSuffix}${expectedSuffix}${attemptSuffix}。`, 'ok');
     return {
       releasedPaymentProxy,
       switchedIpProxy: true,
@@ -16482,6 +16478,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   requestStop,
   probeIpProxyExit,
   switch711ApiProxyUntilExitChanged,
+  switchIpProxyUntilExitRegionMatches,
   resetState,
   resumeAutoRun,
   scheduleAutoRun,
