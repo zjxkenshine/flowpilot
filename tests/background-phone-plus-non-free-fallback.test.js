@@ -366,3 +366,54 @@ test('Phone Plus proxy failure fallback stores reason detail and logs proxy mess
   assert.equal(api.events.logs.some((entry) => /支付转换代理失败/.test(entry.message)), true);
   assert.equal(api.events.logs.some((entry) => /未检测到支付转换代理出口 IP/.test(entry.message)), true);
 });
+
+test('Phone Plus hosted generic error fallback skips payment segment and keeps OAuth tail', async () => {
+  const api = createApi({
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'submit-signup-email': 'completed',
+      'fill-password': 'completed',
+      'fetch-signup-code': 'completed',
+      'fill-profile': 'completed',
+      'wait-registration-success': 'completed',
+      'plus-checkout-create': 'completed',
+      'paypal-hosted-email': 'completed',
+      'paypal-hosted-card': 'running',
+      'paypal-hosted-create-account': 'pending',
+      'paypal-hosted-review': 'pending',
+      'oauth-login': 'pending',
+    },
+    currentNodeId: 'paypal-hosted-card',
+    plusCheckoutTabId: 99,
+    plusCheckoutUrl: 'https://www.paypal.com/checkoutweb/genericError?token=EC-test',
+    oauthUrl: 'https://old.example/oauth',
+  }, PHONE_PLUS_PAYPAL_HOSTED_NODES);
+
+  const result = await api.handlePhonePlusNonFreeTrialFallback(api.getState(), {
+    reason: 'hosted-checkout-generic-error',
+    detail: 'Sorry, something went wrong. Please try again.',
+    nodeId: 'paypal-hosted-card',
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.nextNodeId, 'oauth-login');
+  assert.deepStrictEqual(result.skippedNodeIds, [
+    'plus-checkout-create',
+    'paypal-hosted-email',
+    'paypal-hosted-card',
+    'paypal-hosted-create-account',
+    'paypal-hosted-review',
+  ]);
+  const nextState = api.getState();
+  assert.equal(nextState.phonePlusFallbackReason, 'hosted-checkout-generic-error');
+  assert.equal(nextState.phonePlusFallbackDetail, 'Sorry, something went wrong. Please try again.');
+  assert.equal(nextState.plusCheckoutTabId, null);
+  assert.equal(nextState.oauthUrl, null);
+  assert.equal(nextState.nodeStatuses['paypal-hosted-card'], 'skipped');
+  assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
+  assert.equal(api.events.logs.some((entry) => /genericError/.test(entry.message)), true);
+  assert.equal(api.events.logs.some((entry) => /OAuth/.test(entry.message)), true);
+});

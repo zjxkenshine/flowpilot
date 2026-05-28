@@ -1499,6 +1499,45 @@
       };
     }
 
+    async function handleHostedCheckoutGenericErrorFallback(state = {}, pageState = {}, options = {}) {
+      if (!isPhonePlusModeState(state) || typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        return null;
+      }
+      const detail = String(
+        pageState?.hostedGenericErrorMessage
+        || pageState?.error
+        || options?.detail
+        || 'PayPal Checkout genericError'
+      ).trim();
+      const stepKey = String(
+        options?.nodeId
+        || options?.stepKey
+        || pageState?.stepKey
+        || getHostedStepKeyForStage(pageState?.hostedStage)
+        || PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT
+      ).trim() || PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT;
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'hosted-checkout-generic-error',
+        detail,
+        nodeId: stepKey,
+        phaseLabel: String(options?.phaseLabel || 'PayPal hosted checkout genericError').trim(),
+      });
+      if (!fallbackResult?.handled) {
+        return null;
+      }
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${getHostedStepNumber(stepKey)}：PayPal hosted checkout 返回 genericError，已跳过 Plus 支付段并继续 OAuth 流程。${detail ? `原因：${detail}` : ''}`,
+        'warn'
+      );
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+        reason: 'hosted-checkout-generic-error',
+        detail,
+      };
+    }
+
     async function logHostedCheckoutRuntimeConfig(stepKey, config = {}, options = {}) {
       if (!stepKey) {
         return;
@@ -3230,6 +3269,13 @@
             plusCheckoutTabId: resolution.tabId,
           };
         }
+        if (resolution?.phonePlusFallbackToFreeAuth) {
+          return {
+            ...pageState,
+            ...resolution,
+            hostedStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
+          };
+        }
       }
       if (securityChallengeEnabled && pageState?.hostedSecurityChallengeVisible) {
         await logHostedSecurityChallengeProbeResult(options.stepKey || '', pageState);
@@ -3266,6 +3312,13 @@
             resolvedByPlusActivation: true,
             plusDetectedPlanType: resolution.planType || '',
             plusCheckoutTabId: resolution.tabId,
+          };
+        }
+        if (resolution?.phonePlusFallbackToFreeAuth) {
+          return {
+            ...stepResult,
+            ...resolution,
+            hostedStage: PAYPAL_HOSTED_STAGE_GENERIC_ERROR,
           };
         }
       }
@@ -3570,6 +3623,25 @@
         .test(String(error?.message || error || ''));
     }
 
+    function getHostedStepKeyForStage(stage = '') {
+      switch (String(stage || '').trim()) {
+        case PAYPAL_HOSTED_STAGE_LOGIN:
+          return PAYPAL_HOSTED_STEP_EMAIL;
+        case PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT:
+        case PAYPAL_HOSTED_STAGE_VERIFICATION:
+          return PAYPAL_HOSTED_STEP_CARD;
+        case PAYPAL_HOSTED_STAGE_CREATE_ACCOUNT:
+          return PAYPAL_HOSTED_STEP_CREATE_ACCOUNT;
+        case PAYPAL_HOSTED_STAGE_REVIEW:
+        case PAYPAL_HOSTED_STAGE_APPROVAL:
+          return PAYPAL_HOSTED_STEP_REVIEW;
+        case PAYPAL_HOSTED_STAGE_GENERIC_ERROR:
+          return '';
+        default:
+          return '';
+      }
+    }
+
     function isHostedCheckoutBlockedState(pageState = {}) {
       return (pageState?.hostedStage === PAYPAL_HOSTED_STAGE_BLOCKED || pageState?.hostedBlocked === true)
         && !pageState?.hostedSecurityChallengeVisible;
@@ -3652,6 +3724,12 @@
         || pageState?.resolvedByPlusActivation === true;
     }
 
+    function isHostedCheckoutPhonePlusFallbackResolved(pageState = {}) {
+      return pageState?.phonePlusFallbackToFreeAuth === true
+        || pageState?.fallbackToFreeAuth === true
+        || pageState?.fallbackResult?.handled === true;
+    }
+
     function isHostedPayPalEmailTargetMissingError(error) {
       return /未找到邮箱输入框(?:或只读邮箱字段)?|did not find.*email|email input/i
         .test(String(error?.message || error || ''));
@@ -3670,6 +3748,15 @@
       const latestState = typeof getState === 'function'
         ? await getState().catch(() => ({}))
         : {};
+      const fallback = await handleHostedCheckoutGenericErrorFallback(latestState, {
+        ...pageState,
+        hostedGenericErrorMessage: pageMessage,
+      }, {
+        nodeId: completionPayload?.nodeId || completionPayload?.stepKey || pageState?.stepKey || '',
+      });
+      if (fallback?.phonePlusFallbackToFreeAuth) {
+        return fallback;
+      }
       try {
         const inspection = await refreshChatGptSessionAndInspectPlusActivation();
         if (inspection?.active) {
@@ -3905,6 +3992,9 @@
         try {
           pageState = await getHostedPayPalState(tabId, options);
           if (isHostedCheckoutPlusActivationResolved(pageState)) {
+            return pageState;
+          }
+          if (isHostedCheckoutPhonePlusFallbackResolved(pageState)) {
             return pageState;
           }
           lastStage = pageState?.hostedStage || lastStage;
@@ -4345,6 +4435,9 @@
           },
         });
         if (isHostedCheckoutPlusActivationResolved(pageState)) {
+          return;
+        }
+        if (isHostedCheckoutPhonePlusFallbackResolved(pageState)) {
           return;
         }
         const reviewConfig = refreshedProfileConfig || await getHostedCheckoutRuntimeConfig(refreshedState, {

@@ -10781,6 +10781,8 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     fallbackMessage = `Phone Plus：PayPal 接码池号码已达到使用上限，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
   } else if (fallbackReason === 'hosted-checkout-phone-empty-after-fill') {
     fallbackMessage = `Phone Plus：PayPal 无卡直绑资料页 phone 输入框多次重填后仍为空，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
+  } else if (fallbackReason === 'hosted-checkout-generic-error') {
+    fallbackMessage = `Phone Plus：PayPal Checkout 返回 genericError，已跳过 Plus 支付段，继续后续 OAuth 流程。${detailSuffix}`;
   } else {
     fallbackMessage = `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
   }

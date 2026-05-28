@@ -3499,6 +3499,84 @@ test('PayPal hosted generic_error creates manual confirmation when auto retry is
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
 
+test('Phone Plus PayPal hosted generic_error falls back to OAuth instead of manual confirmation', async () => {
+  const events = [];
+  const broadcasts = [];
+  let fallbackCalled = false;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/genericError?token=EC-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => events.push({ type: 'ready', source, tabId, options }),
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      autoRunRetryPaypalCallback: false,
+      plusPaymentEmailState: {
+        current: 'payment@example.com',
+        source: 'payment:test',
+        updatedAt: 100,
+      },
+    }),
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      fallbackCalled = true;
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+      };
+    },
+    registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return {
+          stepKey: 'paypal-hosted-card',
+          hostedStage: 'generic_error',
+          hostedGenericError: true,
+          hostedGenericErrorMessage: 'Sorry, something went wrong. Please try again.',
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    plusCheckoutTabId: 123,
+    plusPaymentEmailState: {
+      current: 'payment@example.com',
+      source: 'payment:test',
+      updatedAt: 100,
+    },
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(fallbackCalled, true);
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'hosted-checkout-generic-error');
+  assert.equal(fallback?.context?.nodeId, 'paypal-hosted-card');
+  assert.match(fallback?.context?.detail || '', /Sorry, something went wrong/);
+  assert.equal(events.some((event) => event.type === 'set-state' && event.payload?.plusManualConfirmationPending), false);
+  assert.equal(broadcasts.some((payload) => payload.plusManualConfirmationPending), false);
+  assert.equal(events.some((event) => event.type === 'complete'), false);
+});
+
 test('PayPal hosted generic_error throws structured error without manual confirmation when auto retry is enabled', async () => {
   const events = [];
   const broadcasts = [];
