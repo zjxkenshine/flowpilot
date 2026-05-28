@@ -80,6 +80,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phoneSignupReloginAfterBindEmailEnabled',
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
+  'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -124,6 +125,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   signupMethod: 'email',
   browserFingerprintEnabled: true,
   browserFingerprintLevel: 'standard',
+  oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: 'paypal',
@@ -529,6 +531,46 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   }, { fillDefaults: true });
   assert.equal(invalid.plusCheckoutVerificationFailureStrategy, 'continue');
   assert.equal(invalid.settingsState.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
+});
+
+test('buildPersistentSettingsPayload persists OAuth open-after-refresh wait into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.oauthOpenAfterRefreshWaitSeconds, 5);
+  assert.equal(defaults.settingsState.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds, 5);
+
+  const flat = api.buildPersistentSettingsPayload({
+    oauthOpenAfterRefreshWaitSeconds: ' 7.9 ',
+  }, { fillDefaults: true });
+  assert.equal(flat.oauthOpenAfterRefreshWaitSeconds, 7);
+  assert.equal(flat.settingsState.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds, 7);
+
+  const low = api.buildPersistentSettingsPayload({
+    oauthOpenAfterRefreshWaitSeconds: -3,
+  }, { fillDefaults: true });
+  assert.equal(low.oauthOpenAfterRefreshWaitSeconds, 0);
+  assert.equal(low.settingsState.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds, 0);
+
+  const high = api.buildPersistentSettingsPayload({
+    oauthOpenAfterRefreshWaitSeconds: 121,
+  }, { fillDefaults: true });
+  assert.equal(high.oauthOpenAfterRefreshWaitSeconds, 120);
+  assert.equal(high.settingsState.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds, 120);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsState: {
+      flows: {
+        openai: {
+          oauth: {
+            oauthOpenAfterRefreshWaitSeconds: '12.4',
+          },
+        },
+      },
+    },
+  }, { fillDefaults: true });
+  assert.equal(nested.oauthOpenAfterRefreshWaitSeconds, 12);
+  assert.equal(nested.settingsState.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds, 12);
 });
 
 test('buildPersistentSettingsPayload persists PayPal hosted checkout resend strategy into settings schema', () => {

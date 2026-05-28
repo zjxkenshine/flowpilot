@@ -1022,6 +1022,20 @@
           </div>
         </div>
       </div>
+      <div class="data-row" id="row-oauth-open-after-refresh-wait">
+        <span class="data-label">打开后等待</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <div class="setting-controls">
+              <input type="number" id="input-oauth-open-after-refresh-wait-seconds"
+                class="data-input auto-delay-input" value="5" min="0" max="120" step="1"
+                title="刷新并打开 OAuth 后，再等待多少秒开始登录操作；0 表示不等待" />
+              <span class="data-unit">秒</span>
+            </div>
+          </div>
+          <span class="setting-caption">刷新并打开 OAuth 后，再等待 N 秒开始登录操作</span>
+        </div>
+      </div>
       <div class="data-row" id="row-step-execution-range">
         <span class="data-label">执行范围</span>
         <div class="data-inline setting-pair step-execution-range-setting">

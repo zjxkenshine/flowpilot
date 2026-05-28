@@ -1012,6 +1012,138 @@ test('step 7 retries up to configured limit and then fails', async () => {
   assert.equal(events.completed, 0);
 });
 
+test('step 7 waits after opening refreshed OAuth before login automation', async () => {
+  const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
+  const events = [];
+
+  const executor = api.createStep7Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async () => {},
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getLoginAuthStateLabel: (state) => state || 'unknown',
+    getOAuthOpenAfterRefreshWaitSeconds: async () => 5,
+    getState: async () => ({ email: 'user@example.com', password: 'secret' }),
+    isStep6RecoverableResult: (result) => result?.step6Outcome === 'recoverable',
+    isStep6SuccessResult: (result) => result?.step6Outcome === 'success',
+    refreshOAuthUrlBeforeStep6: async () => {
+      events.push('refresh');
+      return 'https://oauth.example/latest';
+    },
+    reuseOrCreateTab: async (_sourceName, url) => {
+      events.push(`open:${url}`);
+    },
+    sendToContentScriptResilient: async () => {
+      events.push('send');
+      return { step6Outcome: 'success', state: 'verification_page' };
+    },
+    sleepWithStop: async (ms) => {
+      events.push(`sleep:${ms}`);
+    },
+    STEP6_MAX_ATTEMPTS: 1,
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret' });
+
+  assert.deepEqual(events, [
+    'refresh',
+    'open:https://oauth.example/latest',
+    'sleep:5000',
+    'send',
+  ]);
+});
+
+test('step 7 skips OAuth open wait when configured to zero', async () => {
+  const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
+  const events = [];
+
+  const executor = api.createStep7Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async () => {},
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getLoginAuthStateLabel: (state) => state || 'unknown',
+    getOAuthOpenAfterRefreshWaitSeconds: async () => 0,
+    getState: async () => ({ email: 'user@example.com', password: 'secret' }),
+    isStep6RecoverableResult: (result) => result?.step6Outcome === 'recoverable',
+    isStep6SuccessResult: (result) => result?.step6Outcome === 'success',
+    refreshOAuthUrlBeforeStep6: async () => {
+      events.push('refresh');
+      return 'https://oauth.example/latest';
+    },
+    reuseOrCreateTab: async () => {
+      events.push('open');
+    },
+    sendToContentScriptResilient: async () => {
+      events.push('send');
+      return { step6Outcome: 'success', state: 'verification_page' };
+    },
+    sleepWithStop: async (ms) => {
+      events.push(`sleep:${ms}`);
+    },
+    STEP6_MAX_ATTEMPTS: 1,
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret' });
+
+  assert.deepEqual(events, ['refresh', 'open', 'send']);
+});
+
+test('step 7 applies OAuth open wait on every retry attempt', async () => {
+  const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundStep7;`)(globalScope);
+  const events = [];
+  let attempt = 0;
+
+  const executor = api.createStep7Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async () => {},
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getLoginAuthStateLabel: (state) => state || 'unknown',
+    getOAuthOpenAfterRefreshWaitSeconds: async () => 5,
+    getState: async () => ({ email: 'user@example.com', password: 'secret' }),
+    isStep6RecoverableResult: (result) => result?.step6Outcome === 'recoverable',
+    isStep6SuccessResult: (result) => result?.step6Outcome === 'success',
+    refreshOAuthUrlBeforeStep6: async () => {
+      attempt += 1;
+      events.push(`refresh:${attempt}`);
+      return `https://oauth.example/${attempt}`;
+    },
+    reuseOrCreateTab: async (_sourceName, url) => {
+      events.push(`open:${url}`);
+    },
+    sendToContentScriptResilient: async () => {
+      events.push(`send:${attempt}`);
+      return attempt < 2
+        ? { step6Outcome: 'recoverable', state: 'email_page', message: 'still on email page' }
+        : { step6Outcome: 'success', state: 'verification_page' };
+    },
+    sleepWithStop: async (ms) => {
+      events.push(`sleep:${ms}`);
+    },
+    STEP6_MAX_ATTEMPTS: 2,
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeStep7({ email: 'user@example.com', password: 'secret' });
+
+  assert.deepEqual(events, [
+    'refresh:1',
+    'open:https://oauth.example/1',
+    'sleep:5000',
+    'send:1',
+    'refresh:2',
+    'open:https://oauth.example/2',
+    'sleep:5000',
+    'send:2',
+  ]);
+});
+
 test('step 7 hands add-phone to the dedicated post-login phone node without internal retry', async () => {
   const source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
   const globalScope = {};

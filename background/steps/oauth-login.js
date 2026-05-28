@@ -22,6 +22,8 @@
       refreshOAuthUrlBeforeStep6,
       reuseOrCreateTab,
       sendToContentScriptResilient,
+      getOAuthOpenAfterRefreshWaitSeconds = null,
+      sleepWithStop = null,
       startOAuthFlowTimeoutWindow,
       STEP6_MAX_ATTEMPTS,
       throwIfStopped,
@@ -341,6 +343,16 @@
           }
 
           await reuseOrCreateTab('signup-page', oauthUrl, { forceNew: true });
+          const openAfterRefreshWaitSeconds = typeof getOAuthOpenAfterRefreshWaitSeconds === 'function'
+            ? Math.max(0, Math.floor(Number(await getOAuthOpenAfterRefreshWaitSeconds(currentState)) || 0))
+            : 0;
+          if (openAfterRefreshWaitSeconds > 0 && typeof sleepWithStop === 'function') {
+            await addLog(`OAuth 閾炬帴宸叉墦寮€锛岀瓑寰?${openAfterRefreshWaitSeconds} 绉掑悗缁х画鐧诲綍鎿嶄綔...`, 'info', {
+              step: completionStep,
+              stepKey: 'oauth-login',
+            });
+            await sleepWithStop(openAfterRefreshWaitSeconds * 1000);
+          }
 
           const result = await sendToContentScriptResilient(
             'signup-page',

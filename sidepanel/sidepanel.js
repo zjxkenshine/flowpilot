@@ -554,6 +554,7 @@ const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled'
 const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes');
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
 const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
+const inputOAuthOpenAfterRefreshWaitSeconds = document.getElementById('input-oauth-open-after-refresh-wait-seconds');
 const rowStepExecutionRange = document.getElementById('row-step-execution-range');
 const inputStepExecutionRangeEnabled = document.getElementById('input-step-execution-range-enabled');
 const inputStepExecutionRangeFrom = document.getElementById('input-step-execution-range-from');
@@ -701,6 +702,7 @@ const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
 const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
+const DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS = 5;
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
@@ -3432,6 +3434,14 @@ function normalizePlusHostedCheckoutOauthDelaySeconds(value) {
   return Math.min(120, Math.max(0, Math.floor(numeric)));
 }
 
+function normalizeOAuthOpenAfterRefreshWaitSeconds(value) {
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS;
+  }
+  return Math.min(120, Math.max(0, Math.floor(numeric)));
+}
+
 function normalizePlusCheckoutCreatePreWaitSeconds(value) {
   const numeric = Number(String(value ?? '').trim());
   if (!Number.isFinite(numeric)) {
@@ -5716,6 +5726,9 @@ function collectSettingsPayload() {
     oauthFlowTimeoutEnabled: typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
       : true,
+    oauthOpenAfterRefreshWaitSeconds: typeof inputOAuthOpenAfterRefreshWaitSeconds !== 'undefined' && inputOAuthOpenAfterRefreshWaitSeconds
+      ? normalizeOAuthOpenAfterRefreshWaitSeconds(inputOAuthOpenAfterRefreshWaitSeconds.value)
+      : normalizeOAuthOpenAfterRefreshWaitSeconds(latestState?.oauthOpenAfterRefreshWaitSeconds),
     phoneVerificationEnabled: effectivePhoneVerificationEnabled,
     signupMethod: effectiveSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
@@ -12676,6 +12689,11 @@ function applySettingsState(state) {
       ? Boolean(state.oauthFlowTimeoutEnabled)
       : true;
   }
+  if (typeof inputOAuthOpenAfterRefreshWaitSeconds !== 'undefined' && inputOAuthOpenAfterRefreshWaitSeconds) {
+    inputOAuthOpenAfterRefreshWaitSeconds.value = String(
+      normalizeOAuthOpenAfterRefreshWaitSeconds(state?.oauthOpenAfterRefreshWaitSeconds)
+    );
+  }
   if (inputVerificationResendCount) {
     const restoredVerificationResendCount = state?.verificationResendCount !== undefined
       ? state.verificationResendCount
@@ -17107,13 +17125,15 @@ inputVpsPassword.addEventListener('blur', () => {
   });
 });
 
-[inputPlusCheckoutCreatePreWaitSeconds, inputPlusCheckoutOpenStableWaitSeconds, inputPlusHostedCheckoutCardPreWaitSeconds].forEach((input) => {
+[inputOAuthOpenAfterRefreshWaitSeconds, inputPlusCheckoutCreatePreWaitSeconds, inputPlusCheckoutOpenStableWaitSeconds, inputPlusHostedCheckoutCardPreWaitSeconds].forEach((input) => {
   input?.addEventListener('input', () => {
     markSettingsDirty(true);
     scheduleSettingsAutoSave();
   });
   input?.addEventListener('blur', () => {
-    if (input === inputPlusCheckoutCreatePreWaitSeconds) {
+    if (input === inputOAuthOpenAfterRefreshWaitSeconds) {
+      input.value = String(normalizeOAuthOpenAfterRefreshWaitSeconds(input.value));
+    } else if (input === inputPlusCheckoutCreatePreWaitSeconds) {
       input.value = String(normalizePlusCheckoutCreatePreWaitSeconds(input.value));
     } else if (input === inputPlusCheckoutOpenStableWaitSeconds) {
       input.value = String(normalizePlusCheckoutOpenStableWaitSeconds(input.value));
@@ -21152,6 +21172,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.oauthFlowTimeoutEnabled !== undefined && typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
         inputOAuthFlowTimeoutEnabled.checked = Boolean(message.payload.oauthFlowTimeoutEnabled);
+      }
+      if (message.payload.oauthOpenAfterRefreshWaitSeconds !== undefined && typeof inputOAuthOpenAfterRefreshWaitSeconds !== 'undefined' && inputOAuthOpenAfterRefreshWaitSeconds) {
+        inputOAuthOpenAfterRefreshWaitSeconds.value = String(
+          normalizeOAuthOpenAfterRefreshWaitSeconds(message.payload.oauthOpenAfterRefreshWaitSeconds)
+        );
       }
       if (
         (

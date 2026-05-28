@@ -45,18 +45,33 @@ test('sidepanel no longer exposes operation delay switch and places step executi
   const step6CookieIndex = html.indexOf('id="row-step6-cookie-settings"');
   const autoDelayIndex = html.indexOf('id="row-auto-delay-settings"');
   const oauthTimeoutIndex = html.indexOf('id="row-oauth-flow-timeout"');
+  const oauthOpenWaitIndex = html.indexOf('id="row-oauth-open-after-refresh-wait"');
   const stepRangeIndex = html.indexOf('id="row-step-execution-range"');
   const oauthDisplayIndex = html.indexOf('id="row-oauth-display"');
 
   assert.notEqual(step6CookieIndex, -1);
   assert.notEqual(autoDelayIndex, -1);
   assert.notEqual(oauthTimeoutIndex, -1);
+  assert.notEqual(oauthOpenWaitIndex, -1);
   assert.notEqual(stepRangeIndex, -1);
   assert.notEqual(oauthDisplayIndex, -1);
   assert.ok(autoDelayIndex > step6CookieIndex, 'startup delay row should render below the openai step6 cookie row');
   assert.ok(stepRangeIndex > autoDelayIndex, 'step execution range should still remain below the startup delay row');
+  assert.ok(oauthOpenWaitIndex > oauthTimeoutIndex, 'oauth open wait should render below oauth timeout');
+  assert.ok(oauthOpenWaitIndex < stepRangeIndex, 'oauth open wait should render above step execution range');
   assert.ok(stepRangeIndex > oauthTimeoutIndex, 'step execution range should render below oauth timeout');
   assert.ok(stepRangeIndex < oauthDisplayIndex, 'step execution range should stay above oauth runtime display');
+});
+
+test('sidepanel exposes and wires OAuth open-after-refresh wait setting', () => {
+  assert.match(html, /id="input-oauth-open-after-refresh-wait-seconds"/);
+  assert.match(html, /value="5" min="0" max="120" step="1"/);
+  assert.match(source, /const inputOAuthOpenAfterRefreshWaitSeconds = document\.getElementById\('input-oauth-open-after-refresh-wait-seconds'\);/);
+  assert.match(source, /function normalizeOAuthOpenAfterRefreshWaitSeconds\(value\)/);
+  assert.match(source, /oauthOpenAfterRefreshWaitSeconds:\s*typeof inputOAuthOpenAfterRefreshWaitSeconds/);
+  assert.match(source, /inputOAuthOpenAfterRefreshWaitSeconds\.value = String\(\s*normalizeOAuthOpenAfterRefreshWaitSeconds\(state\?\.oauthOpenAfterRefreshWaitSeconds\)/);
+  assert.match(source, /message\.payload\.oauthOpenAfterRefreshWaitSeconds !== undefined/);
+  assert.match(source, /\[inputOAuthOpenAfterRefreshWaitSeconds, inputPlusCheckoutCreatePreWaitSeconds/);
 });
 
 test('sidepanel exposes and wires auto-run issue log preservation switch', () => {

@@ -842,6 +842,7 @@ const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
+const DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS = 5;
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
@@ -1519,6 +1520,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   chatGptApiSmsPoolUsage: {},
   chatGptApiSmsPoolAutoDisableEnabled: false,
   chatGptApiCurrentSmsEntry: null,
+  oauthOpenAfterRefreshWaitSeconds: DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS,
   plusHostedCheckoutOauthDelaySeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS,
   plusPaymentEmailState: { ...DEFAULT_PLUS_PAYMENT_EMAIL_STATE },
   paypalEmail: '',
@@ -1765,6 +1767,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutSmsPoolMaxUses',
   'hostedCheckoutSmsPoolUsage',
   'hostedCheckoutCurrentSmsEntry',
+  'oauthOpenAfterRefreshWaitSeconds',
   'plusHostedCheckoutOauthDelaySeconds',
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
@@ -3902,6 +3905,10 @@ function normalizePersistentSettingValue(key, value) {
         verificationUrl,
       };
     }
+    case 'oauthOpenAfterRefreshWaitSeconds': {
+      const numeric = Number(value);
+      return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS)));
+    }
     case 'plusHostedCheckoutOauthDelaySeconds': {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS)));
@@ -4833,6 +4840,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutSmsPoolMaxUses', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolMaxUses']);
   assignIfUpdated('hostedCheckoutSmsPoolUsage', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolUsage']);
   assignIfUpdated('hostedCheckoutCurrentSmsEntry', ['flows', 'openai', 'plus', 'hostedCheckoutCurrentSmsEntry']);
+  assignIfUpdated('oauthOpenAfterRefreshWaitSeconds', ['flows', 'openai', 'oauth', 'oauthOpenAfterRefreshWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
@@ -16031,6 +16039,7 @@ const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
   getOAuthFlowStepTimeoutMs,
   getState,
   getTabId,
+  getOAuthOpenAfterRefreshWaitSeconds,
   isAddPhoneAuthFailure,
   isStep6RecoverableResult,
   isStep6SuccessResult,
@@ -16038,6 +16047,7 @@ const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
   refreshOAuthUrlBeforeStep6,
   reuseOrCreateTab,
   sendToContentScriptResilient,
+  sleepWithStop,
   startOAuthFlowTimeoutWindow,
   STEP6_MAX_ATTEMPTS,
   throwIfStopped,
@@ -17082,6 +17092,16 @@ function isStep6SuccessResult(result) {
 
 function isStep6RecoverableResult(result) {
   return result?.step6Outcome === 'recoverable';
+}
+
+async function getOAuthOpenAfterRefreshWaitSeconds(state = null) {
+  const sourceState = state && typeof state === 'object'
+    ? state
+    : await getState();
+  return normalizePersistentSettingValue(
+    'oauthOpenAfterRefreshWaitSeconds',
+    sourceState?.oauthOpenAfterRefreshWaitSeconds
+  );
 }
 
 function isAddPhoneAuthUrl(url) {

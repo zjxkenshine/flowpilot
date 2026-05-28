@@ -277,6 +277,9 @@
               enabled: true,
               level: 'standard',
             },
+            oauth: {
+              oauthOpenAfterRefreshWaitSeconds: 5,
+            },
             plus: {
               plusModeEnabled: false,
               phonePlusModeEnabled: false,
@@ -515,6 +518,16 @@
                 input?.browserFingerprintLevel
                 ?? nested?.flows?.openai?.browserFingerprint?.level
                 ?? defaults.flows.openai.browserFingerprint.level
+              ),
+            },
+            oauth: {
+              oauthOpenAfterRefreshWaitSeconds: normalizeBoundedInteger(
+                input?.oauthOpenAfterRefreshWaitSeconds
+                  ?? nested?.flows?.openai?.oauth?.oauthOpenAfterRefreshWaitSeconds
+                  ?? defaults.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds,
+                defaults.flows.openai.oauth.oauthOpenAfterRefreshWaitSeconds,
+                0,
+                120
               ),
             },
             plus: {
@@ -893,6 +906,7 @@
       next.phoneSignupReloginAfterBindEmailEnabled = openaiState.signup.phoneSignupReloginAfterBindEmailEnabled;
       next.browserFingerprintEnabled = openaiState.browserFingerprint.enabled;
       next.browserFingerprintLevel = openaiState.browserFingerprint.level;
+      next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
