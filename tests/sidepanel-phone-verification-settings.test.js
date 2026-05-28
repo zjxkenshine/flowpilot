@@ -445,7 +445,8 @@ test('phone signup relogin-after-bind-email switch is wired into UI and step def
   assert.match(sidepanelSource, /phoneSignupPhonePrefixedEmailEnabled: typeof inputPhoneSignupPhonePrefixedEmail !== 'undefined'/);
   assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: Boolean\(state\?\.phoneSignupReloginAfterBindEmailEnabled\)/);
   assert.match(sidepanelSource, /phoneSignupPhonePrefixedEmailEnabled !== undefined/);
-  assert.match(sidepanelSource, /nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled/);
+  assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: Boolean\(options\.phoneSignupReloginAfterBindEmailEnabled\)/);
+  assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled/);
 });
 
 test('manual step 3 uses phone identity without requiring registration email', () => {

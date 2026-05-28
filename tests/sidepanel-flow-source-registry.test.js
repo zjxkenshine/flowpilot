@@ -60,6 +60,7 @@ test('sidepanel step definitions rerender when active flow changes even if plus/
   const bundle = [
     extractFunction(sidepanelSource, 'normalizeSignupMethod'),
     extractFunction(sidepanelSource, 'normalizePlusPaymentMethod'),
+    extractFunction(sidepanelSource, 'buildStepDefinitionSignature'),
     extractFunction(sidepanelSource, 'getStepDefinitionsForMode'),
     extractFunction(sidepanelSource, 'rebuildStepDefinitionState'),
     extractFunction(sidepanelSource, 'syncStepDefinitionsForMode'),
@@ -82,6 +83,7 @@ let currentPlusAccountAccessStrategy = 'oauth';
 let currentSignupMethod = 'email';
 let currentPhoneSignupReloginAfterBindEmailEnabled = false;
 let currentStepDefinitionFlowId = 'openai';
+let currentStepDefinitionSignature = '';
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_SIGNUP_METHOD = 'email';
 const DEFAULT_PLUS_PAYMENT_METHOD = 'paypal';
@@ -128,6 +130,98 @@ return {
     },
   });
   assert.deepEqual(api.calls[1], { type: 'render', stepIds: [88] });
+});
+
+test('sidepanel step definitions do not recursively rerender when UI target is ahead of latest state', () => {
+  const bundle = [
+    extractFunction(sidepanelSource, 'normalizeSignupMethod'),
+    extractFunction(sidepanelSource, 'normalizePlusPaymentMethod'),
+    extractFunction(sidepanelSource, 'buildStepDefinitionSignature'),
+    extractFunction(sidepanelSource, 'getStepDefinitionsForMode'),
+    extractFunction(sidepanelSource, 'rebuildStepDefinitionState'),
+    extractFunction(sidepanelSource, 'syncStepDefinitionsForMode'),
+  ].join('\n');
+
+  const api = new Function(`
+const calls = [];
+const window = {
+  MultiPageStepDefinitions: {
+    getSteps(options) {
+      calls.push({ type: 'getSteps', options });
+      return [{ id: 1, order: 1, key: 'openai' }];
+    },
+  },
+};
+let latestState = { activeFlowId: 'openai' };
+let currentPlusModeEnabled = false;
+let currentPhonePlusModeEnabled = false;
+let currentPlusPaymentMethod = 'paypal';
+let currentPlusAccountAccessStrategy = 'oauth';
+let currentSignupMethod = 'email';
+let currentPhoneSignupReloginAfterBindEmailEnabled = false;
+let currentStepDefinitionFlowId = 'openai';
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const DEFAULT_SIGNUP_METHOD = 'email';
+const DEFAULT_PLUS_PAYMENT_METHOD = 'paypal';
+const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = 'oauth';
+const selectPanelMode = { value: 'cpa' };
+let currentStepDefinitionSignature = buildStepDefinitionSignature({
+  activeFlowId: 'openai',
+  openaiIntegrationTargetId: selectPanelMode.value,
+  panelMode: selectPanelMode.value,
+  plusModeEnabled: false,
+  phonePlusModeEnabled: false,
+  plusPaymentMethod: 'paypal',
+  plusAccountAccessStrategy: 'oauth',
+  signupMethod: 'email',
+  phoneSignupReloginAfterBindEmailEnabled: false,
+  sub2apiReloginEnabled: false,
+  accountContributionEnabled: false,
+});
+let stepDefinitions = [{ id: 1, key: 'openai' }];
+let STEP_IDS = [1];
+let STEP_DEFAULT_STATUSES = { 1: 'pending' };
+let SKIPPABLE_STEPS = new Set([1]);
+function renderStepsList() {
+  calls.push({ type: 'render', stepIds: [...STEP_IDS] });
+  updateButtonStates();
+}
+function updateButtonStates() {
+  renderContributionMode();
+}
+function renderContributionMode() {
+  updateSignupMethodUI();
+}
+function updateSignupMethodUI() {
+  syncStepDefinitionsForMode(false, {
+    plusPaymentMethod: 'paypal',
+    openaiIntegrationTargetId: selectPanelMode.value,
+    panelMode: selectPanelMode.value,
+    signupMethod: 'email',
+    phoneSignupReloginAfterBindEmailEnabled: false,
+  });
+}
+function normalizePlusAccountAccessStrategy(value = '') {
+  return String(value || DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY).trim().toLowerCase() || DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
+}
+${bundle}
+return {
+  calls,
+  renderStepsList,
+  syncStepDefinitionsForMode,
+};
+`)();
+
+  api.renderStepsList();
+  api.syncStepDefinitionsForMode(false, {
+    plusPaymentMethod: 'paypal',
+    openaiIntegrationTargetId: 'cpa',
+    panelMode: 'cpa',
+    signupMethod: 'email',
+    phoneSignupReloginAfterBindEmailEnabled: false,
+  });
+
+  assert.deepEqual(api.calls, [{ type: 'render', stepIds: [1] }]);
 });
 
 test('syncLatestState keeps activeFlowId and flowId in sync when only one side changes', () => {

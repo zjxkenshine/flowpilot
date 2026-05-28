@@ -242,6 +242,7 @@ test('sidepanel rebuilds step definitions and workflow nodes with the effective 
     extractFunction('normalizeSignupMethod'),
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('buildStepDefinitionSignature'),
     extractFunction('getStepDefinitionsForMode'),
     extractFunction('getWorkflowNodesForMode'),
     extractFunction('rebuildStepDefinitionState'),
@@ -272,6 +273,7 @@ let currentPlusAccountAccessStrategy = 'oauth';
 let currentSignupMethod = 'email';
 let currentPhoneSignupReloginAfterBindEmailEnabled = false;
 let currentStepDefinitionFlowId = 'openai';
+let currentStepDefinitionSignature = '';
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_PLUS_PAYMENT_METHOD = 'paypal';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = 'oauth';

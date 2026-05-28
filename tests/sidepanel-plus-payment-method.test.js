@@ -67,6 +67,7 @@ test('sidepanel step definitions keep the selected Plus payment method', () => {
     extractFunction('normalizeSignupMethod'),
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('buildStepDefinitionSignature'),
     extractFunction('getStepDefinitionsForMode'),
     extractFunction('rebuildStepDefinitionState'),
     extractFunction('syncStepDefinitionsForMode'),
@@ -92,6 +93,7 @@ const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 let currentPlusAccountAccessStrategy = DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
 let currentSignupMethod = 'email';
 let currentPhoneSignupReloginAfterBindEmailEnabled = false;
+let currentStepDefinitionSignature = '';
 const DEFAULT_SIGNUP_METHOD = 'email';
 let stepDefinitions = [];
 let STEP_IDS = [];
@@ -1054,6 +1056,7 @@ test('sidepanel step definitions keep GPC helper mode distinct', () => {
     extractFunction('normalizeSignupMethod'),
     extractFunction('normalizePlusPaymentMethod'),
     extractFunction('normalizePlusAccountAccessStrategy'),
+    extractFunction('buildStepDefinitionSignature'),
     extractFunction('getStepDefinitionsForMode'),
     extractFunction('rebuildStepDefinitionState'),
     extractFunction('syncStepDefinitionsForMode'),
@@ -1079,6 +1082,7 @@ const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 let currentPlusAccountAccessStrategy = DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
 let currentSignupMethod = 'email';
 let currentPhoneSignupReloginAfterBindEmailEnabled = false;
+let currentStepDefinitionSignature = '';
 const DEFAULT_SIGNUP_METHOD = 'email';
 let stepDefinitions = [];
 let STEP_IDS = [];

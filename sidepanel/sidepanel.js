@@ -755,6 +755,17 @@ let currentPlusAccountAccessStrategy = DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
 let currentSignupMethod = DEFAULT_SIGNUP_METHOD;
 let currentPhoneSignupReloginAfterBindEmailEnabled = DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED;
 let currentStepDefinitionFlowId = DEFAULT_ACTIVE_FLOW_ID;
+let currentStepDefinitionSignature = buildStepDefinitionSignature({
+  activeFlowId: currentStepDefinitionFlowId,
+  openaiIntegrationTargetId: typeof selectPanelMode !== 'undefined' && selectPanelMode ? selectPanelMode.value : '',
+  panelMode: typeof selectPanelMode !== 'undefined' && selectPanelMode ? selectPanelMode.value : '',
+  plusModeEnabled: currentPlusModeEnabled,
+  phonePlusModeEnabled: currentPhonePlusModeEnabled,
+  plusPaymentMethod: currentPlusPaymentMethod,
+  plusAccountAccessStrategy: currentPlusAccountAccessStrategy,
+  signupMethod: currentSignupMethod,
+  phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
+});
 let phoneSignupReuseUiWasLocked = false;
 let kiroRsConnectionTestStatusText = '未测试';
 let heroSmsCountrySelectionOrder = [];
@@ -1416,6 +1427,29 @@ function getStepIdByNodeIdForCurrentMode(nodeId = '') {
     return displayOrder;
   }
   return getStepIdByKeyForCurrentMode(normalizedNodeId);
+}
+
+function buildStepDefinitionSignature(options = {}) {
+  const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
+  const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : 'paypal';
+  const defaultStrategy = typeof DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY !== 'undefined' ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY : 'oauth';
+  const activeFlowId = String(options.activeFlowId || defaultFlowId).trim().toLowerCase() || defaultFlowId;
+  const openaiIntegrationTargetId = String(options.openaiIntegrationTargetId || options.panelMode || '').trim().toLowerCase();
+  const signaturePayload = {
+    activeFlowId,
+    openaiIntegrationTargetId,
+    panelMode: openaiIntegrationTargetId,
+    plusModeEnabled: Boolean(options.plusModeEnabled),
+    phonePlusModeEnabled: Boolean(options.phonePlusModeEnabled),
+    plusPaymentMethod: normalizePlusPaymentMethod(options.plusPaymentMethod || defaultMethod),
+    plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(options.plusAccountAccessStrategy || defaultStrategy),
+    signupMethod: normalizeSignupMethod(options.signupMethod || DEFAULT_SIGNUP_METHOD),
+    phoneSignupReloginAfterBindEmailEnabled: Boolean(options.phoneSignupReloginAfterBindEmailEnabled),
+    sub2apiReloginEnabled: Boolean(options.sub2apiReloginEnabled),
+    accountContributionEnabled: Boolean(options.accountContributionEnabled),
+    plusHostedCheckoutIsFinalStep: options.plusHostedCheckoutIsFinalStep !== false,
+  };
+  return JSON.stringify(signaturePayload);
 }
 
 function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
@@ -12387,14 +12421,6 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   const nextHostedCheckoutIsFinalStep = options.plusHostedCheckoutIsFinalStep
     ?? currentState?.plusHostedCheckoutIsFinalStep
     ?? true;
-  const currentFlowId = typeof currentStepDefinitionFlowId !== 'undefined'
-    ? currentStepDefinitionFlowId
-    : defaultFlowId;
-  const currentTargetId = String(
-    currentState?.openaiIntegrationTargetId
-    || currentState?.panelMode
-    || ''
-  ).trim().toLowerCase();
   const rootScope = typeof window !== 'undefined' ? window : globalThis;
   const currentPaymentStep = stepDefinitions.find((step) => step.key === 'paypal-approve');
   const nextPaymentTitle = rootScope.MultiPageStepDefinitions?.getPlusPaymentStepTitle?.({
@@ -12410,6 +12436,20 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     signupMethod: nextSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
   });
+  const nextSignature = buildStepDefinitionSignature({
+    activeFlowId: nextActiveFlowId,
+    plusModeEnabled: nextPlusModeEnabled,
+    phonePlusModeEnabled: nextPhonePlusModeEnabled,
+    plusPaymentMethod: nextPaymentMethod,
+    plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
+    plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep,
+    openaiIntegrationTargetId: nextOpenAiIntegrationTargetId,
+    panelMode: nextOpenAiIntegrationTargetId,
+    sub2apiReloginEnabled: nextSub2ApiReloginEnabled,
+    signupMethod: nextSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
+    accountContributionEnabled: nextAccountContributionEnabled,
+  });
   const paymentTitleChanged = Boolean(
     (nextPlusModeEnabled || nextPhonePlusModeEnabled)
     && currentPaymentStep
@@ -12417,16 +12457,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     && currentPaymentStep.title !== nextPaymentTitle
   );
   const shouldRender = Boolean(options.render)
-    || nextPlusModeEnabled !== currentPlusModeEnabled
-    || nextPhonePlusModeEnabled !== previousPhonePlusModeEnabled
-    || nextPaymentMethod !== currentPlusPaymentMethod
-    || nextPlusAccountAccessStrategy !== currentPlusAccountAccessStrategy
-    || nextSignupMethod !== currentSignupMethod
-    || nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled
-    || nextSub2ApiReloginEnabled !== Boolean(currentState?.sub2apiReloginEnabled)
-    || nextOpenAiIntegrationTargetId !== currentTargetId
-    || nextAccountContributionEnabled !== Boolean(currentState?.accountContributionEnabled)
-    || nextActiveFlowId !== currentFlowId
+    || nextSignature !== currentStepDefinitionSignature
     || paymentTitleChanged;
   if (!shouldRender) {
     return;
@@ -12445,6 +12476,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
     accountContributionEnabled: nextAccountContributionEnabled,
   });
+  currentStepDefinitionSignature = nextSignature;
   renderStepsList();
 }
 
