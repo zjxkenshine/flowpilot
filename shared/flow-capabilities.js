@@ -5,16 +5,23 @@
   const flowRegistryApi = rootScope.MultiPageFlowRegistry || {};
   const contributionRegistryApi = rootScope.MultiPageContributionRegistry || {};
   const settingsSchemaApi = rootScope.MultiPageSettingsSchema || {};
-  const DEFAULT_FLOW_ID = flowRegistryApi.DEFAULT_FLOW_ID || 'openai';
-  const DEFAULT_OPENAI_TARGET_ID = flowRegistryApi.DEFAULT_OPENAI_TARGET_ID || 'cpa';
+  const DEFAULT_FLOW_ID = normalizeIdentifierValue(flowRegistryApi.DEFAULT_FLOW_ID) || 'openai';
+  const RAW_DEFAULT_OPENAI_TARGET_ID = normalizeIdentifierValue(flowRegistryApi.DEFAULT_OPENAI_TARGET_ID) || 'cpa';
   const SIGNUP_METHOD_EMAIL = 'email';
   const SIGNUP_METHOD_PHONE = 'phone';
   const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
   const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
   const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
-  const VALID_OPENAI_TARGET_IDS = Array.isArray(flowRegistryApi.OPENAI_TARGET_IDS)
-    ? flowRegistryApi.OPENAI_TARGET_IDS.slice()
-    : ['cpa', 'sub2api', 'codex2api'];
+  const VALID_OPENAI_TARGET_IDS = Array.from(new Set(
+    (Array.isArray(flowRegistryApi.OPENAI_TARGET_IDS)
+      ? flowRegistryApi.OPENAI_TARGET_IDS
+      : ['cpa', 'sub2api', 'codex2api'])
+      .map((value) => normalizeIdentifierValue(value))
+      .filter(Boolean)
+  ));
+  const DEFAULT_OPENAI_TARGET_ID = VALID_OPENAI_TARGET_IDS.includes(RAW_DEFAULT_OPENAI_TARGET_ID)
+    ? RAW_DEFAULT_OPENAI_TARGET_ID
+    : (VALID_OPENAI_TARGET_IDS[0] || 'cpa');
   const REGISTERED_FLOW_IDS = Array.isArray(flowRegistryApi.getRegisteredFlowIds?.())
     ? flowRegistryApi.getRegisteredFlowIds().map((flowId) => String(flowId || '').trim().toLowerCase()).filter(Boolean)
     : [DEFAULT_FLOW_ID];
@@ -98,16 +105,32 @@
     }),
   });
 
+  function normalizeIdentifierValue(value = '') {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    const valueType = typeof value;
+    if (
+      valueType !== 'string'
+      && valueType !== 'number'
+      && valueType !== 'boolean'
+      && valueType !== 'bigint'
+    ) {
+      return '';
+    }
+    return String(value || '').trim().toLowerCase();
+  }
+
   function normalizeFlowId(value = '', fallback = DEFAULT_FLOW_ID) {
     if (typeof flowRegistryApi.normalizeFlowId === 'function') {
       return flowRegistryApi.normalizeFlowId(value, fallback);
     }
-    const normalized = String(value || '').trim().toLowerCase();
-    return normalized || String(fallback || '').trim().toLowerCase() || DEFAULT_FLOW_ID;
+    const normalized = normalizeIdentifierValue(value);
+    return normalized || normalizeIdentifierValue(fallback) || DEFAULT_FLOW_ID;
   }
 
   function normalizeCapabilityFlowId(value = '', fallback = DEFAULT_FLOW_ID) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = normalizeIdentifierValue(value);
     if (normalized) {
       return normalized;
     }
@@ -115,19 +138,20 @@
   }
 
   function isRegisteredFlowId(flowId = '') {
-    const normalized = String(flowId || '').trim().toLowerCase();
+    const normalized = normalizeIdentifierValue(flowId);
     return Boolean(normalized) && REGISTERED_FLOW_ID_SET.has(normalized);
   }
 
   function normalizeOpenAiTargetId(value = '', fallback = DEFAULT_OPENAI_TARGET_ID) {
-    const normalized = String(value || '').trim().toLowerCase();
+    const normalized = normalizeIdentifierValue(value);
     if (VALID_OPENAI_TARGET_IDS.includes(normalized)) {
       return normalized;
     }
-    const fallbackValue = String(fallback || '').trim().toLowerCase();
-    return VALID_OPENAI_TARGET_IDS.includes(fallbackValue)
-      ? fallbackValue
-      : DEFAULT_OPENAI_TARGET_ID;
+    const fallbackValue = normalizeIdentifierValue(fallback);
+    if (VALID_OPENAI_TARGET_IDS.includes(fallbackValue)) {
+      return fallbackValue;
+    }
+    return fallback === '' || fallback === null ? '' : DEFAULT_OPENAI_TARGET_ID;
   }
 
   function normalizeSignupMethod(value = '') {

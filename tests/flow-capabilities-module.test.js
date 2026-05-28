@@ -289,6 +289,39 @@ test('flow capability registry normalizes unsupported mode switches back to the 
   );
 });
 
+test('flow capability registry ignores unsafe OpenAI target ids without recursing', () => {
+  const api = loadApi();
+  const recursiveTarget = {};
+  recursiveTarget.toString = () => String(recursiveTarget);
+  const registry = api.createFlowCapabilityRegistry({
+    flowCapabilities: {
+      openai: {
+        ...api.FLOW_CAPABILITIES.openai,
+        supportedTargetIds: [
+          recursiveTarget,
+          { id: 'sub2api' },
+          'sub2api',
+          null,
+          'codex2api',
+        ],
+      },
+    },
+  });
+
+  const capabilityState = registry.resolveSidepanelCapabilities({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'cpa',
+      signupMethod: 'email',
+    },
+  });
+
+  assert.deepEqual(capabilityState.supportedTargetIds, ['sub2api', 'codex2api']);
+  assert.equal(capabilityState.requestedTargetId, 'cpa');
+  assert.equal(capabilityState.canUseSelectedTarget, false);
+  assert.equal(capabilityState.effectiveTargetId, 'sub2api');
+});
+
 test('flow capability registry exposes editable Plus account access strategies for SUB2API', () => {
   const api = loadApi();
   const registry = api.createFlowCapabilityRegistry();

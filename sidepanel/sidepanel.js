@@ -10642,9 +10642,14 @@ function canSelectPhoneSignupMethod() {
   const accountContributionEnabled = typeof isContributionModeActiveForFlow === 'function'
     ? isContributionModeActiveForFlow(latestState)
     : Boolean(latestState?.accountContributionEnabled);
+  const selectedPanelMode = normalizePanelMode(
+    typeof selectPanelMode !== 'undefined' && selectPanelMode
+      ? selectPanelMode.value
+      : latestState?.panelMode
+  );
   const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
     ? resolveCurrentSidepanelCapabilities({
-      panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : latestState?.panelMode,
+      panelMode: selectedPanelMode,
       state: {
         ...(typeof latestState !== 'undefined' ? latestState : {}),
         phoneVerificationEnabled: phoneEnabled,
@@ -10661,7 +10666,7 @@ function canSelectPhoneSignupMethod() {
       return registry?.resolveSidepanelCapabilities
         ? registry.resolveSidepanelCapabilities({
           activeFlowId: typeof latestState !== 'undefined' ? latestState?.activeFlowId : '',
-          panelMode: typeof getSelectedPanelMode === 'function' ? getSelectedPanelMode() : (latestState?.panelMode || 'cpa'),
+          panelMode: selectedPanelMode,
           state: {
             ...(typeof latestState !== 'undefined' ? latestState : {}),
             phoneVerificationEnabled: phoneEnabled,
