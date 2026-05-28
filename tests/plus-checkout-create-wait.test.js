@@ -1361,6 +1361,85 @@ test('checkout conversion proxy getStoredSession tolerates null runtime session'
   assert.equal(session, null);
 });
 
+test('checkout conversion proxy IP proxy source does not write proxy settings', async () => {
+  const proxySettingsCalls = [];
+  let exitProbeCalls = 0;
+  let reachabilityCalls = 0;
+  const manager = checkoutProxyApi.createCheckoutConversionProxyManager({
+    chrome: {
+      runtime: {},
+      proxy: {
+        settings: {
+          get: (_details, callback) => {
+            proxySettingsCalls.push({ type: 'get' });
+            callback({
+              levelOfControl: 'controlled_by_this_extension',
+              value: { mode: 'fixed_servers' },
+            });
+          },
+          set: (details, callback) => {
+            proxySettingsCalls.push({ type: 'set', details });
+            callback();
+          },
+          clear: (details, callback) => {
+            proxySettingsCalls.push({ type: 'clear', details });
+            callback();
+          },
+        },
+      },
+    },
+    detectProxyExitInfoByPageContext: async () => {
+      exitProbeCalls += 1;
+      return {
+        ip: '203.0.113.88',
+        region: 'US',
+        source: 'page_context',
+        endpoint: 'https://ipinfo.io/json',
+      };
+    },
+    detectIpProxyTargetReachabilityByPageContext: async () => {
+      reachabilityCalls += 1;
+      return {
+        reachable: true,
+        endpoint: 'https://chatgpt.com/',
+        source: 'target_page_context',
+      };
+    },
+  });
+
+  const session = await manager.applySessionFromState({
+    plusCheckoutConversionProxySource: 'ip_proxy',
+    plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+  });
+  assert.equal(session, null);
+  assert.deepStrictEqual(proxySettingsCalls, []);
+
+  const switched = await manager.switchManualSession({
+    state: {
+      plusCheckoutConversionProxySource: 'ip_proxy',
+      plusCheckoutConversionProxyExitCheck: null,
+    },
+    source: 'ip_proxy',
+  });
+  assert.equal(switched.switched, false);
+  assert.equal(switched.alreadyActive, true);
+  assert.equal(switched.session, null);
+  assert.equal(switched.displayName, 'IP代理');
+  assert.deepStrictEqual(proxySettingsCalls, []);
+
+  const result = await manager.testCheckoutConversionProxy({
+    source: 'ip_proxy',
+    proxyUrl: '',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.proxyDisplayName, 'IP代理');
+  assert.equal(result.exitIp, '203.0.113.88');
+  assert.equal(result.exitRegion, 'US');
+  assert.equal(exitProbeCalls, 1);
+  assert.equal(reachabilityCalls, 1);
+  assert.deepStrictEqual(proxySettingsCalls, []);
+});
+
 test('checkout conversion proxy manual switch persists base snapshot and cancel restores original settings', async () => {
   let state = {
     plusCheckoutConversionProxyManualSession: null,

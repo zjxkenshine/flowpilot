@@ -81,6 +81,9 @@
       if (normalized === 'direct') {
         return 'direct';
       }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
+      }
       return 'manual';
     }
 
@@ -980,6 +983,15 @@ function FindProxyForURL(url, host) {
       };
     }
 
+    async function detectCurrentNetworkCheckoutConversionProxyExit(options = {}) {
+      return validateCheckoutProxyCandidateWithSnapshot(null, {
+        probeDiagnostics: Array.isArray(options?.probeDiagnostics) ? options.probeDiagnostics : [],
+        targetDiagnostics: Array.isArray(options?.targetDiagnostics) ? options.targetDiagnostics : [],
+      }, {
+        allowMissingExit: Boolean(options?.allowMissingExit),
+      });
+    }
+
     async function resolve711TemporaryPoolSnapshot(state = {}, options = {}) {
       if (typeof pullIpProxyPoolFromApi !== 'function') {
         throw new Error('711 临时池能力尚未接入。');
@@ -1225,6 +1237,15 @@ function FindProxyForURL(url, host) {
       const proxyUrl = normalizeCheckoutConversionProxyUrl(
         options?.proxyUrl ?? sourceState?.plusCheckoutConversionProxyUrl
       );
+      if (source === 'ip_proxy') {
+        return {
+          switched: false,
+          alreadyActive: true,
+          session: null,
+          displayName: 'IP代理',
+          exitCheck: buildCheckoutConversionProxyExitCheckPayload(sourceState?.[CHECKOUT_CONVERSION_PROXY_EXIT_CHECK_KEY] || {}),
+        };
+      }
       if (source === 'manual' && !proxyUrl) {
         throw new Error('请先填写支付转换代理地址。');
       }
@@ -1592,6 +1613,9 @@ function FindProxyForURL(url, host) {
       const source = getCheckoutConversionProxySourceFromState(state, sessionOptions);
       const proxyUrl = normalizeCheckoutConversionProxyUrl(state?.plusCheckoutConversionProxyUrl);
       const proxy711Region = getCheckoutConversionProxy711RegionFromState(state, sessionOptions);
+      if (source === 'ip_proxy') {
+        return null;
+      }
       if (source === 'manual' && !proxyUrl) {
         return null;
       }
@@ -1671,6 +1695,11 @@ function FindProxyForURL(url, host) {
               targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
             },
           })
+          : (source === 'ip_proxy'
+            ? await detectCurrentNetworkCheckoutConversionProxyExit({
+              probeDiagnostics,
+              targetDiagnostics,
+            })
           : await (async () => {
             snapshot = source === 'direct'
               ? await defaultApplyCheckoutScopedDirectMode({
@@ -1689,12 +1718,17 @@ function FindProxyForURL(url, host) {
                 ? '无代理模式'
                 : describeCheckoutConversionProxyEntry(parseCheckoutConversionProxyUrl(proxyUrl)),
             };
-          })();
+          })());
         snapshot = result?.snapshot || snapshot;
 
         return {
           ok: true,
-          proxyDisplayName: String(result?.proxyDisplayName || result?.displayName || result?.selectedEntryDisplayName || '').trim(),
+          proxyDisplayName: String(
+            result?.proxyDisplayName
+            || result?.displayName
+            || result?.selectedEntryDisplayName
+            || (source === 'ip_proxy' ? 'IP代理' : '')
+          ).trim(),
           exitIp: String(result?.exitIp || '').trim(),
           exitRegion: String(result?.exitRegion || '').trim(),
           exitSource: String(result?.exitSource || '').trim(),

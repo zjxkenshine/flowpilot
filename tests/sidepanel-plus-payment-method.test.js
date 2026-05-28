@@ -629,6 +629,50 @@ return {
   assert.equal(api.hasClass('state-active'), true);
 });
 
+test('sidepanel renders IP proxy checkout conversion proxy runtime status', () => {
+  const bundle = [
+    extractFunction('normalizePlusCheckoutConversionProxyUrlValue'),
+    extractFunction('normalizePlusCheckoutConversionProxySourceValue'),
+    extractFunction('getPlusCheckoutConversionProxyManualSession'),
+    extractFunction('renderPlusCheckoutConversionProxyRuntimeStatus'),
+  ].join('\n');
+
+  const api = new Function(`
+let latestState = {
+  plusCheckoutConversionProxyManualSession: null,
+  plusCheckoutConversionProxyUrl: '',
+  plusCheckoutConversionProxySource: 'ip_proxy',
+};
+const inputPlusCheckoutConversionProxy = { value: '' };
+const selectPlusCheckoutConversionProxySource = { value: 'ip_proxy' };
+const plusCheckoutConversionProxySourceButtons = [];
+function getSelectedPlusCheckoutConversionProxySource(state = latestState) {
+  return normalizePlusCheckoutConversionProxySourceValue(selectPlusCheckoutConversionProxySource.value || state?.plusCheckoutConversionProxySource || 'manual');
+}
+function getCurrentPlusCheckoutConversionProxy711Region() { return ''; }
+const displayPlusCheckoutConversionProxyRuntimeStatus = {
+  textContent: '',
+  title: '',
+  classList: {
+    active: new Set(),
+    remove(...names) { names.forEach((name) => this.active.delete(name)); },
+    add(name) { this.active.add(name); },
+    has(name) { return this.active.has(name); },
+  },
+};
+${bundle}
+return {
+  normalizePlusCheckoutConversionProxySourceValue,
+  renderPlusCheckoutConversionProxyRuntimeStatus,
+  getText() { return displayPlusCheckoutConversionProxyRuntimeStatus.textContent; },
+};
+`)();
+
+  assert.equal(api.normalizePlusCheckoutConversionProxySourceValue('ip_proxy'), 'ip_proxy');
+  api.renderPlusCheckoutConversionProxyRuntimeStatus();
+  assert.equal(api.getText(), 'IP代理模式（沿用当前 IP 代理/当前网络环境）');
+});
+
 test('sidepanel shows checkout conversion proxy next button only for 711 pool mode', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),
@@ -655,6 +699,7 @@ const inputPlusCheckoutConversionProxy = { style: {}, disabled: false, readOnly:
 const plusCheckoutConversionProxy711Shell = { style: {} };
 const inputPlusCheckoutConversionProxy711Region = { disabled: false, readOnly: false, setAttribute(name, value) { this[name] = value; } };
 const btnPlusCheckoutConversionProxyTest = { disabled: false, setAttribute(name, value) { this[name] = value; } };
+const btnPlusCheckoutConversionProxySwitch = { disabled: false, title: '', setAttribute(name, value) { this[name] = value; } };
 const btnPlusCheckoutConversionProxyNext = { style: {}, disabled: false, setAttribute(name, value) { this[name] = value; } };
 const rowPlusCheckoutCloudConversionApiUrl = { style: {} };
 const rowPlusCheckoutCloudConversionApiKey = { style: {} };
@@ -672,7 +717,10 @@ return {
   selectPlusCheckoutConversionProxySource,
   inputPlusCheckoutConversionProxy,
   plusCheckoutConversionProxy711Shell,
+  btnPlusCheckoutConversionProxySwitch,
   btnPlusCheckoutConversionProxyNext,
+  getTestResult() { return displayPlusCheckoutConversionProxyTestResult.textContent; },
+  getTestResultTitle() { return displayPlusCheckoutConversionProxyTestResult.title; },
   setSource(source) {
     selectPlusCheckoutConversionProxySource.value = source;
     latestState = { ...latestState, plusCheckoutConversionProxySource: source };
@@ -701,6 +749,17 @@ return {
   assert.equal(api.inputPlusCheckoutConversionProxy.style.display, 'none');
   assert.equal(api.plusCheckoutConversionProxy711Shell.style.display, 'none');
   assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
+
+  api.setSource('ip_proxy');
+  api.updatePlusCheckoutConversionModeUi();
+  assert.equal(api.selectPlusCheckoutConversionProxySource.value, 'ip_proxy');
+  assert.equal(api.inputPlusCheckoutConversionProxy.style.display, 'none');
+  assert.equal(api.plusCheckoutConversionProxy711Shell.style.display, 'none');
+  assert.equal(api.btnPlusCheckoutConversionProxyNext.style.display, 'none');
+  assert.equal(api.btnPlusCheckoutConversionProxySwitch.disabled, true);
+  assert.equal(api.btnPlusCheckoutConversionProxySwitch['aria-disabled'], 'true');
+  assert.equal(api.getTestResult(), 'IP代理模式');
+  assert.match(api.getTestResultTitle(), /沿用当前 IP 代理/);
 
   api.setSource('711proxy_pool');
   api.setCloud(true);

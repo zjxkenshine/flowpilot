@@ -2453,6 +2453,9 @@ function normalizePlusCheckoutConversionProxySource(value = '') {
   if (normalized === 'direct') {
     return 'direct';
   }
+  if (normalized === 'ip_proxy') {
+    return 'ip_proxy';
+  }
   return 'manual';
 }
 

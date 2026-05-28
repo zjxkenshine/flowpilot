@@ -485,6 +485,21 @@ test('buildPersistentSettingsPayload persists direct Plus checkout conversion pr
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutConversionProxySource, 'direct');
 });
 
+test('buildPersistentSettingsPayload persists IP proxy Plus checkout conversion proxy source into settings schema', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    plusCheckoutConversionProxySource: 'ip_proxy',
+    plusCheckoutConversionProxyUrl: ' socks5h://user:pass@proxy.example:1080 ',
+    plusCheckoutConversionProxy711Region: ' us ',
+  }, { fillDefaults: true });
+
+  assert.equal(payload.plusCheckoutConversionProxySource, 'ip_proxy');
+  assert.equal(payload.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
+  assert.equal(payload.plusCheckoutConversionProxy711Region, 'US');
+  assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutConversionProxySource, 'ip_proxy');
+});
+
 test('buildPersistentSettingsPayload persists Plus checkout wait settings into settings schema', () => {
   const api = buildHarness();
 

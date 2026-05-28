@@ -565,17 +565,23 @@
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds)));
               })(),
-              plusCheckoutConversionProxySource: String(
-                input?.plusCheckoutConversionProxySource
-                ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxySource
-                ?? defaults.flows.openai.plus.plusCheckoutConversionProxySource
-              ).trim().toLowerCase() === '711proxy_pool'
-                ? '711proxy_pool'
-                : (String(
+              plusCheckoutConversionProxySource: (() => {
+                const normalized = String(
                   input?.plusCheckoutConversionProxySource
                   ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxySource
                   ?? defaults.flows.openai.plus.plusCheckoutConversionProxySource
-                ).trim().toLowerCase() === 'direct' ? 'direct' : 'manual'),
+                ).trim().toLowerCase();
+                if (normalized === '711proxy_pool') {
+                  return '711proxy_pool';
+                }
+                if (normalized === 'direct') {
+                  return 'direct';
+                }
+                if (normalized === 'ip_proxy') {
+                  return 'ip_proxy';
+                }
+                return 'manual';
+              })(),
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl

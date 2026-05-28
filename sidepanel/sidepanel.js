@@ -3539,6 +3539,9 @@ function normalizePlusCheckoutConversionProxySourceValue(value = '') {
   if (normalized === 'direct') {
     return 'direct';
   }
+  if (normalized === 'ip_proxy') {
+    return 'ip_proxy';
+  }
   return 'manual';
 }
 
@@ -4768,6 +4771,9 @@ function collectSettingsPayload() {
       }
       if (normalized === 'direct') {
         return 'direct';
+      }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
       }
       return 'manual';
     });
@@ -17250,6 +17256,13 @@ function getCurrentPlusCheckoutConversionProxy711Region(state = latestState) {
 
 function setPlusCheckoutConversionProxyButtonsBusy(isBusy = false, labels = {}) {
   const busy = Boolean(isBusy);
+  const source = typeof getSelectedPlusCheckoutConversionProxySource === 'function'
+    ? getSelectedPlusCheckoutConversionProxySource(latestState)
+    : normalizePlusCheckoutConversionProxySourceValue(latestState?.plusCheckoutConversionProxySource || 'manual');
+  const cloudEnabled = typeof isPlusCheckoutCloudConversionEnabled === 'function'
+    ? isPlusCheckoutCloudConversionEnabled()
+    : Boolean(latestState?.plusCheckoutCloudConversionEnabled);
+  const switchDisabled = busy || cloudEnabled || source === 'ip_proxy';
   if (btnPlusCheckoutConversionProxyTest) {
     btnPlusCheckoutConversionProxyTest.disabled = busy;
     if (labels.test) {
@@ -17259,7 +17272,8 @@ function setPlusCheckoutConversionProxyButtonsBusy(isBusy = false, labels = {}) 
     }
   }
   if (btnPlusCheckoutConversionProxySwitch) {
-    btnPlusCheckoutConversionProxySwitch.disabled = busy;
+    btnPlusCheckoutConversionProxySwitch.disabled = switchDisabled;
+    btnPlusCheckoutConversionProxySwitch.setAttribute?.('aria-disabled', switchDisabled ? 'true' : 'false');
     if (labels.switch) {
       btnPlusCheckoutConversionProxySwitch.textContent = labels.switch;
     } else if (!busy) {
@@ -17298,6 +17312,9 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
       if (normalized === 'direct') {
         return 'direct';
       }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
+      }
       return 'manual';
     });
   const resolve711Region = typeof getCurrentPlusCheckoutConversionProxy711Region === 'function'
@@ -17315,6 +17332,9 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
       }
       if (normalized === 'direct') {
         return 'direct';
+      }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
       }
       return 'manual';
     });
@@ -17335,13 +17355,16 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
   } else if (source === 'direct') {
     text = '无代理模式未开启（支付转换相关域名直连）';
     title = text;
+  } else if (source === 'ip_proxy') {
+    text = 'IP代理模式（沿用当前 IP 代理/当前网络环境）';
+    title = '支付转换代理不会额外切换或覆盖浏览器代理';
   }
   if (session?.active) {
     const displayName = String(session.displayName || '').trim() || '未知代理';
     const currentSource = normalizeSourceValue(session?.source || source);
     const pendingLabel = currentSource === '711proxy_pool'
       ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}`
-      : (currentSource === 'direct' ? '无代理模式' : inputProxyUrl);
+      : (currentSource === 'direct' ? '无代理模式' : (currentSource === 'ip_proxy' ? 'IP代理模式' : inputProxyUrl));
     if (currentSource === 'manual' && inputProxyUrl && inputProxyUrl !== String(session.proxyUrl || '').trim()) {
       text = `当前生效：${displayName}；待切换：${inputProxyUrl}`;
       title = text;
@@ -17355,11 +17378,19 @@ function renderPlusCheckoutConversionProxyRuntimeStatus(state = latestState) {
       title = text;
       nextClass = 'state-pending';
     } else if (currentSource === 'direct' && source !== 'direct') {
-      text = `当前生效：${displayName}；待切换：${source === '711proxy_pool' ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}` : inputProxyUrl || '手动代理'}`;
+      text = `当前生效：${displayName}；待切换：${source === '711proxy_pool' ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}` : (source === 'ip_proxy' ? 'IP代理模式' : inputProxyUrl || '手动代理')}`;
       title = text;
       nextClass = 'state-pending';
     } else if (currentSource !== 'direct' && source === 'direct') {
       text = `当前生效：${displayName}；待切换：无代理模式`;
+      title = text;
+      nextClass = 'state-pending';
+    } else if (currentSource === 'ip_proxy' && source !== 'ip_proxy') {
+      text = `当前生效：${displayName}；待切换：${source === '711proxy_pool' ? `711 临时池${input711Region ? ` [${input711Region}]` : ''}` : (source === 'direct' ? '无代理模式' : inputProxyUrl || '手动代理')}`;
+      title = text;
+      nextClass = 'state-pending';
+    } else if (currentSource !== 'ip_proxy' && source === 'ip_proxy') {
+      text = `当前生效：${displayName}；待切换：IP代理模式`;
       title = text;
       nextClass = 'state-pending';
     } else {
@@ -17432,6 +17463,9 @@ function updatePlusCheckoutConversionModeUi() {
       if (normalized === 'direct') {
         return 'direct';
       }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
+      }
       return 'manual';
     });
   const normalizeSourceValue = typeof normalizePlusCheckoutConversionProxySourceValue === 'function'
@@ -17443,6 +17477,9 @@ function updatePlusCheckoutConversionModeUi() {
       }
       if (normalized === 'direct') {
         return 'direct';
+      }
+      if (normalized === 'ip_proxy') {
+        return 'ip_proxy';
       }
       return 'manual';
     });
@@ -17460,6 +17497,7 @@ function updatePlusCheckoutConversionModeUi() {
   const manualMode = source === 'manual';
   const directMode = source === 'direct';
   const poolMode = source === '711proxy_pool';
+  const ipProxyMode = source === 'ip_proxy';
 
   if (typeof syncPlusCheckoutConversionProxySourceControl === 'function') {
     syncPlusCheckoutConversionProxySourceControl(source);
@@ -17487,7 +17525,7 @@ function updatePlusCheckoutConversionModeUi() {
     inputPlusCheckoutConversionProxy.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
   }
   if (typeof plusCheckoutConversionProxy711Shell !== 'undefined' && plusCheckoutConversionProxy711Shell) {
-    plusCheckoutConversionProxy711Shell.style.display = (!manualMode && !directMode) ? '' : 'none';
+    plusCheckoutConversionProxy711Shell.style.display = poolMode ? '' : 'none';
   }
   if (typeof inputPlusCheckoutConversionProxy711Region !== 'undefined' && inputPlusCheckoutConversionProxy711Region) {
     inputPlusCheckoutConversionProxy711Region.disabled = cloudEnabled;
@@ -17502,6 +17540,13 @@ function updatePlusCheckoutConversionModeUi() {
     btnPlusCheckoutConversionProxyNext.style.display = (!cloudEnabled && poolMode) ? '' : 'none';
     btnPlusCheckoutConversionProxyNext.disabled = cloudEnabled;
     btnPlusCheckoutConversionProxyNext.setAttribute('aria-disabled', cloudEnabled ? 'true' : 'false');
+  }
+  if (typeof btnPlusCheckoutConversionProxySwitch !== 'undefined' && btnPlusCheckoutConversionProxySwitch) {
+    btnPlusCheckoutConversionProxySwitch.disabled = cloudEnabled || ipProxyMode;
+    btnPlusCheckoutConversionProxySwitch.setAttribute('aria-disabled', (cloudEnabled || ipProxyMode) ? 'true' : 'false');
+    btnPlusCheckoutConversionProxySwitch.title = ipProxyMode
+      ? 'IP代理模式会沿用当前 IP 代理/当前网络环境，无需额外切换'
+      : '手动启用当前支付转换代理';
   }
   if (typeof rowPlusCheckoutCloudConversionApiUrl !== 'undefined' && rowPlusCheckoutCloudConversionApiUrl) {
     rowPlusCheckoutCloudConversionApiUrl.style.display = cloudRowsVisible ? '' : 'none';
@@ -17527,6 +17572,10 @@ function updatePlusCheckoutConversionModeUi() {
   } else if (source === 'direct') {
     setPlusCheckoutConversionProxyTestResult('无代理模式', {
       detail: '本次检测会临时绕过当前 IP 代理，仅让支付转换相关域名直连，并在完成后恢复原网络环境。',
+    });
+  } else if (source === 'ip_proxy') {
+    setPlusCheckoutConversionProxyTestResult('IP代理模式', {
+      detail: '将沿用当前 IP 代理/当前网络环境，不额外切换支付转换代理。',
     });
   }
 }
@@ -17592,7 +17641,9 @@ async function handlePlusCheckoutConversionProxyTest() {
         ? `711 临时池测试通过：${exitSummary}`
         : (source === 'direct'
           ? `无代理模式测试通过：${exitSummary}`
-          : `支付转换代理测试通过：${exitSummary}`),
+          : (source === 'ip_proxy'
+            ? `IP代理模式测试通过：${exitSummary}`
+            : `支付转换代理测试通过：${exitSummary}`)),
       'success',
       2500
     );
@@ -17614,6 +17665,14 @@ async function handlePlusCheckoutConversionProxyManualSwitch() {
   const proxy711Region = getCurrentPlusCheckoutConversionProxy711Region(latestState);
   if (inputPlusCheckoutConversionProxy) {
     inputPlusCheckoutConversionProxy.value = proxyUrl;
+  }
+  if (source === 'ip_proxy') {
+    setPlusCheckoutConversionProxyTestResult('IP代理模式', {
+      detail: '将沿用当前 IP 代理/当前网络环境，不额外切换支付转换代理。',
+    });
+    renderPlusCheckoutConversionProxyRuntimeStatus(latestState);
+    showToast('IP代理模式会沿用当前 IP 代理/当前网络环境，无需额外切换。', 'info', 2500);
+    return;
   }
   if (source === 'manual' && !proxyUrl) {
     showToast('请先填写支付转换代理地址。', 'error');
