@@ -58,6 +58,8 @@
         'plusCheckoutAlreadyPaid',
         'plusCheckoutAlreadyPaidAt',
         'plusCheckoutAlreadyPaidDetail',
+        'plusCheckoutRetryCleanupRequested',
+        'plusCheckoutRetryCleanupReason',
         'plusCheckoutConversionProxySession',
         'plusCheckoutConversionProxyManualSession',
         'plusCheckoutConversionProxyExitCheck',

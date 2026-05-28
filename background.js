@@ -1822,6 +1822,8 @@ const DEFAULT_STATE = {
   heroSmsLastPriceUserLimit: '',
   heroSmsLastPriceAt: 0,
   pendingPhoneActivationConfirmation: null,
+  plusCheckoutRetryCleanupRequested: false,
+  plusCheckoutRetryCleanupReason: '',
   autoRunning: false, // 当前是否处于自动运行中。
   autoRunPhase: 'idle', // 当前自动运行阶段。
   autoRunCurrentRun: 0, // 自动运行当前执行到第几轮。
@@ -10672,6 +10674,8 @@ function buildPhonePlusNonFreeTrialFallbackResetPatch(amountLabel = '', options 
     plusCheckoutAlreadyPaid: false,
     plusCheckoutAlreadyPaidAt: 0,
     plusCheckoutAlreadyPaidDetail: '',
+    plusCheckoutRetryCleanupRequested: false,
+    plusCheckoutRetryCleanupReason: '',
     plusBillingCountryText: '',
     plusBillingAddress: null,
     plusPaypalApprovedAt: null,
@@ -15205,12 +15209,6 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       checkoutLabel: 'Plus Checkout',
       retryCount: plusCheckoutRestartCount,
     });
-    await setState({
-      plusCheckoutVerificationRetryRequested: false,
-      plusCheckoutVerificationRetryReason: '',
-      plusCheckoutVerificationRetryAt: 0,
-      plusCheckoutVerificationRetryNodeId: '',
-    });
     const checkoutResetAnchorNodeId = getPreviousNodeId('plus-checkout-create', latestState) || 'fill-profile';
     await invalidateDownstreamAfterAutoRunNodeRestart(checkoutResetAnchorNodeId, {
       logLabel: `节点 ${nodeId} Plus 最终验证未确认后回到 plus-checkout-create 重试（第 ${plusCheckoutRestartCount} 次）`,
@@ -15220,6 +15218,8 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       plusCheckoutVerificationRetryReason: '',
       plusCheckoutVerificationRetryAt: 0,
       plusCheckoutVerificationRetryNodeId: '',
+      plusCheckoutRetryCleanupRequested: true,
+      plusCheckoutRetryCleanupReason: reason,
     });
     setRestartNode('plus-checkout-create');
     return true;

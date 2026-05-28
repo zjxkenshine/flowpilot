@@ -23,6 +23,36 @@
   const HOSTED_CHECKOUT_HOME_FALLBACK_RETRY_DELAY_MS = 3000;
   const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE = 'continue';
   const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY = 'retry';
+  const PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_DOMAINS = [
+    'chatgpt.com',
+    'chat.openai.com',
+    'pay.openai.com',
+    'openai.com',
+    'auth.openai.com',
+    'auth0.openai.com',
+    'accounts.openai.com',
+    'paypal.com',
+    'stripe.com',
+    'checkout.stripe.com',
+    'meiguodizhi.com',
+    'mail-api.yuecheng.shop',
+    'yuecheng.shop',
+  ];
+  const PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_ORIGINS = [
+    'https://chatgpt.com',
+    'https://chat.openai.com',
+    'https://pay.openai.com',
+    'https://auth.openai.com',
+    'https://auth0.openai.com',
+    'https://accounts.openai.com',
+    'https://openai.com',
+    'https://www.paypal.com',
+    'https://paypal.com',
+    'https://checkout.stripe.com',
+    'https://www.meiguodizhi.com',
+    'https://meiguodizhi.com',
+    'https://mail-api.yuecheng.shop',
+  ];
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
   const HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS = 5000;
@@ -152,6 +182,287 @@
         stepKey,
         ...(options && typeof options === 'object' ? options : {}),
       });
+    }
+
+    function normalizeRetryCookieDomain(domain) {
+      return String(domain || '').trim().replace(/^\.+/, '').toLowerCase();
+    }
+
+    function shouldClearPlusCheckoutRetryCookie(cookie) {
+      const domain = normalizeRetryCookieDomain(cookie?.domain);
+      if (!domain) return false;
+      return PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_DOMAINS.some((target) => (
+        domain === target || domain.endsWith(`.${target}`)
+      ));
+    }
+
+    function buildPlusCheckoutRetryCookieRemovalUrl(cookie) {
+      const host = normalizeRetryCookieDomain(cookie?.domain);
+      const rawPath = String(cookie?.path || '/');
+      const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+      return `https://${host}${path}`;
+    }
+
+    function buildPlusCheckoutRetryCookieKey(cookie, fallbackStoreId = '') {
+      return [
+        cookie?.storeId || fallbackStoreId || '',
+        cookie?.domain || '',
+        cookie?.path || '',
+        cookie?.name || '',
+        cookie?.partitionKey ? JSON.stringify(cookie.partitionKey) : '',
+      ].join('|');
+    }
+
+    async function collectPlusCheckoutRetryCookies() {
+      if (!chrome?.cookies?.getAll) {
+        return [];
+      }
+      const stores = chrome.cookies.getAllCookieStores
+        ? await chrome.cookies.getAllCookieStores()
+        : [{ id: undefined }];
+      const queryDomains = Array.from(new Set(
+        PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_DOMAINS
+          .map((domain) => normalizeRetryCookieDomain(domain))
+          .filter(Boolean)
+      ));
+      const cookies = [];
+      const seen = new Set();
+
+      for (const store of stores || []) {
+        const storeId = store?.id;
+        for (const domain of queryDomains) {
+          let batch = [];
+          try {
+            batch = await chrome.cookies.getAll(storeId ? { storeId, domain } : { domain });
+          } catch (error) {
+            console.warn('[MultiPage:plus-checkout-retry] query cookies failed', {
+              storeId: storeId || '',
+              domain,
+              message: error?.message || String(error || 'unknown error'),
+            });
+            continue;
+          }
+          for (const cookie of batch || []) {
+            if (!shouldClearPlusCheckoutRetryCookie(cookie)) continue;
+            const key = buildPlusCheckoutRetryCookieKey(cookie, storeId);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            cookies.push(cookie);
+          }
+        }
+      }
+
+      return cookies;
+    }
+
+    async function removePlusCheckoutRetryCookie(cookie) {
+      if (!chrome?.cookies?.remove) {
+        return false;
+      }
+      const details = {
+        url: buildPlusCheckoutRetryCookieRemovalUrl(cookie),
+        name: cookie.name,
+      };
+      if (cookie.storeId) {
+        details.storeId = cookie.storeId;
+      }
+      if (cookie.partitionKey) {
+        details.partitionKey = cookie.partitionKey;
+      }
+      try {
+        const result = await chrome.cookies.remove(details);
+        return Boolean(result);
+      } catch (error) {
+        console.warn('[MultiPage:plus-checkout-retry] remove cookie failed', {
+          domain: cookie?.domain,
+          name: cookie?.name,
+          message: error?.message || String(error || 'unknown error'),
+        });
+        return false;
+      }
+    }
+
+    function isPlusCheckoutRetryPaymentTabUrl(url = '') {
+      const rawUrl = String(url || '').trim();
+      if (!rawUrl) {
+        return false;
+      }
+      try {
+        const parsed = new URL(rawUrl);
+        const hostname = String(parsed.hostname || '').toLowerCase();
+        const pathname = String(parsed.pathname || '/');
+        if (hostname === 'chatgpt.com' || hostname === 'www.chatgpt.com' || hostname === 'chat.openai.com') {
+          return /^\/checkout(?:\/|$)/i.test(pathname)
+            || /^\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i.test(pathname);
+        }
+        if (hostname === 'pay.openai.com' || hostname === 'checkout.stripe.com') {
+          return true;
+        }
+        if (hostname === 'paypal.com' || hostname.endsWith('.paypal.com')) {
+          return true;
+        }
+        return false;
+      } catch {
+        return /chatgpt\.com\/checkout|pay\.openai\.com|checkout\.stripe\.com|paypal\./i.test(rawUrl);
+      }
+    }
+
+    async function getTabForRetryCleanup(tabId) {
+      const normalizedTabId = Number(tabId) || 0;
+      if (!normalizedTabId || !chrome?.tabs?.get) {
+        return null;
+      }
+      return chrome.tabs.get(normalizedTabId).catch(() => null);
+    }
+
+    function addRetryCleanupTabCandidate(candidates, tab, options = {}) {
+      const tabId = Number(tab?.id);
+      if (!Number.isInteger(tabId) || tabId <= 0 || candidates.has(tabId)) {
+        return;
+      }
+      const url = String(tab?.url || '').trim();
+      if (!options.force && !isPlusCheckoutRetryPaymentTabUrl(url)) {
+        return;
+      }
+      candidates.set(tabId, {
+        id: tabId,
+        url,
+      });
+    }
+
+    async function collectPlusCheckoutRetryTabs(state = {}) {
+      const candidates = new Map();
+      const storedTab = await getTabForRetryCleanup(state?.plusCheckoutTabId);
+      addRetryCleanupTabCandidate(candidates, storedTab, { force: true });
+
+      if (typeof getTabId === 'function') {
+        for (const source of [PLUS_CHECKOUT_SOURCE, PAYPAL_SOURCE]) {
+          const tabId = await Promise.resolve(getTabId(source)).catch(() => 0);
+          const tab = await getTabForRetryCleanup(tabId);
+          addRetryCleanupTabCandidate(candidates, tab, { force: true });
+        }
+      }
+
+      const queryTabs = typeof queryTabsInAutomationWindow === 'function'
+        ? queryTabsInAutomationWindow
+        : (chrome?.tabs?.query ? (queryInfo) => chrome.tabs.query(queryInfo) : null);
+      if (typeof queryTabs === 'function') {
+        const tabs = await queryTabs({}).catch(() => []);
+        for (const tab of Array.isArray(tabs) ? tabs : []) {
+          addRetryCleanupTabCandidate(candidates, tab, { force: false });
+        }
+      }
+
+      return Array.from(candidates.values());
+    }
+
+    async function closePlusCheckoutRetryTabs(state = {}) {
+      if (!chrome?.tabs?.remove) {
+        await addLog('步骤 6：Plus Checkout 重试前无法访问 tabs API，跳过旧支付标签关闭。', 'warn');
+        return 0;
+      }
+      const tabs = await collectPlusCheckoutRetryTabs(state);
+      let closedCount = 0;
+      for (const tab of tabs) {
+        try {
+          await chrome.tabs.remove(tab.id);
+          closedCount += 1;
+        } catch {
+          // Tab may already be gone.
+        }
+      }
+      return closedCount;
+    }
+
+    async function clearPlusCheckoutRetryCookies() {
+      if (!chrome?.cookies?.getAll || !chrome?.cookies?.remove) {
+        await addLog('步骤 6：Plus Checkout 重试前无法访问 cookies API，跳过支付 cookies 清理。', 'warn');
+        return 0;
+      }
+      const cookies = await collectPlusCheckoutRetryCookies();
+      let removedCount = 0;
+      for (const cookie of cookies) {
+        if (await removePlusCheckoutRetryCookie(cookie)) {
+          removedCount += 1;
+        }
+      }
+      if (chrome.browsingData?.removeCookies) {
+        try {
+          await chrome.browsingData.removeCookies({
+            since: 0,
+            origins: PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_ORIGINS,
+          });
+        } catch (error) {
+          await addLog(`步骤 6：Plus Checkout 重试前 browsingData 补扫 cookies 失败：${error?.message || String(error || '未知错误')}`, 'warn');
+        }
+      }
+      return removedCount;
+    }
+
+    async function clearPlusCheckoutRetryState() {
+      if (typeof getState !== 'function' || typeof setState !== 'function') {
+        return;
+      }
+      const latestState = await getState().catch(() => ({}));
+      const registry = latestState?.tabRegistry && typeof latestState.tabRegistry === 'object'
+        ? { ...latestState.tabRegistry }
+        : {};
+      registry[PLUS_CHECKOUT_SOURCE] = null;
+      registry[PAYPAL_SOURCE] = null;
+      await setState({
+        plusCheckoutTabId: null,
+        plusCheckoutUrl: '',
+        plusCheckoutRetryCleanupRequested: false,
+        plusCheckoutRetryCleanupReason: '',
+        tabRegistry: registry,
+      });
+    }
+
+    function shouldCleanupBeforePlusCheckoutCreate(state = {}, options = {}) {
+      return Boolean(
+        options?.retryCleanupBeforeCreate
+        || state?.plusCheckoutRetryCleanupRequested
+        || state?.plusCheckoutVerificationRetryRequested
+      );
+    }
+
+    async function cleanupBeforePlusCheckoutRetryCreate(state = {}, options = {}) {
+      if (!shouldCleanupBeforePlusCheckoutCreate(state, options)) {
+        return {
+          skipped: true,
+        };
+      }
+      const reason = String(
+        options?.retryCleanupReason
+        || state?.plusCheckoutRetryCleanupReason
+        || state?.plusCheckoutVerificationRetryReason
+        || state?.plusHostedCheckoutVerificationFailureReason
+        || 'Plus Checkout retry'
+      ).trim() || 'Plus Checkout retry';
+      await addLog(`步骤 6：Plus Checkout 重试前正在关闭旧支付标签并清理支付 cookies。原因：${reason}`, 'info');
+      let closedTabs = 0;
+      let removedCookies = 0;
+      try {
+        closedTabs = await closePlusCheckoutRetryTabs(state);
+      } catch (error) {
+        await addLog(`步骤 6：Plus Checkout 重试前关闭旧支付标签失败，继续重建 checkout：${error?.message || String(error || '未知错误')}`, 'warn');
+      }
+      try {
+        removedCookies = await clearPlusCheckoutRetryCookies();
+      } catch (error) {
+        await addLog(`步骤 6：Plus Checkout 重试前清理支付 cookies 失败，继续重建 checkout：${error?.message || String(error || '未知错误')}`, 'warn');
+      }
+      try {
+        await clearPlusCheckoutRetryState();
+      } catch (error) {
+        await addLog(`步骤 6：Plus Checkout 重试前清理运行状态失败，继续重建 checkout：${error?.message || String(error || '未知错误')}`, 'warn');
+      }
+      await addLog(`步骤 6：Plus Checkout 重试前清理完成：已关闭 ${closedTabs} 个旧支付标签，已删除 ${removedCookies} 个支付 cookies。`, 'ok');
+      return {
+        skipped: false,
+        closedTabs,
+        removedCookies,
+      };
     }
 
     function normalizePlusPaymentMethod(value = '') {
@@ -5505,9 +5816,10 @@
       });
     }
 
-    async function executePlusCheckoutCreate(state = {}) {
+    async function executePlusCheckoutCreate(state = {}, options = {}) {
       const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
       const useHostedCheckoutFinalStep = isHostedCheckoutFinalStepEnabled(state);
+      await cleanupBeforePlusCheckoutRetryCreate(state, options);
       if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
         await executeGpcCheckoutCreate(state);
         return;
@@ -5629,6 +5941,7 @@
 
     return {
       executePlusCheckoutCreate,
+      cleanupBeforePlusCheckoutRetryCreate,
       executePayPalHostedOpenAiCheckout,
       executePayPalHostedEmail,
       executePayPalHostedCard,

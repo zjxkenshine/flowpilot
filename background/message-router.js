@@ -1397,6 +1397,10 @@
               if (typeof invalidateDownstreamAfterStepRestart === 'function') {
                 await invalidateDownstreamAfterStepRestart(retryStep, { logLabel: 'PayPal genericError 后重试 Plus Checkout' });
               }
+              await setState({
+                plusCheckoutRetryCleanupRequested: true,
+                plusCheckoutRetryCleanupReason: 'PayPal hosted genericError manual retry',
+              });
               await executeNode(retryNodeId);
               return { ok: true };
             }
@@ -1602,6 +1606,12 @@
             await invalidateDownstreamAfterStepRestart(resolvedStep, { logLabel: `节点 ${nodeId} 重新执行` });
           }
           if (message.source === 'sidepanel') {
+            if (nodeId === 'plus-checkout-create') {
+              await setState({
+                plusCheckoutRetryCleanupRequested: true,
+                plusCheckoutRetryCleanupReason: 'Manual plus-checkout-create restart',
+              });
+            }
             await prepareManualPlusCheckoutProxyBeforeExecute(nodeId, await getState());
           }
           if (message.payload.email) {

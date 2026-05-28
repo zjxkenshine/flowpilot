@@ -1364,7 +1364,18 @@ test('RESOLVE_PLUS_MANUAL_CONFIRMATION retry restarts Plus checkout after PayPal
     }
   );
   assert.deepStrictEqual(
-    harness.events.find((event) => event.type === 'executeNode'),
+    (() => {
+      const cleanupFlagEventIndex = harness.events.findIndex((event) => (
+        event.type === 'setState'
+        && event.updates.plusCheckoutRetryCleanupRequested === true
+      ));
+      const executeEventIndex = harness.events.findIndex((event) => event.type === 'executeNode');
+      assert.ok(cleanupFlagEventIndex > -1);
+      assert.ok(executeEventIndex > cleanupFlagEventIndex);
+      assert.equal(harness.getState().plusCheckoutRetryCleanupRequested, true);
+      assert.equal(harness.getState().plusCheckoutRetryCleanupReason, 'PayPal hosted genericError manual retry');
+      return harness.events.find((event) => event.type === 'executeNode');
+    })(),
     { type: 'executeNode', nodeId: 'plus-checkout-create' }
   );
 });

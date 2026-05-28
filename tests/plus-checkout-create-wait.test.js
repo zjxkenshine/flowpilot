@@ -13,6 +13,167 @@ const api = new Function('self', `${source}; return self.MultiPageBackgroundPlus
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 const PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
 
+test('Plus checkout retry cleanup closes payment tabs, clears cookies, and preserves unrelated registry entries', async () => {
+  const events = {
+    logs: [],
+    removedTabs: [],
+    removedCookies: [],
+    browsingDataCalls: [],
+    stateUpdates: [],
+  };
+  let state = {
+    plusCheckoutTabId: 101,
+    plusCheckoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_old',
+    plusCheckoutRetryCleanupRequested: true,
+    plusCheckoutRetryCleanupReason: 'verification retry',
+    tabRegistry: {
+      'plus-checkout': { tabId: 102, ready: true },
+      'paypal-flow': { tabId: 103, ready: true },
+      'signup-page': { tabId: 201, ready: true },
+      'vps-panel': { tabId: 202, ready: true },
+    },
+  };
+  const tabs = new Map([
+    [101, { id: 101, url: 'https://chatgpt.com/checkout/openai_ie/cs_old' }],
+    [102, { id: 102, url: 'https://pay.openai.com/c/pay/cs_old' }],
+    [103, { id: 103, url: 'https://www.paypal.com/checkoutnow?token=EC-old' }],
+    [104, { id: 104, url: 'https://checkout.stripe.com/c/pay/cs_extra' }],
+    [201, { id: 201, url: 'https://auth.openai.com/authorize' }],
+    [202, { id: 202, url: 'https://vps.example.com/panel' }],
+  ]);
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.logs.push({ message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => {
+          if (!tabs.has(tabId)) throw new Error(`missing tab ${tabId}`);
+          return tabs.get(tabId);
+        },
+        remove: async (tabId) => {
+          events.removedTabs.push(tabId);
+          tabs.delete(tabId);
+        },
+      },
+      cookies: {
+        getAllCookieStores: async () => [{ id: 'store-a' }],
+        getAll: async (details) => {
+          if (details.domain === 'chatgpt.com') {
+            return [
+              { domain: '.chatgpt.com', path: '/checkout', name: 'chatgpt-session', storeId: details.storeId },
+              { domain: '.example.com', path: '/', name: 'keep', storeId: details.storeId },
+            ];
+          }
+          if (details.domain === 'paypal.com') {
+            return [{ domain: '.paypal.com', path: '/', name: 'paypal-session', storeId: details.storeId }];
+          }
+          if (details.domain === 'checkout.stripe.com') {
+            return [{ domain: 'checkout.stripe.com', path: '/', name: 'stripe-session', storeId: details.storeId }];
+          }
+          return [];
+        },
+        remove: async (details) => {
+          events.removedCookies.push(details);
+          return details;
+        },
+      },
+      browsingData: {
+        removeCookies: async (details) => events.browsingDataCalls.push(details),
+      },
+    },
+    getState: async () => state,
+    getTabId: async (source) => state.tabRegistry[source]?.tabId || null,
+    queryTabsInAutomationWindow: async () => Array.from(tabs.values()),
+    setState: async (updates) => {
+      events.stateUpdates.push(updates);
+      state = { ...state, ...updates };
+    },
+  });
+
+  await executor.cleanupBeforePlusCheckoutRetryCreate(state);
+
+  assert.deepStrictEqual(events.removedTabs.sort((a, b) => a - b), [101, 102, 103, 104]);
+  assert.deepStrictEqual(Array.from(tabs.keys()).sort((a, b) => a - b), [201, 202]);
+  assert.deepStrictEqual(
+    events.removedCookies.map((details) => details.url).sort(),
+    [
+      'https://chatgpt.com/checkout',
+      'https://checkout.stripe.com/',
+      'https://paypal.com/',
+    ]
+  );
+  assert.equal(events.browsingDataCalls.length, 1);
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://chatgpt.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://www.paypal.com'));
+  assert.ok(events.browsingDataCalls[0].origins.includes('https://checkout.stripe.com'));
+  assert.equal(state.plusCheckoutTabId, null);
+  assert.equal(state.plusCheckoutUrl, '');
+  assert.equal(state.plusCheckoutRetryCleanupRequested, false);
+  assert.equal(state.tabRegistry['plus-checkout'], null);
+  assert.equal(state.tabRegistry['paypal-flow'], null);
+  assert.deepStrictEqual(state.tabRegistry['signup-page'], { tabId: 201, ready: true });
+  assert.deepStrictEqual(state.tabRegistry['vps-panel'], { tabId: 202, ready: true });
+  assert.equal(events.logs.some((entry) => /重试前清理完成/.test(entry.message)), true);
+});
+
+test('Plus checkout retry cleanup is skipped for first normal checkout create', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tab-create', payload });
+          return { id: 42 };
+        },
+        update: async (tabId, payload) => events.push({ type: 'tab-update', tabId, payload }),
+        remove: async (tabId) => events.push({ type: 'tab-remove', tabId }),
+      },
+      cookies: {
+        getAll: async () => {
+          throw new Error('normal create should not query cookies');
+        },
+        remove: async () => {
+          throw new Error('normal create should not remove cookies');
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => events.push({ type: 'ready' }),
+    registerTab: async (source, tabId) => events.push({ type: 'register', source, tabId }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '$0.00',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => events.push({ type: 'tab-complete' }),
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusCheckoutOpenStableWaitSeconds: 0,
+  });
+
+  assert.equal(events.some((event) => event.type === 'tab-remove'), false);
+  assert.equal(events.some((event) => event.type === 'log' && /重试前/.test(event.message)), false);
+});
+
 function createCheckoutContentHarness(options = {}) {
   const checkoutEvents = [];
   const attrs = new Map();
