@@ -527,6 +527,10 @@
       return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
     }
 
+    function isPhoneSignupPhonePrefixedEmailEnabled(state = {}) {
+      return state?.phoneSignupPhonePrefixedEmailEnabled !== false;
+    }
+
     function getPhonePrefixedCloudflarePaymentSource(state = {}) {
       const generator = String(state?.emailGenerator || '').trim().toLowerCase();
       return generator === 'cloudflare'
@@ -689,27 +693,29 @@
     }
 
     function getPhonePlusExistingPaymentEmailCandidate(state = {}) {
-      const preferredPhonePrefixEmail = String(
-        state?.registrationEmailState?.current
-        || state?.email
-        || ''
-      ).trim().toLowerCase();
-      const phonePrefixLocalPart = String(
-        state?.signupVerifiedPhoneNumber
-        || state?.signupPhoneCompletedActivation?.phoneNumber
-        || ''
-      ).replace(/\D+/g, '');
-      if (
-        phonePrefixLocalPart
-        && preferredPhonePrefixEmail
-        && preferredPhonePrefixEmail.includes('@')
-        && preferredPhonePrefixEmail.split('@')[0] === phonePrefixLocalPart
-      ) {
-        return {
-          email: preferredPhonePrefixEmail,
-          source: getPhonePrefixedCloudflarePaymentSource(state),
-          reused: true,
-        };
+      if (isPhoneSignupPhonePrefixedEmailEnabled(state)) {
+        const preferredPhonePrefixEmail = String(
+          state?.registrationEmailState?.current
+          || state?.email
+          || ''
+        ).trim().toLowerCase();
+        const phonePrefixLocalPart = String(
+          state?.signupVerifiedPhoneNumber
+          || state?.signupPhoneCompletedActivation?.phoneNumber
+          || ''
+        ).replace(/\D+/g, '');
+        if (
+          phonePrefixLocalPart
+          && preferredPhonePrefixEmail
+          && preferredPhonePrefixEmail.includes('@')
+          && preferredPhonePrefixEmail.split('@')[0] === phonePrefixLocalPart
+        ) {
+          return {
+            email: preferredPhonePrefixEmail,
+            source: getPhonePrefixedCloudflarePaymentSource(state),
+            reused: true,
+          };
+        }
       }
 
       const paymentEmailState = getPlusPaymentEmailStateLocal(state);
@@ -970,7 +976,7 @@
         return resolveHostedCheckoutPaymentEmail(state);
       }
       const latestState = await getLatestHostedState(state);
-      if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
+      if (isPhoneSignupPhonePrefixedEmailEnabled(latestState) && typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
         const fixedEmail = String(await ensurePhonePrefixedCloudflareTempEmail(latestState, {
           fallbackToGenerated: false,
         }) || '').trim().toLowerCase();

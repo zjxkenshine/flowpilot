@@ -873,6 +873,54 @@ test('step 6 uses signup phone as Cloudflare Temp Email prefix when verified pho
   assert.deepStrictEqual(events.completions, ['wait-registration-success']);
 });
 
+test('step 6 skips phone-prefixed email generation when phone-prefix switch is disabled', async () => {
+  const api = createStep6Api();
+  const events = {
+    helperCalls: 0,
+    fetchCalls: 0,
+    paymentCalls: 0,
+    completions: [],
+  };
+  const state = {
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    phoneSignupPhonePrefixedEmailEnabled: false,
+    signupPhoneNumber: '+86 138-1234-5678',
+    signupVerifiedPhoneNumber: '+86 138-1234-5678',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+86 138-1234-5678',
+  };
+
+  const executor = api.createStep6Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step) => {
+      events.completions.push(step);
+    },
+    ensurePhonePrefixedCloudflareTempEmail: async () => {
+      events.helperCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    fetchCloudflareTempEmailAddress: async () => {
+      events.fetchCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    getState: async () => state,
+    registrationSuccessWaitMs: 0,
+    resolveSignupMethod: (currentState) => currentState.signupMethod,
+    setPlusPaymentEmailState: async () => {
+      events.paymentCalls += 1;
+    },
+    sleepWithStop: async () => {},
+  });
+
+  await executor.executeStep6(state);
+
+  assert.equal(events.helperCalls, 0);
+  assert.equal(events.fetchCalls, 0);
+  assert.equal(events.paymentCalls, 0);
+  assert.deepStrictEqual(events.completions, ['wait-registration-success']);
+});
+
 test('step 6 skips phone-prefixed email generation outside phone Cloudflare Temp Email mode', async () => {
   const api = createStep6Api();
 

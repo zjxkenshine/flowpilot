@@ -276,6 +276,7 @@
               signupMethod: 'email',
               phoneVerificationEnabled: false,
               phoneSignupReloginAfterBindEmailEnabled: false,
+              phoneSignupPhonePrefixedEmailEnabled: true,
             },
             browserFingerprint: {
               enabled: true,
@@ -535,6 +536,11 @@
                 ?? nested?.flows?.openai?.signup?.phoneSignupReloginAfterBindEmailEnabled
                 ?? defaults.flows.openai.signup.phoneSignupReloginAfterBindEmailEnabled
               ),
+              phoneSignupPhonePrefixedEmailEnabled: (
+                input?.phoneSignupPhonePrefixedEmailEnabled
+                ?? nested?.flows?.openai?.signup?.phoneSignupPhonePrefixedEmailEnabled
+                ?? defaults.flows.openai.signup.phoneSignupPhonePrefixedEmailEnabled
+              ) !== false,
             },
             browserFingerprint: {
               enabled: Boolean(
@@ -936,6 +942,7 @@
       next.signupMethod = openaiState.signup.signupMethod;
       next.phoneVerificationEnabled = openaiState.signup.phoneVerificationEnabled;
       next.phoneSignupReloginAfterBindEmailEnabled = openaiState.signup.phoneSignupReloginAfterBindEmailEnabled;
+      next.phoneSignupPhonePrefixedEmailEnabled = openaiState.signup.phoneSignupPhonePrefixedEmailEnabled;
       next.browserFingerprintEnabled = openaiState.browserFingerprint.enabled;
       next.browserFingerprintLevel = openaiState.browserFingerprint.level;
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;

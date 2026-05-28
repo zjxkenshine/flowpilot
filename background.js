@@ -1620,6 +1620,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
   phoneSignupReloginAfterBindEmailEnabled: false,
+  phoneSignupPhonePrefixedEmailEnabled: true,
   phoneSmsReuseEnabled: DEFAULT_HERO_SMS_REUSE_ENABLED,
   freePhoneReuseEnabled: true,
   freePhoneReuseAutoEnabled: true,
@@ -1778,6 +1779,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'signupMethod',
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
+  'phoneSignupPhonePrefixedEmailEnabled',
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
   'plusModeEnabled',
@@ -4332,6 +4334,7 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeStepExecutionRangeByFlow(value);
     case 'phoneVerificationEnabled':
     case 'phoneSignupReloginAfterBindEmailEnabled':
+    case 'phoneSignupPhonePrefixedEmailEnabled':
     case 'phoneSmsReuseEnabled':
     case 'freePhoneReuseEnabled':
     case 'freePhoneReuseAutoEnabled':
@@ -5198,6 +5201,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('signupMethod', ['flows', 'openai', 'signup', 'signupMethod']);
   assignIfUpdated('phoneVerificationEnabled', ['flows', 'openai', 'signup', 'phoneVerificationEnabled']);
   assignIfUpdated('phoneSignupReloginAfterBindEmailEnabled', ['flows', 'openai', 'signup', 'phoneSignupReloginAfterBindEmailEnabled']);
+  assignIfUpdated('phoneSignupPhonePrefixedEmailEnabled', ['flows', 'openai', 'signup', 'phoneSignupPhonePrefixedEmailEnabled']);
   assignIfUpdated('browserFingerprintEnabled', ['flows', 'openai', 'browserFingerprint', 'enabled']);
   assignIfUpdated('browserFingerprintLevel', ['flows', 'openai', 'browserFingerprint', 'level']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
@@ -14126,6 +14130,9 @@ async function fetchCloudflareTempEmailAddress(state, options = {}) {
 
 function getPhonePrefixedCloudflareEmailMode(state = {}) {
   if (resolveSignupMethod(state) !== SIGNUP_METHOD_PHONE) {
+    return '';
+  }
+  if (state?.phoneSignupPhonePrefixedEmailEnabled === false) {
     return '';
   }
   const generator = normalizeEmailGenerator(state?.emailGenerator);

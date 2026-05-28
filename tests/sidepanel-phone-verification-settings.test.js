@@ -439,8 +439,12 @@ return {
 test('phone signup relogin-after-bind-email switch is wired into UI and step definitions', () => {
   assert.match(sidepanelHtml, /row-phone-signup-relogin-after-bind-email/);
   assert.match(sidepanelHtml, /input-phone-signup-relogin-after-bind-email/);
+  assert.match(sidepanelHtml, /row-phone-signup-phone-prefixed-email/);
+  assert.match(sidepanelHtml, /input-phone-signup-phone-prefixed-email/);
   assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined'/);
+  assert.match(sidepanelSource, /phoneSignupPhonePrefixedEmailEnabled: typeof inputPhoneSignupPhonePrefixedEmail !== 'undefined'/);
   assert.match(sidepanelSource, /phoneSignupReloginAfterBindEmailEnabled: Boolean\(state\?\.phoneSignupReloginAfterBindEmailEnabled\)/);
+  assert.match(sidepanelSource, /phoneSignupPhonePrefixedEmailEnabled !== undefined/);
   assert.match(sidepanelSource, /nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled/);
 });
 
@@ -1082,6 +1086,7 @@ const inputAutoDelayEnabled = { checked: false };
 const inputAutoDelayMinutes = { value: '30' };
 const inputAutoStepDelaySeconds = { value: '' };
 const inputPhoneVerificationEnabled = { checked: true };
+const inputPhoneSignupPhonePrefixedEmail = { checked: false };
 const inputFreePhoneReuseEnabled = { checked: true };
 const inputFreePhoneReuseAutoEnabled = { checked: true };
 const selectPhoneSmsProvider = { value: 'hero-sms' };
@@ -1156,6 +1161,7 @@ const DEFAULT_PHONE_SMS_PROVIDER = PHONE_SMS_PROVIDER_HERO_SMS;
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
+const DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED = true;
 const DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY = 'continue';
 const DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS = 10;
 const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
@@ -1271,6 +1277,7 @@ return { collectSettingsPayload };
 
   assert.equal(payload.phoneVerificationEnabled, true);
   assert.equal(payload.signupMethod, 'phone');
+  assert.equal(payload.phoneSignupPhonePrefixedEmailEnabled, false);
   assert.equal(payload.phoneSmsProvider, 'hero-sms');
   assert.deepStrictEqual(payload.phoneSmsProviderOrder, ['nexsms', '5sim']);
   assert.equal(payload.accountRunHistoryTextEnabled, true);

@@ -817,3 +817,71 @@ test('generated email helper forwards preserve identity context to the iCloud ge
   assert.equal(icloudOptions[0].state.signupPhoneNumber, '+447780579093');
   assert.equal(icloudOptions[0].state.emailGenerator, 'icloud');
 });
+
+test('background phone-prefix Cloudflare mode defaults on and respects the disable switch', () => {
+  const source = fs.readFileSync('background.js', 'utf8');
+  function extractFunction(name) {
+    const markers = [`async function ${name}(`, `function ${name}(`];
+    const start = markers
+      .map((marker) => source.indexOf(marker))
+      .find((index) => index >= 0);
+    if (start < 0) {
+      throw new Error(`missing function ${name}`);
+    }
+
+    let parenDepth = 0;
+    let signatureEnded = false;
+    let braceStart = -1;
+    for (let i = start; i < source.length; i += 1) {
+      const ch = source[i];
+      if (ch === '(') parenDepth += 1;
+      if (ch === ')') {
+        parenDepth -= 1;
+        if (parenDepth === 0) signatureEnded = true;
+      }
+      if (ch === '{' && signatureEnded) {
+        braceStart = i;
+        break;
+      }
+    }
+
+    let depth = 0;
+    let end = braceStart;
+    for (; end < source.length; end += 1) {
+      const ch = source[end];
+      if (ch === '{') depth += 1;
+      if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end += 1;
+          break;
+        }
+      }
+    }
+    return source.slice(start, end);
+  }
+
+  const api = new Function(`
+const SIGNUP_METHOD_PHONE = 'phone';
+const CLOUDFLARE_TEMP_EMAIL_GENERATOR = 'cloudflare-temp-email';
+function resolveSignupMethod(state = {}) { return String(state?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'; }
+function normalizeEmailGenerator(value = '') { return String(value || '').trim().toLowerCase(); }
+${extractFunction('getPhonePrefixedCloudflareEmailMode')}
+${extractFunction('isPhonePrefixedCloudflareEmailMode')}
+return { getPhonePrefixedCloudflareEmailMode, isPhonePrefixedCloudflareEmailMode };
+`)();
+
+  assert.equal(api.getPhonePrefixedCloudflareEmailMode({
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+  }), 'cloudflare-temp-email');
+  assert.equal(api.isPhonePrefixedCloudflareEmailMode({
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare',
+  }), true);
+  assert.equal(api.isPhonePrefixedCloudflareEmailMode({
+    signupMethod: 'phone',
+    emailGenerator: 'cloudflare-temp-email',
+    phoneSignupPhonePrefixedEmailEnabled: false,
+  }), false);
+});

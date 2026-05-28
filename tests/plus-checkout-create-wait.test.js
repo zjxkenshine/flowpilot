@@ -5121,6 +5121,92 @@ test('Phone Plus hosted checkout uses Cloudflare phone-prefix payment source ove
   );
 });
 
+test('Phone Plus hosted checkout uses random generated email when phone-prefix switch is disabled', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/test';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    ensurePhonePrefixedCloudflareTempEmail: async () => {
+      events.push({ type: 'ensure-phone-email' });
+      return 'should-not-use@example.com';
+    },
+    fetch: async () => createHostedAddressResponse(),
+    fetchGeneratedEmail: async (_state, options = {}) => {
+      events.push({ type: 'fetch-generated-email', options });
+      return 'random-generated@mail.example.com';
+    },
+    getPlusPaymentEmailState: () => ({
+      current: '',
+      source: '',
+      updatedAt: 0,
+    }),
+    getState: async () => createHostedRuntimeState({
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      emailGenerator: 'cloudflare-temp-email',
+      phoneSignupPhonePrefixedEmailEnabled: false,
+      hostedCheckoutPhoneNumber: '2125550000',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      signupVerifiedPhoneNumber: '+86 138-1234-5678',
+      registrationEmailState: {
+        current: '8613812345678@mail.example.com',
+        source: 'generated:cloudflare-temp-email:phone-prefix',
+        updatedAt: 100,
+      },
+      plusPaymentEmailState: {
+        current: '',
+        source: '',
+        updatedAt: 0,
+      },
+    }),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/pay?token=EC-test';
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return { hostedVerificationVisible: false };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async (email, options = {}) => {
+      events.push({ type: 'set-payment-email', email, options });
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 321,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    phoneSignupPhonePrefixedEmailEnabled: false,
+  });
+
+  const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
+  assert.ok(submitEvent);
+  assert.equal(submitEvent.message.payload.email, 'random-generated@mail.example.com');
+  assert.equal(events.some((event) => event.type === 'ensure-phone-email'), false);
+  assert.deepStrictEqual(
+    events.find((event) => event.type === 'fetch-generated-email')?.options,
+    { stateTarget: 'payment' }
+  );
+  assert.deepStrictEqual(
+    events.find((event) => event.type === 'set-payment-email' && event.email === 'random-generated@mail.example.com')?.options,
+    { source: 'generated:cloudflare-temp-email' }
+  );
+});
+
 test('Phone Plus hosted card refresh keeps saved payment email while refreshing profile details', async () => {
   const events = [];
   let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';

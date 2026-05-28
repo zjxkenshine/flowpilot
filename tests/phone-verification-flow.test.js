@@ -559,6 +559,56 @@ test('signup phone helper finalizes or cancels signup activation without clearin
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
 
+test('signup phone helper skips phone-prefixed email after success when switch is disabled', async () => {
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    phoneSignupPhonePrefixedEmailEnabled: false,
+    signupPhoneActivation: {
+      activationId: 'signup-no-phone-email',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  let phoneEmailCalls = 0;
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'setStatus') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_READY',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => currentState,
+    ensurePhonePrefixedCloudflareTempEmail: async () => {
+      phoneEmailCalls += 1;
+      return 'should-not-create@example.com';
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await helpers.finalizeSignupPhoneActivationAfterSuccess(currentState, currentState.signupPhoneActivation);
+
+  assert.equal(phoneEmailCalls, 0);
+  assert.equal(currentState.signupVerifiedPhoneNumber, '66959916439');
+  assert.equal(currentState.signupPhoneCompletedActivation.activationId, 'signup-no-phone-email');
+  assert.equal(currentState.email, undefined);
+});
+
 test('signup phone helper does not store signup numbers into the reusable pool', async () => {
   const setStateCalls = [];
   let currentState = {

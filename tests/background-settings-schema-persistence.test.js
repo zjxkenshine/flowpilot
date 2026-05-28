@@ -83,6 +83,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'signupMethod',
   'phoneVerificationEnabled',
   'phoneSignupReloginAfterBindEmailEnabled',
+  'phoneSignupPhonePrefixedEmailEnabled',
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
   'oauthOpenAfterRefreshWaitSeconds',
@@ -190,6 +191,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   sub2apiReloginAccountPoolUsage: {},
   sub2apiReloginCurrentAccount: null,
   phoneVerificationEnabled: false,
+  phoneSignupPhonePrefixedEmailEnabled: true,
   mailProvider: '163',
   ipProxyEnabled: false,
   ipProxyService: '711proxy',
@@ -476,6 +478,35 @@ test('buildPersistentSettingsPayload persists browser fingerprint switch and lev
   assert.equal(nested.browserFingerprintEnabled, true);
   assert.equal(nested.browserFingerprintLevel, 'basic');
   assert.equal(nested.settingsState.flows.openai.browserFingerprint.level, 'basic');
+});
+
+test('buildPersistentSettingsPayload persists phone signup phone-prefixed email switch into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.phoneSignupPhonePrefixedEmailEnabled, true);
+  assert.equal(defaults.settingsState.flows.openai.signup.phoneSignupPhonePrefixedEmailEnabled, true);
+
+  const flat = api.buildPersistentSettingsPayload({
+    phoneSignupPhonePrefixedEmailEnabled: false,
+  }, { fillDefaults: true });
+  assert.equal(flat.phoneSignupPhonePrefixedEmailEnabled, false);
+  assert.equal(flat.settingsState.flows.openai.signup.phoneSignupPhonePrefixedEmailEnabled, false);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          signup: {
+            phoneSignupPhonePrefixedEmailEnabled: false,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.phoneSignupPhonePrefixedEmailEnabled, false);
+  assert.equal(nested.settingsState.flows.openai.signup.phoneSignupPhonePrefixedEmailEnabled, false);
 });
 
 test('buildPersistentSettingsPayload persists Plus checkout conversion proxy into settings schema', () => {

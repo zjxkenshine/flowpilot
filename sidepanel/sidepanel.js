@@ -581,6 +581,8 @@ const inputPhoneVerificationEnabled = document.getElementById('input-phone-verif
 const rowSignupMethod = document.getElementById('row-signup-method');
 const rowPhoneSignupReloginAfterBindEmail = document.getElementById('row-phone-signup-relogin-after-bind-email');
 const inputPhoneSignupReloginAfterBindEmail = document.getElementById('input-phone-signup-relogin-after-bind-email');
+const rowPhoneSignupPhonePrefixedEmail = document.getElementById('row-phone-signup-phone-prefixed-email');
+const inputPhoneSignupPhonePrefixedEmail = document.getElementById('input-phone-signup-phone-prefixed-email');
 const rowSignupPhone = document.getElementById('row-signup-phone');
 const signupMethodButtons = Array.from(document.querySelectorAll('[data-signup-method]'));
 const selectPhoneSmsProvider = document.getElementById('select-phone-sms-provider');
@@ -739,6 +741,7 @@ const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED = false;
+const DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED = true;
 const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复用，切回邮箱注册后会恢复原设置';
 let latestState = null;
 let hostedSmsPoolExpanded = false;
@@ -6000,6 +6003,11 @@ function collectSettingsPayload() {
     phoneSignupReloginAfterBindEmailEnabled: sub2apiReloginEnabled ? false : typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
       ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
       : false,
+    phoneSignupPhonePrefixedEmailEnabled: typeof inputPhoneSignupPhonePrefixedEmail !== 'undefined' && inputPhoneSignupPhonePrefixedEmail
+      ? Boolean(inputPhoneSignupPhonePrefixedEmail.checked)
+      : (typeof DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED !== 'undefined'
+        ? DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED
+        : true),
     phoneSmsProvider: phoneSmsProviderValue,
     phoneSmsProviderOrder: phoneSmsProviderOrderValue,
     verificationResendCount: normalizeVerificationResendCount(
@@ -10832,6 +10840,8 @@ function updatePhoneVerificationSettingsUI() {
     : normalizeSignupMethod(latestState?.signupMethod || DEFAULT_SIGNUP_METHOD);
   const showPhoneSignupReloginAfterBindEmail = showSettings
     && selectedSignupMethodForPhoneSettings === SIGNUP_METHOD_PHONE;
+  const showPhoneSignupPhonePrefixedEmail = showSettings
+    && selectedSignupMethodForPhoneSettings === SIGNUP_METHOD_PHONE;
   const normalizeProvider = typeof normalizePhoneSmsProviderValue === 'function'
     ? normalizePhoneSmsProviderValue
     : ((value = '') => {
@@ -10921,6 +10931,9 @@ function updatePhoneVerificationSettingsUI() {
   if (typeof rowPhoneSignupReloginAfterBindEmail !== 'undefined' && rowPhoneSignupReloginAfterBindEmail) {
     rowPhoneSignupReloginAfterBindEmail.style.display = showPhoneSignupReloginAfterBindEmail ? '' : 'none';
   }
+  if (typeof rowPhoneSignupPhonePrefixedEmail !== 'undefined' && rowPhoneSignupPhonePrefixedEmail) {
+    rowPhoneSignupPhonePrefixedEmail.style.display = showPhoneSignupPhonePrefixedEmail ? '' : 'none';
+  }
   if (rowHeroSmsCountry) rowHeroSmsCountry.style.display = showSettings && heroLikeProvider ? '' : 'none';
   if (rowHeroSmsCountryFallback) rowHeroSmsCountryFallback.style.display = showSettings && heroLikeProvider ? '' : 'none';
   if (typeof rowHeroSmsOperator !== 'undefined' && rowHeroSmsOperator) rowHeroSmsOperator.style.display = showSettings && heroProvider ? '' : 'none';
@@ -10975,6 +10988,12 @@ function updatePhoneVerificationSettingsUI() {
   }
   if (typeof rowPhoneSignupReloginAfterBindEmail !== 'undefined' && rowPhoneSignupReloginAfterBindEmail) {
     rowPhoneSignupReloginAfterBindEmail.classList.toggle('is-disabled', settingsLocked || !showPhoneSignupReloginAfterBindEmail);
+  }
+  if (typeof inputPhoneSignupPhonePrefixedEmail !== 'undefined' && inputPhoneSignupPhonePrefixedEmail) {
+    inputPhoneSignupPhonePrefixedEmail.disabled = settingsLocked || !showPhoneSignupPhonePrefixedEmail;
+  }
+  if (typeof rowPhoneSignupPhonePrefixedEmail !== 'undefined' && rowPhoneSignupPhonePrefixedEmail) {
+    rowPhoneSignupPhonePrefixedEmail.classList.toggle('is-disabled', settingsLocked || !showPhoneSignupPhonePrefixedEmail);
   }
   const freePhoneReuseEnabled = Boolean(
     !phoneSignupReuseLocked
@@ -13125,6 +13144,13 @@ function applySettingsState(state) {
     inputPhoneSignupReloginAfterBindEmail.checked = state?.phoneSignupReloginAfterBindEmailEnabled !== undefined
       ? Boolean(state.phoneSignupReloginAfterBindEmailEnabled)
       : DEFAULT_PHONE_SIGNUP_RELOGIN_AFTER_BIND_EMAIL_ENABLED;
+  }
+  if (typeof inputPhoneSignupPhonePrefixedEmail !== 'undefined' && inputPhoneSignupPhonePrefixedEmail) {
+    inputPhoneSignupPhonePrefixedEmail.checked = state?.phoneSignupPhonePrefixedEmailEnabled !== undefined
+      ? Boolean(state.phoneSignupPhonePrefixedEmailEnabled)
+      : (typeof DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED !== 'undefined'
+        ? DEFAULT_PHONE_SIGNUP_PHONE_PREFIXED_EMAIL_ENABLED
+        : true);
   }
   const restoredPhoneSmsProvider = normalizePhoneSmsProvider(state?.phoneSmsProvider);
   const previousPhoneSmsProvider = selectPhoneSmsProvider ? normalizePhoneSmsProvider(selectPhoneSmsProvider.value) : restoredPhoneSmsProvider;
@@ -20411,6 +20437,12 @@ inputPhoneSignupReloginAfterBindEmail?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPhoneSignupPhonePrefixedEmail?.addEventListener('change', () => {
+  updatePhoneVerificationSettingsUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 selectPhoneSmsProvider?.addEventListener('change', async () => {
   if (selectPhoneSmsProvider) {
     selectPhoneSmsProvider.value = normalizePhoneSmsProviderValue(selectPhoneSmsProvider.value);
@@ -21919,10 +21951,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.signupMethod !== undefined) {
         setSignupMethod(message.payload.signupMethod);
       }
+      if (message.payload.phoneSignupPhonePrefixedEmailEnabled !== undefined && inputPhoneSignupPhonePrefixedEmail) {
+        inputPhoneSignupPhonePrefixedEmail.checked = Boolean(message.payload.phoneSignupPhonePrefixedEmailEnabled);
+      }
       if (
         message.payload.phoneVerificationEnabled !== undefined
         || message.payload.phonePlusModeEnabled !== undefined
         || message.payload.signupMethod !== undefined
+        || message.payload.phoneSignupPhonePrefixedEmailEnabled !== undefined
       ) {
         updatePhoneVerificationSettingsUI();
       }

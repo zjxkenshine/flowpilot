@@ -7307,10 +7307,13 @@
           signupVerifiedPhoneCachedAt: Date.now(),
         });
       }
-      if (typeof ensurePhonePrefixedCloudflareTempEmail === 'function') {
-        const latestState = typeof getState === 'function'
-          ? await getState().catch(() => state)
-          : state;
+      const latestState = typeof getState === 'function'
+        ? await getState().catch(() => state)
+        : state;
+      if (
+        latestState?.phoneSignupPhonePrefixedEmailEnabled !== false
+        && typeof ensurePhonePrefixedCloudflareTempEmail === 'function'
+      ) {
         await ensurePhonePrefixedCloudflareTempEmail(latestState, {
           phoneNumber: normalizedActivation.phoneNumber,
           activation: normalizedActivation,

@@ -357,6 +357,9 @@
       if (signupMethod !== 'phone') {
         return '';
       }
+      if (state?.phoneSignupPhonePrefixedEmailEnabled === false) {
+        return '';
+      }
       return generator === 'cloudflare' || generator === cloudflareTempEmailGenerator
         ? generator
         : '';
