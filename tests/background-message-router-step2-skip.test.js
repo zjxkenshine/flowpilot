@@ -100,6 +100,10 @@ function createRouter(overrides = {}) {
     cancelScheduledAutoRun: async () => {},
     checkIcloudSession: async () => {},
     clearAutoRunTimerAlarm: async () => {},
+    clearFailedSignupPhoneReuseActivation: overrides.clearFailedSignupPhoneReuseActivation || (async () => {
+      events.stateUpdates.push({ failedSignupPhoneReuseActivation: null });
+      return { ok: true, failedSignupPhoneReuseActivation: null };
+    }),
     clearLuckmailRuntimeState: async () => {},
     clearStopRequest: () => {},
     closeLocalhostCallbackTabs: async () => {},
@@ -476,6 +480,24 @@ test('message router saves runtime signup phone from sidepanel message', async (
   assert.deepStrictEqual(events.signupPhoneStates, ['66959916439']);
   assert.deepStrictEqual(events.signupPhoneSilentStates, []);
   assert.deepStrictEqual(response, { ok: true, phoneNumber: '66959916439' });
+});
+
+test('message router clears failed signup phone reuse from sidepanel message', async () => {
+  const clearCalls = [];
+  const { router } = createRouter({
+    clearFailedSignupPhoneReuseActivation: async () => {
+      clearCalls.push(true);
+      return { ok: true, failedSignupPhoneReuseActivation: null };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'CLEAR_FAILED_SIGNUP_PHONE_REUSE',
+    source: 'sidepanel',
+  }, {});
+
+  assert.deepStrictEqual(response, { ok: true, failedSignupPhoneReuseActivation: null });
+  assert.equal(clearCalls.length, 1);
 });
 
 test('message router finalizes pending phone activation on platform verify success', async () => {

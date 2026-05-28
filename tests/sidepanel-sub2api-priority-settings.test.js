@@ -52,3 +52,31 @@ test('sidepanel persists and locks SUB2API account priority setting', () => {
     /inputSub2ApiAccountPriority\.addEventListener\('blur', \(\) => \{[\s\S]*saveSettings\(\{ silent: true \}\)/
   );
 });
+
+test('sidepanel exposes and wires SUB2API relogin account pool controls', () => {
+  [
+    'input-sub2api-relogin-enabled',
+    'input-sub2api-relogin-account-pool',
+    'input-sub2api-relogin-pool-import',
+    'btn-sub2api-relogin-pool-import',
+    'btn-sub2api-relogin-pool-refresh',
+    'btn-sub2api-relogin-pool-copy',
+    'btn-sub2api-relogin-pool-clear-used',
+    'btn-sub2api-relogin-pool-delete-all',
+    'sub2api-relogin-pool-list',
+  ].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`));
+  });
+
+  assert.match(flowRegistrySource, /'openai-target-sub2api': \{[\s\S]*'row-sub2api-relogin-enabled'/);
+  assert.match(flowRegistrySource, /'openai-target-sub2api': \{[\s\S]*'row-sub2api-relogin-pool'/);
+  assert.match(source, /function parseSub2ApiReloginAccountPoolEntries\(/);
+  assert.match(source, /function renderSub2ApiReloginPool\(/);
+  assert.match(source, /function applySub2ApiReloginVisibilityOverrides\(/);
+  assert.match(source, /sub2apiDefaultProxyName: sub2apiReloginEnabled \? '' : inputSub2ApiDefaultProxy\.value\.trim\(\)/);
+  assert.match(source, /ipProxyEnabled: sub2apiReloginEnabled \? false : getSelectedIpProxyEnabledSafe\(\)/);
+  assert.match(source, /signupMethod: payloadSignupMethod/);
+  assert.match(source, /inputSub2ApiReloginEnabled\?\.addEventListener\('change'/);
+  assert.match(source, /sub2ApiReloginPoolList\?\.addEventListener\('click'/);
+  assert.match(source, /syncStepDefinitionsForMode[\s\S]*sub2apiReloginEnabled: nextSub2ApiReloginEnabled/);
+});

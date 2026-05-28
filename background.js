@@ -1074,6 +1074,7 @@ function buildResolvedStepDefinitionState(state = {}) {
     signupMethod: resolvedSignupMethod,
     resolvedSignupMethod: resolvedSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: Boolean(state?.phoneSignupReloginAfterBindEmailEnabled),
+    sub2apiReloginEnabled: Boolean(state?.sub2apiReloginEnabled),
   };
 }
 
@@ -1100,16 +1101,35 @@ function getStepDefinitionsForState(state = {}) {
   if (rootScope.MultiPageStepDefinitions?.getSteps) {
     const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
     const activeFlowId = String(resolvedState?.activeFlowId || '').trim().toLowerCase() || defaultFlowId;
-    const definitions = rootScope.MultiPageStepDefinitions.getSteps({
+    const stepDefinitionOptions = {
       activeFlowId,
       plusModeEnabled: Boolean(resolvedState?.plusModeEnabled),
       phonePlusModeEnabled: Boolean(resolvedState?.phonePlusModeEnabled),
       plusPaymentMethod: resolvedPlusPaymentMethod,
-      plusHostedCheckoutIsFinalStep: resolvedState?.plusHostedCheckoutIsFinalStep,
       plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(resolvedState?.plusAccountAccessStrategy),
       signupMethod: getSignupMethodForStepDefinitions(resolvedState),
       phoneSignupReloginAfterBindEmailEnabled: Boolean(resolvedState?.phoneSignupReloginAfterBindEmailEnabled),
-    });
+    };
+    if (Object.prototype.hasOwnProperty.call(state || {}, 'plusHostedCheckoutIsFinalStep')) {
+      stepDefinitionOptions.plusHostedCheckoutIsFinalStep = resolvedState.plusHostedCheckoutIsFinalStep;
+    }
+    if (resolvedState?.openaiIntegrationTargetId) {
+      stepDefinitionOptions.openaiIntegrationTargetId = resolvedState.openaiIntegrationTargetId;
+    }
+    const integrationTargetId = resolvedState?.openaiIntegrationTargetId || resolvedState?.targetId || resolvedState?.panelMode;
+    if (integrationTargetId) {
+      stepDefinitionOptions.integrationTargetId = integrationTargetId;
+    }
+    if (resolvedState?.panelMode) {
+      stepDefinitionOptions.panelMode = resolvedState.panelMode;
+    }
+    if (resolvedState?.targetId) {
+      stepDefinitionOptions.targetId = resolvedState.targetId;
+    }
+    if (Boolean(resolvedState?.sub2apiReloginEnabled)) {
+      stepDefinitionOptions.sub2apiReloginEnabled = true;
+    }
+    const definitions = rootScope.MultiPageStepDefinitions.getSteps(stepDefinitionOptions);
     if (Array.isArray(definitions)) {
       return definitions;
     }
@@ -1117,6 +1137,17 @@ function getStepDefinitionsForState(state = {}) {
   const activeFlowId = String(resolvedState?.activeFlowId || '').trim().toLowerCase();
   if (activeFlowId && activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
     return [];
+  }
+  if (
+    Boolean(resolvedState?.sub2apiReloginEnabled)
+    && String(resolvedState?.panelMode || resolvedState?.openaiIntegrationTargetId || resolvedState?.targetId || '').trim().toLowerCase() === 'sub2api'
+  ) {
+    return self.MultiPageStepDefinitions?.getSteps?.({
+      activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+      panelMode: 'sub2api',
+      openaiIntegrationTargetId: 'sub2api',
+      sub2apiReloginEnabled: true,
+    }) || NORMAL_STEP_DEFINITIONS;
   }
   if (Boolean(resolvedState?.phonePlusModeEnabled)) {
     const paymentMethod = normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod);
@@ -1459,6 +1490,10 @@ const PERSISTED_SETTING_DEFAULTS = {
   sub2apiGroupNames: DEFAULT_SUB2API_GROUP_NAMES,
   sub2apiAccountPriority: DEFAULT_SUB2API_ACCOUNT_PRIORITY,
   sub2apiDefaultProxyName: DEFAULT_SUB2API_PROXY_NAME,
+  sub2apiReloginEnabled: false,
+  sub2apiReloginAccountPoolText: '',
+  sub2apiReloginAccountPoolUsage: {},
+  sub2apiReloginCurrentAccount: null,
   ipProxyEnabled: false,
   ipProxyService: DEFAULT_IP_PROXY_SERVICE,
   ipProxyMode: DEFAULT_IP_PROXY_MODE,
@@ -1733,6 +1768,10 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'sub2apiGroupNames',
   'sub2apiAccountPriority',
   'sub2apiDefaultProxyName',
+  'sub2apiReloginEnabled',
+  'sub2apiReloginAccountPoolText',
+  'sub2apiReloginAccountPoolUsage',
+  'sub2apiReloginCurrentAccount',
   'codex2apiUrl',
   'codex2apiAdminKey',
   'customPassword',
@@ -1825,6 +1864,7 @@ const DEFAULT_STATE = {
   heroSmsLastPriceUserLimit: '',
   heroSmsLastPriceAt: 0,
   pendingPhoneActivationConfirmation: null,
+  failedSignupPhoneReuseActivation: null,
   plusCheckoutRetryCleanupRequested: false,
   plusCheckoutRetryCleanupReason: '',
   autoRunning: false, // 当前是否处于自动运行中。
@@ -2002,6 +2042,167 @@ async function setPlusPaymentEmailState(email, options = {}) {
   await setState(updates);
   broadcastDataUpdate(updates);
   return updates.plusPaymentEmailState;
+}
+
+function isSub2ApiReloginState(state = {}) {
+  const activeFlowId = String(state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase();
+  const targetId = String(state?.openaiIntegrationTargetId || state?.panelMode || state?.targetId || '').trim().toLowerCase();
+  return activeFlowId === DEFAULT_ACTIVE_FLOW_ID
+    && targetId === 'sub2api'
+    && Boolean(state?.sub2apiReloginEnabled);
+}
+
+function pickSub2ApiReloginAccount(state = {}) {
+  const entries = parseSub2ApiReloginAccountPoolEntries(state?.sub2apiReloginAccountPoolText || '');
+  const usage = normalizeSub2ApiReloginAccountPoolUsage(
+    state?.sub2apiReloginAccountPoolUsage,
+    new Set(entries.map((entry) => entry.key))
+  );
+  return entries.find((entry) => {
+    const entryUsage = usage[entry.key] || {};
+    return entryUsage.enabled !== false && !Number(entryUsage.usedAt);
+  }) || null;
+}
+
+function buildSub2ApiReloginRuntimePatch(account = {}) {
+  const email = String(account.email || '').trim().toLowerCase();
+  const phone = String(account.phone || '').trim();
+  const password = String(account.password || '');
+  const now = Date.now();
+  return {
+    activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+    flowId: DEFAULT_ACTIVE_FLOW_ID,
+    panelMode: 'sub2api',
+    openaiIntegrationTargetId: 'sub2api',
+    targetId: 'sub2api',
+    plusModeEnabled: false,
+    phonePlusModeEnabled: false,
+    signupMethod: SIGNUP_METHOD_PHONE,
+    resolvedSignupMethod: SIGNUP_METHOD_PHONE,
+    phoneVerificationEnabled: false,
+    accountIdentifierType: 'phone',
+    accountIdentifier: phone,
+    signupPhoneNumber: phone,
+    password,
+    customPassword: password,
+    email,
+    step8VerificationTargetEmail: email,
+    registrationEmailState: {
+      current: email,
+      previous: '',
+      source: 'sub2api_relogin',
+      updatedAt: now,
+    },
+    sub2apiDefaultProxyName: '',
+    sub2apiProxyId: null,
+    sub2apiReloginCurrentAccount: {
+      key: account.key,
+      phone,
+      password,
+      email,
+    },
+  };
+}
+
+async function prepareSub2ApiReloginRunIfNeeded(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (normalizedNodeId !== 'oauth-login' || !isSub2ApiReloginState(state)) {
+    return state;
+  }
+
+  const account = pickSub2ApiReloginAccount(state);
+  if (!account) {
+    throw new Error('SUB2API 账号补登已开启，但账号池没有可用的未使用账号。');
+  }
+
+  const usage = normalizeSub2ApiReloginAccountPoolUsage(state?.sub2apiReloginAccountPoolUsage);
+  const now = Date.now();
+  const nextUsage = {
+    ...usage,
+    [account.key]: {
+      ...(usage[account.key] || {}),
+      enabled: usage[account.key]?.enabled !== false,
+      usedAt: Math.max(0, Number(usage[account.key]?.usedAt) || 0),
+      lastAttemptAt: now,
+      lastError: '',
+      failureCount: Math.max(0, Math.floor(Number(usage[account.key]?.failureCount) || 0)),
+    },
+  };
+  const runtimePatch = {
+    ...buildSub2ApiReloginRuntimePatch(account),
+    ipProxyEnabled: false,
+    sub2apiReloginAccountPoolUsage: nextUsage,
+  };
+
+  await setPersistentSettings({
+    ipProxyEnabled: false,
+    sub2apiDefaultProxyName: '',
+    sub2apiReloginCurrentAccount: runtimePatch.sub2apiReloginCurrentAccount,
+    sub2apiReloginAccountPoolUsage: nextUsage,
+  });
+  await setState(runtimePatch);
+  const latestState = await getState();
+  if (typeof applyIpProxySettingsFromState === 'function') {
+    await applyIpProxySettingsFromState({
+      ...latestState,
+      ipProxyEnabled: false,
+    }, {
+      skipExitProbe: true,
+      resetNetworkState: false,
+      forceAuthRebind: false,
+      suppressAuthRebind: true,
+    }).catch((error) => addLog(`SUB2API 账号补登关闭扩展代理失败：${getErrorMessage(error)}`, 'warn'));
+  }
+  broadcastDataUpdate(runtimePatch);
+  await addLog(`SUB2API 账号补登：已选择账号池手机号 ${account.phone}，并关闭扩展代理与 SUB2API 默认代理。`, 'info', { nodeId: normalizedNodeId });
+  return {
+    ...latestState,
+    ...runtimePatch,
+  };
+}
+
+async function updateSub2ApiReloginAccountUsageForNodeResult(nodeId, ok, error = null) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (ok && normalizedNodeId !== 'platform-verify') {
+    return;
+  }
+  const state = await getState();
+  if (!isSub2ApiReloginState(state)) {
+    return;
+  }
+  const current = normalizeSub2ApiReloginCurrentAccount(
+    state?.sub2apiReloginCurrentAccount,
+    parseSub2ApiReloginAccountPoolEntries(state?.sub2apiReloginAccountPoolText || '')
+  );
+  if (!current?.key) {
+    return;
+  }
+  const usage = normalizeSub2ApiReloginAccountPoolUsage(state?.sub2apiReloginAccountPoolUsage);
+  const previous = usage[current.key] || {};
+  const now = Date.now();
+  const nextUsage = {
+    ...usage,
+    [current.key]: ok
+      ? {
+          ...previous,
+          enabled: previous.enabled !== false,
+          usedAt: now,
+          lastAttemptAt: Math.max(now, Number(previous.lastAttemptAt) || 0),
+          lastError: '',
+          failureCount: Math.max(0, Math.floor(Number(previous.failureCount) || 0)),
+        }
+      : {
+          ...previous,
+          enabled: previous.enabled !== false,
+          usedAt: Math.max(0, Number(previous.usedAt) || 0),
+          lastAttemptAt: Math.max(now, Number(previous.lastAttemptAt) || 0),
+          lastError: getErrorMessage(error),
+          failureCount: Math.max(0, Math.floor(Number(previous.failureCount) || 0)) + 1,
+        },
+  };
+  await setPersistentSettings({ sub2apiReloginAccountPoolUsage: nextUsage });
+  await setState({ sub2apiReloginAccountPoolUsage: nextUsage });
+  broadcastDataUpdate({ sub2apiReloginAccountPoolUsage: nextUsage });
 }
 
 function normalizePhoneActivationRetryRounds(value, fallback = DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS) {
@@ -3475,6 +3676,79 @@ function normalizeSub2ApiAccountPriority(value, fallback = DEFAULT_SUB2API_ACCOU
   return numeric;
 }
 
+function parseSub2ApiReloginAccountPoolEntries(value = '') {
+  const lines = String(value || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => String(line || '').trim())
+    .filter(Boolean);
+  const entries = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const parts = line.split('----').map((part) => String(part || '').trim());
+    if (parts.length < 3) {
+      continue;
+    }
+    const phone = parts.shift();
+    const email = parts.pop();
+    const password = parts.join('----');
+    if (!phone || !password || !email || !/@/.test(email)) {
+      continue;
+    }
+    const key = `${phone}----${password}----${email.toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    entries.push({
+      key,
+      phone,
+      password,
+      email: email.toLowerCase(),
+    });
+  }
+  return entries;
+}
+
+function normalizeSub2ApiReloginAccountPoolText(value = '') {
+  return parseSub2ApiReloginAccountPoolEntries(value)
+    .map((entry) => `${entry.phone}----${entry.password}----${entry.email}`)
+    .join('\n');
+}
+
+function normalizeSub2ApiReloginAccountPoolUsage(value = {}, allowedKeys = null) {
+  if (!isPlainObjectValue(value)) {
+    return {};
+  }
+  const allowedKeySet = allowedKeys instanceof Set ? allowedKeys : null;
+  return Object.fromEntries(Object.entries(value).map(([rawKey, rawUsage]) => {
+    const key = String(rawKey || '').trim();
+    if (!key || (allowedKeySet && !allowedKeySet.has(key))) {
+      return null;
+    }
+    const usage = isPlainObjectValue(rawUsage) ? rawUsage : {};
+    return [key, {
+      enabled: usage.enabled !== false,
+      usedAt: Math.max(0, Number(usage.usedAt) || 0),
+      lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+      lastError: String(usage.lastError || '').trim(),
+      failureCount: Math.max(0, Math.floor(Number(usage.failureCount) || 0)),
+    }];
+  }).filter(Boolean));
+}
+
+function normalizeSub2ApiReloginCurrentAccount(value = null, entries = []) {
+  if (!isPlainObjectValue(value)) {
+    return null;
+  }
+  const rawKey = String(value.key || '').trim();
+  const normalizedFields = value.phone && value.password && value.email
+    ? `${String(value.phone).trim()}----${String(value.password)}----${String(value.email).trim().toLowerCase()}`
+    : '';
+  const matched = entries.find((entry) => entry.key === rawKey || entry.key === normalizedFields);
+  return matched ? { ...matched } : null;
+}
+
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -3623,6 +3897,22 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeSub2ApiAccountPriority(value);
     case 'sub2apiDefaultProxyName':
       return String(value || '').trim();
+    case 'sub2apiReloginEnabled':
+      return Boolean(value);
+    case 'sub2apiReloginAccountPoolText':
+      return normalizeSub2ApiReloginAccountPoolText(value);
+    case 'sub2apiReloginAccountPoolUsage':
+      return normalizeSub2ApiReloginAccountPoolUsage(value);
+    case 'sub2apiReloginCurrentAccount': {
+      if (!isPlainObjectValue(value)) {
+        return null;
+      }
+      const fromFields = value.phone && value.password && value.email
+        ? `${String(value.phone).trim()}----${String(value.password)}----${String(value.email).trim().toLowerCase()}`
+        : '';
+      const parsed = parseSub2ApiReloginAccountPoolEntries(fromFields || value.key || '');
+      return parsed[0] ? { ...parsed[0] } : null;
+    }
     case 'ipProxyEnabled':
       return Boolean(value);
     case 'ipProxyService':
@@ -4379,6 +4669,19 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     : ((value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value));
   const hasExplicitSettingsState = isPlainObjectForSettingsSchema(normalizedInput.settingsState);
 
+  if (Boolean(normalizedInput.sub2apiReloginEnabled)) {
+    normalizedInput.activeFlowId = DEFAULT_ACTIVE_FLOW_ID;
+    normalizedInput.panelMode = 'sub2api';
+    normalizedInput.openaiIntegrationTargetId = 'sub2api';
+    normalizedInput.plusModeEnabled = false;
+    normalizedInput.phonePlusModeEnabled = false;
+    normalizedInput.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    normalizedInput.phoneVerificationEnabled = false;
+    normalizedInput.signupMethod = SIGNUP_METHOD_PHONE;
+    normalizedInput.sub2apiDefaultProxyName = '';
+    normalizedInput.ipProxyEnabled = false;
+  }
+
   const payload = {};
   let matchedKeyCount = 0;
   for (const key of persistedSettingKeys) {
@@ -4585,6 +4888,36 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       ? groupNames
       : [...DEFAULT_SUB2API_GROUP_NAMES];
   }
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginAccountPoolText')
+    || Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginAccountPoolUsage')
+    || Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginCurrentAccount')
+  ) {
+    const hasPoolText = Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginAccountPoolText');
+    const entries = hasPoolText
+      ? parseSub2ApiReloginAccountPoolEntries(payload.sub2apiReloginAccountPoolText || '')
+      : [];
+    if (hasPoolText) {
+      payload.sub2apiReloginAccountPoolText = entries
+        .map((entry) => `${entry.phone}----${entry.password}----${entry.email}`)
+        .join('\n');
+    }
+    const allowedKeys = hasPoolText ? new Set(entries.map((entry) => entry.key)) : null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginAccountPoolUsage')) {
+      payload.sub2apiReloginAccountPoolUsage = normalizeSub2ApiReloginAccountPoolUsage(
+        payload.sub2apiReloginAccountPoolUsage,
+        allowedKeys
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'sub2apiReloginCurrentAccount')) {
+      if (hasPoolText) {
+        payload.sub2apiReloginCurrentAccount = normalizeSub2ApiReloginCurrentAccount(
+          payload.sub2apiReloginCurrentAccount,
+          entries
+        );
+      }
+    }
+  }
   const nextSignupConstraintState = {
     ...PERSISTED_SETTING_DEFAULTS,
     ...payload,
@@ -4621,13 +4954,60 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     }
   };
   applyPhonePlusPersistentConstraints();
+  const applySub2ApiReloginPersistentConstraints = () => {
+    if (!Boolean(payload.sub2apiReloginEnabled)) {
+      return;
+    }
+    payload.activeFlowId = DEFAULT_ACTIVE_FLOW_ID;
+    payload.openaiIntegrationTargetId = 'sub2api';
+    payload.panelMode = 'sub2api';
+    payload.plusModeEnabled = false;
+    payload.phonePlusModeEnabled = false;
+    payload.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    payload.phoneVerificationEnabled = false;
+    payload.signupMethod = SIGNUP_METHOD_PHONE;
+    payload.sub2apiDefaultProxyName = '';
+    payload.ipProxyEnabled = false;
+    if (isPlainObjectForSettingsSchema(payload.settingsState)) {
+      payload.settingsState = mergeSettingsStatePatch(payload.settingsState, {
+        activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+        flows: {
+          openai: {
+            integrationTargetId: 'sub2api',
+            integrationTargets: {
+              sub2api: {
+                sub2apiDefaultProxyName: '',
+              },
+            },
+            plus: {
+              plusModeEnabled: false,
+              phonePlusModeEnabled: false,
+              plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+            },
+            signup: {
+              signupMethod: SIGNUP_METHOD_PHONE,
+              phoneVerificationEnabled: false,
+            },
+          },
+        },
+        services: {
+          proxy: {
+            enabled: false,
+          },
+        },
+      });
+    }
+  };
+  applySub2ApiReloginPersistentConstraints();
   if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'plusModeEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'phonePlusModeEnabled')
     || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')
     || Object.prototype.hasOwnProperty.call(payload, 'panelMode')
     || Object.prototype.hasOwnProperty.call(payload, 'activeFlowId')) {
-    payload.signupMethod = resolveSignupMethod(nextSignupConstraintState);
+    payload.signupMethod = Boolean(payload.sub2apiReloginEnabled)
+      ? SIGNUP_METHOD_PHONE
+      : resolveSignupMethod(nextSignupConstraintState);
   }
   if (payload.ipProxyServiceProfiles) {
     const selectedService = normalizeIpProxyProviderValue(
@@ -4709,17 +5089,20 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
           : {}),
       }, payload));
       applyPhonePlusPersistentConstraints();
+      applySub2ApiReloginPersistentConstraints();
       if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
         || Object.prototype.hasOwnProperty.call(payload, 'plusModeEnabled')
         || Object.prototype.hasOwnProperty.call(payload, 'phonePlusModeEnabled')
         || Object.prototype.hasOwnProperty.call(payload, 'signupMethod')
         || Object.prototype.hasOwnProperty.call(payload, 'panelMode')
         || Object.prototype.hasOwnProperty.call(payload, 'activeFlowId')) {
-        payload.signupMethod = resolveSignupMethod({
-          ...PERSISTED_SETTING_DEFAULTS,
-          ...payload,
-          resolvedSignupMethod: null,
-        });
+        payload.signupMethod = Boolean(payload.sub2apiReloginEnabled)
+          ? SIGNUP_METHOD_PHONE
+          : resolveSignupMethod({
+            ...PERSISTED_SETTING_DEFAULTS,
+            ...payload,
+            resolvedSignupMethod: null,
+          });
       }
     }
   }
@@ -4805,6 +5188,10 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('sub2apiGroupNames', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiGroupNames']);
   assignIfUpdated('sub2apiAccountPriority', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiAccountPriority']);
   assignIfUpdated('sub2apiDefaultProxyName', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiDefaultProxyName']);
+  assignIfUpdated('sub2apiReloginEnabled', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiReloginEnabled']);
+  assignIfUpdated('sub2apiReloginAccountPoolText', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiReloginAccountPoolText']);
+  assignIfUpdated('sub2apiReloginAccountPoolUsage', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiReloginAccountPoolUsage']);
+  assignIfUpdated('sub2apiReloginCurrentAccount', ['flows', 'openai', 'integrationTargets', 'sub2api', 'sub2apiReloginCurrentAccount']);
   assignIfUpdated('codex2apiUrl', ['flows', 'openai', 'integrationTargets', 'codex2api', 'codex2apiUrl']);
   assignIfUpdated('codex2apiAdminKey', ['flows', 'openai', 'integrationTargets', 'codex2api', 'codex2apiAdminKey']);
   assignIfUpdated('customPassword', ['services', 'account', 'customPassword']);
@@ -5588,6 +5975,51 @@ async function cacheSignupVerifiedPhoneNumber(phoneNumber, options = {}) {
     ...updates,
     source: String(options?.source || '').trim(),
   };
+}
+
+function normalizeFailedSignupPhoneReuseActivation(record = null, options = {}) {
+  const normalizedActivation = normalizePhonePreferredActivation(record);
+  if (!normalizedActivation) {
+    return null;
+  }
+  return {
+    ...normalizedActivation,
+    source: 'signup-page-ready-timeout-reuse',
+    reason: String(options?.reason || record?.reason || '').trim(),
+    recordedAt: Math.max(0, Math.floor(Number(options?.recordedAt || record?.recordedAt) || Date.now())),
+  };
+}
+
+function isSignupVerificationPageReadyTimeoutFailure(error) {
+  const message = getErrorMessage(error);
+  return /步骤\s*4：等待注册验证码页面就绪超时，请刷新认证页后重试|等待注册验证码页面就绪超时或自动恢复失败/i.test(message);
+}
+
+async function clearFailedSignupPhoneReuseActivation(options = {}) {
+  const updates = { failedSignupPhoneReuseActivation: null };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  if (!options.silent) {
+    await addLog('已清除失败复用手机号记录。', 'ok');
+  }
+  return { ok: true, failedSignupPhoneReuseActivation: null };
+}
+
+async function preserveFailedSignupPhoneReuseActivationFromState(state = {}, error = null) {
+  const activation = normalizeFailedSignupPhoneReuseActivation(state?.signupPhoneActivation, {
+    reason: getErrorMessage(error),
+  });
+  if (!activation) {
+    return null;
+  }
+  const updates = { failedSignupPhoneReuseActivation: activation };
+  await setState(updates);
+  broadcastDataUpdate(updates);
+  await addLog(
+    `步骤 4：验证码页就绪超时，已将当前注册手机号 ${activation.phoneNumber} 保留到失败复用槽位，下一次步骤 2 将优先复用。`,
+    'warn'
+  );
+  return activation;
 }
 
 function buildAccountContributionState(enabled, persistedSettings = {}, currentState = {}, options = {}) {
@@ -10466,6 +10898,7 @@ function getSignupPhonePasswordMismatchRestartPayload(preservedState = {}) {
     restorePayload.signupPhoneNumber = '';
     restorePayload.signupPhoneActivation = null;
     restorePayload.signupPhoneCompletedActivation = null;
+    restorePayload.failedSignupPhoneReuseActivation = null;
     restorePayload.signupPhoneVerificationRequestedAt = null;
     restorePayload.signupPhoneVerificationPurpose = '';
     if (accountIdentifierType === 'phone') {
@@ -12515,6 +12948,9 @@ async function completeNodeFromBackground(nodeId, payload = {}) {
   const lastNodeId = getLastNodeIdForState(latestState);
   const completionState = normalizedNodeId === lastNodeId ? latestState : null;
   await setNodeStatus(normalizedNodeId, 'completed');
+  if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
+    await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, true);
+  }
   await addLog('已完成', 'ok', { nodeId: normalizedNodeId });
 
   if (normalizedNodeId === lastNodeId) {
@@ -12553,6 +12989,9 @@ async function finalizeDeferredNodeExecutionError(nodeId, error) {
   }
 
   await setNodeStatus(normalizedNodeId, 'failed');
+  if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
+    await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, false, error);
+  }
   await addLog(`失败：${getErrorMessage(error)}`, 'error', { nodeId: normalizedNodeId });
   await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, latestState, getErrorMessage(error));
 }
@@ -13288,6 +13727,9 @@ async function executeNode(nodeId, options = {}) {
   }
   console.log(LOG_PREFIX, `Executing node ${normalizedNodeId}`);
   let state = await getState();
+  if (typeof prepareSub2ApiReloginRunIfNeeded === 'function') {
+    state = await prepareSub2ApiReloginRunIfNeeded(normalizedNodeId, state);
+  }
   if (typeof assertNodeExecutionAllowedForState === 'function') {
     assertNodeExecutionAllowedForState(normalizedNodeId, state, '执行节点');
   }
@@ -13396,6 +13838,9 @@ async function executeNode(nodeId, options = {}) {
     }
     if (!(deferRetryableTransportError && doesNodeUseCompletionSignal(normalizedNodeId, errorState) && isRetryableContentScriptTransportError(err))) {
       await setNodeStatus(normalizedNodeId, 'failed');
+      if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
+        await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, false, err);
+      }
       await addLog(`失败：${err.message}`, 'error', { nodeId: normalizedNodeId });
       await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, errorState, getErrorMessage(err));
     } else {
@@ -15587,6 +16032,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           await restartSignupPhonePasswordMismatchAttemptFromNode('fetch-signup-code', step4RestartCount, err);
         } else {
           const preservedState = await getState();
+          if (isSignupVerificationPageReadyTimeoutFailure(err)) {
+            await preserveFailedSignupPhoneReuseActivationFromState(preservedState, err);
+          }
           const preservedEmail = String(preservedState.email || '').trim();
           const preservedPassword = String(preservedState.password || '').trim();
           const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
@@ -15951,6 +16399,7 @@ const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   resolveSignupMethod,
   resolveSignupEmailForFlow,
   sendToContentScriptResilient,
+  setState,
   SIGNUP_PAGE_INJECT_FILES,
   waitForTabStableComplete,
 });
@@ -16483,6 +16932,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   clearAccountRunHistory: (...args) => clearAndBroadcastAccountRunHistory(...args),
   deleteAccountRunHistoryRecords: (...args) => deleteAndBroadcastAccountRunHistoryRecords(...args),
   clearAutoRunTimerAlarm,
+  clearFailedSignupPhoneReuseActivation,
   clearFreeReusablePhoneActivation,
   clearBrowserFingerprint: (...args) => browserFingerprintManager?.clearBrowserFingerprint?.(...args),
   clearLuckmailRuntimeState,

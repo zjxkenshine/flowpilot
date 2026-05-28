@@ -256,6 +256,119 @@ test('step 2 reuses existing signup phone activation without acquiring a new num
   assert.equal(completedPayloads[0].payload.signupPhoneActivation, activation);
 });
 
+test('step 2 reuses failed signup phone activation before manual phone or acquiring a new number', async () => {
+  const completedPayloads = [];
+  const logs = [];
+  const sequence = [];
+  const stateUpdates = [];
+  const sentPayloads = [];
+  const activation = {
+    activationId: 'failed-reuse-signup-activation',
+    phoneNumber: '+446700000003',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 16,
+    countryLabel: 'United Kingdom',
+    source: 'signup-page-ready-timeout-reuse',
+    reason: '步骤 4：等待注册验证码页面就绪超时，请刷新认证页后重试。',
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async (message, level) => {
+      logs.push({ message, level });
+    },
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async (step, payload) => {
+      completedPayloads.push({ step, payload });
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 151 }),
+    ensureSignupPostIdentityPageReadyInTab: async () => ({
+      state: 'phone_verification_page',
+      url: 'https://auth.openai.com/phone-verification',
+    }),
+    getTabId: async () => 151,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      normalizeActivation: (record) => record ? {
+        activationId: record.activationId,
+        phoneNumber: record.phoneNumber,
+        provider: record.provider,
+        serviceCode: record.serviceCode,
+        countryId: record.countryId,
+        countryLabel: record.countryLabel,
+        source: record.source,
+      } : null,
+      prepareSignupPhoneActivation: async () => {
+        throw new Error('prepareSignupPhoneActivation should not run when failed signup phone reuse exists');
+      },
+      cancelSignupPhoneActivation: async () => {
+        throw new Error('activation should not be cancelled on success');
+      },
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        sequence.push('ensureSignupPhoneEntryReady');
+        return { ready: true, state: 'phone_entry' };
+      }
+      sequence.push('submitSignupPhone');
+      sentPayloads.push(message.payload);
+      return { submitted: true };
+    },
+    setState: async (updates) => {
+      stateUpdates.push(updates);
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({
+    signupMethod: 'phone',
+    failedSignupPhoneReuseActivation: activation,
+    signupPhoneNumber: '+446700000099',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+446700000099',
+  });
+
+  assert.deepStrictEqual(sequence, [
+    'ensureSignupPhoneEntryReady',
+    'submitSignupPhone',
+  ]);
+  assert.deepStrictEqual(sentPayloads, [
+    {
+      signupMethod: 'phone',
+      phoneNumber: '+446700000003',
+      countryId: 16,
+      countryLabel: 'United Kingdom',
+    },
+  ]);
+  assert.equal(completedPayloads[0].payload.accountIdentifierType, 'phone');
+  assert.equal(completedPayloads[0].payload.accountIdentifier, '+446700000003');
+  assert.equal(completedPayloads[0].payload.signupPhoneNumber, '+446700000003');
+  assert.deepStrictEqual(completedPayloads[0].payload.signupPhoneActivation, {
+    activationId: 'failed-reuse-signup-activation',
+    phoneNumber: '+446700000003',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 16,
+    countryLabel: 'United Kingdom',
+    source: 'signup-page-ready-timeout-reuse',
+    reason: '步骤 4：等待注册验证码页面就绪超时，请刷新认证页后重试。',
+  });
+  assert.deepStrictEqual(stateUpdates, [
+    {
+      signupPhoneNumber: '+446700000003',
+      signupPhoneActivation: completedPayloads[0].payload.signupPhoneActivation,
+      accountIdentifierType: 'phone',
+      accountIdentifier: '+446700000003',
+    },
+  ]);
+  assert.equal(logs.some(({ message }) => /复用上次验证码页就绪超时保留的手机号/.test(message)), true);
+});
+
 test('step 2 submits manual signup phone without acquiring a number', async () => {
   const completedPayloads = [];
   const sentPayloads = [];

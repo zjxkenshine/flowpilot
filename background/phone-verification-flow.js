@@ -7473,9 +7473,14 @@
               stepKey: 'fetch-signup-code',
             });
 
-            const submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
-              signupProfile: options.signupProfile || null,
-            });
+            let submitResult = null;
+            try {
+              submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
+                signupProfile: options.signupProfile || null,
+              });
+            } finally {
+              await setPhoneRuntimeState({ failedSignupPhoneReuseActivation: null });
+            }
 
             if (submitResult.invalidCode) {
               const invalidErrorText = String(submitResult.errorText || submitResult.url || '未知错误').trim();

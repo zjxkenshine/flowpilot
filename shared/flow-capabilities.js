@@ -368,10 +368,15 @@
       const targetState = activeFlowId === 'openai'
         ? getOpenAiTargetCapabilities(effectiveTargetId)
         : defaultTargetCapabilities;
+      const sub2apiReloginEnabled = Boolean(state?.sub2apiReloginEnabled)
+        && activeFlowId === 'openai'
+        && effectiveTargetId === 'sub2api';
       const rawPhonePlusModeEnabled = activeFlowId === 'openai'
+        && !sub2apiReloginEnabled
         && flowState.supportsPlusMode
         && Boolean(state?.phonePlusModeEnabled);
       const rawPlusModeEnabled = activeFlowId === 'openai'
+        && !sub2apiReloginEnabled
         && flowState.supportsPlusMode
         && Boolean(state?.plusModeEnabled)
         && !rawPhonePlusModeEnabled;
@@ -392,7 +397,7 @@
       const canSelectPhoneSignup = activeFlowId === 'openai'
         && Boolean(flowState.supportsPhoneSignup)
         && Boolean(targetState.supportsPhoneSignup)
-        && runtimeLocks.phoneVerificationEnabled
+        && (runtimeLocks.phoneVerificationEnabled || sub2apiReloginEnabled)
         && !runtimeLocks.plusModeEnabled
         && !runtimeLocks.accountContribution;
       if (canSelectPhoneSignup) {
@@ -402,6 +407,8 @@
         effectiveSignupMethods.push(SIGNUP_METHOD_EMAIL);
       }
       const requestedSignupMethod = runtimeLocks.phonePlusModeEnabled
+        ? SIGNUP_METHOD_PHONE
+        : sub2apiReloginEnabled
         ? SIGNUP_METHOD_PHONE
         : normalizeSignupMethod(options?.signupMethod ?? state?.signupMethod);
       const effectiveSignupMethod = requestedSignupMethod === SIGNUP_METHOD_PHONE && canSelectPhoneSignup
@@ -483,6 +490,7 @@
           phonePlusModeEnabled: runtimeLocks.phonePlusModeEnabled,
           plusHostedCheckoutIsFinalStep: state?.plusHostedCheckoutIsFinalStep !== false,
           signupMethod: effectiveSignupMethod,
+          sub2apiReloginEnabled,
         },
         supportedPanelModes: supportedTargetIds,
         supportedTargetIds,
@@ -570,6 +578,16 @@
       const state = options?.state || {};
       const capabilityState = resolveSidepanelCapabilities(options);
       const errors = [];
+
+      if (Boolean(state?.sub2apiReloginEnabled)) {
+        const targetId = String(state?.openaiIntegrationTargetId || state?.panelMode || capabilityState.effectiveTargetId || '').trim().toLowerCase();
+        if (capabilityState.activeFlowId !== 'openai' || targetId !== 'sub2api') {
+          errors.push({
+            code: 'sub2api_relogin_target_required',
+            message: 'SUB2API 账号补登只能在 OpenAI / SUB2API 来源下运行。',
+          });
+        }
+      }
 
       if (
         Array.isArray(capabilityState.supportedTargetIds)

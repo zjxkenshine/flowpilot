@@ -17,6 +17,7 @@
       resolveSignupMethod = () => 'email',
       resolveSignupEmailForFlow,
       sendToContentScriptResilient,
+      setState = null,
       SIGNUP_PAGE_INJECT_FILES,
       waitForTabStableComplete = null,
     } = deps;
@@ -256,7 +257,15 @@
 
     function normalizeSignupPhoneActivationForStep2(activation) {
       if (typeof phoneVerificationHelpers?.normalizeActivation === 'function') {
-        return phoneVerificationHelpers.normalizeActivation(activation);
+        const normalized = phoneVerificationHelpers.normalizeActivation(activation);
+        if (!normalized) {
+          return null;
+        }
+        const metadata = {
+          ...(activation?.reason ? { reason: String(activation.reason || '').trim() } : {}),
+          ...(activation?.recordedAt ? { recordedAt: Math.max(0, Math.floor(Number(activation.recordedAt) || 0)) } : {}),
+        };
+        return Object.keys(metadata).length ? { ...normalized, ...metadata } : normalized;
       }
       if (!activation || typeof activation !== 'object' || Array.isArray(activation)) {
         return null;
@@ -288,6 +297,23 @@
         return {
           phoneNumber: existingActivation.phoneNumber,
           activation: existingActivation,
+        };
+      }
+
+      const failedReuseActivation = normalizeSignupPhoneActivationForStep2(state?.failedSignupPhoneReuseActivation);
+      if (failedReuseActivation?.phoneNumber) {
+        await addLog(`步骤 2：复用上次验证码页就绪超时保留的手机号 ${failedReuseActivation.phoneNumber}，不重新获取号码。`, 'warn');
+        if (typeof setState === 'function') {
+          await setState({
+            signupPhoneNumber: failedReuseActivation.phoneNumber,
+            signupPhoneActivation: failedReuseActivation,
+            accountIdentifierType: 'phone',
+            accountIdentifier: failedReuseActivation.phoneNumber,
+          });
+        }
+        return {
+          phoneNumber: failedReuseActivation.phoneNumber,
+          activation: failedReuseActivation,
         };
       }
 

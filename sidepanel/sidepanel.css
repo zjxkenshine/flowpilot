@@ -1505,6 +1505,26 @@ header {
   text-transform: none;
 }
 
+#row-sub2api-relogin-pool .data-label,
+#row-sub2api-relogin-enabled .data-label {
+  width: 76px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.sub2api-relogin-pool-box {
+  gap: 10px;
+}
+
+.sub2api-relogin-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sub2api-relogin-error {
+  color: var(--red);
+  word-break: break-word;
+}
+
 .data-value {
   font-size: 13px;
   color: var(--text-muted);

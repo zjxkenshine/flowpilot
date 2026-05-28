@@ -48,6 +48,10 @@ test('flow registry exposes canonical flow and target metadata', () => {
       'row-plus-checkout-conversion-proxy-test',
     ]
   );
+  assert.deepEqual(
+    flowRegistry.getSettingsGroupDefinition('openai-target-sub2api')?.rowIds.slice(-2),
+    ['row-sub2api-relogin-enabled', 'row-sub2api-relogin-pool']
+  );
   assert.equal(flowRegistry.getPublicationTargetDefinition('kiro', 'kiro-rs')?.label, 'kiro.rs');
   assert.equal(flowRegistry.getFlowCapabilities('openai').supportsAccountContribution, true);
   assert.equal(flowRegistry.getFlowCapabilities('kiro').supportsAccountContribution, true);
@@ -154,6 +158,45 @@ test('settings schema preserves CPA session strategy in canonical state and read
 
   assert.equal(normalized.flows.openai.plus.plusAccountAccessStrategy, 'cpa_codex_session');
   assert.equal(view.plusAccountAccessStrategy, 'cpa_codex_session');
+});
+
+test('settings schema preserves SUB2API relogin pool fields in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const usage = {
+    '+447780579093----secret----mail@example.com': {
+      enabled: true,
+      usedAt: 0,
+      lastError: '',
+    },
+  };
+  const current = {
+    key: '+447780579093----secret----mail@example.com',
+    phone: '+447780579093',
+    password: 'secret',
+    email: 'mail@example.com',
+  };
+
+  const normalized = schema.normalizeSettingsState({
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+    sub2apiReloginEnabled: true,
+    sub2apiReloginAccountPoolText: '+447780579093----secret----mail@example.com',
+    sub2apiReloginAccountPoolUsage: usage,
+    sub2apiReloginCurrentAccount: current,
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.flows.openai.integrationTargets.sub2api.sub2apiReloginEnabled, true);
+  assert.equal(
+    normalized.flows.openai.integrationTargets.sub2api.sub2apiReloginAccountPoolText,
+    '+447780579093----secret----mail@example.com'
+  );
+  assert.deepEqual(normalized.flows.openai.integrationTargets.sub2api.sub2apiReloginAccountPoolUsage, usage);
+  assert.deepEqual(normalized.flows.openai.integrationTargets.sub2api.sub2apiReloginCurrentAccount, current);
+  assert.equal(view.sub2apiReloginEnabled, true);
+  assert.deepEqual(view.sub2apiReloginAccountPoolUsage, usage);
+  assert.deepEqual(view.sub2apiReloginCurrentAccount, current);
 });
 
 test('settings schema preserves browser fingerprint defaults and nested overrides', () => {

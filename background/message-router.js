@@ -18,6 +18,7 @@
       clearAccountBook,
       deleteAccountRunHistoryRecords,
       clearAutoRunTimerAlarm,
+      clearFailedSignupPhoneReuseActivation,
       clearFreeReusablePhoneActivation,
       clearBrowserFingerprint,
       clearLuckmailRuntimeState,
@@ -1474,6 +1475,13 @@
           return await clearFreeReusablePhoneActivation();
         }
 
+        case 'CLEAR_FAILED_SIGNUP_PHONE_REUSE': {
+          if (typeof clearFailedSignupPhoneReuseActivation !== 'function') {
+            throw new Error('失败复用手机号清除能力未接入。');
+          }
+          return await clearFailedSignupPhoneReuseActivation();
+        }
+
         case 'SET_FREE_REUSABLE_PHONE': {
           if (typeof setFreeReusablePhoneActivation !== 'function') {
             throw new Error('白嫖复用手机号记录能力未接入。');
@@ -1676,13 +1684,23 @@
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           const autoRunSkipFailures = Boolean(message.payload?.autoRunSkipFailures);
           const autoRunRetryPaypalCallback = Boolean(message.payload?.autoRunRetryPaypalCallback);
+          const hasAutoRunPreserveIssueLogsOnRestart = Object.prototype.hasOwnProperty.call(
+            message.payload || {},
+            'autoRunPreserveIssueLogsOnRestart'
+          );
+          const includeAutoRunPreserveIssueLogsOnRestart = hasAutoRunPreserveIssueLogsOnRestart
+            || !Boolean(message.payload?.accountContributionEnabled);
           const autoRunPreserveIssueLogsOnRestart = Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart);
           const mode = message.payload?.mode === 'continue' ? 'continue' : 'restart';
-          await setState({ autoRunSkipFailures, autoRunRetryPaypalCallback, autoRunPreserveIssueLogsOnRestart });
+          await setState({
+            autoRunSkipFailures,
+            autoRunRetryPaypalCallback,
+            ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
+          });
           startAutoRunLoop(totalRuns, {
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
-            autoRunPreserveIssueLogsOnRestart,
+            ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
             mode,
           });
           return { ok: true };
@@ -1817,10 +1835,14 @@
             || Object.prototype.hasOwnProperty.call(updates, 'phonePlusModeEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
             || Object.prototype.hasOwnProperty.call(updates, 'panelMode')
+            || Object.prototype.hasOwnProperty.call(updates, 'openaiIntegrationTargetId')
             || Object.prototype.hasOwnProperty.call(updates, 'activeFlowId')
             || Object.prototype.hasOwnProperty.call(updates, 'accountContributionEnabled')
+            || Object.prototype.hasOwnProperty.call(updates, 'sub2apiReloginEnabled')
           ) {
-            updates.signupMethod = resolveSignupMethod(nextSignupState);
+            updates.signupMethod = Boolean(nextSignupState.sub2apiReloginEnabled)
+              ? 'phone'
+              : resolveSignupMethod(nextSignupState);
           }
           const nextPersistedSignupMethod = Object.prototype.hasOwnProperty.call(updates, 'signupMethod')
             ? updates.signupMethod
@@ -1841,6 +1863,8 @@
               !== normalizePlusAccountAccessStrategyForDisplay(updates.plusAccountAccessStrategy || 'oauth');
           const phoneSignupReloginAfterBindEmailChanged = Object.prototype.hasOwnProperty.call(updates, 'phoneSignupReloginAfterBindEmailEnabled')
             && Boolean(currentState?.phoneSignupReloginAfterBindEmailEnabled) !== Boolean(updates.phoneSignupReloginAfterBindEmailEnabled);
+          const sub2apiReloginChanged = Object.prototype.hasOwnProperty.call(updates, 'sub2apiReloginEnabled')
+            && Boolean(currentState?.sub2apiReloginEnabled) !== Boolean(updates.sub2apiReloginEnabled);
           const nextPlusModeEnabled = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
             ? Boolean(updates.plusModeEnabled)
             : Boolean(currentState?.plusModeEnabled);
@@ -1852,7 +1876,8 @@
             || (nextPhonePlusModeEnabled && plusPaymentChanged)
             || (nextPlusModeEnabled && plusAccountAccessStrategyChanged)
             || (nextPhonePlusModeEnabled && plusAccountAccessStrategyChanged)
-            || phoneSignupReloginAfterBindEmailChanged;
+            || phoneSignupReloginAfterBindEmailChanged
+            || sub2apiReloginChanged;
           const oauthFlowTimeoutDisabled = Object.prototype.hasOwnProperty.call(updates, 'oauthFlowTimeoutEnabled')
             && updates.oauthFlowTimeoutEnabled === false;
           const canonicalSettingsUpdates = await setPersistentSettings(updates);
@@ -1864,6 +1889,20 @@
               oauthFlowDeadlineSourceUrl: null,
             } : {}),
           };
+          if (Boolean(canonicalSettingsUpdates.sub2apiReloginEnabled)) {
+            Object.assign(stateUpdates, {
+              activeFlowId: 'openai',
+              flowId: 'openai',
+              panelMode: 'sub2api',
+              openaiIntegrationTargetId: 'sub2api',
+              signupMethod: 'phone',
+              resolvedSignupMethod: 'phone',
+              phoneVerificationEnabled: false,
+              accountIdentifierType: 'phone',
+              sub2apiDefaultProxyName: '',
+              ipProxyEnabled: false,
+            });
+          }
           if (
             Object.prototype.hasOwnProperty.call(canonicalSettingsUpdates, 'browserFingerprintEnabled')
             && canonicalSettingsUpdates.browserFingerprintEnabled === false

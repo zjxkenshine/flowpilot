@@ -346,6 +346,8 @@
         'row-sub2api-group',
         'row-sub2api-account-priority',
         'row-sub2api-default-proxy',
+        'row-sub2api-relogin-enabled',
+        'row-sub2api-relogin-pool',
       ],
     },
     'openai-target-codex2api': {

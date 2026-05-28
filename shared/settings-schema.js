@@ -262,6 +262,10 @@
                 sub2apiGroupNames: ['codex', 'openai-plus'],
                 sub2apiAccountPriority: 1,
                 sub2apiDefaultProxyName: '',
+                sub2apiReloginEnabled: false,
+                sub2apiReloginAccountPoolText: '',
+                sub2apiReloginAccountPoolUsage: {},
+                sub2apiReloginCurrentAccount: null,
               },
               codex2api: {
                 codex2apiUrl: '',
@@ -475,6 +479,30 @@
                   ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiDefaultProxyName
                   ?? ''
                 ).trim(),
+                sub2apiReloginEnabled: Boolean(
+                  input?.sub2apiReloginEnabled
+                  ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginEnabled
+                  ?? defaults.flows.openai.integrationTargets.sub2api.sub2apiReloginEnabled
+                ),
+                sub2apiReloginAccountPoolText: String(
+                  input?.sub2apiReloginAccountPoolText
+                  ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginAccountPoolText
+                  ?? defaults.flows.openai.integrationTargets.sub2api.sub2apiReloginAccountPoolText
+                ).replace(/\r/g, '').trim(),
+                sub2apiReloginAccountPoolUsage: isPlainObject(
+                  input?.sub2apiReloginAccountPoolUsage
+                  ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginAccountPoolUsage
+                )
+                  ? cloneValue(input?.sub2apiReloginAccountPoolUsage
+                    ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginAccountPoolUsage)
+                  : cloneValue(defaults.flows.openai.integrationTargets.sub2api.sub2apiReloginAccountPoolUsage),
+                sub2apiReloginCurrentAccount: isPlainObject(
+                  input?.sub2apiReloginCurrentAccount
+                  ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginCurrentAccount
+                )
+                  ? cloneValue(input?.sub2apiReloginCurrentAccount
+                    ?? nested?.flows?.openai?.integrationTargets?.sub2api?.sub2apiReloginCurrentAccount)
+                  : null,
               },
               codex2api: {
                 ...defaults.flows.openai.integrationTargets.codex2api,
@@ -898,6 +926,10 @@
       next.sub2apiGroupNames = cloneValue(openaiState.integrationTargets.sub2api.sub2apiGroupNames);
       next.sub2apiAccountPriority = openaiState.integrationTargets.sub2api.sub2apiAccountPriority;
       next.sub2apiDefaultProxyName = openaiState.integrationTargets.sub2api.sub2apiDefaultProxyName;
+      next.sub2apiReloginEnabled = Boolean(openaiState.integrationTargets.sub2api.sub2apiReloginEnabled);
+      next.sub2apiReloginAccountPoolText = openaiState.integrationTargets.sub2api.sub2apiReloginAccountPoolText;
+      next.sub2apiReloginAccountPoolUsage = cloneValue(openaiState.integrationTargets.sub2api.sub2apiReloginAccountPoolUsage);
+      next.sub2apiReloginCurrentAccount = cloneValue(openaiState.integrationTargets.sub2api.sub2apiReloginCurrentAccount);
       next.codex2apiUrl = openaiState.integrationTargets.codex2api.codex2apiUrl;
       next.codex2apiAdminKey = openaiState.integrationTargets.codex2api.codex2apiAdminKey;
       next.customPassword = normalizedState.services.account.customPassword;

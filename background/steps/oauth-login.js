@@ -86,9 +86,15 @@
         || normalizeStep7SignupMethod(state?.resolvedSignupMethod) === 'phone';
     }
 
+    function isSub2ApiReloginModeForStep7(state = {}) {
+      const activeFlowId = String(state?.activeFlowId || state?.flowId || 'openai').trim().toLowerCase();
+      const targetId = String(state?.openaiIntegrationTargetId || state?.panelMode || state?.targetId || '').trim().toLowerCase();
+      return Boolean(state?.sub2apiReloginEnabled) && activeFlowId === 'openai' && targetId === 'sub2api';
+    }
+
     function canUseConfiguredPhoneSignup(state = {}) {
       return isPhoneSignupMethodForStep7(state)
-        && Boolean(state?.phoneVerificationEnabled)
+        && (Boolean(state?.phoneVerificationEnabled) || isSub2ApiReloginModeForStep7(state))
         && !Boolean(state?.plusModeEnabled)
         && !Boolean(state?.accountContributionEnabled);
     }
@@ -202,6 +208,9 @@
           return payload;
         }
         if (isStep7PhoneVerificationResult(result)) {
+          return payload;
+        }
+        if (isStep7PlainVerificationResult(result) && isSub2ApiReloginModeForStep7(currentState)) {
           return payload;
         }
         if (isStep7PlainVerificationResult(result)) {

@@ -313,6 +313,33 @@ test('flow capability registry exposes editable Plus account access strategies f
   assert.equal(capabilityState.stepDefinitionOptions.plusAccountAccessStrategy, 'sub2api_codex_session');
 });
 
+test('flow capability registry treats SUB2API relogin as phone login without SMS or Plus', () => {
+  const api = loadApi();
+  const registry = api.createFlowCapabilityRegistry();
+
+  const capabilityState = registry.resolveSidepanelCapabilities({
+    state: {
+      activeFlowId: 'openai',
+      openaiIntegrationTargetId: 'sub2api',
+      panelMode: 'sub2api',
+      sub2apiReloginEnabled: true,
+      phoneVerificationEnabled: false,
+      plusModeEnabled: true,
+      phonePlusModeEnabled: true,
+      signupMethod: 'email',
+      plusAccountAccessStrategy: 'sub2api_codex_session',
+    },
+  });
+
+  assert.equal(capabilityState.canUsePhoneSignup, true);
+  assert.equal(capabilityState.effectiveSignupMethod, 'phone');
+  assert.equal(capabilityState.runtimeLocks.phoneVerificationEnabled, false);
+  assert.equal(capabilityState.runtimeLocks.plusModeEnabled, false);
+  assert.equal(capabilityState.runtimeLocks.phonePlusModeEnabled, false);
+  assert.equal(capabilityState.effectivePlusAccountAccessStrategy, 'oauth');
+  assert.equal(capabilityState.stepDefinitionOptions.sub2apiReloginEnabled, true);
+});
+
 test('flow capability registry maps session import to the current source target', () => {
   const api = loadApi();
   const registry = api.createFlowCapabilityRegistry();

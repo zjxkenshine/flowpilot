@@ -207,6 +207,15 @@
     ];
   }
 
+  function createSub2ApiReloginSteps() {
+    return [
+      { id: 1, order: 10, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+      { id: 2, order: 20, key: 'fetch-login-code', title: '获取登录验证码', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'submit-verification-code', mailRuleId: 'openai-login-code' },
+      { id: 3, order: 30, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+      { id: 4, order: 40, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
+    ];
+  }
+
   function createHostedCheckoutSteps(prefixSteps, startId, startOrder, signupMethod = SIGNUP_METHOD_EMAIL, options = {}) {
     const sessionTailFactory = resolvePlusSessionImportTail(options, signupMethod);
     const tailSteps = sessionTailFactory
@@ -328,6 +337,7 @@
   const PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
   const PHONE_PLUS_GPC_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS);
   const PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
+  const SUB2API_RELOGIN_STEP_DEFINITIONS = createSub2ApiReloginSteps();
   const KIRO_STEP_DEFINITIONS = [
     {
       id: 1,
@@ -466,6 +476,22 @@
     return fallbackValue || DEFAULT_ACTIVE_FLOW_ID;
   }
 
+  function normalizeReloginTargetId(options = {}) {
+    return String(
+      options?.openaiIntegrationTargetId
+      || options?.integrationTargetId
+      || options?.panelMode
+      || options?.targetId
+      || ''
+    ).trim().toLowerCase();
+  }
+
+  function isSub2ApiReloginStepModeEnabled(options = {}) {
+    return Boolean(options?.sub2apiReloginEnabled)
+      && normalizeActiveFlowId(options?.activeFlowId || options?.flowId, DEFAULT_ACTIVE_FLOW_ID) === DEFAULT_ACTIVE_FLOW_ID
+      && normalizeReloginTargetId(options) === 'sub2api';
+  }
+
   function getResolvedSignupMethod(options = {}) {
     if (isPhonePlusModeEnabled(options)) {
       return SIGNUP_METHOD_PHONE;
@@ -474,6 +500,9 @@
   }
 
   function getOpenAiModeStepDefinitions(options = {}) {
+    if (isSub2ApiReloginStepModeEnabled(options)) {
+      return SUB2API_RELOGIN_STEP_DEFINITIONS;
+    }
     const signupMethod = getResolvedSignupMethod(options);
     const reloginAfterBindEmail = signupMethod === SIGNUP_METHOD_PHONE
       && isPhoneSignupReloginAfterBindEmailEnabled(options);
@@ -629,6 +658,7 @@
           ...PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
           ...PHONE_PLUS_GPC_STEP_DEFINITIONS,
           ...PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...SUB2API_RELOGIN_STEP_DEFINITIONS,
         ]) {
           keyed.set(`${step.id}:${step.key}`, step);
         }

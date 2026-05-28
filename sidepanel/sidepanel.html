@@ -236,6 +236,59 @@
         <span class="data-label">默认代理</span>
         <input type="text" id="input-sub2api-default-proxy" class="data-input" placeholder="留空则不使用代理；或填写代理名称 / ID" />
       </div>
+      <div class="data-row" id="row-sub2api-relogin-enabled" style="display:none;">
+        <span class="data-label">补登</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-sub2api-relogin-enabled" title="开启后从 OAuth 登录开始运行 SUB2API 账号补登">
+              <input type="checkbox" id="input-sub2api-relogin-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <span class="setting-caption">SUB2API 账号补登</span>
+        </div>
+      </div>
+      <div class="data-row data-check-row" id="row-sub2api-relogin-pool" style="display:none;">
+        <span class="data-label">补登池</span>
+        <div class="hotmail-import-box sub2api-relogin-pool-box">
+          <textarea id="input-sub2api-relogin-account-pool" class="data-textarea mono" hidden
+            placeholder="+447780579093----password----mail@example.com"></textarea>
+          <div class="section-mini-header">
+            <div class="section-mini-copy">
+              <span class="section-label">SUB2API 账号补登池</span>
+              <span id="sub2api-relogin-pool-summary" class="data-value">每行 手机号----密码----邮箱</span>
+            </div>
+            <div class="section-mini-actions">
+              <button id="btn-sub2api-relogin-pool-refresh" class="btn btn-ghost btn-xs" type="button">刷新</button>
+              <button id="btn-sub2api-relogin-pool-copy" class="btn btn-ghost btn-xs" type="button">复制</button>
+              <button id="btn-sub2api-relogin-pool-clear-used" class="btn btn-ghost btn-xs" type="button">清空已用</button>
+            </div>
+          </div>
+          <textarea id="input-sub2api-relogin-pool-import" class="data-textarea mono" rows="4"
+            placeholder="+447780579093----password----mail@example.com"></textarea>
+          <div class="data-inline hosted-sms-pool-import-actions">
+            <button id="btn-sub2api-relogin-pool-import" class="btn btn-primary btn-sm" type="button">导入账号</button>
+            <button id="btn-sub2api-relogin-pool-delete-all" class="btn btn-outline btn-sm" type="button">全部删除</button>
+          </div>
+          <div class="icloud-card">
+            <div class="icloud-toolbar">
+              <input id="input-sub2api-relogin-pool-search" class="data-input icloud-search" type="text"
+                placeholder="搜索手机号 / 邮箱" />
+              <select id="select-sub2api-relogin-pool-filter" class="data-select icloud-filter">
+                <option value="all">全部</option>
+                <option value="unused">未用</option>
+                <option value="used">已用</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">禁用</option>
+                <option value="error">异常</option>
+              </select>
+            </div>
+            <div id="sub2api-relogin-pool-list" class="icloud-list"></div>
+          </div>
+        </div>
+      </div>
       <div class="data-row" id="row-codex2api-url" style="display:none;">
         <span class="data-label">Codex2API</span>
         <input type="text" id="input-codex2api-url" class="data-input"
@@ -2282,6 +2335,12 @@
             <span id="display-free-reusable-phone" class="data-value mono hero-sms-runtime-value">未保存</span>
             <button id="btn-save-free-reusable-phone" class="btn btn-outline btn-xs data-inline-btn hero-sms-runtime-action" type="button">记录</button>
             <button id="btn-clear-free-reusable-phone" class="btn btn-ghost btn-xs data-inline-btn hero-sms-runtime-action" type="button">清除</button>
+          </div>
+          <div id="row-failed-signup-phone-reuse" class="hero-sms-runtime-cell hero-sms-runtime-cell-span2 hero-sms-free-phone-cell" style="display:none;">
+            <span class="hero-sms-runtime-key">失败复用</span>
+            <span id="display-failed-signup-phone-reuse-country" class="data-value hero-sms-free-phone-country">地区：未保存</span>
+            <span id="display-failed-signup-phone-reuse" class="data-value mono hero-sms-runtime-value">未保存</span>
+            <button id="btn-clear-failed-signup-phone-reuse" class="btn btn-ghost btn-xs data-inline-btn hero-sms-runtime-action" type="button">清除</button>
           </div>
           <div id="row-hero-sms-preferred-activation" class="hero-sms-runtime-cell hero-sms-runtime-cell-span2" style="display:none;">
             <span class="hero-sms-runtime-key">优先号码</span>

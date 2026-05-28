@@ -57,6 +57,7 @@ ${flowRegistrySource}
 ${settingsSchemaSource}
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_SUB2API_GROUP_NAMES = ['codex', 'openai-plus'];
+const DEFAULT_SUB2API_ACCOUNT_PRIORITY = 1;
 const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'activeFlowId',
   'openaiIntegrationTargetId',
@@ -72,6 +73,10 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'sub2apiGroupNames',
   'sub2apiAccountPriority',
   'sub2apiDefaultProxyName',
+  'sub2apiReloginEnabled',
+  'sub2apiReloginAccountPoolText',
+  'sub2apiReloginAccountPoolUsage',
+  'sub2apiReloginCurrentAccount',
   'codex2apiUrl',
   'codex2apiAdminKey',
   'customPassword',
@@ -173,6 +178,17 @@ const PERSISTED_SETTING_DEFAULTS = {
   },
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
+  sub2apiUrl: '',
+  sub2apiEmail: '',
+  sub2apiPassword: '',
+  sub2apiGroupName: 'codex',
+  sub2apiGroupNames: DEFAULT_SUB2API_GROUP_NAMES,
+  sub2apiAccountPriority: 1,
+  sub2apiDefaultProxyName: '',
+  sub2apiReloginEnabled: false,
+  sub2apiReloginAccountPoolText: '',
+  sub2apiReloginAccountPoolUsage: {},
+  sub2apiReloginCurrentAccount: null,
   phoneVerificationEnabled: false,
   mailProvider: '163',
   ipProxyEnabled: false,
@@ -247,6 +263,11 @@ ${extractFunction('normalizePlusCheckoutConversionProxy711Region')}
 function normalizeSub2ApiGroupNames(value) {
   return Array.isArray(value) ? value.map((entry) => String(entry || '').trim()).filter(Boolean) : [];
 }
+${extractFunction('normalizeSub2ApiAccountPriority')}
+${extractFunction('parseSub2ApiReloginAccountPoolEntries')}
+${extractFunction('normalizeSub2ApiReloginAccountPoolText')}
+${extractFunction('normalizeSub2ApiReloginAccountPoolUsage')}
+${extractFunction('normalizeSub2ApiReloginCurrentAccount')}
 function normalizeCloudflareDomains(value) { return Array.isArray(value) ? value : []; }
 function normalizeCloudflareTempEmailDomains(value) { return Array.isArray(value) ? value : []; }
 function normalizeCloudMailDomains(value) { return Array.isArray(value) ? value : []; }
@@ -830,6 +851,54 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
   );
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolAutoDisableEnabled, true);
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 4);
+});
+
+test('buildPersistentSettingsPayload forces SUB2API relogin runtime settings and disables proxies', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    activeFlowId: 'kiro',
+    panelMode: 'cpa',
+    sub2apiReloginEnabled: true,
+    sub2apiReloginAccountPoolText: '+447780579093----secret----mail@example.com',
+    sub2apiReloginAccountPoolUsage: {
+      '+447780579093----secret----mail@example.com': {
+        enabled: true,
+        usedAt: 0,
+      },
+    },
+    plusModeEnabled: true,
+    phonePlusModeEnabled: true,
+    phoneVerificationEnabled: true,
+    signupMethod: 'email',
+    sub2apiDefaultProxyName: 'proxy-a',
+    ipProxyEnabled: true,
+  }, { fillDefaults: true });
+
+  assert.equal(payload.activeFlowId, 'openai');
+  assert.equal(payload.panelMode, 'sub2api');
+  assert.equal(payload.openaiIntegrationTargetId, 'sub2api');
+  assert.equal(payload.sub2apiReloginEnabled, true);
+  assert.equal(payload.signupMethod, 'phone');
+  assert.equal(payload.phoneVerificationEnabled, false);
+  assert.equal(payload.plusModeEnabled, false);
+  assert.equal(payload.phonePlusModeEnabled, false);
+  assert.equal(payload.plusAccountAccessStrategy, 'oauth');
+  assert.equal(payload.sub2apiDefaultProxyName, '');
+  assert.equal(payload.ipProxyEnabled, false);
+  assert.equal(payload.settingsState.activeFlowId, 'openai');
+  assert.equal(payload.settingsState.flows.openai.integrationTargetId, 'sub2api');
+  assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
+  assert.equal(payload.settingsState.flows.openai.signup.phoneVerificationEnabled, false);
+  assert.equal(payload.settingsState.flows.openai.plus.plusModeEnabled, false);
+  assert.equal(payload.settingsState.flows.openai.plus.phonePlusModeEnabled, false);
+  assert.equal(payload.settingsState.services.proxy.enabled, false);
+  assert.equal(payload.settingsState.flows.openai.integrationTargets.sub2api.sub2apiDefaultProxyName, '');
+  assert.equal(payload.settingsState.flows.openai.integrationTargets.sub2api.sub2apiReloginEnabled, true);
+  assert.equal(
+    payload.settingsState.flows.openai.integrationTargets.sub2api.sub2apiReloginAccountPoolText,
+    '+447780579093----secret----mail@example.com'
+  );
 });
 
 test('buildPersistentSettingsPayload projects nested Phone Plus settings into flat view and canonical schema', () => {

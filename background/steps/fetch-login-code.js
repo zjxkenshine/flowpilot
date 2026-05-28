@@ -92,6 +92,12 @@
         );
     }
 
+    function isSub2ApiReloginMode(state = {}) {
+      const targetId = String(state?.openaiIntegrationTargetId || state?.panelMode || state?.targetId || '').trim().toLowerCase();
+      const activeFlowId = String(state?.activeFlowId || state?.flowId || 'openai').trim().toLowerCase();
+      return Boolean(state?.sub2apiReloginEnabled) && activeFlowId === 'openai' && targetId === 'sub2api';
+    }
+
     function getAuthLoginStepForVisibleStep(visibleStep) {
       return visibleStep >= 11 ? 10 : 7;
     }
@@ -149,6 +155,24 @@
         accountIdentifier: email,
         email,
         step8VerificationTargetEmail: normalizeStep8VerificationTargetEmail(email),
+      };
+    }
+
+    function buildSub2ApiReloginEmailCodeState(state = {}, visibleStep = 0) {
+      const email = normalizeStep8VerificationTargetEmail(
+        state?.sub2apiReloginCurrentAccount?.email
+        || state?.step8VerificationTargetEmail
+        || state?.email
+        || state?.registrationEmailState?.current
+        || ''
+      );
+      if (!email) {
+        throw new Error(`步骤 ${visibleStep}：SUB2API 账号补登缺少账号池邮箱，无法接收邮箱登录验证码。`);
+      }
+      return {
+        ...state,
+        email,
+        step8VerificationTargetEmail: email,
       };
     }
 
@@ -798,6 +822,11 @@
           return;
         }
         if (pageState?.state === 'verification_page') {
+          if (isSub2ApiReloginMode(state)) {
+            const preparedState = buildSub2ApiReloginEmailCodeState(state, visibleStep);
+            await addLog(`步骤 ${visibleStep}：SUB2API 账号补登检测到邮箱登录验证码页，使用账号池邮箱 ${preparedState.step8VerificationTargetEmail} 接收验证码。`, 'info');
+            return pollEmailVerificationCode(preparedState, pageState, visibleStep, runtime);
+          }
           throw new Error(`步骤 ${visibleStep}：手机号注册模式只允许处理手机登录验证码，当前进入了普通邮箱登录验证码页，不会回落到邮箱 provider。URL: ${pageState?.url || ''}`.trim());
         }
         if (pageState?.state === 'add_phone_page') {

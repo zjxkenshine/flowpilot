@@ -385,6 +385,38 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
   });
 });
 
+test('SUB2API relogin mode keeps only the rebased OAuth tail', () => {
+  const source = fs.readFileSync('data/step-definitions.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
+  const options = {
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+    openaiIntegrationTargetId: 'sub2api',
+    sub2apiReloginEnabled: true,
+    signupMethod: 'phone',
+  };
+  const steps = api.getSteps(options);
+  const nodes = api.getNodes(options);
+
+  assert.deepStrictEqual(steps.map((step) => step.key), [
+    'oauth-login',
+    'fetch-login-code',
+    'confirm-oauth',
+    'platform-verify',
+  ]);
+  assert.deepStrictEqual(steps.map((step) => step.id), [1, 2, 3, 4]);
+  assert.deepStrictEqual(nodes.map((node) => node.nodeId), [
+    'oauth-login',
+    'fetch-login-code',
+    'confirm-oauth',
+    'platform-verify',
+  ]);
+  assert.deepStrictEqual(nodes.map((node) => node.displayOrder), [1, 2, 3, 4]);
+  assert.deepStrictEqual(api.getStepIds(options), [1, 2, 3, 4]);
+  assert.equal(api.getLastStepId(options), 4);
+});
+
 test('Plus phone signup never switches to SUB2API session tail even if the requested strategy is session import', () => {
   const source = fs.readFileSync('data/step-definitions.js', 'utf8');
   const globalScope = {};

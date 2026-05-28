@@ -121,6 +121,20 @@ const rowSub2ApiAccountPriority = document.getElementById('row-sub2api-account-p
 const inputSub2ApiAccountPriority = document.getElementById('input-sub2api-account-priority');
 const rowSub2ApiDefaultProxy = document.getElementById('row-sub2api-default-proxy');
 const inputSub2ApiDefaultProxy = document.getElementById('input-sub2api-default-proxy');
+const rowSub2ApiReloginEnabled = document.getElementById('row-sub2api-relogin-enabled');
+const inputSub2ApiReloginEnabled = document.getElementById('input-sub2api-relogin-enabled');
+const rowSub2ApiReloginPool = document.getElementById('row-sub2api-relogin-pool');
+const inputSub2ApiReloginAccountPool = document.getElementById('input-sub2api-relogin-account-pool');
+const inputSub2ApiReloginPoolImport = document.getElementById('input-sub2api-relogin-pool-import');
+const btnSub2ApiReloginPoolImport = document.getElementById('btn-sub2api-relogin-pool-import');
+const btnSub2ApiReloginPoolRefresh = document.getElementById('btn-sub2api-relogin-pool-refresh');
+const btnSub2ApiReloginPoolCopy = document.getElementById('btn-sub2api-relogin-pool-copy');
+const btnSub2ApiReloginPoolClearUsed = document.getElementById('btn-sub2api-relogin-pool-clear-used');
+const btnSub2ApiReloginPoolDeleteAll = document.getElementById('btn-sub2api-relogin-pool-delete-all');
+const sub2ApiReloginPoolSummary = document.getElementById('sub2api-relogin-pool-summary');
+const inputSub2ApiReloginPoolSearch = document.getElementById('input-sub2api-relogin-pool-search');
+const selectSub2ApiReloginPoolFilter = document.getElementById('select-sub2api-relogin-pool-filter');
+const sub2ApiReloginPoolList = document.getElementById('sub2api-relogin-pool-list');
 const rowIpProxyEnabled = document.getElementById('row-ip-proxy-enabled');
 const inputIpProxyEnabled = document.getElementById('input-ip-proxy-enabled');
 const btnToggleIpProxySection = document.getElementById('btn-toggle-ip-proxy-section');
@@ -663,6 +677,9 @@ const displayPhoneSmsBalance = document.getElementById('display-phone-sms-balanc
 const displayHeroSmsCurrentCode = document.getElementById('display-hero-sms-current-code');
 const displayFreeReusablePhoneCountry = document.getElementById('display-free-reusable-phone-country');
 const displayFreeReusablePhone = document.getElementById('display-free-reusable-phone');
+const rowFailedSignupPhoneReuse = document.getElementById('row-failed-signup-phone-reuse');
+const displayFailedSignupPhoneReuseCountry = document.getElementById('display-failed-signup-phone-reuse-country');
+const displayFailedSignupPhoneReuse = document.getElementById('display-failed-signup-phone-reuse');
 const displayHeroSmsCountryFallbackOrder = document.getElementById('display-hero-sms-country-fallback-order');
 const heroSmsOperatorList = document.getElementById('hero-sms-operator-list');
 const displayFiveSimCountryFallbackOrder = document.getElementById('display-five-sim-country-fallback-order');
@@ -670,6 +687,7 @@ const displayNexSmsCountryFallbackOrder = document.getElementById('display-nex-s
 const displayPhoneSmsProviderOrder = document.getElementById('display-phone-sms-provider-order');
 const btnSaveFreeReusablePhone = document.getElementById('btn-save-free-reusable-phone');
 const btnClearFreeReusablePhone = document.getElementById('btn-clear-free-reusable-phone');
+const btnClearFailedSignupPhoneReuse = document.getElementById('btn-clear-failed-signup-phone-reuse');
 const rowAccountRunHistoryHelperBaseUrl = document.getElementById('row-account-run-history-helper-base-url');
 const inputAccountRunHistoryHelperBaseUrl = document.getElementById('input-account-run-history-helper-base-url');
 const autoStartModal = document.getElementById('auto-start-modal');
@@ -725,6 +743,8 @@ const PHONE_SIGNUP_REUSE_LOCK_TITLE = '手机号注册流程不使用号码复�
 let latestState = null;
 let hostedSmsPoolExpanded = false;
 let chatGptApiSmsPoolExpanded = false;
+let sub2ApiReloginPoolSearchKeyword = '';
+let sub2ApiReloginPoolFilter = 'all';
 let currentPlusModeEnabled = false;
 let currentPhonePlusModeEnabled = false;
 let currentPlusPaymentMethod = DEFAULT_PLUS_PAYMENT_METHOD;
@@ -1242,28 +1262,49 @@ function getStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
   const phoneSignupReloginAfterBindEmailEnabled = typeof options === 'string'
     ? currentPhoneSignupReloginAfterBindEmailEnabled
     : Boolean(options.phoneSignupReloginAfterBindEmailEnabled ?? currentPhoneSignupReloginAfterBindEmailEnabled);
+  const sub2apiReloginEnabled = typeof options === 'string'
+    ? Boolean(typeof latestState !== 'undefined' ? latestState?.sub2apiReloginEnabled : false)
+    : Boolean(options.sub2apiReloginEnabled ?? (typeof latestState !== 'undefined' ? latestState?.sub2apiReloginEnabled : false));
+  const openaiIntegrationTargetId = typeof options === 'string'
+    ? (typeof latestState !== 'undefined' ? latestState?.openaiIntegrationTargetId || latestState?.panelMode : '')
+    : (options.openaiIntegrationTargetId || options.panelMode || (typeof latestState !== 'undefined' ? latestState?.openaiIntegrationTargetId || latestState?.panelMode : ''));
   const accountContributionEnabled = typeof options === 'string'
     ? Boolean(typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false)
     : Boolean(options.accountContributionEnabled ?? (typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false));
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
+  const hasExplicitHostedCheckoutIsFinalStep = typeof options === 'string'
+    || Object.prototype.hasOwnProperty.call(options, 'plusHostedCheckoutIsFinalStep')
+    || (typeof latestState !== 'undefined'
+      && latestState
+      && Object.prototype.hasOwnProperty.call(latestState, 'plusHostedCheckoutIsFinalStep'));
   const hostedCheckoutIsFinalStep = typeof options === 'string'
     ? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
     : (options.plusHostedCheckoutIsFinalStep
       ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
       ?? true);
-  return (window.MultiPageStepDefinitions?.getSteps?.({
+  const stepDefinitionOptions = {
     activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
     plusModeEnabled: normalizedPlusModeEnabled,
     phonePlusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
-    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(rawPlusAccountAccessStrategy),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
     phoneSignupReloginAfterBindEmailEnabled,
     accountContributionEnabled,
-  }) || [])
+  };
+  if (hasExplicitHostedCheckoutIsFinalStep) {
+    stepDefinitionOptions.plusHostedCheckoutIsFinalStep = hostedCheckoutIsFinalStep;
+  }
+  if (openaiIntegrationTargetId) {
+    stepDefinitionOptions.openaiIntegrationTargetId = openaiIntegrationTargetId;
+    stepDefinitionOptions.panelMode = openaiIntegrationTargetId;
+  }
+  if (sub2apiReloginEnabled) {
+    stepDefinitionOptions.sub2apiReloginEnabled = true;
+  }
+  return (window.MultiPageStepDefinitions?.getSteps?.(stepDefinitionOptions) || [])
     .sort((left, right) => {
       const leftOrder = Number.isFinite(left.order) ? left.order : left.id;
       const rightOrder = Number.isFinite(right.order) ? right.order : right.id;
@@ -1301,22 +1342,30 @@ function getWorkflowNodesForMode(plusModeEnabled = false, options = {}) {
   const activeFlowId = typeof options === 'string'
     ? ((typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId)
     : (options.activeFlowId || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '') || defaultFlowId);
+  const hasExplicitHostedCheckoutIsFinalStep = typeof options === 'string'
+    || Object.prototype.hasOwnProperty.call(options, 'plusHostedCheckoutIsFinalStep')
+    || (typeof latestState !== 'undefined'
+      && latestState
+      && Object.prototype.hasOwnProperty.call(latestState, 'plusHostedCheckoutIsFinalStep'));
   const hostedCheckoutIsFinalStep = typeof options === 'string'
     ? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
     : (options.plusHostedCheckoutIsFinalStep
       ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
       ?? true);
-  const nodes = window.MultiPageStepDefinitions?.getNodes?.({
+  const workflowNodeOptions = {
     activeFlowId: String(activeFlowId || '').trim().toLowerCase() || defaultFlowId,
     plusModeEnabled: normalizedPlusModeEnabled,
     phonePlusModeEnabled,
     plusPaymentMethod: normalizePlusPaymentMethod(rawPaymentMethod),
-    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(rawPlusAccountAccessStrategy),
     signupMethod: normalizeSignupMethod(rawSignupMethod),
     phoneSignupReloginAfterBindEmailEnabled,
     accountContributionEnabled,
-  });
+  };
+  if (hasExplicitHostedCheckoutIsFinalStep) {
+    workflowNodeOptions.plusHostedCheckoutIsFinalStep = hostedCheckoutIsFinalStep;
+  }
+  const nodes = window.MultiPageStepDefinitions?.getNodes?.(workflowNodeOptions);
   if (Array.isArray(nodes) && nodes.length) {
     return nodes.slice().sort((left, right) => {
       const leftOrder = Number.isFinite(Number(left.displayOrder)) ? Number(left.displayOrder) : 0;
@@ -1390,10 +1439,20 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
   const phoneSignupReloginAfterBindEmailEnabled = typeof options === 'string'
     ? currentPhoneSignupReloginAfterBindEmailEnabled
     : Boolean(options.phoneSignupReloginAfterBindEmailEnabled ?? currentPhoneSignupReloginAfterBindEmailEnabled);
+  const sub2apiReloginEnabled = typeof options === 'string'
+    ? Boolean(typeof latestState !== 'undefined' ? latestState?.sub2apiReloginEnabled : false)
+    : Boolean(options.sub2apiReloginEnabled ?? (typeof latestState !== 'undefined' ? latestState?.sub2apiReloginEnabled : false));
+  const openaiIntegrationTargetId = typeof options === 'string'
+    ? (typeof latestState !== 'undefined' ? latestState?.openaiIntegrationTargetId || latestState?.panelMode : '')
+    : (options.openaiIntegrationTargetId || options.panelMode || (typeof latestState !== 'undefined' ? latestState?.openaiIntegrationTargetId || latestState?.panelMode : ''));
   const accountContributionEnabled = Boolean(
     options.accountContributionEnabled
     ?? (typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false)
   );
+  const hasExplicitHostedCheckoutIsFinalStep = Object.prototype.hasOwnProperty.call(options, 'plusHostedCheckoutIsFinalStep')
+    || (typeof latestState !== 'undefined'
+      && latestState
+      && Object.prototype.hasOwnProperty.call(latestState, 'plusHostedCheckoutIsFinalStep'));
   const hostedCheckoutIsFinalStep = options.plusHostedCheckoutIsFinalStep
     ?? (typeof latestState !== 'undefined' ? latestState?.plusHostedCheckoutIsFinalStep : true)
     ?? true;
@@ -1413,22 +1472,28 @@ function rebuildStepDefinitionState(plusModeEnabled = false, options = {}) {
     activeFlowId: nextActiveFlowId,
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
     plusPaymentMethod: currentPlusPaymentMethod,
-    plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
     plusAccountAccessStrategy: currentPlusAccountAccessStrategy,
+    openaiIntegrationTargetId,
+    panelMode: openaiIntegrationTargetId,
+    sub2apiReloginEnabled,
     signupMethod: currentSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
     accountContributionEnabled,
+    ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep } : {}),
   });
   const nextWorkflowNodes = typeof getWorkflowNodesForMode === 'function'
     ? getWorkflowNodesForMode(currentPlusModeEnabled, {
       activeFlowId: nextActiveFlowId,
       phonePlusModeEnabled: nextPhonePlusModeEnabled,
       plusPaymentMethod: currentPlusPaymentMethod,
-      plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep,
       plusAccountAccessStrategy: currentPlusAccountAccessStrategy,
+      openaiIntegrationTargetId,
+      panelMode: openaiIntegrationTargetId,
+      sub2apiReloginEnabled,
       signupMethod: currentSignupMethod,
       phoneSignupReloginAfterBindEmailEnabled: currentPhoneSignupReloginAfterBindEmailEnabled,
       accountContributionEnabled,
+      ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: hostedCheckoutIsFinalStep } : {}),
     })
     : stepDefinitions.map((step) => ({
       nodeId: String(step.key || step.id || '').trim(),
@@ -3316,6 +3381,159 @@ function syncLatestState(nextState) {
   }
 }
 
+function parseSub2ApiReloginAccountPoolEntries(value = '') {
+  const lines = String(value || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => String(line || '').trim())
+    .filter(Boolean);
+  const entries = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const parts = line.split('----').map((part) => String(part || '').trim());
+    if (parts.length < 3) {
+      continue;
+    }
+    const phone = parts.shift();
+    const email = parts.pop();
+    const password = parts.join('----');
+    if (!phone || !password || !email || !/@/.test(email)) {
+      continue;
+    }
+    const key = `${phone}----${password}----${email.toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    entries.push({ key, phone, password, email: email.toLowerCase() });
+  }
+  return entries;
+}
+
+function normalizeSub2ApiReloginAccountPoolText(value = '') {
+  return parseSub2ApiReloginAccountPoolEntries(value)
+    .map((entry) => `${entry.phone}----${entry.password}----${entry.email}`)
+    .join('\n');
+}
+
+function getSub2ApiReloginPoolUsage() {
+  const usage = latestState?.sub2apiReloginAccountPoolUsage;
+  return usage && typeof usage === 'object' && !Array.isArray(usage) ? usage : {};
+}
+
+function setSub2ApiReloginPoolState(patch = {}) {
+  syncLatestState(patch);
+  renderSub2ApiReloginPool();
+}
+
+function getSub2ApiReloginPoolEntries() {
+  return parseSub2ApiReloginAccountPoolEntries(
+    inputSub2ApiReloginAccountPool?.value || latestState?.sub2apiReloginAccountPoolText || ''
+  );
+}
+
+function renderSub2ApiReloginPool() {
+  if (!sub2ApiReloginPoolList) {
+    return;
+  }
+  const entries = getSub2ApiReloginPoolEntries();
+  const usage = getSub2ApiReloginPoolUsage();
+  const keyword = String(sub2ApiReloginPoolSearchKeyword || '').trim().toLowerCase();
+  const filter = String(sub2ApiReloginPoolFilter || 'all').trim().toLowerCase();
+  const currentKey = String(latestState?.sub2apiReloginCurrentAccount?.key || '').trim();
+  const counts = entries.reduce((acc, entry) => {
+    const item = usage[entry.key] || {};
+    acc.total += 1;
+    if (item.enabled === false) acc.disabled += 1;
+    else acc.enabled += 1;
+    if (Number(item.usedAt) > 0) acc.used += 1;
+    else acc.unused += 1;
+    if (String(item.lastError || '').trim()) acc.error += 1;
+    return acc;
+  }, { total: 0, enabled: 0, disabled: 0, used: 0, unused: 0, error: 0 });
+  if (sub2ApiReloginPoolSummary) {
+    sub2ApiReloginPoolSummary.textContent = `共 ${counts.total} 条，未用 ${counts.unused}，已用 ${counts.used}，禁用 ${counts.disabled}`;
+  }
+  const visibleEntries = entries.filter((entry) => {
+    const item = usage[entry.key] || {};
+    const used = Number(item.usedAt) > 0;
+    const enabled = item.enabled !== false;
+    const hasError = Boolean(String(item.lastError || '').trim());
+    if (keyword && !`${entry.phone} ${entry.email}`.toLowerCase().includes(keyword)) {
+      return false;
+    }
+    if (filter === 'unused') return !used;
+    if (filter === 'used') return used;
+    if (filter === 'enabled') return enabled;
+    if (filter === 'disabled') return !enabled;
+    if (filter === 'error') return hasError;
+    return true;
+  });
+  sub2ApiReloginPoolList.innerHTML = '';
+  if (!visibleEntries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'icloud-empty';
+    empty.textContent = entries.length ? '没有匹配的补登账号' : '尚未导入补登账号';
+    sub2ApiReloginPoolList.appendChild(empty);
+    return;
+  }
+  visibleEntries.forEach((entry) => {
+    const item = usage[entry.key] || {};
+    const used = Number(item.usedAt) > 0;
+    const enabled = item.enabled !== false;
+    const hasError = Boolean(String(item.lastError || '').trim());
+    const row = document.createElement('div');
+    row.className = 'icloud-item sub2api-relogin-item';
+    row.dataset.key = entry.key;
+    const main = document.createElement('div');
+    main.className = 'icloud-item-main';
+    const phone = document.createElement('div');
+    phone.className = 'icloud-item-email';
+    phone.textContent = entry.phone;
+    const email = document.createElement('div');
+    email.className = 'data-value mono';
+    email.textContent = entry.email;
+    const meta = document.createElement('div');
+    meta.className = 'icloud-item-meta';
+    [
+      used ? ['已用', 'used'] : ['未用', 'active'],
+      enabled ? ['启用', 'active'] : ['禁用', 'used'],
+      currentKey === entry.key ? ['当前', 'active'] : null,
+      hasError ? ['异常', 'used'] : null,
+    ].filter(Boolean).forEach(([label, className]) => {
+      const tag = document.createElement('span');
+      tag.className = `icloud-tag ${className}`;
+      tag.textContent = label;
+      meta.appendChild(tag);
+    });
+    if (hasError) {
+      const errorText = document.createElement('div');
+      errorText.className = 'data-value sub2api-relogin-error';
+      errorText.textContent = item.lastError;
+      main.append(phone, email, meta, errorText);
+    } else {
+      main.append(phone, email, meta);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'icloud-item-actions';
+    [
+      [enabled ? '禁用' : '启用', 'toggle-enabled'],
+      [used ? '标未用' : '标已用', 'toggle-used'],
+      ['删除', 'delete'],
+    ].forEach(([label, action]) => {
+      const button = document.createElement('button');
+      button.className = 'btn btn-ghost btn-xs';
+      button.type = 'button';
+      button.dataset.action = action;
+      button.dataset.key = entry.key;
+      button.textContent = label;
+      actions.appendChild(button);
+    });
+    row.append(main, actions);
+    sub2ApiReloginPoolList.appendChild(row);
+  });
+}
+
 function isContributionModeActiveForFlow(state = latestState, flowId = undefined) {
   const rawFlowId = flowId !== undefined
     ? flowId
@@ -4992,6 +5210,20 @@ function collectSettingsPayload() {
         ? normalizeSignupMethod(latestState?.signupMethod)
         : (String(latestState?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email'))
     );
+  const sub2apiReloginEnabled = typeof inputSub2ApiReloginEnabled !== 'undefined' && inputSub2ApiReloginEnabled
+    ? Boolean(inputSub2ApiReloginEnabled.checked)
+    : Boolean(latestState?.sub2apiReloginEnabled);
+  const normalizeSub2ApiReloginAccountPoolTextSafe = typeof normalizeSub2ApiReloginAccountPoolText === 'function'
+    ? normalizeSub2ApiReloginAccountPoolText
+    : ((value = '') => String(value || '').trim());
+  const sub2apiReloginAccountPoolText = normalizeSub2ApiReloginAccountPoolTextSafe(
+    typeof inputSub2ApiReloginAccountPool !== 'undefined' && inputSub2ApiReloginAccountPool
+      ? inputSub2ApiReloginAccountPool.value
+      : latestState?.sub2apiReloginAccountPoolText || ''
+  );
+  const sub2apiReloginAccountPoolUsage = typeof getSub2ApiReloginPoolUsage === 'function'
+    ? getSub2ApiReloginPoolUsage()
+    : (latestState?.sub2apiReloginAccountPoolUsage || {});
   const phoneSignupReuseLocked = typeof isPhoneSignupReuseLocked === 'function'
     ? isPhoneSignupReuseLocked(latestState, { signupMethod: selectedSignupMethod })
     : selectedSignupMethod === 'phone';
@@ -5257,6 +5489,10 @@ function collectSettingsPayload() {
     : (activeFlowId === defaultFlowId
       ? rawPanelMode
       : String(selectPanelMode?.value || latestState?.kiroTargetId || 'kiro-rs').trim().toLowerCase() || 'kiro-rs');
+  const capabilityActiveFlowId = sub2apiReloginEnabled ? defaultFlowId : activeFlowId;
+  const capabilityTargetId = sub2apiReloginEnabled ? 'sub2api' : selectedTargetId;
+  const capabilityPanelMode = sub2apiReloginEnabled ? 'sub2api' : rawPanelMode;
+  const capabilitySignupMethod = sub2apiReloginEnabled ? SIGNUP_METHOD_PHONE : selectedSignupMethod;
   const rawPlusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
     ? Boolean(inputPlusModeEnabled.checked)
     : Boolean(latestState?.plusModeEnabled);
@@ -5269,21 +5505,22 @@ function collectSettingsPayload() {
   const rawPhoneVerificationEnabled = Boolean(inputPhoneVerificationEnabled?.checked);
   const capabilityState = typeof resolveCurrentSidepanelCapabilities === 'function'
     ? resolveCurrentSidepanelCapabilities({
-      activeFlowId,
-      targetId: selectedTargetId,
-      panelMode: rawPanelMode,
-      signupMethod: selectedSignupMethod,
+      activeFlowId: capabilityActiveFlowId,
+      targetId: capabilityTargetId,
+      panelMode: capabilityPanelMode,
+      signupMethod: capabilitySignupMethod,
       state: {
         ...(latestState || {}),
-        activeFlowId,
-        ...(activeFlowId === defaultFlowId
-          ? { panelMode: rawPanelMode }
-          : { kiroTargetId: selectedTargetId }),
+        activeFlowId: capabilityActiveFlowId,
+        ...(capabilityActiveFlowId === defaultFlowId
+          ? { panelMode: capabilityPanelMode, openaiIntegrationTargetId: capabilityPanelMode }
+          : { kiroTargetId: capabilityTargetId }),
         plusModeEnabled: rawPlusModeEnabled,
         phonePlusModeEnabled: rawPhonePlusModeEnabled,
         plusAccountAccessStrategy: requestedPlusAccountAccessStrategy,
         phoneVerificationEnabled: rawPhoneVerificationEnabled,
-        signupMethod: selectedSignupMethod,
+        signupMethod: capabilitySignupMethod,
+        sub2apiReloginEnabled,
       },
     })
     : (() => {
@@ -5293,21 +5530,22 @@ function collectSettingsPayload() {
       }) || null;
       return registry?.resolveSidepanelCapabilities
         ? registry.resolveSidepanelCapabilities({
-          activeFlowId,
-          panelMode: rawPanelMode,
-          targetId: selectedTargetId,
-          signupMethod: selectedSignupMethod,
+          activeFlowId: capabilityActiveFlowId,
+          panelMode: capabilityPanelMode,
+          targetId: capabilityTargetId,
+          signupMethod: capabilitySignupMethod,
           state: {
             ...(latestState || {}),
-            activeFlowId,
-            ...(activeFlowId === defaultFlowId
-              ? { panelMode: rawPanelMode }
-              : { kiroTargetId: selectedTargetId }),
+            activeFlowId: capabilityActiveFlowId,
+            ...(capabilityActiveFlowId === defaultFlowId
+              ? { panelMode: capabilityPanelMode, openaiIntegrationTargetId: capabilityPanelMode }
+              : { kiroTargetId: capabilityTargetId }),
             plusModeEnabled: rawPlusModeEnabled,
             phonePlusModeEnabled: rawPhonePlusModeEnabled,
             plusAccountAccessStrategy: requestedPlusAccountAccessStrategy,
             phoneVerificationEnabled: rawPhoneVerificationEnabled,
-            signupMethod: selectedSignupMethod,
+            signupMethod: capabilitySignupMethod,
+            sub2apiReloginEnabled,
           },
         })
         : null;
@@ -5324,6 +5562,18 @@ function collectSettingsPayload() {
     ? Boolean(capabilityState.runtimeLocks?.phoneVerificationEnabled)
     : (rawPhonePlusModeEnabled ? true : rawPhoneVerificationEnabled);
   const effectiveSignupMethod = capabilityState?.effectiveSignupMethod || selectedSignupMethod;
+  const payloadActiveFlowId = sub2apiReloginEnabled ? defaultFlowId : activeFlowId;
+  const payloadPanelMode = sub2apiReloginEnabled ? 'sub2api' : effectivePanelMode;
+  const payloadTargetId = sub2apiReloginEnabled ? 'sub2api' : effectiveTargetId;
+  const payloadPlusModeEnabled = sub2apiReloginEnabled ? false : effectivePlusModeEnabled;
+  const payloadPhonePlusModeEnabled = sub2apiReloginEnabled ? false : effectivePhonePlusModeEnabled;
+  const payloadPhoneVerificationEnabled = sub2apiReloginEnabled ? false : effectivePhoneVerificationEnabled;
+  const payloadSignupMethod = sub2apiReloginEnabled ? SIGNUP_METHOD_PHONE : effectiveSignupMethod;
+  const payloadPlusAccountAccessStrategy = sub2apiReloginEnabled
+    ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
+    : (effectivePhonePlusModeEnabled
+      ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
+      : requestedPlusAccountAccessStrategy);
   const plusPaymentMethod = getSelectedPlusPaymentMethod();
   const normalizeGpcHelperPhoneModeSafe = typeof normalizeGpcHelperPhoneModeValue === 'function'
     ? normalizeGpcHelperPhoneModeValue
@@ -5403,14 +5653,19 @@ function collectSettingsPayload() {
       return Math.min(120, Math.max(0, Math.floor(numeric)));
     });
   return {
-    activeFlowId,
+    activeFlowId: payloadActiveFlowId,
     ...(accountContributionEnabled ? {} : {
-      ...(activeFlowId === defaultFlowId ? { panelMode: effectivePanelMode } : {}),
+      ...(payloadActiveFlowId === defaultFlowId
+        ? {
+          panelMode: payloadPanelMode,
+          openaiIntegrationTargetId: payloadPanelMode,
+        }
+        : {}),
     }),
     kiroTargetId: normalizeKiroTargetIdSafe(
       'kiro',
-      activeFlowId === 'kiro'
-        ? effectiveTargetId
+      payloadActiveFlowId === 'kiro'
+        ? payloadTargetId
         : (latestState?.kiroTargetId || 'kiro-rs'),
       'kiro-rs'
     ),
@@ -5433,8 +5688,12 @@ function collectSettingsPayload() {
         ? inputSub2ApiAccountPriority.value
         : latestState?.sub2apiAccountPriority
     ),
-    sub2apiDefaultProxyName: inputSub2ApiDefaultProxy.value.trim(),
-    ipProxyEnabled: getSelectedIpProxyEnabledSafe(),
+    sub2apiDefaultProxyName: sub2apiReloginEnabled ? '' : inputSub2ApiDefaultProxy.value.trim(),
+    sub2apiReloginEnabled,
+    sub2apiReloginAccountPoolText,
+    sub2apiReloginAccountPoolUsage,
+    sub2apiReloginCurrentAccount: latestState?.sub2apiReloginCurrentAccount || null,
+    ipProxyEnabled: sub2apiReloginEnabled ? false : getSelectedIpProxyEnabledSafe(),
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
     ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
@@ -5478,16 +5737,19 @@ function collectSettingsPayload() {
     browserFingerprintLevel: typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel
       ? normalizeBrowserFingerprintLevelInput(selectBrowserFingerprintLevel.value)
       : normalizeBrowserFingerprintLevelInput(latestState?.browserFingerprintLevel),
-    plusModeEnabled: effectivePlusModeEnabled,
-    phonePlusModeEnabled: effectivePhonePlusModeEnabled,
+    plusModeEnabled: payloadPlusModeEnabled,
+    phonePlusModeEnabled: payloadPhonePlusModeEnabled,
     plusPaymentMethod,
     plusHostedCheckoutIsFinalStep: latestState?.plusHostedCheckoutIsFinalStep !== false,
-    plusAccountAccessStrategy: effectivePhonePlusModeEnabled
-      ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY
-      : requestedPlusAccountAccessStrategy,
-    plusCheckoutVerificationFailureStrategy: typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy
-      ? normalizePlusCheckoutVerificationFailureStrategy(selectPlusCheckoutVerificationFailureStrategy.value)
-      : normalizePlusCheckoutVerificationFailureStrategy(latestState?.plusCheckoutVerificationFailureStrategy),
+    plusAccountAccessStrategy: payloadPlusAccountAccessStrategy,
+    plusCheckoutVerificationFailureStrategy: (() => {
+      const normalizeVerificationFailureStrategy = typeof normalizePlusCheckoutVerificationFailureStrategy === 'function'
+        ? normalizePlusCheckoutVerificationFailureStrategy
+        : ((value = '') => String(value || '').trim().toLowerCase() === 'retry' ? 'retry' : 'continue');
+      return typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy
+        ? normalizeVerificationFailureStrategy(selectPlusCheckoutVerificationFailureStrategy.value)
+        : normalizeVerificationFailureStrategy(latestState?.plusCheckoutVerificationFailureStrategy);
+    })(),
     plusCheckoutCreatePreWaitSeconds: typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds
       ? normalizePlusCheckoutCreatePreWaitSeconds(inputPlusCheckoutCreatePreWaitSeconds.value)
       : defaultPlusCheckoutCreatePreWaitSeconds,
@@ -5727,11 +5989,15 @@ function collectSettingsPayload() {
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
       : true,
     oauthOpenAfterRefreshWaitSeconds: typeof inputOAuthOpenAfterRefreshWaitSeconds !== 'undefined' && inputOAuthOpenAfterRefreshWaitSeconds
-      ? normalizeOAuthOpenAfterRefreshWaitSeconds(inputOAuthOpenAfterRefreshWaitSeconds.value)
-      : normalizeOAuthOpenAfterRefreshWaitSeconds(latestState?.oauthOpenAfterRefreshWaitSeconds),
-    phoneVerificationEnabled: effectivePhoneVerificationEnabled,
-    signupMethod: effectiveSignupMethod,
-    phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
+      ? (typeof normalizeOAuthOpenAfterRefreshWaitSeconds === 'function'
+        ? normalizeOAuthOpenAfterRefreshWaitSeconds(inputOAuthOpenAfterRefreshWaitSeconds.value)
+        : Math.max(0, Math.min(120, Math.floor(Number(inputOAuthOpenAfterRefreshWaitSeconds.value) || 8))))
+      : (typeof normalizeOAuthOpenAfterRefreshWaitSeconds === 'function'
+        ? normalizeOAuthOpenAfterRefreshWaitSeconds(latestState?.oauthOpenAfterRefreshWaitSeconds)
+        : Math.max(0, Math.min(120, Math.floor(Number(latestState?.oauthOpenAfterRefreshWaitSeconds) || 8)))),
+    phoneVerificationEnabled: payloadPhoneVerificationEnabled,
+    signupMethod: payloadSignupMethod,
+    phoneSignupReloginAfterBindEmailEnabled: sub2apiReloginEnabled ? false : typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
       ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
       : false,
     phoneSmsProvider: phoneSmsProviderValue,
@@ -8317,6 +8583,29 @@ function updateHeroSmsRuntimeDisplay(state = {}) {
       inputFreeReusablePhone.value = phoneNumber;
     }
   }
+  if (rowFailedSignupPhoneReuse || displayFailedSignupPhoneReuse || displayFailedSignupPhoneReuseCountry) {
+    const activation = state?.failedSignupPhoneReuseActivation ?? latestState?.failedSignupPhoneReuseActivation ?? null;
+    const phoneNumber = String(activation?.phoneNumber || '').trim();
+    const activationId = String(activation?.activationId || '').trim();
+    const countryLabel = normalizePhoneSmsCountryLabel(
+      activation?.countryLabel
+      || getHeroSmsCountryLabelById(activation?.countryId || ''),
+      activation?.provider || getSelectedPhoneSmsProvider()
+    );
+    if (rowFailedSignupPhoneReuse) {
+      rowFailedSignupPhoneReuse.style.display = phoneNumber ? '' : 'none';
+    }
+    if (displayFailedSignupPhoneReuse) {
+      displayFailedSignupPhoneReuse.textContent = phoneNumber
+        ? `${phoneNumber}${activationId ? ` (#${activationId})` : ''}`
+        : '未保存';
+    }
+    if (displayFailedSignupPhoneReuseCountry) {
+      displayFailedSignupPhoneReuseCountry.textContent = phoneNumber
+        ? `地区：${countryLabel || '未保存'}`
+        : '地区：未保存';
+    }
+  }
   syncPhoneRuntimeCountdown(state);
   renderPhonePreferredActivationOptions(state);
 }
@@ -10147,10 +10436,63 @@ function applyFlowSettingsGroupVisibility(visibleGroupIds = []) {
     }
     element.style.display = visibleSectionIdSet.has(sectionId) ? '' : 'none';
   });
+  applySub2ApiReloginVisibilityOverrides();
   return {
     rowIds: visibleRowIds,
     sectionIds: visibleSectionIds,
   };
+}
+
+function applySub2ApiReloginVisibilityOverrides(state = latestState) {
+  const enabled = Boolean(state?.sub2apiReloginEnabled);
+  const targetId = String(state?.openaiIntegrationTargetId || state?.panelMode || selectPanelMode?.value || '').trim().toLowerCase();
+  const activeFlowId = String(state?.activeFlowId || state?.flowId || selectFlow?.value || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase();
+  const active = enabled && activeFlowId === DEFAULT_ACTIVE_FLOW_ID && targetId === 'sub2api';
+  if (rowSub2ApiReloginPool) {
+    rowSub2ApiReloginPool.style.display = active ? '' : 'none';
+  }
+  if (!active) {
+    return;
+  }
+  [
+    rowCustomPassword,
+    rowPlusMode,
+    rowPhonePlusMode,
+    rowBrowserFingerprint,
+    rowPlusAccountAccessStrategy,
+    rowPlusPaymentMethod,
+    rowPlusCheckoutVerificationFailureStrategy,
+    rowPlusCheckoutCreatePreWait,
+    rowPlusCheckoutOpenStableWait,
+    rowPlusHostedCheckoutCardPreWait,
+    rowPlusCheckoutConversionProxy,
+    rowPayPalAccount,
+    rowPayPalProfileGenerator,
+    rowHostedCheckoutVerificationUrl,
+    rowHostedCheckoutManualFetch,
+    rowHostedCheckoutSecurityChallenge,
+    rowHostedCheckoutVerificationPopupDelay,
+    rowHostedCheckoutPhone,
+    rowHostedCheckoutSmsPool,
+    rowHostedCheckoutResendSettings,
+    rowChatGptApiSmsPool,
+  ].filter(Boolean).forEach((element) => {
+    element.style.display = 'none';
+  });
+  [
+    rowPlusCheckoutConversionProxyTest,
+    rowPlusCheckoutConversionProxyExit,
+    rowPlusCheckoutCloudConversionApiUrl,
+    rowPlusCheckoutCloudConversionApiKey,
+    rowPlusCheckoutConversionProxyRuntime,
+  ].filter(Boolean).forEach((element) => {
+    element.style.display = 'none';
+  });
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('#phone-verification-section, #ip-proxy-section').forEach((element) => {
+      element.style.display = 'none';
+    });
+  }
 }
 
 function syncFlowSelectorsFromState(state = latestState) {
@@ -10343,6 +10685,9 @@ function updateSignupMethodUI(options = {}) {
   const phonePlusModeEnabled = typeof inputPhonePlusModeEnabled !== 'undefined' && inputPhonePlusModeEnabled
     ? Boolean(inputPhonePlusModeEnabled.checked)
     : Boolean(latestState?.phonePlusModeEnabled);
+  const sub2apiReloginEnabled = typeof inputSub2ApiReloginEnabled !== 'undefined' && inputSub2ApiReloginEnabled
+    ? Boolean(inputSub2ApiReloginEnabled.checked)
+    : Boolean(latestState?.sub2apiReloginEnabled);
   const showSignupMethod = Boolean(inputPhoneVerificationEnabled?.checked || phonePlusModeEnabled);
   if (rowSignupMethod) {
     rowSignupMethod.style.display = showSignupMethod ? '' : 'none';
@@ -10394,6 +10739,10 @@ function updateSignupMethodUI(options = {}) {
   const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
     ? resolveStepDefinitionCapabilityState({
       ...(latestState || {}),
+      activeFlowId: sub2apiReloginEnabled ? DEFAULT_ACTIVE_FLOW_ID : latestState?.activeFlowId,
+      panelMode: sub2apiReloginEnabled ? 'sub2api' : latestState?.panelMode,
+      openaiIntegrationTargetId: sub2apiReloginEnabled ? 'sub2api' : latestState?.openaiIntegrationTargetId,
+      sub2apiReloginEnabled,
       plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
         ? Boolean(inputPlusModeEnabled.checked)
         : Boolean(latestState?.plusModeEnabled),
@@ -10412,6 +10761,9 @@ function updateSignupMethodUI(options = {}) {
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
     plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
+    openaiIntegrationTargetId: sub2apiReloginEnabled ? 'sub2api' : (latestState?.openaiIntegrationTargetId || latestState?.panelMode),
+    panelMode: sub2apiReloginEnabled ? 'sub2api' : (latestState?.panelMode || latestState?.openaiIntegrationTargetId),
+    sub2apiReloginEnabled,
     signupMethod: stepDefinitionState.signupMethod,
     phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
       ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
@@ -11955,6 +12307,8 @@ function renderStepsList() {
 function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOrOptions = {}, maybeOptions = {}) {
   const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
   const defaultStrategy = typeof DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY !== 'undefined' ? DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY : 'oauth';
+  const currentState = typeof latestState !== 'undefined' ? latestState : {};
+  const hasPaymentMethodShortcut = typeof plusPaymentMethodOrOptions === 'string';
   const options = typeof plusPaymentMethodOrOptions === 'string'
     ? maybeOptions
     : (plusPaymentMethodOrOptions || {});
@@ -11965,7 +12319,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   const nextPlusModeEnabled = Boolean(plusModeEnabled) && !nextPhonePlusModeEnabled;
   const rawPaymentMethod = typeof plusPaymentMethodOrOptions === 'string'
     ? plusPaymentMethodOrOptions
-    : (options.plusPaymentMethod || getSelectedPlusPaymentMethod(latestState));
+    : (options.plusPaymentMethod || getSelectedPlusPaymentMethod(currentState));
   const nextPlusAccountAccessStrategy = normalizePlusAccountAccessStrategy(
     options.plusAccountAccessStrategy
       || currentPlusAccountAccessStrategy
@@ -11978,19 +12332,45 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
         ? inputPhoneSignupReloginAfterBindEmail.checked
         : currentPhoneSignupReloginAfterBindEmailEnabled)
   );
+  const nextSub2ApiReloginEnabled = Boolean(
+    options.sub2apiReloginEnabled
+      ?? (typeof inputSub2ApiReloginEnabled !== 'undefined' && inputSub2ApiReloginEnabled
+        ? inputSub2ApiReloginEnabled.checked
+        : currentState?.sub2apiReloginEnabled)
+  );
+  const nextOpenAiIntegrationTargetId = String(
+    options.openaiIntegrationTargetId
+    || options.panelMode
+    || currentState?.openaiIntegrationTargetId
+    || currentState?.panelMode
+    || (typeof selectPanelMode !== 'undefined' && selectPanelMode ? selectPanelMode.value : '')
+    || ''
+  ).trim().toLowerCase();
   const nextAccountContributionEnabled = Boolean(
     options.accountContributionEnabled
-      ?? (typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false)
+      ?? Boolean(currentState?.accountContributionEnabled)
   );
   const nextPaymentMethod = normalizePlusPaymentMethod(rawPaymentMethod);
   const nextActiveFlowId = String(
     options.activeFlowId
-    || (typeof latestState !== 'undefined' ? latestState?.activeFlowId : '')
+    || currentState?.activeFlowId
     || defaultFlowId
   ).trim().toLowerCase() || defaultFlowId;
+  const hasExplicitHostedCheckoutIsFinalStep = hasPaymentMethodShortcut
+    || Object.prototype.hasOwnProperty.call(options, 'plusHostedCheckoutIsFinalStep')
+    || (currentState
+      && Object.prototype.hasOwnProperty.call(currentState, 'plusHostedCheckoutIsFinalStep'));
+  const nextHostedCheckoutIsFinalStep = options.plusHostedCheckoutIsFinalStep
+    ?? currentState?.plusHostedCheckoutIsFinalStep
+    ?? true;
   const currentFlowId = typeof currentStepDefinitionFlowId !== 'undefined'
     ? currentStepDefinitionFlowId
     : defaultFlowId;
+  const currentTargetId = String(
+    currentState?.openaiIntegrationTargetId
+    || currentState?.panelMode
+    || ''
+  ).trim().toLowerCase();
   const rootScope = typeof window !== 'undefined' ? window : globalThis;
   const currentPaymentStep = stepDefinitions.find((step) => step.key === 'paypal-approve');
   const nextPaymentTitle = rootScope.MultiPageStepDefinitions?.getPlusPaymentStepTitle?.({
@@ -11999,6 +12379,10 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
+    ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep } : {}),
+    openaiIntegrationTargetId: nextOpenAiIntegrationTargetId,
+    panelMode: nextOpenAiIntegrationTargetId,
+    sub2apiReloginEnabled: nextSub2ApiReloginEnabled,
     signupMethod: nextSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
   });
@@ -12015,7 +12399,9 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     || nextPlusAccountAccessStrategy !== currentPlusAccountAccessStrategy
     || nextSignupMethod !== currentSignupMethod
     || nextPhoneSignupReloginAfterBindEmailEnabled !== currentPhoneSignupReloginAfterBindEmailEnabled
-    || nextAccountContributionEnabled !== Boolean(typeof latestState !== 'undefined' ? latestState?.accountContributionEnabled : false)
+    || nextSub2ApiReloginEnabled !== Boolean(currentState?.sub2apiReloginEnabled)
+    || nextOpenAiIntegrationTargetId !== currentTargetId
+    || nextAccountContributionEnabled !== Boolean(currentState?.accountContributionEnabled)
     || nextActiveFlowId !== currentFlowId
     || paymentTitleChanged;
   if (!shouldRender) {
@@ -12027,6 +12413,10 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
+    ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep } : {}),
+    openaiIntegrationTargetId: nextOpenAiIntegrationTargetId,
+    panelMode: nextOpenAiIntegrationTargetId,
+    sub2apiReloginEnabled: nextSub2ApiReloginEnabled,
     signupMethod: nextSignupMethod,
     phoneSignupReloginAfterBindEmailEnabled: nextPhoneSignupReloginAfterBindEmailEnabled,
     accountContributionEnabled: nextAccountContributionEnabled,
@@ -12056,6 +12446,9 @@ function syncStepDefinitionsFromUiState(stateOverrides = {}) {
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
     plusPaymentMethod: getSelectedPlusPaymentMethod(nextState),
     plusAccountAccessStrategy: stepDefinitionState.plusAccountAccessStrategy,
+    openaiIntegrationTargetId: nextState?.openaiIntegrationTargetId || nextState?.panelMode,
+    panelMode: nextState?.panelMode || nextState?.openaiIntegrationTargetId,
+    sub2apiReloginEnabled: Boolean(nextState?.sub2apiReloginEnabled),
     signupMethod: stepDefinitionState.signupMethod,
     phoneSignupReloginAfterBindEmailEnabled: Boolean(nextState?.phoneSignupReloginAfterBindEmailEnabled),
     accountContributionEnabled: Boolean(nextState?.accountContributionEnabled),
@@ -12083,6 +12476,9 @@ function applySettingsState(state) {
       phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
       plusPaymentMethod: state?.plusPaymentMethod,
       plusAccountAccessStrategy: stepDefinitionState.plusAccountAccessStrategy,
+      openaiIntegrationTargetId: state?.openaiIntegrationTargetId || state?.panelMode,
+      panelMode: state?.panelMode || state?.openaiIntegrationTargetId,
+      sub2apiReloginEnabled: Boolean(state?.sub2apiReloginEnabled),
       signupMethod: stepDefinitionState.signupMethod,
       phoneSignupReloginAfterBindEmailEnabled: Boolean(state?.phoneSignupReloginAfterBindEmailEnabled),
       accountContributionEnabled: Boolean(state?.accountContributionEnabled),
@@ -12403,6 +12799,21 @@ function applySettingsState(state) {
     inputSub2ApiAccountPriority.value = String(normalizeSub2ApiAccountPriorityValue(state?.sub2apiAccountPriority));
   }
   inputSub2ApiDefaultProxy.value = state?.sub2apiDefaultProxyName || '';
+  if (typeof inputSub2ApiReloginEnabled !== 'undefined' && inputSub2ApiReloginEnabled) {
+    inputSub2ApiReloginEnabled.checked = Boolean(state?.sub2apiReloginEnabled);
+  }
+  const normalizeSub2ApiReloginAccountPoolTextSafe = typeof normalizeSub2ApiReloginAccountPoolText === 'function'
+    ? normalizeSub2ApiReloginAccountPoolText
+    : ((value = '') => String(value || '').trim());
+  if (typeof inputSub2ApiReloginAccountPool !== 'undefined' && inputSub2ApiReloginAccountPool) {
+    inputSub2ApiReloginAccountPool.value = normalizeSub2ApiReloginAccountPoolTextSafe(state?.sub2apiReloginAccountPoolText || '');
+  }
+  if (typeof inputSub2ApiReloginPoolImport !== 'undefined' && inputSub2ApiReloginPoolImport && !inputSub2ApiReloginPoolImport.value.trim()) {
+    inputSub2ApiReloginPoolImport.value = normalizeSub2ApiReloginAccountPoolTextSafe(state?.sub2apiReloginAccountPoolText || '');
+  }
+  if (typeof renderSub2ApiReloginPool === 'function') {
+    renderSub2ApiReloginPool();
+  }
   if (typeof inputKiroRsUrl !== 'undefined' && inputKiroRsUrl) {
     inputKiroRsUrl.value = String(state?.kiroRsUrl || '').trim();
   }
@@ -15241,6 +15652,9 @@ function updatePanelModeUI() {
   }
   if (typeof updatePhoneVerificationSettingsUI === 'function') {
     updatePhoneVerificationSettingsUI();
+  }
+  if (typeof applySub2ApiReloginVisibilityOverrides === 'function') {
+    applySub2ApiReloginVisibilityOverrides(latestState);
   }
   const panelMode = capabilityState?.effectivePanelMode || capabilityState?.panelMode || rawPanelMode;
 
@@ -18495,6 +18909,9 @@ selectPanelMode.addEventListener('change', async () => {
       phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
         ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
         : Boolean(latestState?.phoneSignupReloginAfterBindEmailEnabled),
+      sub2apiReloginEnabled: Boolean(inputSub2ApiReloginEnabled?.checked),
+      openaiIntegrationTargetId: latestState?.openaiIntegrationTargetId || latestState?.panelMode,
+      panelMode: latestState?.panelMode || latestState?.openaiIntegrationTargetId,
     });
   }
   applyStepExecutionRangeState(latestState);
@@ -18598,6 +19015,146 @@ if (inputIpProxyEnabled) {
     });
   });
 }
+
+inputSub2ApiReloginEnabled?.addEventListener('change', () => {
+  const enabled = Boolean(inputSub2ApiReloginEnabled.checked);
+  const patch = {
+    sub2apiReloginEnabled: enabled,
+    activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+    flowId: DEFAULT_ACTIVE_FLOW_ID,
+    panelMode: 'sub2api',
+    openaiIntegrationTargetId: 'sub2api',
+    signupMethod: enabled ? SIGNUP_METHOD_PHONE : latestState?.signupMethod,
+    resolvedSignupMethod: enabled ? SIGNUP_METHOD_PHONE : latestState?.resolvedSignupMethod,
+    phoneVerificationEnabled: enabled ? false : Boolean(latestState?.phoneVerificationEnabled),
+    sub2apiDefaultProxyName: enabled ? '' : (inputSub2ApiDefaultProxy?.value || latestState?.sub2apiDefaultProxyName || ''),
+    ipProxyEnabled: enabled ? false : Boolean(latestState?.ipProxyEnabled),
+  };
+  if (enabled) {
+    if (selectFlow) selectFlow.value = DEFAULT_ACTIVE_FLOW_ID;
+    if (selectPanelMode) selectPanelMode.value = 'sub2api';
+    if (inputIpProxyEnabled) inputIpProxyEnabled.checked = false;
+    if (inputSub2ApiDefaultProxy) inputSub2ApiDefaultProxy.value = '';
+  }
+  syncLatestState(patch);
+  syncStepDefinitionsFromUiState(patch);
+  updatePanelModeUI();
+  renderSub2ApiReloginPool();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+function saveSub2ApiReloginPoolPatch(patch = {}) {
+  setSub2ApiReloginPoolState(patch);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => {});
+}
+
+btnSub2ApiReloginPoolImport?.addEventListener('click', () => {
+  const imported = normalizeSub2ApiReloginAccountPoolText(inputSub2ApiReloginPoolImport?.value || '');
+  if (inputSub2ApiReloginAccountPool) {
+    inputSub2ApiReloginAccountPool.value = imported;
+  }
+  saveSub2ApiReloginPoolPatch({
+    sub2apiReloginAccountPoolText: imported,
+    sub2apiReloginCurrentAccount: null,
+  });
+});
+
+btnSub2ApiReloginPoolRefresh?.addEventListener('click', () => {
+  renderSub2ApiReloginPool();
+});
+
+btnSub2ApiReloginPoolCopy?.addEventListener('click', async () => {
+  const text = normalizeSub2ApiReloginAccountPoolText(inputSub2ApiReloginAccountPool?.value || latestState?.sub2apiReloginAccountPoolText || '');
+  try {
+    await navigator.clipboard?.writeText(text);
+    showToast('补登账号池已复制', 'ok');
+  } catch {
+    showToast('复制失败', 'error');
+  }
+});
+
+btnSub2ApiReloginPoolClearUsed?.addEventListener('click', () => {
+  const usage = getSub2ApiReloginPoolUsage();
+  const nextUsage = Object.fromEntries(Object.entries(usage).map(([key, item]) => [key, {
+    ...(item || {}),
+    usedAt: 0,
+    lastError: '',
+  }]));
+  saveSub2ApiReloginPoolPatch({ sub2apiReloginAccountPoolUsage: nextUsage });
+});
+
+btnSub2ApiReloginPoolDeleteAll?.addEventListener('click', () => {
+  if (inputSub2ApiReloginAccountPool) inputSub2ApiReloginAccountPool.value = '';
+  if (inputSub2ApiReloginPoolImport) inputSub2ApiReloginPoolImport.value = '';
+  saveSub2ApiReloginPoolPatch({
+    sub2apiReloginAccountPoolText: '',
+    sub2apiReloginAccountPoolUsage: {},
+    sub2apiReloginCurrentAccount: null,
+  });
+});
+
+inputSub2ApiReloginPoolSearch?.addEventListener('input', () => {
+  sub2ApiReloginPoolSearchKeyword = inputSub2ApiReloginPoolSearch.value || '';
+  renderSub2ApiReloginPool();
+});
+
+selectSub2ApiReloginPoolFilter?.addEventListener('change', () => {
+  sub2ApiReloginPoolFilter = selectSub2ApiReloginPoolFilter.value || 'all';
+  renderSub2ApiReloginPool();
+});
+
+sub2ApiReloginPoolList?.addEventListener('click', (event) => {
+  const button = event.target?.closest?.('button[data-action][data-key]');
+  if (!button) {
+    return;
+  }
+  const key = String(button.dataset.key || '').trim();
+  const action = String(button.dataset.action || '').trim();
+  const entries = getSub2ApiReloginPoolEntries();
+  const usage = getSub2ApiReloginPoolUsage();
+  const current = usage[key] || {};
+  if (action === 'toggle-enabled') {
+    saveSub2ApiReloginPoolPatch({
+      sub2apiReloginAccountPoolUsage: {
+        ...usage,
+        [key]: {
+          ...current,
+          enabled: current.enabled === false,
+        },
+      },
+    });
+    return;
+  }
+  if (action === 'toggle-used') {
+    const used = Number(current.usedAt) > 0;
+    saveSub2ApiReloginPoolPatch({
+      sub2apiReloginAccountPoolUsage: {
+        ...usage,
+        [key]: {
+          ...current,
+          enabled: current.enabled !== false,
+          usedAt: used ? 0 : Date.now(),
+          lastError: used ? '' : String(current.lastError || ''),
+        },
+      },
+    });
+    return;
+  }
+  if (action === 'delete') {
+    const nextEntries = entries.filter((entry) => entry.key !== key);
+    const nextText = nextEntries.map((entry) => `${entry.phone}----${entry.password}----${entry.email}`).join('\n');
+    const nextUsage = { ...usage };
+    delete nextUsage[key];
+    if (inputSub2ApiReloginAccountPool) inputSub2ApiReloginAccountPool.value = nextText;
+    saveSub2ApiReloginPoolPatch({
+      sub2apiReloginAccountPoolText: nextText,
+      sub2apiReloginAccountPoolUsage: nextUsage,
+      sub2apiReloginCurrentAccount: latestState?.sub2apiReloginCurrentAccount?.key === key ? null : latestState?.sub2apiReloginCurrentAccount,
+    });
+  }
+});
 
 selectIpProxyService?.addEventListener('change', () => {
   const previousService = normalizeIpProxyService(latestState?.ipProxyService || DEFAULT_IP_PROXY_SERVICE);
@@ -20067,6 +20624,26 @@ btnClearFreeReusablePhone?.addEventListener('click', async () => {
   }
 });
 
+btnClearFailedSignupPhoneReuse?.addEventListener('click', async () => {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'CLEAR_FAILED_SIGNUP_PHONE_REUSE',
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    syncLatestState({
+      ...(response?.state || {}),
+      failedSignupPhoneReuseActivation: response?.failedSignupPhoneReuseActivation ?? null,
+    });
+    updateHeroSmsRuntimeDisplay(latestState);
+    showToast?.('已清除失败复用手机号。', 'info', 1800);
+  } catch (error) {
+    console.error('Failed to clear failed signup phone reuse:', error);
+    showToast?.(`清除失败复用手机号失败：${error?.message || error}`, 'error', 4000);
+  }
+});
+
 selectHeroSmsAcquirePriority?.addEventListener('change', () => {
   selectHeroSmsAcquirePriority.value = normalizeHeroSmsAcquirePriority(selectHeroSmsAcquirePriority.value);
   markSettingsDirty(true);
@@ -21446,6 +22023,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.currentPhoneVerificationCountdownWindowIndex !== undefined
         || message.payload.currentPhoneVerificationCountdownWindowTotal !== undefined
         || message.payload.freeReusablePhoneActivation !== undefined
+        || message.payload.failedSignupPhoneReuseActivation !== undefined
         || message.payload.heroSmsLastPriceTiers !== undefined
         || message.payload.heroSmsLastPriceCountryId !== undefined
         || message.payload.heroSmsLastPriceCountryLabel !== undefined

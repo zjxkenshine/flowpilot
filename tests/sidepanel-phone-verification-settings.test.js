@@ -131,6 +131,11 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="input-free-reusable-phone"/);
   assert.match(html, /id="btn-save-free-reusable-phone"/);
   assert.match(html, /id="btn-clear-free-reusable-phone"/);
+  assert.match(html, /id="row-failed-signup-phone-reuse"/);
+  assert.match(html, /id="display-failed-signup-phone-reuse"/);
+  assert.match(html, /id="display-failed-signup-phone-reuse-country"/);
+  assert.match(html, /id="btn-clear-failed-signup-phone-reuse"/);
+  assert.match(html, /失败复用/);
   assert.match(html, /白嫖复用/);
   assert.match(html, /自动白嫖复用/);
   assert.match(html, /id="row-phone-replacement-limit"/);
@@ -227,6 +232,20 @@ test('sidepanel source wires free reusable phone save and clear actions to runti
   assert.match(sidepanelSource, /type:\s*'SET_FREE_REUSABLE_PHONE'/);
   assert.match(sidepanelSource, /payload:\s*\{\s*phoneNumber\s*\}/s);
   assert.match(sidepanelSource, /type:\s*'CLEAR_FREE_REUSABLE_PHONE'/);
+});
+
+test('sidepanel source wires failed signup phone reuse display and clear action', () => {
+  assert.match(sidepanelSource, /const rowFailedSignupPhoneReuse = document\.getElementById\('row-failed-signup-phone-reuse'\);/);
+  assert.match(sidepanelSource, /const displayFailedSignupPhoneReuseCountry = document\.getElementById\('display-failed-signup-phone-reuse-country'\);/);
+  assert.match(sidepanelSource, /const displayFailedSignupPhoneReuse = document\.getElementById\('display-failed-signup-phone-reuse'\);/);
+  assert.match(sidepanelSource, /const btnClearFailedSignupPhoneReuse = document\.getElementById\('btn-clear-failed-signup-phone-reuse'\);/);
+  assert.match(
+    sidepanelSource,
+    /const activation = state\?\.failedSignupPhoneReuseActivation \?\? latestState\?\.failedSignupPhoneReuseActivation \?\? null;[\s\S]*rowFailedSignupPhoneReuse\.style\.display = phoneNumber \? '' : 'none';/
+  );
+  assert.match(sidepanelSource, /type:\s*'CLEAR_FAILED_SIGNUP_PHONE_REUSE'/);
+  assert.match(sidepanelSource, /failedSignupPhoneReuseActivation:\s*response\?\.failedSignupPhoneReuseActivation \?\? null/);
+  assert.match(sidepanelSource, /message\.payload\.failedSignupPhoneReuseActivation !== undefined/);
 });
 
 test('sidepanel keeps free reuse switches realtime and locks them during auto run', () => {

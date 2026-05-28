@@ -3011,16 +3011,16 @@
 
     function buildHostedCheckoutNoVerificationCodeError(payload = {}) {
       const preview = getHostedCheckoutNonVerificationContentPreview(payload);
-      const error = new Error('hosted checkout 验证码接口暂未返回有效验证码。');
+      const error = new Error('hosted checkout 验证码接口暂未返回有效验证码（暂未返回有效 6 位验证码）。');
       if (preview) {
         error.hostedCheckoutResendImmediately = true;
         error.hostedCheckoutResponsePreview = preview;
-        error.message = `hosted checkout 验证码接口返回了非验证码内容，准备直接 Resend：${preview}`;
+        error.message = `hosted checkout 验证码接口暂未返回有效验证码（暂未返回有效 6 位验证码），返回了非验证码内容，准备直接 Resend：${preview}`;
       } else {
         const responsePreview = getHostedCheckoutNoCodeResponsePreview(payload);
         if (responsePreview) {
           error.hostedCheckoutResponsePreview = responsePreview;
-          error.message = `hosted checkout 验证码接口暂未返回有效验证码，响应预览：${responsePreview}`;
+          error.message = `hosted checkout 验证码接口暂未返回有效验证码（暂未返回有效 6 位验证码），响应预览：${responsePreview}`;
         }
       }
       return error;

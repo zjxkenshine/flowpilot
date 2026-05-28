@@ -115,6 +115,7 @@
         'signupPhoneNumber',
         'signupPhoneActivation',
         'signupPhoneCompletedActivation',
+        'failedSignupPhoneReuseActivation',
         'signupVerifiedPhoneNumber',
         'signupVerifiedPhoneCachedAt',
         'signupPhoneVerificationRequestedAt',

@@ -45,6 +45,11 @@ test('runtime-state view preserves canonical flow metadata from node state', () 
       activationId: 'active-1',
       phoneNumber: '+447700900123',
     },
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-1',
+      phoneNumber: '+447700900124',
+      source: 'signup-page-ready-timeout-reuse',
+    },
     tabRegistry: {
       'signup-page': { tabId: 12 },
     },
@@ -69,6 +74,11 @@ test('runtime-state view preserves canonical flow metadata from node state', () 
   assert.deepStrictEqual(view.runtimeState.flowState.openai.phoneVerification.currentPhoneActivation, {
     activationId: 'active-1',
     phoneNumber: '+447700900123',
+  });
+  assert.deepStrictEqual(view.runtimeState.flowState.openai.phoneVerification.failedSignupPhoneReuseActivation, {
+    activationId: 'failed-reuse-1',
+    phoneNumber: '+447700900124',
+    source: 'signup-page-ready-timeout-reuse',
   });
   assert.deepStrictEqual(view.sharedState, {
     tabRegistry: {

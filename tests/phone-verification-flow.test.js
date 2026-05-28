@@ -389,6 +389,14 @@ test('signup phone helper polls signup SMS code and keeps activation purpose iso
       successfulUses: 0,
       maxUses: 3,
     },
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-123',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      source: 'signup-page-ready-timeout-reuse',
+    },
     currentPhoneActivation: {
       activationId: 'add-phone-activation',
       phoneNumber: '66880000000',
@@ -746,6 +754,8 @@ test('signup phone helper completes signup SMS verification without touching add
   assert.equal(currentState.signupPhoneActivation, null);
   assert.equal(currentState.signupPhoneVerificationPurpose, '');
   assert.equal(currentState.currentPhoneVerificationCode, '');
+  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
+  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
   assert.equal(currentState.currentPhoneActivation.activationId, 'add-phone-activation');
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
@@ -838,6 +848,7 @@ test('signup phone helper writes account book entry immediately after phone veri
 });
 
 test('signup phone helper does not generate phone-prefixed email when code submit is rejected', async () => {
+  const setStateCalls = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
     phoneCodeWaitSeconds: 15,
@@ -854,6 +865,14 @@ test('signup phone helper does not generate phone-prefixed email when code submi
       countryId: 52,
       successfulUses: 0,
       maxUses: 3,
+    },
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-invalid',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      source: 'signup-page-ready-timeout-reuse',
     },
   };
   let phoneEmailCalls = 0;
@@ -898,6 +917,7 @@ test('signup phone helper does not generate phone-prefixed email when code submi
       throw new Error(`Unexpected content-script message: ${message.type}`);
     },
     setState: async (updates) => {
+      setStateCalls.push(updates);
       currentState = { ...currentState, ...updates };
     },
     sleepWithStop: async () => {},
@@ -909,6 +929,82 @@ test('signup phone helper does not generate phone-prefixed email when code submi
     /invalid code/
   );
   assert.equal(phoneEmailCalls, 0);
+  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
+  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
+});
+
+test('signup phone helper clears failed reuse slot when code submit throws', async () => {
+  const setStateCalls = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    phoneCodeWaitSeconds: 15,
+    phoneCodeTimeoutWindows: 1,
+    phoneCodePollIntervalSeconds: 1,
+    phoneCodePollMaxRounds: 2,
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-submit-throws',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-throws',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      source: 'signup-page-ready-timeout-reuse',
+    },
+  };
+
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_OK:778899' };
+      }
+      if (action === 'cancel') {
+        return { ok: true, text: async () => 'ACCESS_CANCEL' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        throw new Error('submit failed');
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      setStateCalls.push(updates);
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => helpers.completeSignupPhoneVerificationFlow(77, { state: currentState }),
+    /submit failed/
+  );
+  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
+  assert.ok(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null));
 });
 
 test('signup phone helper writes account book entry before email-verification handoff continues', async () => {
