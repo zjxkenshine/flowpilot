@@ -13730,37 +13730,22 @@ function renderReleaseSnapshot(snapshot) {
 }
 
 async function initializeReleaseInfo() {
-  const fallbackReleaseUrl = sidepanelUpdateService?.releasesPageUrl || 'https://github.com/QLHazyCoder/FlowPilot/releases';
-
-  if (btnReleaseLog) {
-    btnReleaseLog.onclick = () => openExternalUrl(currentReleaseSnapshot?.logUrl || fallbackReleaseUrl);
-  }
-
   if (!extensionUpdateStatus || !extensionVersionMeta) {
     return;
   }
 
-  const localVersion = sidepanelUpdateService?.getLocalVersionLabel?.(chrome.runtime.getManifest())
-    || chrome.runtime.getManifest()?.version_name
-    || (chrome.runtime.getManifest()?.version ? `FlowPilot${chrome.runtime.getManifest().version}` : '');
+  const manifest = chrome.runtime.getManifest();
+  const localVersion = sidepanelUpdateService?.getLocalVersionLabel?.(manifest)
+    || manifest?.version_name
+    || (manifest?.version ? `FlowPilot${manifest.version}` : '');
+
+  currentReleaseSnapshot = null;
   extensionUpdateStatus.textContent = localVersion || 'FlowPilot0.0';
   extensionUpdateStatus.classList.remove('is-update-available', 'is-check-failed');
   extensionUpdateStatus.classList.add('is-version-label');
   extensionVersionMeta.hidden = true;
   extensionVersionMeta.textContent = '';
-  if (btnReleaseLog) {
-    btnReleaseLog.hidden = true;
-  }
   resetUpdateCard();
-
-  if (!sidepanelUpdateService) {
-    extensionVersionMeta.textContent = '更新检查服务不可用';
-    extensionVersionMeta.hidden = false;
-    return;
-  }
-
-  const snapshot = await sidepanelUpdateService.getReleaseSnapshot();
-  renderReleaseSnapshot(snapshot);
 }
 
 function getContributionUpdateHintMessage(snapshot = currentContributionContentSnapshot) {
@@ -17157,10 +17142,6 @@ btnCloudflareTempEmailUsageGuide?.addEventListener('click', () => {
 
 btnCloudflareTempEmailGithub?.addEventListener('click', () => {
   openCloudflareTempEmailRepositoryPage();
-});
-
-extensionUpdateStatus?.addEventListener('click', () => {
-  openReleaseListPage();
 });
 
 btnDismissContributionUpdateHint?.addEventListener('click', (event) => {

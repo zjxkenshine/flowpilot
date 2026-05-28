@@ -48,7 +48,7 @@ function extractFunction(name) {
   return sidepanelSource.slice(start, end);
 }
 
-test('sidepanel html exposes header repo and releases entry points', () => {
+test('sidepanel html exposes header repo entry point without update log UI', () => {
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
 
   assert.match(
@@ -57,16 +57,17 @@ test('sidepanel html exposes header repo and releases entry points', () => {
   );
   assert.match(
     html,
-    /id="extension-update-status"[\s\S]*title="打开 GitHub Releases 页面"/
+    /id="extension-update-status"[\s\S]*FlowPilot0\.0/
   );
+  assert.doesNotMatch(html, /id="btn-release-log"/);
+  assert.doesNotMatch(html, /id="update-section"/);
+  assert.doesNotMatch(html, /id="update-release-list"/);
 });
 
-test('header link helpers resolve repo and releases urls', () => {
+test('header link helper resolves repo url', () => {
   const bundle = [
     extractFunction('getRepositoryHomeUrl'),
-    extractFunction('getReleaseListUrl'),
     extractFunction('openRepositoryHomePage'),
-    extractFunction('openReleaseListPage'),
   ].join('\n');
 
   const api = new Function(`
@@ -81,9 +82,7 @@ function openExternalUrl(url) {
 ${bundle}
 return {
   getRepositoryHomeUrl,
-  getReleaseListUrl,
   openRepositoryHomePage,
-  openReleaseListPage,
   setSnapshot(snapshot) {
     currentReleaseSnapshot = snapshot;
   },
@@ -97,19 +96,13 @@ return {
     api.getRepositoryHomeUrl(),
     'https://github.com/example/project'
   );
-  assert.equal(
-    api.getReleaseListUrl(),
-    'https://github.com/example/project/releases'
-  );
 
   api.setSnapshot({
     releasesPageUrl: 'https://github.com/example/project/releases',
   });
   api.openRepositoryHomePage();
-  api.openReleaseListPage();
 
   assert.deepEqual(api.getOpened(), [
     'https://github.com/example/project',
-    'https://github.com/example/project/releases',
   ]);
 });
