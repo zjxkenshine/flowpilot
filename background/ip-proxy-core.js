@@ -3419,6 +3419,38 @@ async function clearIpProxySettings(options = {}) {
   await callChromeProxySettings('clear', { scope: IP_PROXY_SETTINGS_SCOPE });
 }
 
+async function disableIpProxySettings(options = {}) {
+  currentIpProxyAuthEntry = null;
+  lastAppliedIpProxyEntrySignature = '';
+  ipProxyAuthHostVariantToggle = false;
+  lastAppliedIpProxyAuthSnapshot = {
+    host: '',
+    port: 0,
+    username: '',
+    password: '',
+  };
+  ipProxyExitDetectionToken += 1;
+  resetIpProxyAuthDiagnostics();
+  resetIpProxyRuntimeErrorDiagnostics();
+  await setIpProxyLeakGuardEnabled(false);
+
+  let warning = '';
+  try {
+    await callChromeProxySettings('set', {
+      value: { mode: 'direct' },
+      scope: IP_PROXY_SETTINGS_SCOPE,
+    });
+  } catch (error) {
+    warning = error?.message || String(error || 'failed to switch proxy to direct mode');
+  }
+
+  if (options?.resetNetworkState === true) {
+    await clearIpProxyNetworkState().catch(() => {});
+  }
+
+  return { warning };
+}
+
 async function clearIpProxyNetworkState() {
   try {
     if (chrome.webRequest?.handlerBehaviorChanged) {
@@ -3470,12 +3502,9 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
   const resolvedState = state || await getState();
   const enabled = Boolean(resolvedState?.ipProxyEnabled);
   if (!enabled) {
-    try {
-      await clearIpProxySettings({ resetLastAppliedAuthSnapshot: true });
-    } catch {
-      // ignore clear failures when already clear
-    }
-    await setIpProxyLeakGuardEnabled(false);
+    const disableResult = await disableIpProxySettings({
+      resetNetworkState: options?.resetNetworkState === true,
+    });
     const status = {
       enabled: false,
       applied: false,
@@ -3485,6 +3514,7 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
       exitIp: '',
       exitRegion: '',
       exitError: '',
+      warning: disableResult?.warning || '',
       error: '',
     };
     await updateIpProxyRuntimeStatus(status);

@@ -2021,7 +2021,7 @@
               // 手动开启时自动应用一次代理，不做出口探测；
               // 出口探测由“同步/检测出口”按钮显式触发，避免开启即误判为失败。
               skipExitProbe: true,
-              resetNetworkState: false,
+              resetNetworkState: !isEnablingProxy,
               forceAuthRebind: false,
               suppressAuthRebind: !isEnablingProxy,
             }).catch((error) => ({

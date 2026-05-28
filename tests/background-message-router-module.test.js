@@ -472,6 +472,86 @@ test('SAVE_SETTING broadcasts free phone reuse setting updates for realtime side
   );
 });
 
+test('SAVE_SETTING disables IP proxy by applying direct mode cleanup state', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyHost: 'global.rotgb.711proxy.com',
+    ipProxyPort: '10000',
+    ipProxyApplied: true,
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({
+        state: { ...nextState },
+        options: { ...options },
+      });
+      return {
+        enabled: false,
+        applied: false,
+        reason: 'disabled',
+        provider: '711proxy',
+        exitDetecting: false,
+        exitIp: '',
+        exitRegion: '',
+        exitError: '',
+        error: '',
+      };
+    },
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => (
+      Object.prototype.hasOwnProperty.call(input, 'ipProxyEnabled')
+        ? { ipProxyEnabled: Boolean(input.ipProxyEnabled) }
+        : {}
+    ),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      ipProxyEnabled: false,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyEnabled, false);
+  assert.equal(applyCalls.length, 1);
+  assert.equal(applyCalls[0].state.ipProxyEnabled, false);
+  assert.equal(applyCalls[0].state.ipProxyHost, 'global.rotgb.711proxy.com');
+  assert.deepEqual(applyCalls[0].options, {
+    skipExitProbe: true,
+    resetNetworkState: true,
+    forceAuthRebind: false,
+    suppressAuthRebind: true,
+  });
+  assert.deepEqual(response.proxyRouting, {
+    enabled: false,
+    applied: false,
+    reason: 'disabled',
+    provider: '711proxy',
+    exitDetecting: false,
+    exitIp: '',
+    exitRegion: '',
+    exitError: '',
+    error: '',
+  });
+});
+
 test('handleStepData stores step 6 free status for account book capture', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

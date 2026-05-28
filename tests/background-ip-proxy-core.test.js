@@ -56,6 +56,7 @@ return {
   applyTargetReachabilityExpectation,
   pullIpProxyPoolFromApi,
   getAccountModeProxyPoolFromState,
+  getCurrentIpProxyAuthEntry,
   normalize711ProxyApiConfig,
   normalizeIpProxyAccountList,
   normalizeIpProxyListFromPayload,
@@ -680,6 +681,141 @@ test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snap
   assert.equal(pool.length, 1);
   assert.equal(pool[0].host, '1.2.3.4');
   assert.equal(pool[0].protocol, 'http');
+});
+
+test('IP proxy disabled state forces Chrome direct mode and clears runtime auth state', async () => {
+  const api = loadIpProxyCore();
+  const proxyEvents = [];
+  const stateUpdates = [];
+  const broadcasts = [];
+  const guardEvents = [];
+  const browsingDataCalls = [];
+  let proxyValue = { mode: 'direct' };
+  const originalChrome = globalThis.chrome;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+
+  try {
+    api.chrome.proxy = {
+      settings: {
+        clear(details, callback) {
+          proxyEvents.push({ type: 'clear', details });
+          callback();
+        },
+        set(details, callback) {
+          proxyEvents.push({ type: 'set', details });
+          proxyValue = details?.value || {};
+          callback();
+        },
+        get(_details, callback) {
+          callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: proxyValue,
+          });
+        },
+      },
+    };
+    api.chrome.runtime = {};
+    api.chrome.webRequest = {
+      handlerBehaviorChanged(callback) {
+        callback();
+      },
+    };
+    api.chrome.browsingData = {
+      remove(options, dataTypes) {
+        browsingDataCalls.push({ options, dataTypes });
+        return Promise.resolve();
+      },
+    };
+    api.chrome.declarativeNetRequest = {
+      updateDynamicRules(payload) {
+        guardEvents.push(payload);
+        return Promise.resolve();
+      },
+    };
+    globalThis.chrome = api.chrome;
+    globalThis.setState = async (updates) => {
+      stateUpdates.push(updates);
+    };
+    globalThis.broadcastDataUpdate = (updates) => {
+      broadcasts.push(updates);
+    };
+
+    await api.applyIpProxySettingsFromState({
+      ipProxyEnabled: true,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'account',
+      ipProxyHost: 'global.rotgb.711proxy.com',
+      ipProxyPort: '10000',
+      ipProxyProtocol: 'http',
+      ipProxyUsername: 'user-a',
+      ipProxyPassword: 'pass-a',
+    }, {
+      skipExitProbe: true,
+    });
+    assert.deepEqual(api.getCurrentIpProxyAuthEntry(), {
+      host: 'global.rotgb.711proxy.com',
+      port: 10000,
+      username: 'user-a',
+      password: 'pass-a',
+    });
+    proxyEvents.length = 0;
+    stateUpdates.length = 0;
+    broadcasts.length = 0;
+
+    const status = await api.applyIpProxySettingsFromState({
+      ipProxyEnabled: false,
+      ipProxyService: '711proxy',
+      ipProxyMode: 'account',
+      ipProxyHost: 'global.rotgb.711proxy.com',
+      ipProxyPort: '10000',
+      ipProxyProtocol: 'http',
+      ipProxyUsername: 'user-a',
+      ipProxyPassword: 'pass-a',
+    }, {
+      resetNetworkState: true,
+    });
+
+    assert.equal(status.enabled, false);
+    assert.equal(status.applied, false);
+    assert.equal(status.reason, 'disabled');
+    assert.equal(status.warning, '');
+    assert.equal(api.getCurrentIpProxyAuthEntry(), null);
+    assert.deepEqual(proxyEvents.map((event) => event.type), ['set']);
+    assert.deepEqual(proxyEvents[0].details, {
+      value: { mode: 'direct' },
+      scope: 'regular',
+    });
+    assert.equal(browsingDataCalls.length, 1);
+    assert.ok(guardEvents.some((event) => event.addRules.length === 0));
+    assert.ok(stateUpdates.length > 0);
+    const finalPatch = stateUpdates.at(-1);
+    assert.equal(finalPatch.ipProxyApplied, false);
+    assert.equal(finalPatch.ipProxyAppliedReason, 'disabled');
+    assert.equal(finalPatch.ipProxyAppliedHost, '');
+    assert.equal(finalPatch.ipProxyAppliedPort, 0);
+    assert.equal(finalPatch.ipProxyAppliedHasAuth, false);
+    assert.equal(finalPatch.ipProxyAppliedExitIp, '');
+    assert.equal(finalPatch.ipProxyAppliedExitRegion, '');
+    assert.equal(finalPatch.ipProxyAppliedExitDetecting, false);
+    assert.deepEqual(broadcasts.at(-1), finalPatch);
+  } finally {
+    if (originalChrome === undefined) {
+      delete globalThis.chrome;
+    } else {
+      globalThis.chrome = originalChrome;
+    }
+    if (originalSetState === undefined) {
+      delete globalThis.setState;
+    } else {
+      globalThis.setState = originalSetState;
+    }
+    if (originalBroadcastDataUpdate === undefined) {
+      delete globalThis.broadcastDataUpdate;
+    } else {
+      globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    }
+  }
 });
 
 function installProxySettingsMock(api, initialValue = { mode: 'pac_script', pacScript: { data: 'original' } }) {
