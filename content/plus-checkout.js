@@ -233,6 +233,139 @@ function getHostedAddressFieldValues() {
   };
 }
 
+function hasHostedAttribute(el = null, name = '') {
+  if (!el || !name) {
+    return false;
+  }
+  if (typeof el.hasAttribute === 'function') {
+    return el.hasAttribute(name);
+  }
+  const value = el.getAttribute?.(name);
+  return value !== null && value !== undefined && value !== '';
+}
+
+function isHostedReadOnlyControl(el = null) {
+  if (!el || el.nodeType !== 1) {
+    return false;
+  }
+  const ariaReadOnly = String(el.getAttribute?.('aria-readonly') || '').trim().toLowerCase();
+  return el.readOnly === true
+    || hasHostedAttribute(el, 'readonly')
+    || ariaReadOnly === 'true';
+}
+
+function getHostedElementDiagnosticText(node = null) {
+  if (!node || node.nodeType !== 1) {
+    return '';
+  }
+  return normalizeText([
+    node.tagName ? String(node.tagName).toLowerCase() : '',
+    node.id ? `#${node.id}` : '',
+    node.className ? `.${String(node.className).replace(/\s+/g, '.')}` : '',
+    node.getAttribute?.('class') && !node.className ? `class=${node.getAttribute('class')}` : '',
+    node.getAttribute?.('name') ? `name=${node.getAttribute('name')}` : '',
+    node.getAttribute?.('type') ? `type=${node.getAttribute('type')}` : '',
+    node.getAttribute?.('autocomplete') ? `autocomplete=${node.getAttribute('autocomplete')}` : '',
+    node.getAttribute?.('data-testid') ? `testid=${node.getAttribute('data-testid')}` : '',
+    node.getAttribute?.('aria-label') ? `aria=${node.getAttribute('aria-label')}` : '',
+    node.getAttribute?.('placeholder') ? `placeholder=${node.getAttribute('placeholder')}` : '',
+    node.textContent ? `text=${normalizeText(node.textContent).slice(0, 80)}` : '',
+  ].filter(Boolean).join(' '));
+}
+
+function hasHostedReadOnlyFieldStructureSignal(node = null) {
+  if (!node || node.nodeType !== 1) {
+    return false;
+  }
+  if (isHostedReadOnlyControl(node)) {
+    return true;
+  }
+  const signalText = normalizeText([
+    node.id,
+    node.className,
+    node.getAttribute?.('class'),
+    node.getAttribute?.('data-testid'),
+    node.getAttribute?.('data-test-id'),
+    node.getAttribute?.('data-automation-id'),
+    node.getAttribute?.('role'),
+    node.getAttribute?.('aria-readonly'),
+  ].filter(Boolean).join(' '));
+  return /ReadOnlyFormField|read\s*only|read[-_]?only|readonly/i.test(signalText);
+}
+
+function getHostedReadOnlyEmailLabel(node = null) {
+  if (!node || node.nodeType !== 1) {
+    return '';
+  }
+  const type = String(node.getAttribute?.('type') || node.type || '').trim().toLowerCase();
+  if (type === 'email') {
+    return 'email';
+  }
+  const text = normalizeText([
+    node.textContent,
+    node.innerText,
+    node.value,
+    node.getAttribute?.('aria-label'),
+    node.getAttribute?.('title'),
+    node.getAttribute?.('placeholder'),
+    node.getAttribute?.('name'),
+    node.id,
+  ].filter(Boolean).join(' '));
+  const label = text.match(/email\s*address|e-?mail|\u7535\u5b50\u90ae\u4ef6|\u90ae\u4ef6\u5730\u5740|\u90ae\u7bb1|\u90ae\u4ef6|\u96fb\u5b50\u90f5\u4ef6|\u90f5\u4ef6\u5730\u5740|\u90f5\u7bb1|\u90f5\u4ef6/i);
+  if (label) {
+    return label[0];
+  }
+  const emailAddress = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return emailAddress ? emailAddress[0] : '';
+}
+
+function findHostedReadOnlyEmailField() {
+  let candidates = [];
+  try {
+    candidates = Array.from(document.querySelectorAll('*') || []);
+  } catch {
+    candidates = [];
+  }
+  return candidates.find((node) => (
+    node
+    && hasHostedReadOnlyFieldStructureSignal(node)
+    && getHostedReadOnlyEmailLabel(node)
+    && isVisibleElement(node)
+  )) || null;
+}
+
+function findHostedEditableEmailInput() {
+  const directCandidates = [
+    document.getElementById('email'),
+    document.querySelector('input[type="email"]'),
+    document.querySelector('input[name="email"]'),
+  ];
+  return directCandidates.find((candidate) => (
+    candidate
+    && isVisibleElement(candidate)
+    && isEnabledControl(candidate)
+    && !isHostedReadOnlyControl(candidate)
+  )) || null;
+}
+
+function findHostedEmailTarget() {
+  const emailInput = findHostedEditableEmailInput();
+  if (emailInput) {
+    return {
+      emailInput,
+      readOnlyEmailField: null,
+    };
+  }
+  const readOnlyEmailField = findHostedReadOnlyEmailField();
+  if (readOnlyEmailField) {
+    return {
+      emailInput: null,
+      readOnlyEmailField,
+    };
+  }
+  return null;
+}
+
 async function fillHostedEmailInput(email) {
   const normalizedEmail = normalizeText(email);
   if (!normalizedEmail) {
@@ -242,16 +375,24 @@ async function fillHostedEmailInput(email) {
     100,
     Math.floor(Number(window.__PAYPAL_HOSTED_EMAIL_INPUT_TIMEOUT_MS__) || 15000)
   );
-  const emailInput = await waitUntil(() => {
-    const candidate = document.getElementById('email')
-      || document.querySelector('input[type="email"]')
-      || document.querySelector('input[name="email"]');
-    return candidate && isVisibleElement(candidate) && isEnabledControl(candidate) ? candidate : null;
-  }, {
+  const emailTarget = await waitUntil(() => findHostedEmailTarget(), {
     label: 'hosted checkout 邮箱输入框',
     intervalMs: 300,
     timeoutMs: waitTimeoutMs,
   });
+  if (emailTarget.readOnlyEmailField) {
+    const readOnlyEmailLabel = getHostedReadOnlyEmailLabel(emailTarget.readOnlyEmailField);
+    log(`Plus Checkout：OpenAI hosted checkout 已显示只读邮箱字段（${readOnlyEmailLabel || 'email'}），跳过邮箱填写。`);
+    return {
+      emailFilled: false,
+      emailSkipped: true,
+      readOnlyEmailDetected: true,
+      readOnlyEmailLabel,
+      readOnlyEmailSummary: getHostedElementDiagnosticText(emailTarget.readOnlyEmailField),
+      email: normalizedEmail,
+    };
+  }
+  const emailInput = emailTarget.emailInput;
   fillInput(emailInput, normalizedEmail);
   await sleep(250);
   const renderedEmail = normalizeText(emailInput.value || '');
@@ -261,6 +402,8 @@ async function fillHostedEmailInput(email) {
   log(`Plus Checkout：已填写 OpenAI hosted checkout 支付邮箱 ${normalizedEmail}`);
   return {
     emailFilled: true,
+    emailSkipped: false,
+    readOnlyEmailDetected: false,
     email: normalizedEmail,
   };
 }
@@ -580,7 +723,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
   }
 
   const normalizedEmail = normalizeText(payload.email || '');
-  await fillHostedEmailInput(normalizedEmail);
+  const hostedEmailResult = await fillHostedEmailInput(normalizedEmail);
 
   hideHostedAddressAutocomplete();
   const payPalButton = findHostedPayPalButton();
@@ -611,6 +754,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
   const hostedCardDeclinedError = getHostedOpenAiCardDeclinedState();
   return {
     ...clickResult,
+    ...hostedEmailResult,
     hostedAddressError: hostedAddressError.hasError,
     hostedAddressErrorMessage: hostedAddressError.message,
     hostedCardDeclinedError: hostedCardDeclinedError.hasError,
@@ -2484,6 +2628,8 @@ async function inspectPlusCheckoutState(options = {}) {
   const hostedAddressError = getHostedOpenAiAddressErrorState();
   const hostedCardDeclinedError = getHostedOpenAiCardDeclinedState();
   const hostedCardFallback = getHostedOpenAiCardFallbackState();
+  const hostedEmailInput = findHostedEditableEmailInput();
+  const hostedReadOnlyEmailField = findHostedReadOnlyEmailField();
   const state = {
     url: location.href,
     readyState: document.readyState,
@@ -2503,6 +2649,10 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedOpenAiPage: isPayPalHostedOpenAiCheckoutPage(),
     hostedVerificationVisible: hasHostedOpenAiVerificationDialog(),
     hostedPayPalButtonFound: Boolean(findHostedPayPalButton()),
+    hostedEmailInputDetected: Boolean(hostedEmailInput),
+    hostedReadOnlyEmailDetected: Boolean(hostedReadOnlyEmailField),
+    hostedReadOnlyEmailLabel: getHostedReadOnlyEmailLabel(hostedReadOnlyEmailField),
+    hostedReadOnlyEmailSummary: getHostedElementDiagnosticText(hostedReadOnlyEmailField),
     hostedAddressError: hostedAddressError.hasError,
     hostedAddressErrorMessage: hostedAddressError.message,
     hostedCardDeclinedError: hostedCardDeclinedError.hasError,

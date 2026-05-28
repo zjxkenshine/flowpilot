@@ -18,6 +18,7 @@ function createCheckoutContentHarness(options = {}) {
   let listener = null;
   const elements = [];
   const includeHostedEmailInput = options.includeHostedEmailInput !== false;
+  const includeHostedReadOnlyEmail = Boolean(options.includeHostedReadOnlyEmail);
   const locationHref = options.locationHref || 'https://chatgpt.com/checkout/openai_ie/cs_test';
   const locationUrl = new URL(locationHref);
   const omitHostedPayPalButton = Boolean(options.omitHostedPayPalButton);
@@ -48,6 +49,9 @@ function createCheckoutContentHarness(options = {}) {
         if (name === 'id') return this.id || attrMap.get(name) || '';
         if (name === 'type') return this.type || attrMap.get(name) || '';
         return attrMap.has(name) ? attrMap.get(name) : '';
+      },
+      hasAttribute(name) {
+        return attrMap.has(name);
       },
       setAttribute(name, nextValue) {
         attrMap.set(name, String(nextValue));
@@ -103,6 +107,15 @@ function createCheckoutContentHarness(options = {}) {
 
   const paymentButton = createElement({ tagName: 'BUTTON', text: 'PayPal', attrs: { role: 'tab', 'aria-selected': '', 'data-testid': 'paypal-accordion-item-button' } });
   const hostedEmailInput = createElement({ tagName: 'INPUT', id: 'email', type: 'text', attrs: { name: 'email', placeholder: 'email@example.com' } });
+  const hostedReadOnlyEmail = createElement({
+    tagName: 'DIV',
+    text: options.hostedReadOnlyEmailText || 'Email payment@example.com',
+    attrs: {
+      class: 'ReadOnlyFormField',
+      'data-testid': 'customer-email-readonly',
+      'aria-label': 'Email address',
+    },
+  });
   const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', value: options.hostedAddressValue || '', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
   const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
@@ -165,6 +178,9 @@ function createCheckoutContentHarness(options = {}) {
   if (includeHostedEmailInput) {
     elements.push(hostedEmailInput);
   }
+  if (includeHostedReadOnlyEmail) {
+    elements.push(hostedReadOnlyEmail);
+  }
   if (options.includeHostedCardBranch) {
     elements.push(hostedCardNumberInput, hostedCardAccordion);
   }
@@ -224,6 +240,7 @@ function createCheckoutContentHarness(options = {}) {
       },
       querySelectorAll(selector) {
         const text = String(selector || '');
+        if (text === '*') return elements;
         if (text.includes('label[for=')) return [];
         if (text.includes('[role="option"]') || text.includes('.pac-item') || text === 'li') return options.omitAddressSuggestion ? [] : [suggestionOption];
       if (text === 'iframe') return options.includeHostedPaypalDisabledFrame ? [hostedPaypalDisabledFrame] : [];
@@ -5023,6 +5040,49 @@ test('OpenAI hosted checkout stops before PayPal selection when email input is m
   assert.match(result.error, /email|邮箱|郵箱/i);
   assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'paypal'), false);
   assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingAddressLine1'), false);
+});
+
+test('OpenAI hosted checkout skips email fill when read-only email field is already present', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    includeHostedEmailInput: false,
+    includeHostedReadOnlyEmail: true,
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedEmailInputTimeoutMs: 100,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        street: '1 Main St',
+        city: 'New York',
+        state: 'New York',
+        zip: '10001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.emailSkipped, true);
+  assert.equal(result.readOnlyEmailDetected, true);
+  assert.match(result.readOnlyEmailLabel, /email/i);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'email'), false);
+  assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'paypal'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingAddressLine1' && event.value === '1 Main St'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'click' && event.target === 'subscribe'), true);
+
+  const state = await send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedEmailInputDetected, false);
+  assert.equal(state.hostedReadOnlyEmailDetected, true);
+  assert.match(state.hostedReadOnlyEmailLabel, /email/i);
+  assert.match(state.hostedReadOnlyEmailSummary, /ReadOnlyFormField|customer-email-readonly/i);
 });
 
 test('OpenAI hosted checkout reports card fallback state when PayPal is unavailable and card fields are visible', async () => {
