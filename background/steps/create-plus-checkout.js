@@ -1429,9 +1429,15 @@
       if (!result || typeof result !== 'object') {
         throw new Error(`步骤 ${stepNumber}：PayPal 资料页提交没有返回有效结果。`);
       }
+      const stage = String(result.stage || result.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN).trim();
+      const expectedStage = String(result.expectedStage || PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT).trim();
+      if (
+        expectedStage === PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT
+        && getHostedStageOrder(stage) > getHostedStageOrder(PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT)
+      ) {
+        return result;
+      }
       if (result.skipped || result.submitted === false) {
-        const stage = String(result.stage || result.hostedStage || PAYPAL_HOSTED_STAGE_UNKNOWN).trim();
-        const expectedStage = String(result.expectedStage || PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT).trim();
         throw new Error(`步骤 ${stepNumber}：PayPal 资料页未执行提交（当前状态：${stage || PAYPAL_HOSTED_STAGE_UNKNOWN}，期望状态：${expectedStage || PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT}）。`);
       }
       if (result.phoneMatched !== true) {

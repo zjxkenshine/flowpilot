@@ -11,6 +11,7 @@ const globalScope = {};
 new Function('self', `${gopayUtilsSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
+const PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
 
 function createCheckoutContentHarness(options = {}) {
   const checkoutEvents = [];
@@ -3864,6 +3865,59 @@ test('PayPal hosted card node stops immediately when hosted submit is skipped', 
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
 
+test('PayPal hosted card node completes when skipped submit already reached review consent', async () => {
+  const events = [];
+  let statePollCount = 0;
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => createHostedAddressResponse(),
+    getState: async () => createHostedRuntimeState(),
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        return {
+          hostedStage: statePollCount === 1 ? 'guest_checkout' : 'review_consent',
+        };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        return {
+          stage: 'review_consent',
+          expectedStage: 'guest_checkout',
+          submitted: false,
+          skipped: true,
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '4155551234',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  const complete = events.find((event) => event.type === 'complete' && event.step === 'paypal-hosted-card');
+  assert.ok(complete);
+  assert.equal(complete.payload.plusHostedCheckoutLastStage, 'review_consent');
+  assert.equal(events.some((event) => event.type === 'log' && /未执行提交|submit/i.test(event.message)), false);
+});
+
 test('PayPal hosted card node refills when phone is empty while waiting for transition', async () => {
   const events = [];
   let statePollCount = 0;
@@ -4531,7 +4585,7 @@ test('PayPal hosted card node uses address suggestion fallback after fresh addre
 
   const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
   const fallbackSubmitEvents = submitEvents.filter((event) => event.message.payload?.useAddressSuggestionFallback);
-  assert.equal(fetchCount, 2);
+  assert.equal(fetchCount, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS + 1);
   assert.equal(fallbackSubmitEvents.length, 1);
   assert.equal(fallbackSubmitEvents[0].message.payload.address.street, '8 Retry Ave');
   assert.equal(fallbackSubmitEvents[0].message.payload.addressOnly, true);
@@ -4611,8 +4665,8 @@ test('PayPal hosted card node stops after invalid address retry limit', async ()
   );
 
   const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
-  assert.equal(submitEvents.length, 5);
-  assert.equal(fetchCount, 4);
+  assert.equal(submitEvents.length, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS + 2);
+  assert.equal(fetchCount, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS + 1);
   assert.equal(submitEvents.filter((event) => event.message.payload?.useAddressSuggestionFallback).length, 1);
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
@@ -6266,7 +6320,7 @@ test('PayPal hosted create account uses address suggestion fallback after fresh 
         if (statePollCount === 1) {
           return { hostedStage: 'create_account' };
         }
-        if (statePollCount <= 3) {
+        if (statePollCount <= PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS + 2) {
           return {
             hostedStage: 'create_account',
             hostedCreateAccountAddressError: true,
@@ -6292,7 +6346,7 @@ test('PayPal hosted create account uses address suggestion fallback after fresh 
 
   const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
   const fallbackSubmitEvents = submitEvents.filter((event) => event.message.payload?.useAddressSuggestionFallback);
-  assert.equal(fetchCount, 1);
+  assert.equal(fetchCount, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS);
   assert.equal(fallbackSubmitEvents.length, 1);
   assert.equal(fallbackSubmitEvents[0].message.payload.address.street, '8 Retry Ave');
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-create-account'), true);
@@ -6363,8 +6417,8 @@ test('PayPal hosted create account stops after invalid address retry limit', asy
   );
 
   const submitEvents = events.filter((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
-  assert.equal(submitEvents.length, 5);
-  assert.equal(fetchCount, 3);
+  assert.equal(submitEvents.length, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS + 2);
+  assert.equal(fetchCount, PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS);
   assert.equal(submitEvents.filter((event) => event.message.payload?.useAddressSuggestionFallback).length, 1);
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
