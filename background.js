@@ -5946,6 +5946,30 @@ function buildFreshAutoRunKeepState(prevState = {}) {
   keepState.browserFingerprintAppliedAt = 0;
   keepState.browserFingerprintExitIp = '';
   keepState.browserFingerprintExitRegion = '';
+  [
+    'ipProxyApiPool',
+    'ipProxyApiCurrentIndex',
+    'ipProxyApiCurrent',
+    'ipProxyAccountPool',
+    'ipProxyAccountCurrentIndex',
+    'ipProxyAccountCurrent',
+    'ipProxyPool',
+    'ipProxyCurrentIndex',
+    'ipProxyCurrent',
+  ].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(sourceState, key)) {
+      keepState[key] = cloneAutoRunKeepStateValue(sourceState[key]);
+    }
+  });
+  keepState.ipProxyApplied = Boolean(sourceState.ipProxyApplied);
+  keepState.ipProxyAppliedReason = String(sourceState.ipProxyAppliedReason || 'disabled').trim().toLowerCase() || 'disabled';
+  keepState.ipProxyAppliedHost = String(sourceState.ipProxyAppliedHost || '').trim();
+  keepState.ipProxyAppliedPort = Number(sourceState.ipProxyAppliedPort) || 0;
+  keepState.ipProxyAppliedRegion = String(sourceState.ipProxyAppliedRegion || '').trim();
+  keepState.ipProxyAppliedHasAuth = Boolean(sourceState.ipProxyAppliedHasAuth);
+  keepState.ipProxyAppliedProvider = String(sourceState.ipProxyAppliedProvider || '711proxy').trim().toLowerCase() || '711proxy';
+  keepState.ipProxyAppliedError = String(sourceState.ipProxyAppliedError || '').trim();
+  keepState.ipProxyAppliedWarning = String(sourceState.ipProxyAppliedWarning || '').trim();
   keepState.ipProxyAppliedExitIp = String(sourceState.ipProxyAppliedExitIp || '').trim();
   keepState.ipProxyAppliedExitRegion = String(sourceState.ipProxyAppliedExitRegion || '').trim();
   keepState.ipProxyAppliedExitDetecting = Boolean(sourceState.ipProxyAppliedExitDetecting);

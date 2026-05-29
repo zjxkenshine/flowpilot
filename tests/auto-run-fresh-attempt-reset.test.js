@@ -181,6 +181,75 @@ let currentState = {
   heroSmsLastPriceCountryLabel: 'Thailand',
   heroSmsLastPriceUserLimit: '0.08',
   heroSmsLastPriceAt: 123456789,
+  ipProxyApiPool: [
+    {
+      host: 'proxy-a.example',
+      port: 8001,
+      username: 'user-a',
+      password: 'pass-a',
+      protocol: 'http',
+      region: 'US',
+      provider: '711proxy',
+    },
+    {
+      host: 'proxy-b.example',
+      port: 8002,
+      username: 'user-b',
+      password: 'pass-b',
+      protocol: 'http',
+      region: 'JP',
+      provider: '711proxy',
+    },
+  ],
+  ipProxyApiCurrentIndex: 1,
+  ipProxyApiCurrent: {
+    host: 'proxy-b.example',
+    port: 8002,
+    username: 'user-b',
+    password: 'pass-b',
+    protocol: 'http',
+    region: 'JP',
+    provider: '711proxy',
+  },
+  ipProxyPool: [
+    {
+      host: 'proxy-a.example',
+      port: 8001,
+      username: 'user-a',
+      password: 'pass-a',
+      protocol: 'http',
+      region: 'US',
+      provider: '711proxy',
+    },
+    {
+      host: 'proxy-b.example',
+      port: 8002,
+      username: 'user-b',
+      password: 'pass-b',
+      protocol: 'http',
+      region: 'JP',
+      provider: '711proxy',
+    },
+  ],
+  ipProxyCurrentIndex: 1,
+  ipProxyCurrent: {
+    host: 'proxy-b.example',
+    port: 8002,
+    username: 'user-b',
+    password: 'pass-b',
+    protocol: 'http',
+    region: 'JP',
+    provider: '711proxy',
+  },
+  ipProxyApplied: true,
+  ipProxyAppliedReason: 'applied',
+  ipProxyAppliedHost: 'proxy-b.example',
+  ipProxyAppliedPort: 8002,
+  ipProxyAppliedRegion: 'JP',
+  ipProxyAppliedHasAuth: true,
+  ipProxyAppliedProvider: '711proxy',
+  ipProxyAppliedError: '',
+  ipProxyAppliedWarning: '',
   ipProxyAppliedExitIp: '203.0.113.8',
   ipProxyAppliedExitRegion: 'JP',
   ipProxyAppliedExitDetecting: false,
@@ -498,6 +567,31 @@ return {
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceCountryLabel, '', 'price snapshot label should be cleared on reset');
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceUserLimit, '', 'price snapshot user limit should be cleared on reset');
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceAt, 0, 'price snapshot timestamp should be cleared on reset');
+  assert.strictEqual(snapshot.currentState.ipProxyApiPool.length, 2, 'IP proxy API pool should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyApiCurrentIndex, 1, 'IP proxy API current index should survive fresh-attempt reset');
+  assert.deepStrictEqual(
+    snapshot.currentState.ipProxyApiCurrent,
+    {
+      host: 'proxy-b.example',
+      port: 8002,
+      username: 'user-b',
+      password: 'pass-b',
+      protocol: 'http',
+      region: 'JP',
+      provider: '711proxy',
+    },
+    'IP proxy API current entry should survive fresh-attempt reset'
+  );
+  assert.strictEqual(snapshot.currentState.ipProxyCurrent?.host, 'proxy-b.example', 'legacy current proxy summary should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyApplied, true, 'IP proxy applied flag should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedReason, 'applied', 'IP proxy applied reason should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedHost, 'proxy-b.example', 'IP proxy applied host should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedPort, 8002, 'IP proxy applied port should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedRegion, 'JP', 'IP proxy applied region should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedHasAuth, true, 'IP proxy applied auth flag should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedProvider, '711proxy', 'IP proxy applied provider should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedError, '', 'IP proxy applied error should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedWarning, '', 'IP proxy applied warning should survive fresh-attempt reset');
   assert.strictEqual(snapshot.currentState.ipProxyAppliedExitIp, '203.0.113.8', 'IP proxy exit IP should survive fresh-attempt reset');
   assert.strictEqual(snapshot.currentState.ipProxyAppliedExitRegion, 'JP', 'IP proxy exit region should survive fresh-attempt reset');
   assert.strictEqual(snapshot.currentState.ipProxyAppliedExitDetecting, false, 'IP proxy exit detecting state should survive fresh-attempt reset');
