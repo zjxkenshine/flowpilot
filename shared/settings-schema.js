@@ -55,6 +55,19 @@
     return Math.min(300, Math.max(5, Math.floor(numeric)));
   }
 
+  function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = 30) {
+    const fallbackNumber = Math.min(180, Math.max(5, Math.floor(Number(fallback) || 30)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(180, Math.max(5, Math.floor(numeric)));
+  }
+
   function createSettingsSchema(deps = {}) {
     const rootScope = typeof self !== 'undefined' ? self : globalThis;
     const flowRegistry = deps.flowRegistry || rootScope.MultiPageFlowRegistry || {};
@@ -358,6 +371,7 @@
               autoRunPreserveIssueLogsOnRestart: false,
               registrationStageWaitSeconds: 30,
               signupIdentityRedirectTimeoutSeconds: 45,
+              authContentScriptRecoveryTimeoutSeconds: 30,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -849,6 +863,12 @@
                 ?? defaults.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds,
                 defaults.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds
               ),
+              authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
+                input?.authContentScriptRecoveryTimeoutSeconds
+                ?? nested?.flows?.openai?.autoRun?.authContentScriptRecoveryTimeoutSeconds
+                ?? defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds,
+                defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
                   ?? nested?.flows?.openai?.autoRun?.stepExecutionRange
@@ -1036,6 +1056,7 @@
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
       next.registrationStageWaitSeconds = openaiState.autoRun.registrationStageWaitSeconds;
       next.signupIdentityRedirectTimeoutSeconds = openaiState.autoRun.signupIdentityRedirectTimeoutSeconds;
+      next.authContentScriptRecoveryTimeoutSeconds = openaiState.autoRun.authContentScriptRecoveryTimeoutSeconds;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

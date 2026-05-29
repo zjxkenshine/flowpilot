@@ -32,6 +32,7 @@
       waitForTabStableComplete = null,
       phoneVerificationHelpers = null,
       resolveSignupMethod = () => 'email',
+      getAuthContentScriptRecoveryTimeoutMsForState = () => 30000,
     } = deps;
 
     function buildSignupProfileForVerificationStep() {
@@ -224,7 +225,7 @@
             || '',
         },
       };
-      const prepareTimeoutMs = 30000;
+      const prepareTimeoutMs = Math.max(5000, Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000);
       const prepareResponseTimeoutMs = 30000;
       const prepareAttemptTimeoutMs = 15000;
       const prepareStartAt = Date.now();
@@ -241,6 +242,7 @@
           prepareResult = typeof sendToContentScriptResilient === 'function'
             ? await sendToContentScriptResilient('signup-page', prepareRequest, {
               timeoutMs: Math.max(1000, Math.min(prepareAttemptTimeoutMs, remainingBeforePrepareMs)),
+              transportRecoveryTimeoutMs: Math.max(1000, Math.min(prepareTimeoutMs, remainingBeforePrepareMs)),
               responseTimeoutMs: prepareResponseTimeoutMs,
               retryDelayMs: 700,
               logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',
@@ -273,6 +275,7 @@
               },
             }, {
               timeoutMs: Math.min(12000, remainingMs),
+              transportRecoveryTimeoutMs: Math.min(prepareTimeoutMs, remainingMs),
               responseTimeoutMs: Math.min(12000, remainingMs),
               retryDelayMs: 700,
               logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',

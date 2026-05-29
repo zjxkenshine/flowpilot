@@ -1030,6 +1030,15 @@
               <span class="data-unit">秒</span>
             </div>
           </div>
+          <div class="setting-group setting-group-secondary auth-content-script-recovery-timeout-setting">
+            <span class="setting-caption">认证脚本恢复</span>
+            <div class="setting-controls">
+              <input type="number" id="input-auth-content-script-recovery-timeout-seconds"
+                class="data-input auto-delay-input" value="30" min="5" max="180" step="1"
+                title="认证页跳转或刷新后等待内容脚本重新接回的最长秒数" />
+              <span class="data-unit">秒</span>
+            </div>
+          </div>
           <div class="setting-group setting-group-secondary">
             <span class="setting-caption">PAYPAL回调自动重试</span>
             <label class="toggle-switch" for="input-auto-run-retry-paypal-callback"

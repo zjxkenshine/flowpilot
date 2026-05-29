@@ -118,6 +118,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
   'signupIdentityRedirectTimeoutSeconds',
+  'authContentScriptRecoveryTimeoutSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -130,6 +131,9 @@ const SETTINGS_SCHEMA_VIEW_KEY_SET = new Set(SETTINGS_SCHEMA_VIEW_KEYS);
 const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
 const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
 const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
+const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
 const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   panelMode: 'cpa',
@@ -186,6 +190,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
   signupIdentityRedirectTimeoutSeconds: 45,
+  authContentScriptRecoveryTimeoutSeconds: 30,
   sub2apiUrl: '',
   sub2apiEmail: '',
   sub2apiPassword: '',
@@ -357,6 +362,8 @@ function resolveSignupMethod(state = {}) {
 }
 function resolveLegacyAutoStepDelaySeconds() { return undefined; }
 ${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
+${extractFunction('normalizeAuthContentScriptRecoveryTimeoutSeconds')}
+${extractFunction('getAuthContentScriptRecoveryTimeoutMsForState')}
 ${extractFunction('normalizePersistentSettingValue')}
 ${extractFunction('getSettingsSchemaApi')}
 ${extractFunction('projectSettingsSchemaView')}
@@ -373,6 +380,7 @@ return {
   buildPersistedSettingsStoragePayload,
   getPersistedSettings,
   setPersistentSettings,
+  getAuthContentScriptRecoveryTimeoutMsForState,
   getRequestedKeys: typeof getRequestedKeys === 'function' ? getRequestedKeys : () => [],
   getPersistedWrites: typeof getPersistedWrites === 'function' ? getPersistedWrites : () => [],
   getRemovedKeys: typeof getRemovedKeys === 'function' ? getRemovedKeys : () => [],
@@ -497,6 +505,65 @@ test('buildPersistentSettingsPayload persists signup identity redirect timeout i
   }, { requireKnownKeys: true });
   assert.equal(nested.signupIdentityRedirectTimeoutSeconds, 120);
   assert.equal(nested.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 120);
+});
+
+test('buildPersistentSettingsPayload persists auth content script recovery timeout into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.authContentScriptRecoveryTimeoutSeconds, 30);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 30);
+
+  const flat = api.buildPersistentSettingsPayload({
+    authContentScriptRecoveryTimeoutSeconds: 60,
+  }, { fillDefaults: true });
+  assert.equal(flat.authContentScriptRecoveryTimeoutSeconds, 60);
+  assert.equal(flat.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 60);
+
+  const clampedLow = api.buildPersistentSettingsPayload({
+    authContentScriptRecoveryTimeoutSeconds: 1,
+  }, { fillDefaults: true });
+  assert.equal(clampedLow.authContentScriptRecoveryTimeoutSeconds, 5);
+  assert.equal(clampedLow.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 5);
+
+  const clampedHigh = api.buildPersistentSettingsPayload({
+    authContentScriptRecoveryTimeoutSeconds: 999,
+  }, { fillDefaults: true });
+  assert.equal(clampedHigh.authContentScriptRecoveryTimeoutSeconds, 180);
+  assert.equal(clampedHigh.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 180);
+
+  const invalid = api.buildPersistentSettingsPayload({
+    authContentScriptRecoveryTimeoutSeconds: 'slow',
+  }, { fillDefaults: true });
+  assert.equal(invalid.authContentScriptRecoveryTimeoutSeconds, 30);
+  assert.equal(invalid.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 30);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            authContentScriptRecoveryTimeoutSeconds: 75,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.authContentScriptRecoveryTimeoutSeconds, 75);
+  assert.equal(nested.settingsState.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds, 75);
+});
+
+test('auth content script recovery timeout helper returns normalized milliseconds', () => {
+  const api = buildHarness();
+
+  assert.equal(api.getAuthContentScriptRecoveryTimeoutMsForState({
+    authContentScriptRecoveryTimeoutSeconds: 60,
+  }), 60000);
+  assert.equal(api.getAuthContentScriptRecoveryTimeoutMsForState({}), 30000);
+  assert.equal(api.getAuthContentScriptRecoveryTimeoutMsForState({
+    authContentScriptRecoveryTimeoutSeconds: 'slow',
+  }), 30000);
 });
 
 test('buildPersistentSettingsPayload persists browser fingerprint switch level and language into settings schema', () => {

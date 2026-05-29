@@ -7,6 +7,7 @@
       completeNodeFromBackground,
       getErrorMessage,
       getLoginAuthStateLabel,
+      getAuthContentScriptRecoveryTimeoutMsForState = () => 30000,
       getOAuthFlowStepTimeoutMs,
       getState,
       isAddPhoneAuthFailure = (error) => {
@@ -338,6 +339,10 @@
               oauthUrl,
             })
             : 180000;
+          const authRecoveryTimeoutMs = Math.max(
+            5000,
+            Number(getAuthContentScriptRecoveryTimeoutMsForState(currentState)) || 30000
+          );
 
           if (attempt === 1) {
             await addLog('正在打开最新 OAuth 链接并登录...', 'info', {
@@ -389,6 +394,7 @@
             },
             {
               timeoutMs: loginTimeoutMs,
+              transportRecoveryTimeoutMs: authRecoveryTimeoutMs,
               responseTimeoutMs: loginTimeoutMs,
               retryDelayMs: 700,
               logMessage: '认证页正在切换，等待页面重新就绪后继续登录...',

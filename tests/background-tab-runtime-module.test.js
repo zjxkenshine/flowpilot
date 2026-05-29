@@ -274,6 +274,57 @@ test('tab runtime replays retryable transport recovery hook and surfaces a local
   assert.equal(recoveryCalls > 0, true);
 });
 
+test('tab runtime caps queued reconnect wait with transport recovery timeout', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async () => ({
+          id: 9,
+          windowId: 1,
+          url: 'https://auth.openai.com/log-in',
+          status: 'complete',
+        }),
+        query: async () => [],
+        sendMessage: async () => ({ ok: true }),
+      },
+    },
+    getSourceLabel: () => '认证页',
+    getState: async () => ({
+      tabRegistry: {
+        'signup-page': { tabId: 9, ready: false },
+      },
+      sourceLastUrls: {},
+    }),
+    isRetryableContentScriptTransportError: (error) => /内容脚本|Receiving end/i.test(String(error?.message || error || '')),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    runtime.sendToContentScriptResilient('signup-page', {
+      type: 'EXECUTE_NODE',
+      nodeId: 'oauth-login',
+      payload: {},
+    }, {
+      timeoutMs: 1000,
+      responseTimeoutMs: 1000,
+      transportRecoveryTimeoutMs: 5,
+      retryDelayMs: 0,
+    }),
+    /页面刚完成跳转或刷新，内容脚本还没有重新接回/
+  );
+  assert.equal(Date.now() - startedAt < 500, true);
+});
+
 test('tab runtime localized reconnect error remains recoverable for step 4 verification fallback', async () => {
   const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const verificationFlowSource = fs.readFileSync('background/verification-flow.js', 'utf8');

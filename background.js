@@ -739,6 +739,9 @@ const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
 const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
 const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
 const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
+const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -1623,6 +1626,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
   registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
   signupIdentityRedirectTimeoutSeconds: DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS,
+  authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
   step6CookieCleanupEnabled: false,
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
@@ -1823,6 +1827,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunPreserveIssueLogsOnRestart',
   'registrationStageWaitSeconds',
   'signupIdentityRedirectTimeoutSeconds',
+  'authContentScriptRecoveryTimeoutSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2032,6 +2037,30 @@ function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT
   return Math.min(
     SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS,
     Math.max(SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS) {
+  const fallbackNumber = Math.min(
+    AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS,
+    Math.max(
+      AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS,
+      Math.floor(Number(fallback) || DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS,
+    Math.max(AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
   );
 }
 
@@ -4425,6 +4454,11 @@ function normalizePersistentSettingValue(key, value) {
         value,
         PERSISTED_SETTING_DEFAULTS.signupIdentityRedirectTimeoutSeconds
       );
+    case 'authContentScriptRecoveryTimeoutSeconds':
+      return normalizeAuthContentScriptRecoveryTimeoutSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
+      );
     case 'verificationResendCount':
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
@@ -5313,6 +5347,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
   assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
   assignIfUpdated('signupIdentityRedirectTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupIdentityRedirectTimeoutSeconds']);
+  assignIfUpdated('authContentScriptRecoveryTimeoutSeconds', ['flows', 'openai', 'autoRun', 'authContentScriptRecoveryTimeoutSeconds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5469,6 +5504,10 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
           signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSeconds(
             prevState?.signupIdentityRedirectTimeoutSeconds,
             PERSISTED_SETTING_DEFAULTS.signupIdentityRedirectTimeoutSeconds
+          ),
+          authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
+            prevState?.authContentScriptRecoveryTimeoutSeconds,
+            PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
           ),
           ...(normalizedStepExecutionRangeByFlow.openai
             ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }
@@ -13043,6 +13082,13 @@ function getRegistrationStageWaitSecondsForState(state = {}) {
   );
 }
 
+function getAuthContentScriptRecoveryTimeoutMsForState(state = {}) {
+  return normalizeAuthContentScriptRecoveryTimeoutSeconds(
+    state?.authContentScriptRecoveryTimeoutSeconds,
+    PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
+  ) * 1000;
+}
+
 function notifyNodeComplete(nodeId, payload) {
   const normalizedNodeId = String(nodeId || '').trim();
   const waiter = nodeWaiters.get(normalizedNodeId);
@@ -16718,6 +16764,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   waitForTabStableComplete,
   phoneVerificationHelpers,
   resolveSignupMethod,
+  getAuthContentScriptRecoveryTimeoutMsForState,
 });
 const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
   addLog,
@@ -16748,6 +16795,7 @@ const step7Executor = self.MultiPageBackgroundStep7?.createStep7Executor({
   completeNodeFromBackground,
   getErrorMessage,
   getLoginAuthStateLabel,
+  getAuthContentScriptRecoveryTimeoutMsForState,
   getOAuthFlowStepTimeoutMs,
   getState,
   getTabId,
@@ -16776,6 +16824,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   ensureStep8VerificationPageReady,
   getOAuthFlowRemainingMs,
   getOAuthFlowStepTimeoutMs,
+  getAuthContentScriptRecoveryTimeoutMsForState,
   getPanelMode,
   getMailConfig,
   getState,
@@ -18018,6 +18067,10 @@ async function getLoginAuthStateFromContent(options = {}) {
   const visibleStep = Math.floor(Number(options.visibleStep || options.logStep || options.step) || 0);
   const logStep = visibleStep > 0 ? visibleStep : null;
   const { logMessage = '认证页正在切换，等待页面重新就绪后继续确认验证码页状态...' } = options;
+  const defaultTimeoutMs = getAuthContentScriptRecoveryTimeoutMsForState(
+    options.state || await getState().catch(() => ({}))
+  );
+  const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
   const result = await sendToContentScriptResilient(
     'signup-page',
     {
@@ -18026,9 +18079,10 @@ async function getLoginAuthStateFromContent(options = {}) {
       payload: {},
     },
     {
-      timeoutMs: options.timeoutMs ?? 15000,
+      timeoutMs,
+      transportRecoveryTimeoutMs: defaultTimeoutMs,
       retryDelayMs: options.retryDelayMs ?? 600,
-      responseTimeoutMs: options.responseTimeoutMs ?? (options.timeoutMs ?? 15000),
+      responseTimeoutMs: options.responseTimeoutMs ?? timeoutMs,
       logMessage,
       logStep,
       logStepKey: options.logStepKey || '',
@@ -18478,10 +18532,13 @@ async function shouldDeferStep9CallbackTimeout(details = {}) {
 
 async function ensureStep8SignupPageReady(tabId, options = {}) {
   const visibleStep = Math.floor(Number(options.visibleStep || options.logStep || options.step) || 0);
+  const defaultTimeoutMs = getAuthContentScriptRecoveryTimeoutMsForState(
+    options.state || await getState().catch(() => ({}))
+  );
   await ensureContentScriptReadyOnTab('signup-page', tabId, {
     inject: SIGNUP_PAGE_INJECT_FILES,
     injectSource: 'signup-page',
-    timeoutMs: options.timeoutMs ?? 15000,
+    timeoutMs: options.timeoutMs ?? defaultTimeoutMs,
     retryDelayMs: options.retryDelayMs ?? 600,
     logMessage: options.logMessage || '',
     logStep: visibleStep > 0 ? visibleStep : null,
@@ -18619,6 +18676,9 @@ async function prepareStep8DebuggerClick(tabId, options = {}) {
   const timeoutMs = options.timeoutMs ?? 15000;
   const responseTimeoutMs = options.responseTimeoutMs ?? timeoutMs;
   const visibleStep = Math.floor(Number(options.visibleStep) || 0) || 9;
+  const recoveryTimeoutMs = getAuthContentScriptRecoveryTimeoutMsForState(
+    options.state || await getState().catch(() => ({}))
+  );
   await ensureStep8SignupPageReady(tabId, {
     timeoutMs,
     visibleStep,
@@ -18631,6 +18691,7 @@ async function prepareStep8DebuggerClick(tabId, options = {}) {
     payload: { visibleStep, nodeId: 'confirm-oauth' },
   }, {
     timeoutMs,
+    transportRecoveryTimeoutMs: recoveryTimeoutMs,
     responseTimeoutMs,
     retryDelayMs: 600,
     logMessage: '认证页正在切换，等待 OAuth 同意页按钮重新就绪...',
@@ -18649,6 +18710,9 @@ async function triggerStep8ContentStrategy(tabId, strategy, options = {}) {
   const timeoutMs = options.timeoutMs ?? 15000;
   const responseTimeoutMs = options.responseTimeoutMs ?? timeoutMs;
   const visibleStep = Math.floor(Number(options.visibleStep) || 0) || 9;
+  const recoveryTimeoutMs = getAuthContentScriptRecoveryTimeoutMsForState(
+    options.state || await getState().catch(() => ({}))
+  );
   await ensureStep8SignupPageReady(tabId, {
     timeoutMs,
     visibleStep,
@@ -18667,6 +18731,7 @@ async function triggerStep8ContentStrategy(tabId, strategy, options = {}) {
     },
   }, {
     timeoutMs,
+    transportRecoveryTimeoutMs: recoveryTimeoutMs,
     responseTimeoutMs,
     retryDelayMs: 600,
     logMessage: '认证页正在切换，等待“继续”按钮重新就绪...',
@@ -18686,6 +18751,9 @@ async function recoverAuthRetryPageOnTab(tabId, payload = {}, options = {}) {
   const timeoutMs = options.timeoutMs ?? 15000;
   const responseTimeoutMs = options.responseTimeoutMs ?? timeoutMs;
   const visibleStep = Math.floor(Number(options.visibleStep || payload?.visibleStep || payload?.step) || 0) || 9;
+  const recoveryTimeoutMs = getAuthContentScriptRecoveryTimeoutMsForState(
+    options.state || await getState().catch(() => ({}))
+  );
   await ensureStep8SignupPageReady(tabId, {
     timeoutMs: readyTimeoutMs,
     retryDelayMs: options.retryDelayMs ?? 600,
@@ -18699,6 +18767,7 @@ async function recoverAuthRetryPageOnTab(tabId, payload = {}, options = {}) {
     payload: { nodeId: 'confirm-oauth', ...(payload || {}) },
   }, {
     timeoutMs,
+    transportRecoveryTimeoutMs: recoveryTimeoutMs,
     responseTimeoutMs,
     retryDelayMs: options.retryDelayMs ?? 600,
     logMessage: options.logMessage || '认证页正在切换，等待“重试”按钮重新就绪...',

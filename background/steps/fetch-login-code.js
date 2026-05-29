@@ -16,6 +16,7 @@
       ensureStep8VerificationPageReady,
       getOAuthFlowRemainingMs,
       getOAuthFlowStepTimeoutMs,
+      getAuthContentScriptRecoveryTimeoutMsForState = () => 30000,
       getMailConfig,
       getState,
       getTabId,
@@ -103,14 +104,22 @@
     }
 
     async function getStep8ReadyTimeoutMs(actionLabel, expectedOauthUrl = '', visibleStep = 8) {
+      const state = typeof getState === 'function'
+        ? await getState().catch(() => ({}))
+        : {};
+      const configuredTimeoutMs = Math.max(
+        5000,
+        Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000
+      );
       if (typeof getOAuthFlowStepTimeoutMs !== 'function') {
-        return 15000;
+        return configuredTimeoutMs;
       }
 
-      return getOAuthFlowStepTimeoutMs(15000, {
+      return getOAuthFlowStepTimeoutMs(configuredTimeoutMs, {
         step: visibleStep,
         actionLabel,
         oauthUrl: expectedOauthUrl,
+        state,
       });
     }
 
@@ -180,7 +189,14 @@
       if (typeof sendToContentScriptResilient !== 'function') {
         return {};
       }
-      const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 15000);
+      const state = typeof getState === 'function'
+        ? await getState().catch(() => ({}))
+        : {};
+      const recoveryTimeoutMs = Math.max(
+        5000,
+        Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000
+      );
+      const timeoutMs = Math.max(1000, Number(options.timeoutMs) || recoveryTimeoutMs);
       const result = await sendToContentScriptResilient(
         'signup-page',
         {
@@ -190,6 +206,7 @@
         },
         {
           timeoutMs,
+          transportRecoveryTimeoutMs: recoveryTimeoutMs,
           responseTimeoutMs: timeoutMs,
           retryDelayMs: 600,
           logMessage: options.logMessage || `步骤 ${visibleStep}：认证页正在切换，等待页面重新就绪...`,

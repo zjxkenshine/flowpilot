@@ -839,7 +839,7 @@
       });
     }
 
-    function queueCommand(source, message, timeout = 15000) {
+    function queueCommand(source, message, timeout = 15000, responseTimeoutMs = timeout) {
       return new Promise((resolve, reject) => {
         const commandKey = getSourceCommandKey(source);
         const timer = setTimeout(() => {
@@ -852,7 +852,7 @@
           reject,
           source,
           timer,
-          responseTimeoutMs: timeout,
+          responseTimeoutMs,
         });
         console.log(LOG_PREFIX, `Command queued for ${source} (waiting for ready)`);
       });
@@ -1077,19 +1077,22 @@
 
     async function sendToContentScript(source, message, options = {}) {
       throwIfStopped();
-      const { responseTimeoutMs = getContentScriptResponseTimeoutMs(message) } = options;
+      const {
+        responseTimeoutMs = getContentScriptResponseTimeoutMs(message),
+        queueTimeoutMs = responseTimeoutMs,
+      } = options;
       const registry = await getTabRegistry();
       const entry = getSourceMapValue(registry, source);
 
       if (!entry || !entry.ready) {
         throwIfStopped();
-        return queueCommand(source, message, responseTimeoutMs);
+        return queueCommand(source, message, queueTimeoutMs, responseTimeoutMs);
       }
 
       const alive = await isTabAlive(source);
       throwIfStopped();
       if (!alive) {
-        return queueCommand(source, message, responseTimeoutMs);
+        return queueCommand(source, message, queueTimeoutMs, responseTimeoutMs);
       }
 
       throwIfStopped();
@@ -1105,8 +1108,12 @@
         logStepKey = '',
         onRetryableError = null,
         responseTimeoutMs,
+        transportRecoveryTimeoutMs = null,
       } = options;
       const start = Date.now();
+      const recoveryTimeoutMs = Number.isFinite(Number(transportRecoveryTimeoutMs))
+        ? Math.max(1, Math.floor(Number(transportRecoveryTimeoutMs)))
+        : timeoutMs;
       let lastError = null;
       let logged = false;
       let attempt = 0;
@@ -1125,7 +1132,13 @@
           return await sendToContentScript(
             source,
             message,
-            { responseTimeoutMs: effectiveResponseTimeoutMs }
+            {
+              responseTimeoutMs: effectiveResponseTimeoutMs,
+              queueTimeoutMs: Math.max(1, Math.min(
+                effectiveResponseTimeoutMs,
+                recoveryTimeoutMs - (Date.now() - start)
+              )),
+            }
           );
         } catch (err) {
           const retryable = isRetryableContentScriptTransportError(err);
@@ -1150,6 +1163,10 @@
               source,
               message,
             });
+          }
+
+          if (Date.now() - start >= recoveryTimeoutMs) {
+            break;
           }
 
           await sleepOrStop(retryDelayMs);

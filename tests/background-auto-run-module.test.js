@@ -23,9 +23,23 @@ test('fresh auto-run keep state preserves only warn and error logs when enabled'
       normalizeFlowId: (value, fallback) => String(value || fallback || 'openai').trim().toLowerCase(),
     },
   };
-  const api = new Function('self', `
+const api = new Function('self', `
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const kiroStateHelpers = null;
+const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;
+const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;
+const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
+const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
+const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const PERSISTED_SETTING_DEFAULTS = {
+  registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
+  signupIdentityRedirectTimeoutSeconds: DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS,
+  authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
+};
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -66,6 +80,9 @@ function buildPersistentSettingsPayload(input = {}) {
 function collectAutoRunFreshResetRuntimeSettingKeys() {
   return new Set();
 }
+${extractFunction('normalizeRegistrationStageWaitSeconds')}
+${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
+${extractFunction('normalizeAuthContentScriptRecoveryTimeoutSeconds')}
 ${extractFunction('buildAutoRunFreshResetSettingsState')}
 ${extractFunction('filterAutoRunIssueLogsForRestart')}
 ${extractFunction('buildFreshAutoRunKeepState')}
