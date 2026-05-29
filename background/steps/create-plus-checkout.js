@@ -17,6 +17,7 @@
   const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
   const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
+  const SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES = Object.freeze(['US', 'JP', 'BR']);
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
   const HOSTED_CHECKOUT_HOME_FALLBACK_URL = 'https://chatgpt.com/';
   const HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS = 2;
@@ -131,6 +132,59 @@
       zip: '73301',
     }),
   ]);
+  const HOSTED_CHECKOUT_REGIONAL_FALLBACK_ADDRESSES = Object.freeze({
+    US: HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES,
+    JP: Object.freeze([
+      Object.freeze({
+        street: 'Marunouchi 1-1',
+        city: 'Chiyoda-ku',
+        state: 'Tokyo',
+        zip: '100-0005',
+        countryCode: 'JP',
+        country: 'Japan',
+      }),
+      Object.freeze({
+        street: 'Umeda 3-1',
+        city: 'Kita-ku',
+        state: 'Osaka',
+        zip: '530-0001',
+        countryCode: 'JP',
+        country: 'Japan',
+      }),
+    ]),
+    BR: Object.freeze([
+      Object.freeze({
+        street: 'Avenida Paulista 1000',
+        city: 'Sao Paulo',
+        state: 'Sao Paulo',
+        zip: '01310-100',
+        countryCode: 'BR',
+        country: 'Brazil',
+      }),
+      Object.freeze({
+        street: 'Avenida Atlantica 1702',
+        city: 'Rio de Janeiro',
+        state: 'Rio de Janeiro',
+        zip: '22021-001',
+        countryCode: 'BR',
+        country: 'Brazil',
+      }),
+    ]),
+  });
+  const HOSTED_CHECKOUT_REGIONAL_NAMES = Object.freeze({
+    US: Object.freeze({
+      firstNames: Object.freeze(['James', 'John', 'Robert', 'Michael', 'William', 'Mary', 'Patricia', 'Jennifer', 'Linda', 'Elizabeth']),
+      lastNames: Object.freeze(['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'Wilson', 'Anderson']),
+    }),
+    JP: Object.freeze({
+      firstNames: Object.freeze(['Haruto', 'Yuto', 'Sota', 'Ren', 'Yuma', 'Yui', 'Aoi', 'Hina', 'Sakura', 'Mei']),
+      lastNames: Object.freeze(['Sato', 'Suzuki', 'Takahashi', 'Tanaka', 'Watanabe', 'Ito', 'Yamamoto', 'Nakamura', 'Kobayashi', 'Kato']),
+    }),
+    BR: Object.freeze({
+      firstNames: Object.freeze(['Lucas', 'Gabriel', 'Rafael', 'Pedro', 'Matheus', 'Mariana', 'Juliana', 'Camila', 'Ana', 'Beatriz']),
+      lastNames: Object.freeze(['Silva', 'Santos', 'Oliveira', 'Souza', 'Pereira', 'Costa', 'Rodrigues', 'Almeida', 'Nascimento', 'Lima']),
+    }),
+  });
 
   function createPlusCheckoutCreateExecutor(deps = {}) {
     const {
@@ -167,6 +221,8 @@
       waitForTabUrlMatchUntilStopped = null,
       throwIfStopped = () => {},
       checkoutConversionProxyManager = null,
+      resolvePlusCheckoutProfileRegion = null,
+      resolvePlusCheckoutRegionalBillingDetails = null,
     } = deps;
 
     function addLog(message, level = 'info', options = {}) {
@@ -557,6 +613,76 @@
         }
       }
       return '';
+    }
+
+    function normalizeHostedProfileCountryCode(value = '', fallback = 'US') {
+      const raw = String(value || '').trim();
+      const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      let normalized = /^[A-Z]{2}$/.test(compact) ? compact : '';
+      if (!normalized) {
+        const lower = raw.toLowerCase();
+        if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) normalized = 'US';
+        else if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) normalized = 'JP';
+        else if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) normalized = 'BR';
+      }
+      if (!normalized) {
+        const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+        normalized = bracketMatch ? bracketMatch[1].toUpperCase() : '';
+      }
+      if (SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(normalized)) {
+        return normalized;
+      }
+      return SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(fallback) ? fallback : 'US';
+    }
+
+    function getHostedCountryName(countryCode = '') {
+      const normalized = normalizeHostedProfileCountryCode(countryCode, 'US');
+      return {
+        US: 'United States',
+        JP: 'Japan',
+        BR: 'Brazil',
+      }[normalized] || normalized;
+    }
+
+    function pickHostedRegionalName(countryCode = '') {
+      const normalized = normalizeHostedProfileCountryCode(countryCode, 'US');
+      const pool = HOSTED_CHECKOUT_REGIONAL_NAMES[normalized] || HOSTED_CHECKOUT_REGIONAL_NAMES.US;
+      const pick = (list = []) => {
+        const values = Array.isArray(list) ? list : [];
+        return values.length ? String(values[Math.floor(Math.random() * values.length)] || '').trim() : '';
+      };
+      return {
+        firstName: pick(pool.firstNames),
+        lastName: pick(pool.lastNames),
+      };
+    }
+
+    async function resolveHostedProfileRegionForState(state = {}, options = {}) {
+      if (typeof resolvePlusCheckoutProfileRegion === 'function') {
+        const resolved = await resolvePlusCheckoutProfileRegion(state, {
+          context: options?.context || 'paypal-hosted-profile',
+        }).catch((error) => ({
+          countryCode: 'US',
+          exitRegion: '',
+          fallbackApplied: true,
+          error: error?.message || String(error || ''),
+        }));
+        return {
+          ...(resolved && typeof resolved === 'object' ? resolved : {}),
+          countryCode: normalizeHostedProfileCountryCode(resolved?.countryCode || resolved?.exitRegion || 'US', 'US'),
+        };
+      }
+      const exitRegion = firstNonEmpty(
+        state?.plusCheckoutConversionProxyExitCheck?.exitRegion,
+        state?.plusCheckoutConversionProxySession?.exitRegion,
+        state?.plusCheckoutConversionProxyManualSession?.exitRegion,
+        state?.ipProxyAppliedExitRegion
+      );
+      return {
+        countryCode: normalizeHostedProfileCountryCode(exitRegion, 'US'),
+        exitRegion,
+        fallbackApplied: !normalizeHostedProfileCountryCode(exitRegion, ''),
+      };
     }
 
     function collectSessionFieldValues(root, targetKeys = []) {
@@ -1513,10 +1639,34 @@
         && Boolean(state?.plusCheckoutCloudConversionEnabled);
     }
 
-    function getCheckoutBillingDetailsForPaymentMethod(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
+    function getCheckoutBillingDetailsForPaymentMethod(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
       return normalizePlusPaymentMethod(paymentMethod) === PLUS_PAYMENT_METHOD_GOPAY
         ? { country: 'ID', currency: 'IDR' }
-        : { country: 'US', currency: 'USD' };
+        : {
+          country: String(options?.country || 'US').trim().toUpperCase() || 'US',
+          currency: String(options?.currency || 'USD').trim().toUpperCase() || 'USD',
+        };
+    }
+
+    async function getCheckoutBillingDetailsForState(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, state = {}, options = {}) {
+      const normalizedPaymentMethod = normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod);
+      if (normalizedPaymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+        return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
+      }
+      if (!Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
+        return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
+      }
+      if (typeof resolvePlusCheckoutRegionalBillingDetails === 'function') {
+        const regional = await resolvePlusCheckoutRegionalBillingDetails(state, {
+          paymentMethod: normalizedPaymentMethod,
+          context: options?.context || 'plus-checkout-create',
+          log: options?.log,
+        }).catch(() => null);
+        if (regional?.country && regional?.currency) {
+          return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod, regional);
+        }
+      }
+      return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
     }
 
     function formatCloudCheckoutErrorDetail(value, fallback = '') {
@@ -1605,10 +1755,10 @@
       if (!digits) {
         return '';
       }
-      if (digits.length > 10 && digits.startsWith('1')) {
+      if (digits.length === 11 && digits.startsWith('1')) {
         return digits.slice(-10);
       }
-      return digits.length > 10 ? digits.slice(-10) : digits;
+      return digits;
     }
 
     function normalizeHostedCheckoutPoolPhone(value = '') {
@@ -2299,17 +2449,30 @@
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
       });
+      const profileRegion = await resolveHostedProfileRegionForState(mergedState, {
+        context: 'paypal-hosted-profile',
+      });
+      const countryCode = normalizeHostedProfileCountryCode(profileRegion?.countryCode || 'US', 'US');
       const nextPhone = normalizeHostedPhoneForPayload(
         forceRefresh ? config.phone : (config.phone || existingProfile.phone)
       );
+      const existingAddressCountryCode = normalizeHostedProfileCountryCode(
+        existingProfile?.address?.countryCode || existingProfile?.countryCode || '',
+        ''
+      );
+      const canReuseExistingAddress = existingProfile.address
+        && typeof existingProfile.address === 'object'
+        && existingAddressCountryCode === countryCode;
       const address = forceRefresh
-        ? await fetchHostedCheckoutAddress()
+        ? await fetchHostedCheckoutAddress(countryCode)
         : (existingProfile.address && typeof existingProfile.address === 'object'
+          && canReuseExistingAddress
           ? existingProfile.address
-          : await fetchHostedCheckoutAddress());
+          : await fetchHostedCheckoutAddress(countryCode));
       const generatedProfile = buildHostedGuestProfile(address, {
         email: paymentEmailInfo?.email || existingStoredProfile.email || existingProfile.email,
         phone: nextPhone,
+        countryCode,
       });
       const nextProfile = forceRefresh
         ? {
@@ -2317,6 +2480,8 @@
           email: paymentEmailInfo?.email || existingStoredProfile.email || generatedProfile.email,
           address,
           phone: nextPhone,
+          countryCode,
+          generatedFromCountry: countryCode,
         }
         : {
           ...generatedProfile,
@@ -2324,6 +2489,10 @@
           email: paymentEmailInfo?.email || existingProfile.email || generatedProfile.email,
           address,
           phone: nextPhone,
+          countryCode,
+          generatedFromCountry: countryCode,
+          firstName: generatedProfile.firstName,
+          lastName: generatedProfile.lastName,
         };
       nextProfile.email = String(nextProfile.email || paymentEmailInfo?.email || '').trim().toLowerCase();
       if (!nextProfile.email) {
@@ -2809,10 +2978,14 @@
       return `${localPart}@gmail.com`;
     }
 
-    function normalizeHostedUsAddress(address = {}) {
+    function normalizeHostedCheckoutAddress(address = {}, countryCode = 'US') {
       const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
       const location = source?.results?.[0]?.location || source?.location || {};
       const street = location?.street || {};
+      const normalizedCountryCode = normalizeHostedProfileCountryCode(
+        source.countryCode || source.country || countryCode,
+        'US'
+      );
       const streetLine = firstNonEmpty(
         [street?.number, street?.name].filter((item) => normalizeString(item)).join(' '),
         source.Address,
@@ -2824,7 +2997,7 @@
       const state = firstNonEmpty(source.State_Full, source.State, source.state, source.region, location.state);
       const zip = firstNonEmpty(source.Zip_Code, source.zip, source.postalCode, location.postcode)
         .replace(/[^\d-]/g, '')
-        .slice(0, 5);
+        .slice(0, normalizedCountryCode === 'BR' ? 9 : (normalizedCountryCode === 'JP' ? 8 : 5));
       if (!streetLine || !city || !state || !zip) {
         return null;
       }
@@ -2833,17 +3006,32 @@
         city,
         state,
         zip,
-        countryCode: 'US',
-        country: 'United States',
+        countryCode: normalizedCountryCode,
+        country: getHostedCountryName(normalizedCountryCode),
       };
     }
 
-    function getFallbackHostedUsAddress() {
-      const index = Math.floor(Math.random() * HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES.length);
-      return normalizeHostedUsAddress(HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES[index] || HOSTED_CHECKOUT_US_FALLBACK_ADDRESSES[0]);
+    function normalizeHostedUsAddress(address = {}) {
+      return normalizeHostedCheckoutAddress(address, 'US');
     }
 
-    async function fetchHostedCheckoutAddress() {
+    function getFallbackHostedCheckoutAddress(countryCode = 'US') {
+      const normalizedCountryCode = normalizeHostedProfileCountryCode(countryCode, 'US');
+      const candidates = HOSTED_CHECKOUT_REGIONAL_FALLBACK_ADDRESSES[normalizedCountryCode]
+        || HOSTED_CHECKOUT_REGIONAL_FALLBACK_ADDRESSES.US;
+      const index = Math.floor(Math.random() * candidates.length);
+      return normalizeHostedCheckoutAddress(candidates[index] || candidates[0], normalizedCountryCode);
+    }
+
+    function getFallbackHostedUsAddress() {
+      return getFallbackHostedCheckoutAddress('US');
+    }
+
+    async function fetchHostedCheckoutAddress(countryCode = 'US') {
+      const normalizedCountryCode = normalizeHostedProfileCountryCode(countryCode, 'US');
+      if (normalizedCountryCode !== 'US') {
+        return getFallbackHostedCheckoutAddress(normalizedCountryCode);
+      }
       try {
         const { response, data } = await fetchJsonWithTimeout(HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT, {
           method: 'GET',
@@ -2854,30 +3042,46 @@
         if (!response?.ok) {
           throw new Error(`HTTP ${response?.status || 0}`);
         }
-        const address = normalizeHostedUsAddress(data);
+        const address = normalizeHostedCheckoutAddress(data, normalizedCountryCode);
         if (address) {
           return address;
         }
         throw new Error('incomplete randomuser address');
       } catch (error) {
         await addLog(`Step 6: US hosted checkout address source unavailable, using built-in US fallback. ${error?.message || String(error || '')}`, 'warn');
-        return getFallbackHostedUsAddress();
+        return getFallbackHostedCheckoutAddress(normalizedCountryCode);
       }
+    }
+
+    function getHostedProfileCountryCode(profile = {}) {
+      return normalizeHostedProfileCountryCode(
+        profile?.countryCode
+        || profile?.generatedFromCountry
+        || profile?.address?.countryCode
+        || profile?.address?.country
+        || 'US',
+        'US'
+      );
     }
 
     function buildHostedGuestProfile(address = {}, config = {}) {
       const card = buildHostedVisaCard();
-      const normalizedAddress = normalizeHostedUsAddress(address) || getFallbackHostedUsAddress();
+      const countryCode = normalizeHostedProfileCountryCode(config?.countryCode || address?.countryCode || 'US', 'US');
+      const normalizedAddress = normalizeHostedCheckoutAddress(address, countryCode) || getFallbackHostedCheckoutAddress(countryCode);
+      const regionalName = pickHostedRegionalName(normalizedAddress.countryCode || countryCode);
       return {
         email: String(config?.email || buildRandomHostedEmail()).trim().toLowerCase(),
         password: buildRandomHostedPassword(),
         phone: String(config?.phone || '').trim(),
-        firstName: 'James',
-        lastName: 'Smith',
+        firstName: regionalName.firstName || 'James',
+        lastName: regionalName.lastName || 'Smith',
         cardNumber: card.number,
         cardExpiry: card.expiry,
         cardCvv: card.cvv,
         address: normalizedAddress,
+        countryCode: normalizedAddress.countryCode || countryCode,
+        generatedFromCountry: normalizedAddress.countryCode || countryCode,
+        generatedAt: Date.now(),
       };
     }
 
@@ -3526,7 +3730,7 @@
           }
           hostedOpenAiCardDeclinedRetries += 1;
           verificationSubmitted = false;
-          const retryAddress = await fetchHostedCheckoutAddress();
+          const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
           currentProfile = {
             ...currentProfile,
             address: retryAddress,
@@ -3556,7 +3760,7 @@
           }
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
-          const retryAddress = await fetchHostedCheckoutAddress();
+          const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
           currentProfile = {
             ...currentProfile,
             address: retryAddress,
@@ -3586,7 +3790,7 @@
           }
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
-          const retryAddress = await fetchHostedCheckoutAddress();
+          const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
           currentProfile = {
             ...currentProfile,
             address: retryAddress,
@@ -3960,7 +4164,7 @@
       }
 
       const nextRetries = retries + 1;
-      const retryAddress = await fetchHostedCheckoutAddress();
+      const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(previousProfile));
       const nextProfile = {
         ...previousProfile,
         address: retryAddress,
@@ -5802,7 +6006,9 @@
         throw new Error('步骤 6：云端支付转换服务地址不是有效的 HTTP/HTTPS URL。');
       }
 
-      const billingDetails = getCheckoutBillingDetailsForPaymentMethod(paymentMethod);
+      const billingDetails = await getCheckoutBillingDetailsForState(paymentMethod, state, {
+        context: 'plus-checkout-cloud-conversion',
+      });
       const headers = {
         Accept: 'application/json',
         'Accept-Language': getBrowserFingerprintAcceptLanguageForState(state),
@@ -6012,6 +6218,9 @@
       });
 
       let result = null;
+      const checkoutBillingDetails = await getCheckoutBillingDetailsForState(paymentMethod, state, {
+        context: 'plus-checkout-create',
+      });
       if (isPlusCheckoutCloudConversionEnabled(state, paymentMethod)) {
         await addLog('步骤 6：已启用云端支付转换，正在读取 accessToken 并请求云端服务生成订阅链接...', 'info');
         const accessToken = await readAccessTokenFromChatGptSessionTab(tabId);
@@ -6026,6 +6235,8 @@
           payload: {
             paymentMethod,
             hostedCheckoutFinalStep: useHostedCheckoutFinalStep,
+            regionalCheckoutEnabled: Boolean(state?.plusCheckoutRegionalCheckoutEnabled),
+            billingDetails: checkoutBillingDetails,
           },
         });
       }

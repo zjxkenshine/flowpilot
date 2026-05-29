@@ -439,6 +439,7 @@
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
               plusHostedCheckoutCardPreWaitSeconds: 10,
+              plusCheckoutRegionalCheckoutEnabled: false,
               plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
               plusCheckoutConversionProxy711Region: '',
@@ -832,6 +833,11 @@
                 }
                 return 'manual';
               })(),
+              plusCheckoutRegionalCheckoutEnabled: Boolean(
+                input?.plusCheckoutRegionalCheckoutEnabled
+                  ?? nested?.flows?.openai?.plus?.plusCheckoutRegionalCheckoutEnabled
+                  ?? defaults.flows.openai.plus.plusCheckoutRegionalCheckoutEnabled
+              ),
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl
@@ -1198,6 +1204,7 @@
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
       next.plusHostedCheckoutCardPreWaitSeconds = openaiState.plus.plusHostedCheckoutCardPreWaitSeconds;
+      next.plusCheckoutRegionalCheckoutEnabled = openaiState.plus.plusCheckoutRegionalCheckoutEnabled;
       next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;
       next.plusCheckoutConversionProxy711Region = openaiState.plus.plusCheckoutConversionProxy711Region;

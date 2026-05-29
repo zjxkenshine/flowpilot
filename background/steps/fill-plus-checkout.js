@@ -55,6 +55,7 @@
   const MEIGUODIZHI_COUNTRY_CONFIG = {
     AR: { path: '/ar-address', city: 'Buenos Aires', aliases: ['ar', 'argentina', '阿根廷'] },
     AU: { path: '/au-address', city: 'Sydney', aliases: ['au', 'aus', 'australia', '澳大利亚'] },
+    BR: { path: '/br-address', city: 'Sao Paulo', aliases: ['br', 'bra', 'brazil', 'brasil', '巴西'] },
     CA: { path: '/ca-address', city: 'Toronto', aliases: ['ca', 'canada', '加拿大'] },
     CN: { path: '/cn-address', city: 'Shanghai', aliases: ['cn', 'china', '中国'] },
     DE: { path: '/de-address', city: 'Berlin', aliases: ['de', 'deu', 'germany', 'deutschland', '德国'] },
@@ -99,6 +100,7 @@
       waitForTabCompleteUntilStopped,
       probeIpProxyExit = null,
       checkoutConversionProxyManager = null,
+      resolvePlusCheckoutProfileRegion = null,
       throwIfStopped = () => {},
     } = deps;
 
@@ -1399,6 +1401,57 @@
       };
     }
 
+    function normalizeSupportedPayPalBillingCountryCode(value = '', fallback = 'US') {
+      const raw = String(value || '').trim();
+      const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      let normalized = /^[A-Z]{2}$/.test(compact) ? compact : '';
+      if (!normalized) {
+        const lower = raw.toLowerCase();
+        if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) normalized = 'US';
+        else if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) normalized = 'JP';
+        else if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) normalized = 'BR';
+      }
+      if (!normalized) {
+        const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+        normalized = bracketMatch ? bracketMatch[1].toUpperCase() : '';
+      }
+      if (['US', 'JP', 'BR'].includes(normalized)) {
+        return normalized;
+      }
+      return ['US', 'JP', 'BR'].includes(fallback) ? fallback : 'US';
+    }
+
+    async function resolvePayPalBillingProfileRegion(state = {}) {
+      if (typeof resolvePlusCheckoutProfileRegion === 'function') {
+        const resolved = await resolvePlusCheckoutProfileRegion(state, {
+          context: 'classic-paypal-billing',
+        }).catch((error) => ({
+          countryCode: 'US',
+          fallbackApplied: true,
+          error: error?.message || String(error || ''),
+        }));
+        return {
+          ...(resolved && typeof resolved === 'object' ? resolved : {}),
+          countryCode: normalizeSupportedPayPalBillingCountryCode(resolved?.countryCode || resolved?.exitRegion || 'US', 'US'),
+        };
+      }
+      const source = String(state?.plusCheckoutConversionProxySource || '').trim().toLowerCase();
+      const exitRegion = source === 'ip_proxy'
+        ? normalizeText(state?.ipProxyAppliedExitRegion || state?.ipProxyExitRegion || '')
+        : normalizeText(
+          state?.plusCheckoutConversionProxyExitCheck?.exitRegion
+          || state?.plusCheckoutConversionProxySession?.exitRegion
+          || state?.plusCheckoutConversionProxyManualSession?.exitRegion
+          || ''
+        );
+      const countryCode = normalizeSupportedPayPalBillingCountryCode(exitRegion, 'US');
+      return {
+        countryCode,
+        exitRegion,
+        fallbackApplied: !normalizeSupportedPayPalBillingCountryCode(exitRegion, ''),
+      };
+    }
+
     function buildRandomUserAddressSeed(payload = {}, fallbackSeed = null) {
       const location = payload?.results?.[0]?.location || payload?.location || {};
       const street = location?.street || {};
@@ -1445,7 +1498,7 @@
       return buildRandomUserAddressSeed(data, fallbackSeed);
     }
 
-    function resolveBillingAddressCountry(state = {}, countryOverride = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL) {
+    function resolveBillingAddressCountry(state = {}, countryOverride = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
       const normalizedPaymentMethod = normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod);
       const checkoutCountry = resolveMeiguodizhiCountryCode(countryOverride);
       const savedCheckoutCountry = resolveMeiguodizhiCountryCode(state.plusCheckoutCountry);
@@ -1467,6 +1520,15 @@
         };
       }
 
+      const profileCountry = resolveMeiguodizhiCountryCode(options?.profileCountryCode || '');
+      if (profileCountry) {
+        return {
+          countryCode: profileCountry,
+          requestedCountry: options?.profileExitRegion || profileCountry,
+          source: options?.profileFallbackApplied ? 'paypal_profile_region_fallback' : 'paypal_profile_region',
+        };
+      }
+
       return {
         countryCode: 'US',
         requestedCountry: 'US',
@@ -1484,9 +1546,22 @@
         await addLog('步骤 7：PayPal 将按扩展式地址模式填写：先切到 United States，再输入 4 位数字并随机选择 Google 地址建议。', 'info');
         return buildPayPalUsAutocompleteSeed();
       }
-      const countryResolution = resolveBillingAddressCountry(state, countryOverride, paymentMethod);
+      const profileRegion = paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL
+        ? await resolvePayPalBillingProfileRegion(state)
+        : null;
+      const countryResolution = resolveBillingAddressCountry(state, countryOverride, paymentMethod, {
+        profileCountryCode: profileRegion?.countryCode || '',
+        profileExitRegion: profileRegion?.exitRegion || '',
+        profileFallbackApplied: Boolean(profileRegion?.fallbackApplied),
+      });
       const countryCode = countryResolution.countryCode;
       const requestedCountry = countryResolution.requestedCountry;
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && countryResolution.source === 'paypal_profile_region') {
+        await addLog(`Step 7: PayPal billing address will use payment exit country ${countryCode}.`, 'info');
+      }
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && countryResolution.source === 'paypal_profile_region_fallback') {
+        await addLog(`Step 7: PayPal payment exit ${requestedCountry || 'unknown'} is not supported yet; using US billing address.`, 'warn');
+      }
       if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY && countryResolution.source === 'proxy_exit') {
         await addLog(`步骤 7：GoPay 账单地址将按当前代理出口地区 ${countryCode} 填写。`, 'info');
       }
@@ -1508,6 +1583,11 @@
       }
       const lookupSeed = localSeed || buildMeiguodizhiLookupSeed(countryCode);
       if (!lookupSeed) {
+        const fallbackSeed = getLocalAddressSeed('US');
+        if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && hasCompleteAddressFallback(fallbackSeed)) {
+          await addLog(`Step 7: billing country ${requestedCountry || countryCode} is not supported by address source; using US fallback.`, 'warn');
+          return fallbackSeed;
+        }
         throw new Error(`步骤 7：无法识别账单国家或地区：${requestedCountry || '空'}`);
       }
       try {

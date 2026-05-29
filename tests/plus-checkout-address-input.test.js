@@ -187,6 +187,54 @@ test('CREATE_PLUS_CHECKOUT uses hosted US/USD checkout for PayPal no-card bindin
   assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
 });
 
+test('CREATE_PLUS_CHECKOUT maps regional checkout country and currency when enabled', async () => {
+  const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_jp' });
+
+  const result = await harness.send({
+    type: 'CREATE_PLUS_CHECKOUT',
+    source: 'test',
+    payload: {
+      paymentMethod: 'paypal',
+      regionalCheckoutEnabled: true,
+      billingDetails: { country: 'JP', currency: 'JPY' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_jp');
+  assert.equal(result.country, 'JP');
+  assert.equal(result.currency, 'JPY');
+
+  const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
+  assert.ok(checkoutCall);
+  const payload = JSON.parse(checkoutCall.options.body);
+  assert.deepEqual(payload.billing_details, { country: 'JP', currency: 'JPY' });
+});
+
+test('CREATE_PLUS_CHECKOUT ignores regional billing override while switch is off', async () => {
+  const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_br_off' });
+
+  const result = await harness.send({
+    type: 'CREATE_PLUS_CHECKOUT',
+    source: 'test',
+    payload: {
+      paymentMethod: 'paypal-hosted',
+      regionalCheckoutEnabled: false,
+      billingDetails: { country: 'BR', currency: 'BRL' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.country, 'US');
+  assert.equal(result.currency, 'USD');
+
+  const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
+  assert.ok(checkoutCall);
+  const payload = JSON.parse(checkoutCall.options.body);
+  assert.equal(payload.checkout_ui_mode, 'hosted');
+  assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
+});
+
 function extractFunction(name) {
   const plainStart = source.indexOf(`function ${name}(`);
   const asyncStart = source.indexOf(`async function ${name}(`);

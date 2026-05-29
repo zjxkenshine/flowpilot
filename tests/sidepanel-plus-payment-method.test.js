@@ -348,6 +348,23 @@ test('sidepanel PayPal hosted sms pool max uses renders and syncs through settin
   assert.match(dataUpdatedSnippet, /normalizeHostedCheckoutSmsPoolMaxUsesValue\(message\.payload\.hostedCheckoutSmsPoolMaxUses/);
 });
 
+test('sidepanel regional checkout switch renders and syncs through settings', () => {
+  assert.match(sidepanelHtml, /id="row-plus-checkout-regional-checkout"/);
+  assert.match(sidepanelHtml, /id="input-plus-checkout-regional-checkout-enabled"/);
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /plusCheckoutRegionalCheckoutEnabled:/);
+  assert.match(collectSource, /inputPlusCheckoutRegionalCheckoutEnabled\.checked/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /inputPlusCheckoutRegionalCheckoutEnabled\.checked\s*=\s*Boolean/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 16000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckoutRegionalCheckoutEnabled !== undefined/);
+});
+
 test('sidepanel Plus UI restores traditional PayPal account mode when hosted final step is disabled', () => {
   const bundle = [
     extractFunction('normalizePlusPaymentMethod'),

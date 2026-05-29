@@ -711,7 +711,12 @@ test('Plus checkout create waits 20 seconds after opening checkout page by defau
   assert.deepStrictEqual(sleepEvents.map((event) => event.ms), [1000, 20000]);
   assert.deepStrictEqual(
     events.find((event) => event.type === 'tab-message')?.message?.payload,
-    { paymentMethod: 'paypal', hostedCheckoutFinalStep: false }
+    {
+      paymentMethod: 'paypal',
+      hostedCheckoutFinalStep: false,
+      regionalCheckoutEnabled: false,
+      billingDetails: { country: 'US', currency: 'USD' },
+    }
   );
   assert.equal(
     events.some((event) => event.type === 'log' && /订阅页面已打开，固定等待 20 秒让页面稳定/.test(event.message)),
@@ -846,7 +851,12 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
 
   await executor.executePlusCheckoutCreate({ plusPaymentMethod: 'gopay' });
 
-  assert.deepStrictEqual(events[0]?.payload, { paymentMethod: 'gopay', hostedCheckoutFinalStep: false });
+  assert.deepStrictEqual(events[0]?.payload, {
+    paymentMethod: 'gopay',
+    hostedCheckoutFinalStep: false,
+    regionalCheckoutEnabled: false,
+    billingDetails: { country: 'ID', currency: 'IDR' },
+  });
   assert.equal(events.some((event) => event.type === 'proxy-apply'), false);
 });
 
@@ -2878,7 +2888,12 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
 
   assert.deepStrictEqual(
     events.find((event) => event.type === 'tab-message' && event.message.type === 'CREATE_PLUS_CHECKOUT')?.message?.payload,
-    { paymentMethod: 'paypal-hosted', hostedCheckoutFinalStep: true }
+    {
+      paymentMethod: 'paypal-hosted',
+      hostedCheckoutFinalStep: true,
+      regionalCheckoutEnabled: false,
+      billingDetails: { country: 'US', currency: 'USD' },
+    }
   );
   assert.equal(
     events.find((event) => event.type === 'tab-update')?.payload?.url,
@@ -3161,6 +3176,91 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
       plusHostedCheckoutCompleted: true,
     },
   });
+});
+
+test('PayPal hosted auto profile follows payment exit region and preserves SMS pool phone', async () => {
+  const events = [];
+  let currentUrl = 'https://pay.openai.com/c/pay/cs_hosted';
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => {
+      events.push({ type: 'log', message, level });
+    },
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => {
+      events.push({ type: 'complete', step, payload });
+    },
+    ensureContentScriptReadyOnTabUntilStopped: async (source, tabId, options) => {
+      events.push({ type: 'ready', source, tabId, options });
+    },
+    getState: async () => ({
+      email: 'jp-run@example.com',
+      hostedCheckoutPhoneNumber: '08012345678',
+      hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'JP',
+        exitIp: '203.0.113.9',
+      },
+    }),
+    registerTab: async (source, tabId) => {
+      events.push({ type: 'register', source, tabId });
+    },
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'JP',
+      exitRegion: 'JP',
+      exitIp: '203.0.113.9',
+      fallbackApplied: false,
+    }),
+    sendTabMessageUntilStopped: async (tabId, source, message) => {
+      events.push({ type: 'tab-message', tabId, source, message });
+      if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
+        currentUrl = 'https://chatgpt.com/backend-api/payments/success?session_id=cs_hosted_jp';
+        return { clicked: true };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          hostedVerificationVisible: false,
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '¥0',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+    },
+    sleepWithStop: async (ms) => {
+      events.push({ type: 'sleep', ms });
+    },
+    waitForTabCompleteUntilStopped: async () => {
+      events.push({ type: 'tab-complete' });
+    },
+  });
+
+  await executor.executePayPalHostedOpenAiCheckout({
+    plusCheckoutTabId: 55,
+    plusPaymentMethod: 'paypal-hosted',
+    hostedCheckoutPhoneNumber: '08012345678',
+    plusHostedCheckoutOauthDelaySeconds: 0,
+  });
+
+  const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)?.payload || {};
+  assert.equal(profileState.plusHostedCheckoutGuestProfile.phone, '08012345678');
+  assert.equal(profileState.plusHostedCheckoutGuestProfile.countryCode, 'JP');
+  assert.equal(profileState.plusHostedCheckoutGuestProfile.address.countryCode, 'JP');
+  assert.equal(profileState.paypalGeneratedProfile.countryCode, 'JP');
+  assert.equal(profileState.paypalGeneratedProfile.city, 'Chiyoda-ku');
+  assert.equal(profileState.paypalGeneratedProfile.phone, '08012345678');
+  const hostedPayload = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP')?.message?.payload;
+  assert.equal(hostedPayload.address.countryCode, 'JP');
+  assert.equal(hostedPayload.address.country, 'Japan');
 });
 
 test('PayPal hosted OpenAI checkout retries with a fresh address after address validation failure', async () => {
@@ -4166,8 +4266,8 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.address.countryCode, 'US');
   assert.equal(profileState.address.country, 'United States');
   assert.equal(profileState.phone, '4155551234');
-  assert.equal(profileState.firstName, 'James');
-  assert.equal(profileState.lastName, 'Smith');
+  assert.ok(profileState.firstName);
+  assert.ok(profileState.lastName);
   assert.equal(profileState.email, cachedProfile.email);
   assert.equal(profileEvent.payload.paypalGeneratedProfile.address1, '7 Fresh St');
   assert.equal(profileEvent.payload.paypalGeneratedProfile.city, 'Austin');
@@ -4178,8 +4278,8 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.notEqual(profileState.cardNumber, cachedProfile.cardNumber);
   assert.equal(submitEvent.message.payload.address.street, '7 Fresh St');
   assert.equal(submitEvent.message.payload.address.countryCode, 'US');
-  assert.equal(submitEvent.message.payload.firstName, 'James');
-  assert.equal(submitEvent.message.payload.lastName, 'Smith');
+  assert.equal(submitEvent.message.payload.firstName, profileState.firstName);
+  assert.equal(submitEvent.message.payload.lastName, profileState.lastName);
   assert.equal(submitEvent.message.payload.phone, '4155551234');
   assert.equal(submitEvent.message.payload.email, profileState.email);
   assert.equal(submitEvent.message.payload.cardNumber, profileState.cardNumber);

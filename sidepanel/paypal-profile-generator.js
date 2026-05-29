@@ -72,6 +72,58 @@
       return normalized.length === 2 ? normalized : '';
     }
 
+    function normalizeProfileCountryCode(value = '', fallback = '') {
+      const raw = String(value || '').trim();
+      const direct = normalizeCountryCode(raw);
+      const lower = raw.toLowerCase();
+      const normalized = direct
+        || (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower) ? 'US' : '')
+        || (/\b(?:jp|jpn|japan)\b|日本/.test(lower) ? 'JP' : '')
+        || (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower) ? 'BR' : '')
+        || (() => {
+          const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+          return bracketMatch ? normalizeCountryCode(bracketMatch[1]) : '';
+        })();
+      return ['US', 'JP', 'BR'].includes(normalized) ? normalized : normalizeCountryCode(fallback);
+    }
+
+    function getCountryDisplayName(countryCode = '') {
+      const normalized = normalizeProfileCountryCode(countryCode, 'US') || 'US';
+      return {
+        US: 'United States',
+        JP: 'Japan',
+        BR: 'Brazil',
+      }[normalized] || normalized;
+    }
+
+    function chooseFromList(list = []) {
+      const values = Array.isArray(list) ? list.filter(Boolean) : [];
+      return values.length ? String(values[Math.floor(Math.random() * values.length)] || '').trim() : '';
+    }
+
+    function generateRegionalName(countryCode = '') {
+      const normalized = normalizeProfileCountryCode(countryCode, 'US') || 'US';
+      const pools = {
+        US: {
+          firstNames: ['James', 'John', 'Robert', 'Michael', 'William', 'Mary', 'Patricia', 'Jennifer', 'Linda', 'Elizabeth'],
+          lastNames: ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'Wilson', 'Anderson'],
+        },
+        JP: {
+          firstNames: ['Haruto', 'Yuto', 'Sota', 'Ren', 'Yuma', 'Yui', 'Aoi', 'Hina', 'Sakura', 'Mei'],
+          lastNames: ['Sato', 'Suzuki', 'Takahashi', 'Tanaka', 'Watanabe', 'Ito', 'Yamamoto', 'Nakamura', 'Kobayashi', 'Kato'],
+        },
+        BR: {
+          firstNames: ['Lucas', 'Gabriel', 'Rafael', 'Pedro', 'Matheus', 'Mariana', 'Juliana', 'Camila', 'Ana', 'Beatriz'],
+          lastNames: ['Silva', 'Santos', 'Oliveira', 'Souza', 'Pereira', 'Costa', 'Rodrigues', 'Almeida', 'Nascimento', 'Lima'],
+        },
+      };
+      const pool = pools[normalized] || pools.US;
+      return {
+        firstName: chooseFromList(pool.firstNames),
+        lastName: chooseFromList(pool.lastNames),
+      };
+    }
+
     function normalizeGeneratedAt(value) {
       return Math.max(0, Number(value) || 0);
     }
@@ -279,8 +331,10 @@
           zip: normalizedProfile.postalCode,
           postalCode: normalizedProfile.postalCode,
           countryCode: normalizedProfile.countryCode,
-          country: normalizedProfile.countryCode === 'US' ? 'United States' : normalizedProfile.countryCode,
+          country: getCountryDisplayName(normalizedProfile.countryCode),
         },
+        countryCode: normalizedProfile.countryCode,
+        generatedFromCountry: normalizedProfile.generatedFromCountry || normalizedProfile.countryCode,
       };
     }
 
@@ -299,15 +353,19 @@
       }
       const upperTokens = raw.toUpperCase().match(/[A-Z]{2,3}/g) || [];
       for (const token of upperTokens) {
-        const normalized = normalizeCountryCode(token);
+        const normalized = normalizeProfileCountryCode(token);
         if (normalized) {
           return normalized;
         }
       }
       if (typeof data.normalizeCountryCode === 'function') {
-        return normalizeCountryCode(data.normalizeCountryCode(raw));
+        return normalizeProfileCountryCode(data.normalizeCountryCode(raw));
       }
       return '';
+    }
+
+    function resolveSupportedProfileCountryCode(countryCode = '') {
+      return normalizeProfileCountryCode(countryCode, 'US') || 'US';
     }
 
     function resolveProfileCountryCode(currentState = getLatestState()) {
@@ -320,32 +378,46 @@
           || ''
         );
         if (sessionCountry) {
-          return sessionCountry;
+          return resolveSupportedProfileCountryCode(sessionCountry);
         }
       }
-      const exitCountry = normalizeExitRegionToCountryCode(currentState?.ipProxyAppliedExitRegion || '');
+      const exitCheck = currentState?.plusCheckoutConversionProxyExitCheck;
+      const exitCountry = normalizeExitRegionToCountryCode(
+        exitCheck?.exitRegion
+        || currentState?.ipProxyAppliedExitRegion
+        || ''
+      );
       if (exitCountry) {
-        return exitCountry;
+        return resolveSupportedProfileCountryCode(exitCountry);
       }
       return 'US';
     }
 
-    function generateProfile(currentState = getLatestState()) {
-      const name = typeof data.generateRandomName === 'function'
-        ? data.generateRandomName()
-        : { firstName: '', lastName: '' };
+    function generateProfile(currentState = getLatestState(), options = {}) {
       const birthday = typeof data.generateRandomBirthday === 'function'
         ? data.generateRandomBirthday()
         : null;
-      const countryCode = resolveProfileCountryCode(currentState);
+      const countryCode = resolveSupportedProfileCountryCode(
+        options?.countryCode
+        || options?.profileRegion?.countryCode
+        || resolveProfileCountryCode(currentState)
+      );
+      const fallbackName = typeof data.generateRandomName === 'function'
+        ? data.generateRandomName()
+        : { firstName: '', lastName: '' };
+      const regionalName = generateRegionalName(countryCode);
+      const name = {
+        firstName: regionalName.firstName || fallbackName?.firstName || '',
+        lastName: regionalName.lastName || fallbackName?.lastName || '',
+      };
       const addressSeed = typeof data.getAddressSeedForCountry === 'function'
         ? data.getAddressSeedForCountry(countryCode, { fallbackCountry: 'US' })
         : null;
-      const effectiveCountryCode = normalizeCountryCode(
+      const effectiveCountryCode = resolveSupportedProfileCountryCode(
         typeof data.normalizeCountryCode === 'function'
           ? data.normalizeCountryCode(addressSeed?.countryCode || countryCode)
           : (addressSeed?.countryCode || countryCode)
-      ) || 'US';
+      );
       const fallback = addressSeed?.fallback || {};
       const currentPayPalAccount = typeof helpers?.getCurrentPayPalAccount === 'function'
         ? helpers.getCurrentPayPalAccount(currentState)
@@ -496,6 +568,34 @@
       return normalizedProfile;
     }
 
+    async function resolveProfileRegionForGeneration(currentState = getLatestState()) {
+      const localCountryCode = resolveProfileCountryCode(currentState);
+      if (typeof runtime?.sendMessage !== 'function') {
+        return { countryCode: localCountryCode };
+      }
+      try {
+        const response = await runtime.sendMessage({
+          type: 'RESOLVE_PLUS_CHECKOUT_PROFILE_REGION',
+          source: 'sidepanel',
+          payload: {},
+        });
+        if (response?.error) {
+          throw new Error(response.error);
+        }
+        return {
+          ...(response && typeof response === 'object' ? response : {}),
+          countryCode: resolveSupportedProfileCountryCode(response?.countryCode || localCountryCode),
+        };
+      } catch (error) {
+        helpers?.showToast?.(
+          `支付出口地区解析失败，已使用 ${localCountryCode} 生成资料：${error?.message || String(error || '')}`,
+          'warn',
+          2600
+        );
+        return { countryCode: localCountryCode, error: error?.message || String(error || '') };
+      }
+    }
+
     function buildProfileCopyText(profile = getCurrentProfile()) {
       return PROFILE_COPY_LINES
         .map(([label, field]) => {
@@ -576,7 +676,9 @@
       actionInFlight = true;
       renderProfile(getCurrentProfile());
       try {
-        const profile = generateProfile(getLatestState());
+        const currentState = getLatestState();
+        const profileRegion = await resolveProfileRegionForGeneration(currentState);
+        const profile = generateProfile(currentState, { profileRegion });
         await persistProfile(profile);
         helpers.showToast('已生成 PayPal 注册资料', 'success', 1800);
       } finally {
@@ -586,17 +688,13 @@
     }
 
     function bindPayPalProfileEvents() {
-      dom.btnGenerateProfile?.addEventListener('click', () => {
-        handleGenerateProfile().catch((error) => {
+      dom.btnGenerateProfile?.addEventListener('click', () => handleGenerateProfile().catch((error) => {
           renderProfile(getCurrentProfile());
           helpers.showToast(error?.message || '生成 PayPal 资料失败。', 'error');
-        });
-      });
-      dom.btnCopyProfile?.addEventListener('click', () => {
-        handleCopyProfile().catch((error) => {
+        }));
+      dom.btnCopyProfile?.addEventListener('click', () => handleCopyProfile().catch((error) => {
           helpers.showToast(error?.message || '复制 PayPal 资料失败。', 'error');
-        });
-      });
+        }));
       dom.btnToggleProfile?.addEventListener('click', () => {
         toggleProfileDetails();
       });
@@ -610,6 +708,7 @@
       normalizeProfile,
       renderPayPalProfile: renderProfile,
       resolveProfileCountryCode,
+      resolveProfileRegionForGeneration,
       syncCollapseState,
       toggleProfileDetails,
     };

@@ -207,6 +207,7 @@
       syncHotmailAccounts,
       syncPayPalAccounts,
       testPlusCheckoutConversionProxy,
+      resolvePlusCheckoutProfileRegion,
       testHotmailAccountMailAccess,
       upsertPayPalAccount,
       upsertMail2925Account,
@@ -2198,6 +2199,34 @@
             proxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region,
           });
           return { ok: true, ...result };
+        }
+
+        case 'RESOLVE_PLUS_CHECKOUT_PROFILE_REGION': {
+          if (typeof resolvePlusCheckoutProfileRegion !== 'function') {
+            throw new Error('Plus Checkout 资料地区解析能力尚未接入。');
+          }
+          const currentState = await getState();
+          const state = buildResolvedIpProxyState(currentState, message.payload || {});
+          const result = await resolvePlusCheckoutProfileRegion(state, {
+            source: message.payload?.source ?? state?.plusCheckoutConversionProxySource,
+            proxyUrl: message.payload?.proxyUrl ?? state?.plusCheckoutConversionProxyUrl,
+            proxy711Region: message.payload?.proxy711Region ?? state?.plusCheckoutConversionProxy711Region,
+            context: 'sidepanel-profile-generator',
+          });
+          if (result?.plusCheckoutConversionProxyExitCheck && typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate({
+              plusCheckoutConversionProxyExitCheck: result.plusCheckoutConversionProxyExitCheck,
+            });
+          }
+          return {
+            ok: true,
+            countryCode: result?.countryCode || 'US',
+            exitIp: String(result?.exitIp || '').trim(),
+            exitRegion: String(result?.exitRegion || '').trim(),
+            exitSource: String(result?.exitSourceMode || result?.exitSource || '').trim(),
+            fallbackApplied: Boolean(result?.fallbackApplied),
+            plusCheckoutConversionProxyExitCheck: result?.plusCheckoutConversionProxyExitCheck || null,
+          };
         }
 
         case 'SWITCH_PLUS_CHECKOUT_CONVERSION_PROXY_MANUAL': {

@@ -94,6 +94,52 @@ test('message router module exposes a factory', () => {
   assert.equal(typeof api?.createMessageRouter, 'function');
 });
 
+test('message router resolves Plus checkout profile region through background helper', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const broadcasts = [];
+  const router = api.createMessageRouter({
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    getState: async () => ({
+      plusCheckoutConversionProxySource: 'manual',
+      plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
+    }),
+    isAutoRunLockedState: () => false,
+    resolvePlusCheckoutProfileRegion: async (state, options) => ({
+      countryCode: 'BR',
+      exitIp: '203.0.113.10',
+      exitRegion: 'BR',
+      exitSourceMode: options.source,
+      fallbackApplied: false,
+      plusCheckoutConversionProxyExitCheck: {
+        status: 'success',
+        exitIp: '203.0.113.10',
+        exitRegion: 'BR',
+      },
+    }),
+  });
+
+  const response = await router.handleMessage({
+    type: 'RESOLVE_PLUS_CHECKOUT_PROFILE_REGION',
+    source: 'sidepanel',
+    payload: {},
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.countryCode, 'BR');
+  assert.equal(response.exitIp, '203.0.113.10');
+  assert.equal(response.exitSource, 'manual');
+  assert.equal(response.fallbackApplied, false);
+  assert.deepEqual(broadcasts, [{
+    plusCheckoutConversionProxyExitCheck: {
+      status: 'success',
+      exitIp: '203.0.113.10',
+      exitRegion: 'BR',
+    },
+  }]);
+});
+
 function createExecuteNodeRouterHarness(options = {}) {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

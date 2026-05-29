@@ -3,6 +3,7 @@
 })(typeof self !== 'undefined' ? self : globalThis, function createAddressSourcesModule() {
   const COUNTRY_ALIASES = {
     AU: ['au', 'aus', 'australia', '澳大利亚'],
+    BR: ['br', 'bra', 'brazil', 'brasil', '巴西'],
     DE: ['de', 'deu', 'germany', 'deutschland', '德国'],
     FR: ['fr', 'fra', 'france', '法国'],
     ID: ['id', 'indonesia', '印度尼西亚', '印尼'],
@@ -31,6 +32,28 @@
           city: 'Sydney',
           region: 'New South Wales',
           postalCode: '2000',
+        },
+      },
+    ],
+    BR: [
+      {
+        query: 'Sao Paulo SP',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Avenida Paulista 1000',
+          city: 'Sao Paulo',
+          region: 'Sao Paulo',
+          postalCode: '01310-100',
+        },
+      },
+      {
+        query: 'Rio de Janeiro RJ',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Avenida Atlantica 1702',
+          city: 'Rio de Janeiro',
+          region: 'Rio de Janeiro',
+          postalCode: '22021-001',
         },
       },
     ],

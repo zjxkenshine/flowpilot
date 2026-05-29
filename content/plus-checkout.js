@@ -76,6 +76,11 @@ const PAYMENT_METHOD_CONFIGS = {
     patterns: [/gopay|go\s*pay/i],
   },
 };
+const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = {
+  US: { country: 'US', currency: 'USD' },
+  JP: { country: 'JP', currency: 'JPY' },
+  BR: { country: 'BR', currency: 'BRL' },
+};
 
 async function performOperationWithDelay(metadata, operation) {
   const rootScope = typeof window !== 'undefined' ? window : globalThis;
@@ -1589,6 +1594,37 @@ function writeGoPayDiagnostics(reason, level = 'info') {
   return writePaymentMethodDiagnostics(PLUS_PAYMENT_METHOD_GOPAY, reason, level);
 }
 
+function normalizeRegionalCheckoutCountryCode(value = '') {
+  const raw = String(value || '').trim();
+  const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (Object.prototype.hasOwnProperty.call(PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS, normalized)) {
+    return normalized;
+  }
+  const lower = raw.toLowerCase();
+  if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+  if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+  if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+  return '';
+}
+
+function resolveCheckoutBillingDetails(config = {}, options = {}) {
+  const defaultDetails = { ...(config.billingDetails || {}) };
+  const overrideSource = options.billingDetails && typeof options.billingDetails === 'object'
+    ? options.billingDetails
+    : {};
+  const countryCode = normalizeRegionalCheckoutCountryCode(
+    overrideSource.country || overrideSource.countryCode || options.country || options.countryCode || ''
+  );
+  if (
+    options.regionalCheckoutEnabled === true
+    && countryCode
+    && config.id !== PLUS_PAYMENT_METHOD_GOPAY
+  ) {
+    return { ...PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS[countryCode] };
+  }
+  return defaultDetails;
+}
+
 function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
   const config = getPaymentMethodConfig(paymentMethod);
   return {
@@ -1597,9 +1633,7 @@ function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, op
       ...options,
       paymentMethod,
     }) ? 'hosted' : 'custom',
-    billing_details: {
-      ...config.billingDetails,
-    },
+    billing_details: resolveCheckoutBillingDetails(config, options),
   };
 }
 

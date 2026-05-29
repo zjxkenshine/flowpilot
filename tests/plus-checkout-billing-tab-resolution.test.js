@@ -137,6 +137,7 @@ function createExecutorHarness({
   sleepWithStop = null,
   initialState = {},
   checkoutConversionProxyManager = null,
+  resolvePlusCheckoutProfileRegion = null,
   submitRedirectUrl = 'https://www.paypal.com/checkoutnow',
   onGetState = null,
   onRetryAddressTaxAutocomplete = null,
@@ -260,6 +261,7 @@ function createExecutorHarness({
       return { id: tabId, url: submitRedirectUrl };
     },
     ...(typeof probeIpProxyExit === 'function' ? { probeIpProxyExit } : {}),
+    ...(typeof resolvePlusCheckoutProfileRegion === 'function' ? { resolvePlusCheckoutProfileRegion } : {}),
   });
 
   return {
@@ -1657,6 +1659,52 @@ test('Classic PayPal billing ignores detected Germany and uses US address source
   assert.equal(fetchRequests.length, 1);
   assert.equal(fetchRequests[0].url, 'https://randomuser.me/api/?nat=us&inc=location&noinfo');
   assert.equal(events.completed[0].step, 'plus-checkout-billing');
+});
+
+test('Classic PayPal billing uses payment conversion proxy exit country for supported regions', async () => {
+  const requestedCountries = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 8, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: { hasPayPal: false, paypalCandidates: [], billingFieldsVisible: true },
+    },
+    getAddressSeedForCountry: (countryValue) => {
+      requestedCountries.push(countryValue);
+      if (countryValue === 'JP') {
+        return {
+          countryCode: 'JP',
+          query: 'Tokyo Marunouchi',
+          suggestionIndex: 1,
+          fallback: {
+            address1: 'Marunouchi 1-1',
+            city: 'Chiyoda-ku',
+            region: 'Tokyo',
+            postalCode: '100-0005',
+          },
+        };
+      }
+      return createAddressSeed();
+    },
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'JP',
+      exitRegion: 'JP',
+      exitIp: '203.0.113.7',
+      fallbackApplied: false,
+    }),
+  });
+
+  await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+  const fillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  assert.equal(requestedCountries[0], 'JP');
+  assert.equal(fillMessage.message.payload.addressSeed.countryCode, 'JP');
+  assert.equal(fillMessage.message.payload.addressSeed.fallback.city, 'Chiyoda-ku');
 });
 
 test('Classic PayPal billing keeps US address seed even when checkout country is detected elsewhere', async () => {

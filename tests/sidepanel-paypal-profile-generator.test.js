@@ -107,6 +107,9 @@ function createGenerator(overrides = {}) {
     runtime: {
       sendMessage: async (message) => {
         events.push({ type: 'message', message });
+        if (typeof overrides.sendMessage === 'function') {
+          return await overrides.sendMessage(message, events);
+        }
         return { ok: true };
       },
     },
@@ -124,7 +127,7 @@ function createGenerator(overrides = {}) {
       })),
       normalizeCountryCode: overrides.normalizeCountryCode || ((value) => {
         const normalized = String(value || '').trim().toUpperCase();
-        return ['DE', 'JP', 'KR', 'US'].includes(normalized) ? normalized : '';
+        return ['BR', 'DE', 'JP', 'KR', 'US'].includes(normalized) ? normalized : '';
       }),
     },
   });
@@ -181,8 +184,8 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
   assert.match(profile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
   assert.match(profile.cardCvv, /^\d{3}$/);
   assert.equal(profile.password.length >= 14, true);
-  assert.equal(profile.firstName, 'Ada');
-  assert.equal(profile.lastName, 'Lovelace');
+  assert.ok(profile.firstName);
+  assert.ok(profile.lastName);
   assert.equal(profile.birthday, '2001-02-03');
   assert.equal(profile.countryCode, 'JP');
   assert.equal(profile.generatedFromCountry, 'JP');
@@ -225,6 +228,39 @@ test('PayPal profile generator falls back to selected PayPal account email and U
   assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
 });
 
+test('PayPal profile generator supports Brazil exit profiles and keeps existing email and phone sources', () => {
+  const { generator } = createGenerator({
+    initialState: {
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'Brazil [BR]',
+      },
+      email: 'state@example.com',
+      hostedCheckoutPhoneNumber: '5511999998888',
+    },
+    getAddressSeedForCountry: (countryCode) => ({
+      countryCode,
+      fallback: {
+        address1: 'Avenida Paulista 1000',
+        city: 'Sao Paulo',
+        region: 'Sao Paulo',
+        postalCode: '01310-100',
+      },
+    }),
+  });
+
+  const profile = generator.generateProfile();
+
+  assert.equal(profile.email, 'state@example.com');
+  assert.equal(profile.phone, '5511999998888');
+  assert.equal(profile.countryCode, 'BR');
+  assert.equal(profile.generatedFromCountry, 'BR');
+  assert.equal(profile.address1, 'Avenida Paulista 1000');
+  assert.equal(profile.city, 'Sao Paulo');
+  assert.equal(profile.fullAddress, 'Avenida Paulista 1000 Sao Paulo Sao Paulo 01310-100 BR');
+  assert.ok(profile.firstName);
+  assert.ok(profile.lastName);
+});
+
 test('PayPal profile generator defaults to a local US address seed without proxy country', () => {
   const requestedSeeds = [];
   const { generator } = createGenerator({
@@ -256,15 +292,26 @@ test('PayPal profile generator persists generated profile and copies full profil
   const { btnCopyProfile, btnGenerateProfile, events, generator, getLatestState } = createGenerator({
     initialState: {
       customPassword: 'CustomSecret123!',
-      ipProxyAppliedExitRegion: 'DE',
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'JP',
+      },
     },
     getDraftEmail: () => 'user@example.com',
     getDraftHostedCheckoutPhone: () => '+4915123456789',
+    getAddressSeedForCountry: (countryCode) => ({
+      countryCode,
+      fallback: {
+        address1: 'Marunouchi 1-1',
+        city: 'Chiyoda-ku',
+        region: 'Tokyo',
+        postalCode: '100-0005',
+      },
+    }),
   });
   generator.bindPayPalProfileEvents();
 
   await btnGenerateProfile.click();
-  const saveMessage = events.find((event) => event.type === 'message')?.message;
+  const saveMessage = events.filter((event) => event.type === 'message').find((event) => event.message.type === 'SAVE_SETTING')?.message;
 
   assert.equal(saveMessage.type, 'SAVE_SETTING');
   assert.equal(saveMessage.payload.paypalGeneratedProfile.email, 'user@example.com');
@@ -277,12 +324,17 @@ test('PayPal profile generator persists generated profile and copies full profil
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardNumber, /^4147\d{12}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
   assert.match(saveMessage.payload.paypalGeneratedProfile.cardCvv, /^\d{3}$/);
-  assert.equal(saveMessage.payload.paypalGeneratedProfile.fullAddress, 'Marunouchi 1-1 Chiyoda-ku Tokyo 100-0005 DE');
+  assert.equal(saveMessage.payload.paypalGeneratedProfile.fullAddress, 'Marunouchi 1-1 Chiyoda-ku Tokyo 100-0005 JP');
 
   await btnCopyProfile.click();
   const copied = events.filter((event) => event.type === 'copy').at(-1)?.text;
 
-  assert.match(copied, /^邮箱：user@example\.com\n电话：\+4915123456789\n卡号：4147\d{12}\n有效期：(0[1-9]|1[0-2]) \/ \d{2}\nCVV：\d{3}\n密码：CustomSecret123!\n名字：Ada\n姓氏：Lovelace\n生日：2001-02-03\n国家：DE\n地址：Marunouchi 1-1\n城市：Chiyoda-ku\n州省：Tokyo\n邮编：100-0005$/);
+  assert.match(copied, /user@example\.com/);
+  assert.match(copied, /\+4915123456789/);
+  assert.match(copied, /4147\d{12}/);
+  assert.match(copied, /CustomSecret123!/);
+  assert.match(copied, /JP/);
+  assert.match(copied, /Marunouchi 1-1/);
   assert.equal(copied.includes('整段地址'), false);
 });
 

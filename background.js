@@ -1561,6 +1561,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutCloudConversionEnabled: false,
   plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
   plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
+  plusCheckoutRegionalCheckoutEnabled: false,
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
@@ -1832,6 +1833,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
   'plusCheckoutConversionProxySource',
+  'plusCheckoutRegionalCheckoutEnabled',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
   'hostedCheckoutSecurityChallengeEnabled',
@@ -2971,6 +2973,195 @@ function normalizePlusCheckoutConversionProxySource(value = '') {
 function normalizePlusCheckoutConversionProxy711Region(value = '') {
   const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
   return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+}
+
+const PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES = Object.freeze(['US', 'JP', 'BR']);
+const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = Object.freeze({
+  US: Object.freeze({ country: 'US', currency: 'USD' }),
+  JP: Object.freeze({ country: 'JP', currency: 'JPY' }),
+  BR: Object.freeze({ country: 'BR', currency: 'BRL' }),
+});
+
+function normalizePlusCheckoutProfileCountryCode(value = '', fallback = '') {
+  const raw = String(value || '').trim();
+  const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  let normalized = /^[A-Z]{2}$/.test(compact) ? compact : '';
+  if (!normalized) {
+    const lower = raw.toLowerCase();
+    if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) normalized = 'US';
+    else if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) normalized = 'JP';
+    else if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) normalized = 'BR';
+  }
+  if (!normalized) {
+    const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+    normalized = bracketMatch ? bracketMatch[1].toUpperCase() : '';
+  }
+  if (!normalized && typeof normalizeCountryCode === 'function') {
+    normalized = String(normalizeCountryCode(raw) || '').trim().toUpperCase();
+  }
+  if (PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.includes(normalized)) {
+    return normalized;
+  }
+  return PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.includes(fallback) ? fallback : '';
+}
+
+function buildPlusCheckoutProfileRegionFallback(exitRegion = '') {
+  const fallbackApplied = !normalizePlusCheckoutProfileCountryCode(exitRegion);
+  return {
+    countryCode: 'US',
+    exitRegion: String(exitRegion || '').trim(),
+    fallbackApplied,
+  };
+}
+
+function buildPlusCheckoutProfileExitCheckPayload(value = {}, overrides = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const exitIp = String(overrides.exitIp ?? source.exitIp ?? '').trim();
+  const diagnostics = String(overrides.diagnostics ?? source.diagnostics ?? source.error ?? '').trim();
+  return {
+    status: String(overrides.status || source.status || (exitIp ? 'success' : 'error')).trim().toLowerCase() || (exitIp ? 'success' : 'error'),
+    exitIp,
+    exitRegion: String(overrides.exitRegion ?? source.exitRegion ?? '').trim(),
+    exitSource: String(overrides.exitSource ?? source.exitSource ?? '').trim(),
+    exitEndpoint: String(overrides.exitEndpoint ?? source.exitEndpoint ?? '').trim(),
+    diagnostics,
+    displayName: String(overrides.displayName ?? source.displayName ?? '').trim(),
+    checkedAt: Math.max(0, Number(overrides.checkedAt ?? source.checkedAt) || Date.now()),
+    context: String(overrides.context ?? source.context ?? 'plus-checkout-profile-region').trim(),
+  };
+}
+
+function normalizePlusCheckoutProfileRegionResult(source = {}) {
+  const exitRegion = String(
+    source.exitRegion
+    || source.plusCheckoutConversionProxyExitCheck?.exitRegion
+    || ''
+  ).trim();
+  const countryCode = normalizePlusCheckoutProfileCountryCode(source.countryCode || exitRegion, '');
+  const fallbackApplied = !countryCode || Boolean(source.fallbackApplied);
+  return {
+    countryCode: countryCode || 'US',
+    exitIp: String(source.exitIp || source.plusCheckoutConversionProxyExitCheck?.exitIp || '').trim(),
+    exitRegion,
+    exitSource: String(source.exitSource || source.plusCheckoutConversionProxyExitCheck?.exitSource || '').trim(),
+    fallbackApplied,
+    plusCheckoutConversionProxyExitCheck: source.plusCheckoutConversionProxyExitCheck || null,
+  };
+}
+
+async function resolvePlusCheckoutProfileRegion(state = {}, options = {}) {
+  const latestState = {
+    ...(typeof getState === 'function' ? await getState().catch(() => ({})) : {}),
+    ...(state && typeof state === 'object' && !Array.isArray(state) ? state : {}),
+  };
+  const source = normalizePlusCheckoutConversionProxySource(
+    options?.source ?? latestState.plusCheckoutConversionProxySource
+  );
+  const context = String(options?.context || 'plus-checkout-profile-region').trim();
+
+  if (source === 'ip_proxy') {
+    const exitIp = String(latestState.ipProxyAppliedExitIp || latestState.ipProxyExitIp || '').trim();
+    const exitRegion = String(latestState.ipProxyAppliedExitRegion || latestState.ipProxyExitRegion || latestState.ipProxyRegion || '').trim();
+    const countryCode = normalizePlusCheckoutProfileCountryCode(exitRegion, '');
+    const exitCheck = buildPlusCheckoutProfileExitCheckPayload(latestState.plusCheckoutConversionProxyExitCheck || {}, {
+      status: exitIp || countryCode ? 'success' : 'error',
+      exitIp,
+      exitRegion,
+      exitSource: latestState.ipProxyAppliedExitSource || latestState.ipProxyExitSource || 'ip_proxy',
+      exitEndpoint: latestState.ipProxyAppliedExitEndpoint || latestState.ipProxyExitEndpoint || '',
+      diagnostics: exitIp || countryCode ? '' : '当前 IP 代理没有可用出口信息，已使用 US 生成资料。',
+      displayName: 'IP代理',
+      context,
+    });
+    return {
+      ...buildPlusCheckoutProfileRegionFallback(exitRegion),
+      countryCode: countryCode || 'US',
+      exitIp,
+      exitRegion,
+      exitSource: exitCheck.exitSource,
+      exitSourceMode: source,
+      exitEndpoint: exitCheck.exitEndpoint,
+      exitCheckSource: 'ip_proxy_state',
+      fallbackApplied: !countryCode,
+      plusCheckoutConversionProxyExitCheck: exitCheck,
+    };
+  }
+
+  let exitCheck = null;
+  const storedSession = checkoutConversionProxyManager?.getStoredSession
+    ? await checkoutConversionProxyManager.getStoredSession(latestState).catch(() => null)
+    : null;
+  const manualSession = checkoutConversionProxyManager?.getStoredManualSession
+    ? await checkoutConversionProxyManager.getStoredManualSession(latestState).catch(() => null)
+    : null;
+  const session = storedSession?.active ? storedSession : (manualSession?.active ? manualSession : null);
+  if (session?.active && checkoutConversionProxyManager?.checkCheckoutConversionProxySessionExit) {
+    exitCheck = await checkoutConversionProxyManager.checkCheckoutConversionProxySessionExit(session, {
+      context,
+      requireExit: false,
+      persistRunning: false,
+      log: options?.log !== false,
+    }).catch((error) => buildPlusCheckoutProfileExitCheckPayload({}, {
+      status: 'error',
+      diagnostics: error?.message || String(error || '支付出口检测失败。'),
+      displayName: session.displayName,
+      context,
+    }));
+  }
+
+  if (!exitCheck && latestState.plusCheckoutConversionProxyExitCheck?.exitRegion) {
+    exitCheck = buildPlusCheckoutProfileExitCheckPayload(latestState.plusCheckoutConversionProxyExitCheck, { context });
+  }
+
+  if (!exitCheck && typeof plusCheckoutCreateExecutor?.testCheckoutConversionProxy === 'function') {
+    const testResult = await plusCheckoutCreateExecutor.testCheckoutConversionProxy({
+      state: latestState,
+      source,
+      proxyUrl: options?.proxyUrl ?? latestState.plusCheckoutConversionProxyUrl,
+      proxy711Region: options?.proxy711Region ?? latestState.plusCheckoutConversionProxy711Region,
+    }).catch((error) => ({
+      ok: false,
+      diagnostics: error?.message || String(error || '支付出口检测失败。'),
+    }));
+    exitCheck = buildPlusCheckoutProfileExitCheckPayload({}, {
+      status: testResult?.ok && testResult?.exitIp ? 'success' : 'error',
+      exitIp: testResult?.exitIp || '',
+      exitRegion: testResult?.exitRegion || '',
+      exitSource: testResult?.exitSource || '',
+      exitEndpoint: testResult?.exitEndpoint || '',
+      diagnostics: testResult?.diagnostics || testResult?.error || '',
+      displayName: testResult?.proxyDisplayName || '',
+      context,
+    });
+  }
+
+  const normalized = normalizePlusCheckoutProfileRegionResult({
+    exitRegion: exitCheck?.exitRegion || '',
+    exitIp: exitCheck?.exitIp || '',
+    exitSource: exitCheck?.exitSource || source,
+    plusCheckoutConversionProxyExitCheck: exitCheck,
+  });
+  return {
+    ...normalized,
+    exitSourceMode: source,
+  };
+}
+
+async function resolvePlusCheckoutRegionalBillingDetails(state = {}, options = {}) {
+  const paymentMethod = normalizePlusPaymentMethod(options?.paymentMethod || state?.plusPaymentMethod);
+  const gopayMethod = typeof PLUS_PAYMENT_METHOD_GOPAY === 'string' ? PLUS_PAYMENT_METHOD_GOPAY : 'gopay';
+  const gpcHelperMethod = typeof PLUS_PAYMENT_METHOD_GPC_HELPER === 'string' ? PLUS_PAYMENT_METHOD_GPC_HELPER : 'gpc-helper';
+  if (paymentMethod === gopayMethod || paymentMethod === gpcHelperMethod) {
+    return null;
+  }
+  if (!Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
+    return null;
+  }
+  const region = await resolvePlusCheckoutProfileRegion(state, {
+    context: options?.context || 'plus-checkout-regional-checkout',
+    log: options?.log,
+  });
+  return PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS[region.countryCode] || PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS.US;
 }
 
 function normalizeFiveSimCountryId(value, fallback = FIVE_SIM_COUNTRY_ID) {
@@ -4341,6 +4532,8 @@ function normalizePersistentSettingValue(key, value) {
       }
     case 'plusCheckoutCloudConversionApiKey':
       return String(value || '').trim();
+    case 'plusCheckoutRegionalCheckoutEnabled':
+      return Boolean(value);
     case 'plusCheckoutConversionProxySource':
       return normalizePlusCheckoutConversionProxySource(value);
     case 'plusCheckoutConversionProxyUrl': {
@@ -5574,6 +5767,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutCardPreWaitSeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutCardPreWaitSeconds']);
+  assignIfUpdated('plusCheckoutRegionalCheckoutEnabled', ['flows', 'openai', 'plus', 'plusCheckoutRegionalCheckoutEnabled']);
   assignIfUpdated('plusCheckoutConversionProxySource', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxySource']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
   assignIfUpdated('plusCheckoutConversionProxy711Region', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxy711Region']);
@@ -17434,6 +17628,8 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
   checkoutConversionProxyManager,
+  resolvePlusCheckoutProfileRegion,
+  resolvePlusCheckoutRegionalBillingDetails,
 });
 const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?.createPlusCheckoutBillingExecutor({
   addLog,
@@ -17458,6 +17654,7 @@ const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?
   waitForTabUrlMatchUntilStopped,
   probeIpProxyExit,
   checkoutConversionProxyManager,
+  resolvePlusCheckoutProfileRegion,
 });
 const goPayManualConfirmExecutor = self.MultiPageBackgroundGoPayManualConfirm?.createGoPayManualConfirmExecutor({
   addLog,
@@ -17919,6 +18116,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
     }
     return plusCheckoutCreateExecutor.testCheckoutConversionProxy(...args);
   },
+  resolvePlusCheckoutProfileRegion,
   deleteMail2925Account,
   deleteMail2925Accounts,
   testHotmailAccountMailAccess,

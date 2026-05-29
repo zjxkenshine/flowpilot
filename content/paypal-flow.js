@@ -1027,6 +1027,32 @@ function selectFirstHostedOptionByIdText(ids = [], value = '') {
   return false;
 }
 
+function normalizeHostedCountryCode(value = '') {
+  const raw = normalizeText(value || '');
+  const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (['US', 'JP', 'BR'].includes(normalized)) {
+    return normalized;
+  }
+  const lower = raw.toLowerCase();
+  if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+  if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+  if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+  return '';
+}
+
+function matchesHostedCountryOption(optionText = '', optionValue = '', countryCode = 'US') {
+  const normalizedCountryCode = normalizeHostedCountryCode(countryCode) || 'US';
+  const text = normalizeText(optionText || '').toLowerCase();
+  const value = normalizeText(optionValue || '').toLowerCase();
+  const aliases = {
+    US: ['us', 'usa', 'united states', 'united states of america', 'america'],
+    JP: ['jp', 'jpn', 'japan', '日本'],
+    BR: ['br', 'bra', 'brazil', 'brasil', '巴西'],
+  }[normalizedCountryCode] || [];
+  return value === normalizedCountryCode.toLowerCase()
+    || aliases.some((alias) => value === alias || text === alias || text.includes(alias));
+}
+
 function fillHostedAddressFields(address = {}) {
   const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
   const street = source.street || source.address1 || source.line1 || source.billingLine1 || '';
@@ -1074,22 +1100,19 @@ function selectHostedCountryById(id = 'country', countryCode = 'US') {
   if (!select || !isVisibleElement(select)) {
     return { found: Boolean(select), selected: false };
   }
-  const expected = normalizeText(countryCode || 'US').toLowerCase();
+  const expectedCountryCode = normalizeHostedCountryCode(countryCode) || 'US';
   const currentOption = Array.from(select.options || []).find((item) => item.selected) || null;
   const currentText = normalizeText(currentOption?.textContent || currentOption?.label || select.value || '').toLowerCase();
-  if (currentText === expected || select.value.toLowerCase() === expected || /united\s+states|usa/i.test(currentText)) {
+  if (matchesHostedCountryOption(currentText, select.value, expectedCountryCode)) {
     return { found: true, selected: false, value: select.value };
   }
   if (!isEnabledControl(select)) {
     return { found: true, selected: false, missing: true, disabled: true };
   }
   const option = Array.from(select.options || []).find((item) => {
-    const optionText = normalizeText(item.textContent || item.label || '').toLowerCase();
-    const optionValue = normalizeText(item.value || '').toLowerCase();
-    return optionValue === expected
-      || optionValue === 'usa'
-      || optionText === expected
-      || /united\s+states|usa/i.test(optionText);
+    const optionText = normalizeText(item.textContent || item.label || '');
+    const optionValue = normalizeText(item.value || '');
+    return matchesHostedCountryOption(optionText, optionValue, expectedCountryCode);
   });
   if (!option) {
     return { found: true, selected: false, missing: true };
@@ -1490,14 +1513,15 @@ async function submitHostedLogin(payload = {}) {
 
 async function fillHostedGuestCheckout(payload = {}) {
   await waitForDocumentComplete();
-  const countryResult = selectHostedCountryById('country', 'US');
+  const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
+  const countryCode = normalizeHostedCountryCode(address.countryCode || payload.countryCode || payload.generatedFromCountry || 'US') || 'US';
+  const countryResult = selectHostedCountryById('country', countryCode);
   if (countryResult.missing) {
-    throw new Error('PayPal hosted checkout country dropdown does not contain United States.');
+    throw new Error(`PayPal hosted checkout country dropdown does not contain ${countryCode}.`);
   }
   if (countryResult.selected) {
     await sleep(1000);
   }
-  const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
   if (payload.addressOnly === true) {
     const addressFillResult = fillHostedAddressFields(address);
     const addressSuggestionResult = payload.useAddressSuggestionFallback === true

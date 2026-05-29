@@ -355,6 +355,8 @@ const btnPlusCheckoutConversionProxyTest = document.getElementById('btn-plus-che
 const inputPlusCheckoutCloudConversionEnabled = document.getElementById('input-plus-checkout-cloud-conversion-enabled');
 const rowPlusCheckoutConversionProxyExit = document.getElementById('row-plus-checkout-conversion-proxy-exit');
 const displayPlusCheckoutConversionProxyExitCheck = document.getElementById('display-plus-checkout-conversion-proxy-exit-check');
+const rowPlusCheckoutRegionalCheckout = document.getElementById('row-plus-checkout-regional-checkout');
+const inputPlusCheckoutRegionalCheckoutEnabled = document.getElementById('input-plus-checkout-regional-checkout-enabled');
 const rowPlusCheckoutCloudConversionApiUrl = document.getElementById('row-plus-checkout-cloud-conversion-api-url');
 const inputPlusCheckoutCloudConversionApiUrl = document.getElementById('input-plus-checkout-cloud-conversion-api-url');
 const rowPlusCheckoutCloudConversionApiKey = document.getElementById('row-plus-checkout-cloud-conversion-api-key');
@@ -6351,6 +6353,9 @@ function collectSettingsPayload() {
     plusCheckoutCloudConversionEnabled: typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled
       ? Boolean(inputPlusCheckoutCloudConversionEnabled.checked)
       : false,
+    plusCheckoutRegionalCheckoutEnabled: typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled
+      ? Boolean(inputPlusCheckoutRegionalCheckoutEnabled.checked)
+      : Boolean(latestState?.plusCheckoutRegionalCheckoutEnabled),
     plusCheckoutCloudConversionApiUrl: typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl
       ? normalizePlusCheckoutCloudConversionApiUrlValue(inputPlusCheckoutCloudConversionApiUrl.value)
       : builtinPlusCheckoutCloudConversionApiUrl,
@@ -11056,6 +11061,7 @@ function applySub2ApiReloginVisibilityOverrides(state = latestState) {
   [
     rowPlusCheckoutConversionProxyTest,
     rowPlusCheckoutConversionProxyExit,
+    typeof rowPlusCheckoutRegionalCheckout !== 'undefined' ? rowPlusCheckoutRegionalCheckout : null,
     rowPlusCheckoutCloudConversionApiUrl,
     rowPlusCheckoutCloudConversionApiKey,
     rowPlusCheckoutConversionProxyRuntime,
@@ -11869,6 +11875,7 @@ function updatePlusModeUI() {
     typeof rowPlusCheckoutConversionProxy !== 'undefined' ? rowPlusCheckoutConversionProxy : null,
     typeof rowPlusCheckoutConversionProxyTest !== 'undefined' ? rowPlusCheckoutConversionProxyTest : null,
     typeof rowPlusCheckoutConversionProxyExit !== 'undefined' ? rowPlusCheckoutConversionProxyExit : null,
+    typeof rowPlusCheckoutRegionalCheckout !== 'undefined' ? rowPlusCheckoutRegionalCheckout : null,
     typeof rowPlusCheckoutConversionProxyRuntime !== 'undefined' ? rowPlusCheckoutConversionProxyRuntime : null,
   ].forEach((row) => {
     if (!row) {
@@ -13362,6 +13369,9 @@ function applySettingsState(state) {
   }
   if (typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled) {
     inputPlusCheckoutCloudConversionEnabled.checked = Boolean(state?.plusCheckoutCloudConversionEnabled);
+  }
+  if (typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
+    inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(state?.plusCheckoutRegionalCheckoutEnabled);
   }
   if (typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl) {
     inputPlusCheckoutCloudConversionApiUrl.value = normalizePlusCheckoutCloudConversionApiUrlValue(state?.plusCheckoutCloudConversionApiUrl || '');
@@ -19087,6 +19097,11 @@ inputPlusCheckoutCloudConversionEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPlusCheckoutRegionalCheckoutEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputPlusCheckoutCloudConversionApiUrl?.addEventListener('input', () => {
   validatePlusCheckoutCloudConversionConfig();
   markSettingsDirty(true);
@@ -22046,6 +22061,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(message.payload.hostedCheckoutPhoneNumber);
         validateHostedCheckoutContactConfig();
       }
+      if (message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined && typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
+        inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(message.payload.plusCheckoutRegionalCheckoutEnabled);
+      }
       if (message.payload.hostedCheckoutSmsPoolText !== undefined && inputHostedCheckoutSmsPool) {
         inputHostedCheckoutSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(message.payload.hostedCheckoutSmsPoolText);
         queueHostedSmsPoolRefresh();
@@ -22378,12 +22396,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.plusCheckoutConversionProxy711Region !== undefined && inputPlusCheckoutConversionProxy711Region) {
         inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionValue(message.payload.plusCheckoutConversionProxy711Region);
       }
+      if (message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined && typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
+        inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(message.payload.plusCheckoutRegionalCheckoutEnabled);
+      }
       if (
         message.payload.plusCheckoutConversionProxyManualSession !== undefined
         || message.payload.plusCheckoutConversionProxyExitCheck !== undefined
         || message.payload.plusCheckoutConversionProxySource !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
         || message.payload.plusCheckoutConversionProxy711Region !== undefined
+        || message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined
       ) {
         updatePlusCheckoutConversionModeUi();
         renderPlusCheckoutConversionProxyExitCheck(latestState);
