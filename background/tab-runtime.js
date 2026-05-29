@@ -847,9 +847,14 @@
     function buildRetryableTransportTimeoutError(source, error) {
       const rawMessage = error?.message || String(error || '');
       if (isRetryableContentScriptTransportError(error)) {
-        return new Error(
+        const wrapped = new Error(
           `${getSourceLabel(source)} 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。`
         );
+        wrapped.code = 'CONTENT_SCRIPT_RECONNECT_TIMEOUT';
+        wrapped.retryableTransport = true;
+        wrapped.source = source;
+        wrapped.causeMessage = rawMessage;
+        return wrapped;
       }
       return new Error(rawMessage || `${getSourceLabel(source)} 页面通信失败。`);
     }

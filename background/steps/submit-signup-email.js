@@ -16,6 +16,7 @@
       phoneVerificationHelpers = null,
       resolveSignupMethod = () => 'email',
       resolveSignupEmailForFlow,
+      isRetryableContentScriptTransportError = null,
       sendToContentScriptResilient,
       setState = null,
       SIGNUP_PAGE_INJECT_FILES,
@@ -38,7 +39,11 @@
 
     function isRetryableStep2TransportErrorMessage(errorLike) {
       const message = getErrorMessage(errorLike);
-      return /Content script on signup-page did not respond in \d+s|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|Receiving end does not exist|message channel closed|A listener indicated an asynchronous response|port closed before a response was received|did not respond in \d+s/i.test(message);
+      if (typeof isRetryableContentScriptTransportError === 'function'
+        && isRetryableContentScriptTransportError(errorLike)) {
+        return true;
+      }
+      return /Content script on signup-page did not respond in \d+s|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|Receiving end does not exist|message channel closed|A listener indicated an asynchronous response|port closed before a response was received|did not respond in \d+s|页面刚完成跳转或刷新，内容脚本还没有重新接回|页面未能重新就绪|页面通信异常/i.test(message);
     }
 
     function isLikelyLoggedInChatgptHomeUrl(rawUrl) {

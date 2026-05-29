@@ -285,6 +285,81 @@ return {
   assert.equal(api.snapshot().messages[0].payload.signupMethod, 'phone');
 });
 
+test('step 5 post-completion validation retries transient reconnect failures', async () => {
+  const api = new Function(`
+const logs = [];
+let stateReadCount = 0;
+
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/about-you' };
+    },
+  },
+};
+
+async function sendToContentScriptResilient(_source, message) {
+  if (message.type !== 'GET_STEP5_SUBMIT_STATE') {
+    throw new Error('unexpected message type: ' + message.type);
+  }
+  stateReadCount += 1;
+  if (stateReadCount === 1) {
+    throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+  }
+  return {
+    retryPage: false,
+    retryEnabled: false,
+    maxCheckAttemptsBlocked: false,
+    userAlreadyExistsBlocked: false,
+    successState: 'logged_in_home',
+    profileVisible: false,
+    errorText: '',
+    unknownAuthPage: false,
+    url: 'https://chatgpt.com/',
+  };
+}
+
+function isRetryableContentScriptTransportError(error) {
+  return /页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(error?.message || String(error || ''));
+}
+
+async function addLog(message, level, meta) {
+  logs.push({ message, level, meta });
+}
+async function waitForTabStableComplete() {}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('isStep5PhoneSignupCompletionPayload')}
+${extractFunction('recoverStep5SubmitRetryPageOnTab')}
+${extractFunction('validateStep5PostCompletion')}
+
+return {
+  async run() {
+    return validateStep5PostCompletion(99, {
+      step5ProfileSubmitResultMaxRounds: 2,
+      step5ProfileSubmitResultRoundWaitSeconds: 1,
+    });
+  },
+  snapshot() {
+    return { logs, stateReadCount };
+  },
+};
+`)();
+
+  const result = await api.run();
+  const snapshot = api.snapshot();
+
+  assert.equal(result.successState, 'logged_in_home');
+  assert.equal(snapshot.stateReadCount, 2);
+  assert.equal(
+    snapshot.logs.some(({ message }) => /认证页短暂失联，继续等待下一轮恢复/.test(message)),
+    true
+  );
+});
+
 test('step 5 post-completion validation rejects callback error landing without phone signup context', async () => {
   const api = new Function(`
 const chrome = {
@@ -336,5 +411,77 @@ return {
   await assert.rejects(
     () => api.run(),
     /不是手机号注册上下文/
+  );
+});
+
+test('completion signal recovery completes step 3 when auth tab already reached verification', async () => {
+  const api = new Function(`
+const events = {
+  logs: [],
+  completed: [],
+};
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/email-verification' };
+    },
+  },
+};
+
+async function getTabId(source) {
+  return source === 'signup-page' ? 31 : null;
+}
+async function getState() {
+  return {
+    email: 'user@example.com',
+    accountIdentifierType: 'email',
+    accountIdentifier: 'user@example.com',
+  };
+}
+async function addLog(message, level, meta) {
+  events.logs.push({ message, level, meta });
+}
+async function completeNodeFromBackground(nodeId, payload) {
+  events.completed.push({ nodeId, payload });
+}
+async function waitForTabStableComplete() {}
+function getErrorMessage(error) {
+  return error?.message || String(error || '');
+}
+function isRetryableContentScriptTransportError(error) {
+  return /页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(getErrorMessage(error));
+}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupPageHost')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('isSignupEmailVerificationPageUrl')}
+${extractFunction('isSignupPhoneVerificationPageUrl')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('recoverCompletionSignalAfterRetryableTransportFailure')}
+
+return {
+  async run() {
+    const payload = await recoverCompletionSignalAfterRetryableTransportFailure(
+      'fill-password',
+      new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。'),
+      new Error('节点 fill-password 等待超时（>120 秒）')
+    );
+    return { payload, events };
+  },
+};
+`)();
+
+  const { payload, events } = await api.run();
+
+  assert.equal(payload.state, undefined);
+  assert.equal(payload.email, 'user@example.com');
+  assert.equal(payload.transportRecovered, true);
+  assert.equal(events.completed[0].nodeId, 'fill-password');
+  assert.equal(events.completed[0].payload.signupVerificationRequestedAt > 0, true);
+  assert.equal(
+    events.logs.some(({ message }) => /按步骤 3 已完成继续/.test(message)),
+    true
   );
 });

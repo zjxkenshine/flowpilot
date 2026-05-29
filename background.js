@@ -14017,6 +14017,119 @@ async function finalizeDeferredStepExecutionError(step, error) {
   return finalizeDeferredNodeExecutionError(nodeId, error);
 }
 
+function isSignupPhoneVerificationPageUrl(rawUrl) {
+  const parsed = parseUrlSafely(rawUrl);
+  return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/phone-verification(?:[/?#]|$)/i.test(parsed.pathname || ''));
+}
+
+function isSignupProfilePageUrl(rawUrl) {
+  const parsed = parseUrlSafely(rawUrl);
+  return Boolean(parsed && isSignupPageHost(parsed.hostname) && /\/(?:create-account\/profile|u\/signup\/profile|signup\/profile|about-you)(?:[/?#]|$)/i.test(parsed.pathname || ''));
+}
+
+async function recoverCompletionSignalAfterRetryableTransportFailure(nodeId, executeError, completionError) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!normalizedNodeId) {
+    return null;
+  }
+
+  const completionMessage = getErrorMessage(completionError);
+  if (!/等待超时/.test(completionMessage)) {
+    return null;
+  }
+
+  if (executeError && !isRetryableContentScriptTransportError(executeError)) {
+    return null;
+  }
+
+  if (normalizedNodeId !== 'fill-password' && normalizedNodeId !== 'fill-profile') {
+    return null;
+  }
+
+  const signupTabId = await getTabId('signup-page').catch(() => null);
+  if (!Number.isInteger(signupTabId)) {
+    return null;
+  }
+
+  if (typeof waitForTabStableComplete === 'function') {
+    await waitForTabStableComplete(signupTabId, {
+      timeoutMs: normalizedNodeId === 'fill-profile' ? 120000 : 30000,
+      retryDelayMs: 300,
+      stableMs: normalizedNodeId === 'fill-profile' ? 1000 : 800,
+      initialDelayMs: 300,
+    }).catch(() => null);
+  }
+
+  const tab = await chrome.tabs.get(signupTabId).catch(() => null);
+  const currentUrl = String(tab?.url || '').trim();
+
+  if (normalizedNodeId === 'fill-password') {
+    const isVerificationPage = isSignupEmailVerificationPageUrl(currentUrl);
+    const isPhoneVerificationPage = isSignupPhoneVerificationPageUrl(currentUrl);
+    const isProfilePage = isSignupProfilePageUrl(currentUrl);
+    const isLoggedInHome = isLikelyLoggedInChatgptHomeUrl(currentUrl);
+    if (!isVerificationPage && !isPhoneVerificationPage && !isProfilePage && !isLoggedInHome) {
+      return null;
+    }
+
+    const latestState = await getState().catch(() => ({}));
+    const accountIdentifierType = String(latestState.accountIdentifierType || '').trim().toLowerCase();
+    const phoneNumber = String(
+      latestState.signupPhoneNumber
+      || (accountIdentifierType === 'phone' ? latestState.accountIdentifier : '')
+      || ''
+    ).trim();
+    const payload = {
+      email: String(latestState.email || '').trim(),
+      phoneNumber,
+      accountIdentifierType: phoneNumber ? 'phone' : (accountIdentifierType || 'email'),
+      accountIdentifier: phoneNumber || String(latestState.accountIdentifier || latestState.email || '').trim(),
+      signupVerificationRequestedAt: (isVerificationPage || isPhoneVerificationPage) ? Date.now() : null,
+      skippedPasswordPage: true,
+      deferredSubmit: false,
+      ...(isLoggedInHome ? { skipProfileStep: true } : {}),
+      transportRecovered: true,
+      url: currentUrl,
+    };
+
+    await addLog(
+      `节点 fill-password：${executeError ? '内容脚本断连且' : ''}未收到完成信号，但认证页已进入${isLoggedInHome ? '已登录首页' : '注册后续页面'}，按步骤 3 已完成继续。`,
+      'warn',
+      { nodeId: normalizedNodeId }
+    );
+    await completeNodeFromBackground(normalizedNodeId, payload);
+    return payload;
+  }
+
+  try {
+    const validationState = await getState().catch(() => ({}));
+    const validationConfig = typeof getStep5ProfileSubmitResultConfigForState === 'function'
+      ? getStep5ProfileSubmitResultConfigForState(validationState)
+      : {
+        maxRounds: 12,
+        roundWaitSeconds: 10,
+      };
+    const payload = {
+      profileSubmitted: true,
+      transportRecovered: true,
+      url: currentUrl,
+      step5ProfileSubmitResultMaxRounds: validationConfig.maxRounds,
+      step5ProfileSubmitResultRoundWaitSeconds: validationConfig.roundWaitSeconds,
+    };
+    await validateStep5PostCompletion(signupTabId, payload);
+    payload.step5PostCompletionValidated = true;
+    await addLog(
+      `节点 fill-profile：${executeError ? '内容脚本断连且' : ''}未收到完成信号，但资料提交后的页面状态已确认成功，按步骤 5 已完成继续。`,
+      'warn',
+      { nodeId: normalizedNodeId }
+    );
+    await completeNodeFromBackground(normalizedNodeId, payload);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 async function executeNodeViaCompletionSignal(nodeId, timeoutMs = 0) {
   const normalizedNodeId = String(nodeId || '').trim();
   const executionState = await getState();
@@ -14055,6 +14168,14 @@ async function executeNodeViaCompletionSignal(nodeId, timeoutMs = 0) {
   if (executeError && isRetryableContentScriptTransportError(executeError)) {
     const completionMessage = getErrorMessage(completionResult.error);
     if (/等待超时/.test(completionMessage)) {
+      const recoveredPayload = await recoverCompletionSignalAfterRetryableTransportFailure(
+        normalizedNodeId,
+        executeError,
+        completionResult.error
+      );
+      if (recoveredPayload) {
+        return recoveredPayload;
+      }
       await finalizeDeferredNodeExecutionError(normalizedNodeId, executeError);
       throw executeError;
     }
@@ -14063,6 +14184,15 @@ async function executeNodeViaCompletionSignal(nodeId, timeoutMs = 0) {
 
   if (executeError) {
     throw executeError;
+  }
+
+  const recoveredPayload = await recoverCompletionSignalAfterRetryableTransportFailure(
+    normalizedNodeId,
+    null,
+    completionResult.error
+  );
+  if (recoveredPayload) {
+    return recoveredPayload;
   }
 
   throw completionResult.error;
@@ -14927,32 +15057,36 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
     }
     const signupTabId = await getTabId('signup-page');
     if (signupTabId) {
-      await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
-      await waitForTabStableComplete(signupTabId, {
-        timeoutMs: 120000,
-        retryDelayMs: 300,
-        stableMs: 1000,
-        initialDelayMs: 800,
-      });
-      try {
-        const validationState = await getState().catch(() => ({}));
-        const validationConfig = typeof getStep5ProfileSubmitResultConfigForState === 'function'
-          ? getStep5ProfileSubmitResultConfigForState(validationState)
-          : {
-              maxRounds: 12,
-              roundWaitSeconds: 10,
-            };
-        await validateStep5PostCompletion(signupTabId, {
-          ...(completionPayload || {}),
-          step5ProfileSubmitResultMaxRounds: completionPayload?.step5ProfileSubmitResultMaxRounds ?? validationConfig.maxRounds,
-          step5ProfileSubmitResultRoundWaitSeconds: completionPayload?.step5ProfileSubmitResultRoundWaitSeconds ?? validationConfig.roundWaitSeconds,
+      if (completionPayload?.step5PostCompletionValidated) {
+        await addLog('自动运行：填写资料节点已通过断连兜底确认提交结果，跳过重复验证。', 'info');
+      } else {
+        await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
+        await waitForTabStableComplete(signupTabId, {
+          timeoutMs: 120000,
+          retryDelayMs: 300,
+          stableMs: 1000,
+          initialDelayMs: 800,
         });
-      } catch (step5ValidationError) {
-        step5ValidationError.skipFailedSignupPhoneReusePreserve = true;
-        step5ValidationError.signupProfileSubmitted = true;
-        await setNodeStatus(normalizedNodeId, 'failed');
-        await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { nodeId: normalizedNodeId });
-        throw step5ValidationError;
+        try {
+          const validationState = await getState().catch(() => ({}));
+          const validationConfig = typeof getStep5ProfileSubmitResultConfigForState === 'function'
+            ? getStep5ProfileSubmitResultConfigForState(validationState)
+            : {
+                maxRounds: 12,
+                roundWaitSeconds: 10,
+              };
+          await validateStep5PostCompletion(signupTabId, {
+            ...(completionPayload || {}),
+            step5ProfileSubmitResultMaxRounds: completionPayload?.step5ProfileSubmitResultMaxRounds ?? validationConfig.maxRounds,
+            step5ProfileSubmitResultRoundWaitSeconds: completionPayload?.step5ProfileSubmitResultRoundWaitSeconds ?? validationConfig.roundWaitSeconds,
+          });
+        } catch (step5ValidationError) {
+          step5ValidationError.skipFailedSignupPhoneReusePreserve = true;
+          step5ValidationError.signupProfileSubmitted = true;
+          await setNodeStatus(normalizedNodeId, 'failed');
+          await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { nodeId: normalizedNodeId });
+          throw step5ValidationError;
+        }
       }
     }
   }
@@ -17475,6 +17609,7 @@ const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   phoneVerificationHelpers,
   resolveSignupMethod,
   resolveSignupEmailForFlow,
+  isRetryableContentScriptTransportError,
   sendToContentScriptResilient,
   setState,
   SIGNUP_PAGE_INJECT_FILES,
@@ -18966,6 +19101,7 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
   const isPhoneSignupCompletion = isStep5PhoneSignupCompletionPayload(completionPayload);
   let authRetryRecoveryCount = 0;
   let validationRound = 0;
+  let transientTransportErrorCount = 0;
 
   while (validationRound < maxValidationRounds) {
     validationRound += 1;
@@ -18978,17 +19114,39 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
       };
     }
 
-    const pageState = await getStep5SubmitStateFromContent({
-      payload: {
-        ...completionPayload,
-        step5ProfileSubmitResultMaxRounds: maxValidationRounds,
-        step5ProfileSubmitResultRoundWaitSeconds: validationRoundWaitSeconds,
-      },
-      timeoutMs: Math.max(1000, validationRoundWaitMs),
-      responseTimeoutMs: Math.max(1000, validationRoundWaitMs),
-      retryDelayMs: 500,
-      logMessage: `步骤 5：资料提交后正在确认最终页面状态（第 ${validationRound}/${maxValidationRounds} 轮，每轮 ${validationRoundWaitSeconds} 秒）...`,
-    });
+    let pageState = null;
+    try {
+      pageState = await getStep5SubmitStateFromContent({
+        payload: {
+          ...completionPayload,
+          step5ProfileSubmitResultMaxRounds: maxValidationRounds,
+          step5ProfileSubmitResultRoundWaitSeconds: validationRoundWaitSeconds,
+        },
+        timeoutMs: Math.max(1000, validationRoundWaitMs),
+        responseTimeoutMs: Math.max(1000, validationRoundWaitMs),
+        retryDelayMs: 500,
+        logMessage: `步骤 5：资料提交后正在确认最终页面状态（第 ${validationRound}/${maxValidationRounds} 轮，每轮 ${validationRoundWaitSeconds} 秒）...`,
+      });
+    } catch (error) {
+      if (!isRetryableContentScriptTransportError(error)) {
+        throw error;
+      }
+      transientTransportErrorCount += 1;
+      await addLog(
+        `步骤 5：资料提交后确认页面状态时认证页短暂失联，继续等待下一轮恢复（${transientTransportErrorCount}/${maxValidationRounds}）。`,
+        'warn',
+        { step: 5, stepKey: 'fill-profile' }
+      );
+      if (typeof waitForTabStableComplete === 'function') {
+        await waitForTabStableComplete(tabId, {
+          timeoutMs: Math.min(30000, Math.max(1000, validationRoundWaitMs)),
+          retryDelayMs: 300,
+          stableMs: 800,
+          initialDelayMs: 300,
+        }).catch(() => null);
+      }
+      continue;
+    }
 
     if (pageState.userAlreadyExistsBlocked) {
       throw new Error('SIGNUP_USER_ALREADY_EXISTS::步骤 5：检测到 user_already_exists，当前轮将直接停止。');

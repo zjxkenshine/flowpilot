@@ -92,6 +92,61 @@ test('step 2 keeps password flow when landing on password page', async () => {
   ]);
 });
 
+test('step 2 treats localized reconnect timeout as retryable transport error', async () => {
+  const events = {
+    entryReadyCalls: 0,
+    authEntryReadyCalls: 0,
+    sends: 0,
+    logs: [],
+    completedPayloads: [],
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async (message, level = 'info') => {
+      events.logs.push({ message, level });
+    },
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async (step, payload) => {
+      events.completedPayloads.push({ step, payload });
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupAuthEntryPageReady: async () => {
+      events.authEntryReadyCalls += 1;
+      return { tabId: 21 };
+    },
+    ensureSignupEntryPageReady: async () => {
+      events.entryReadyCalls += 1;
+      return { tabId: 21 };
+    },
+    ensureSignupPostEmailPageReadyInTab: async () => ({
+      state: 'password_page',
+      url: 'https://auth.openai.com/create-account/password',
+    }),
+    getTabId: async () => 21,
+    isTabAlive: async () => true,
+    isRetryableContentScriptTransportError: (error) => /页面刚完成跳转或刷新，内容脚本还没有重新接回/i.test(error?.message || String(error || '')),
+    resolveSignupEmailForFlow: async () => 'user@example.com',
+    sendToContentScriptResilient: async () => {
+      events.sends += 1;
+      if (events.sends === 1) {
+        throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
+      }
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({ email: 'user@example.com' });
+
+  assert.equal(events.sends, 2);
+  assert.equal(events.authEntryReadyCalls, 1);
+  assert.equal(events.completedPayloads[0].payload.nextSignupState, 'password_page');
+  assert.equal(
+    events.logs.some(({ message }) => /通信超时，正在切换认证入口页并重试提交邮箱/.test(message)),
+    true
+  );
+});
+
 test('step 2 passes configured signup identity redirect timeout to email landing wait', async () => {
   const landingOptions = [];
 
