@@ -239,6 +239,105 @@ function fillHostedInput(selector, value) {
   return true;
 }
 
+function getHostedOpenAiDocumentValue(payload = {}) {
+  const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const address = source.address && typeof source.address === 'object' && !Array.isArray(source.address)
+    ? source.address
+    : {};
+  return normalizeText(
+    source.documentNumber
+    || address.documentNumber
+    || source.cpf
+    || address.cpf
+    || source.documentDigits
+    || address.documentDigits
+    || source.cpfDigits
+    || address.cpfDigits
+    || ''
+  );
+}
+
+function isHostedOpenAiDocumentInputCandidate(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+  if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password', 'email'].includes(type)) {
+    return false;
+  }
+  const text = normalizeText([
+    input.id,
+    input.name,
+    input.type,
+    input.getAttribute?.('data-testid'),
+    input.getAttribute?.('autocomplete'),
+    input.getAttribute?.('placeholder'),
+    input.getAttribute?.('aria-label'),
+    input.getAttribute?.('title'),
+  ].filter(Boolean).join(' '));
+  const positive = /\b(?:cpf|cnpj)\b|tax\s*(?:id|number|payer|document)|taxpayer|document(?:\s*(?:number|id))?|identity\s*(?:number|document)|national\s*id/i.test(text);
+  if (!positive) {
+    return false;
+  }
+  const negative = /card|cvv|cvc|security\s*code|expiry|expiration|postal|zip|postcode|address|street|city|state|province|region|phone|mobile|tel|email|password|name/i.test(text);
+  return !negative || /\b(?:cpf|cnpj)\b/i.test(text);
+}
+
+function findHostedOpenAiDocumentInput() {
+  const candidates = [
+    ...Array.from(document.querySelectorAll('input[id*="cpf" i], input[name*="cpf" i], input[placeholder*="cpf" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="cnpj" i], input[name*="cnpj" i], input[placeholder*="cnpj" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="tax" i], input[name*="tax" i], input[placeholder*="tax" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="document" i], input[name*="document" i], input[placeholder*="document" i]') || []),
+    ...Array.from(document.querySelectorAll('input') || []),
+  ].filter(Boolean);
+  const seen = new Set();
+  return candidates.find((input) => {
+    if (seen.has(input)) return false;
+    seen.add(input);
+    return isHostedOpenAiDocumentInputCandidate(input);
+  }) || null;
+}
+
+function fillHostedOpenAiDocumentIfPresent(payload = {}) {
+  if (typeof normalizeText !== 'function') {
+    return {
+      attempted: false,
+      found: false,
+      filled: false,
+    };
+  }
+  const value = getHostedOpenAiDocumentValue(payload);
+  if (!value) {
+    return {
+      attempted: false,
+      found: false,
+      filled: false,
+    };
+  }
+  const input = findHostedOpenAiDocumentInput();
+  if (!input) {
+    return {
+      attempted: true,
+      found: false,
+      filled: false,
+    };
+  }
+  if (!String(input.value || '').trim()) {
+    fillInput(input, value);
+    return {
+      attempted: true,
+      found: true,
+      filled: true,
+    };
+  }
+  return {
+    attempted: true,
+    found: true,
+    filled: false,
+  };
+}
+
 function getHostedAddressFieldValues() {
   const regionSelect = document.querySelector('#billingAdministrativeArea');
   return {
@@ -847,6 +946,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
   fillHostedInput('#billingLocality', address.city || '');
   fillHostedInput('#billingPostalCode', address.zip || address.postalCode || '');
   selectHostedOptionByText('#billingAdministrativeArea', address.state || address.region || '');
+  const documentFillResult = fillHostedOpenAiDocumentIfPresent(payload);
 
   const consent = document.getElementById('termsOfServiceConsentCheckbox');
   if (consent && !consent.checked) {
@@ -868,6 +968,8 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     hostedAddressErrorMessage: hostedAddressError.message,
     hostedCardDeclinedError: hostedCardDeclinedError.hasError,
     hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
+    hostedDocumentInputFound: Boolean(documentFillResult.found),
+    hostedDocumentFilled: Boolean(documentFillResult.filled),
   };
 }
 
@@ -2412,12 +2514,92 @@ function getStructuredAddressFields() {
   return { address1, address2, city, region, postalCode };
 }
 
+function getBrazilDocumentValue(source = {}) {
+  const root = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+  const address = root.address && typeof root.address === 'object' && !Array.isArray(root.address)
+    ? root.address
+    : {};
+  return normalizeText(
+    root.documentNumber
+    || address.documentNumber
+    || root.cpf
+    || address.cpf
+    || root.documentDigits
+    || address.documentDigits
+    || root.cpfDigits
+    || address.cpfDigits
+    || ''
+  );
+}
+
+function isBrazilDocumentInputCandidate(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+  if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password', 'email'].includes(type)) {
+    return false;
+  }
+  const text = getCombinedSearchText(input);
+  const positive = /\b(?:cpf|cnpj)\b|tax\s*(?:id|number|payer|document)|taxpayer|document(?:\s*(?:number|id))?|identity\s*(?:number|document)|national\s*id/i.test(text);
+  if (!positive) {
+    return false;
+  }
+  const negative = /card|cvv|cvc|security\s*code|expiry|expiration|postal|zip|postcode|address|street|city|state|province|region|phone|mobile|tel|email|password|name/i.test(text);
+  return !negative || /\b(?:cpf|cnpj)\b/i.test(text);
+}
+
+function findBrazilDocumentInput() {
+  const candidates = [
+    ...Array.from(document.querySelectorAll('input[id*="cpf" i], input[name*="cpf" i], input[placeholder*="cpf" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="cnpj" i], input[name*="cnpj" i], input[placeholder*="cnpj" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="tax" i], input[name*="tax" i], input[placeholder*="tax" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="document" i], input[name*="document" i], input[placeholder*="document" i]') || []),
+    ...getVisibleTextInputs(),
+  ].filter(Boolean);
+  const seen = new Set();
+  return candidates.find((input) => {
+    if (seen.has(input)) return false;
+    seen.add(input);
+    return isBrazilDocumentInputCandidate(input);
+  }) || null;
+}
+
 function fillIfEmpty(input, value, options = {}) {
   if (!input || !value) return false;
   if (!options.overwrite && String(input.value || '').trim()) return false;
   if (options.overwrite && String(input.value || '').trim() === String(value || '').trim()) return false;
   fillInput(input, value);
   return true;
+}
+
+function fillBrazilDocumentIfPresent(source = {}, options = {}) {
+  const documentValue = getBrazilDocumentValue(source);
+  if (!documentValue) {
+    return {
+      attempted: false,
+      filled: false,
+      found: false,
+      value: '',
+    };
+  }
+  const input = findBrazilDocumentInput();
+  if (!input) {
+    return {
+      attempted: true,
+      filled: false,
+      found: false,
+      value: documentValue,
+    };
+  }
+  return {
+    attempted: true,
+    filled: fillIfEmpty(input, documentValue, {
+      overwrite: Boolean(options.overwrite),
+    }),
+    found: true,
+    value: documentValue,
+  };
 }
 
 function isDropdownStructuredAddressForm(fields = getStructuredAddressFields()) {
@@ -2453,6 +2635,7 @@ async function ensureStructuredAddress(seed, options = {}) {
   fillIfEmpty(fields.city, fallback.city, { overwrite });
   await selectRegionDropdown(findRegionDropdown(), fallback.region);
   fillIfEmpty(fields.postalCode, fallback.postalCode, { overwrite });
+  const documentResult = fillBrazilDocumentIfPresent(seed, { overwrite });
   await sleep(500);
 
   const latest = getStructuredAddressFields();
@@ -2469,6 +2652,8 @@ async function ensureStructuredAddress(seed, options = {}) {
     city: latest.city?.value || '',
     region: getRegionDropdownValue(findRegionDropdown()) || latest.region?.value || '',
     postalCode: latest.postalCode?.value || '',
+    documentFilled: Boolean(documentResult.filled),
+    documentInputFound: Boolean(documentResult.found),
   };
 }
 

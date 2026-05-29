@@ -16,6 +16,11 @@
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
   const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
+  const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
+  const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
+  const HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY = 'hostedCheckoutPhoneSmsActivation';
+  const HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY = 'hostedCheckoutPhoneSmsRequestedRegion';
+  const HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY = 'hostedCheckoutPhoneSmsResolvedRegion';
   const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
   const SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES = Object.freeze(['US', 'JP', 'BR']);
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
@@ -154,10 +159,10 @@
     ]),
     BR: Object.freeze([
       Object.freeze({
-        street: 'Avenida Paulista 1000',
+        street: 'Avenida Paulista 1578',
         city: 'Sao Paulo',
         state: 'Sao Paulo',
-        zip: '01310-100',
+        zip: '01310-200',
         countryCode: 'BR',
         country: 'Brazil',
       }),
@@ -166,6 +171,14 @@
         city: 'Rio de Janeiro',
         state: 'Rio de Janeiro',
         zip: '22021-001',
+        countryCode: 'BR',
+        country: 'Brazil',
+      }),
+      Object.freeze({
+        street: 'Praca Maua 1',
+        city: 'Rio de Janeiro',
+        state: 'Rio de Janeiro',
+        zip: '20081-240',
         countryCode: 'BR',
         country: 'Brazil',
       }),
@@ -221,6 +234,7 @@
       waitForTabUrlMatchUntilStopped = null,
       throwIfStopped = () => {},
       checkoutConversionProxyManager = null,
+      phoneVerificationHelpers = null,
       resolvePlusCheckoutProfileRegion = null,
       resolvePlusCheckoutRegionalBillingDetails = null,
     } = deps;
@@ -543,6 +557,59 @@
       return normalized === PLUS_PAYMENT_METHOD_GOPAY ? PLUS_PAYMENT_METHOD_GOPAY : PLUS_PAYMENT_METHOD_PAYPAL;
     }
 
+    function normalizeHostedCheckoutSmsSource(value = '') {
+      const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+      return normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
+        ? HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
+        : HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
+    }
+
+    function normalizeHostedCheckoutPhoneSmsActivation(record = null) {
+      if (phoneVerificationHelpers?.normalizeActivation) {
+        return phoneVerificationHelpers.normalizeActivation(record);
+      }
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        return null;
+      }
+      const activationId = String(record.activationId || record.id || record.activation || '').trim();
+      const phoneNumber = String(record.phoneNumber || record.number || record.phone || '').trim();
+      if (!activationId || !phoneNumber) {
+        return null;
+      }
+      return {
+        ...record,
+        activationId,
+        phoneNumber,
+        provider: String(record.provider || '').trim(),
+        successfulUses: Math.max(0, Math.floor(Number(record.successfulUses) || 0)),
+        maxUses: Math.max(1, Math.floor(Number(record.maxUses) || 3)),
+      };
+    }
+
+    function normalizeHostedPhoneSmsRegionCode(value = '') {
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      if (normalized === 'UK') {
+        return 'GB';
+      }
+      return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+    }
+
+    function isHostedCheckoutPhoneSmsReusable(state = {}, activation = null) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        return false;
+      }
+      if (state?.phoneSmsReuseEnabled === false) {
+        return false;
+      }
+      const provider = String(normalizedActivation.provider || '').trim().toLowerCase();
+      if (provider !== 'hero-sms' && provider !== '5sim') {
+        return false;
+      }
+      return Math.max(0, Number(normalizedActivation.successfulUses) || 0)
+        < Math.max(1, Number(normalizedActivation.maxUses) || 1);
+    }
+
     function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
       return String(value || '').trim().toLowerCase() === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
         ? PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
@@ -635,6 +702,24 @@
       return SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(fallback) ? fallback : 'US';
     }
 
+    function normalizeHostedProfileCountryPreference(value = '') {
+      const raw = normalizeString(value);
+      if (!raw) {
+        return '';
+      }
+      const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      if (SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(compact)) {
+        return compact;
+      }
+      const lower = raw.toLowerCase();
+      if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+      if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+      if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+      const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+      const bracketCountry = bracketMatch ? bracketMatch[1].toUpperCase() : '';
+      return SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(bracketCountry) ? bracketCountry : '';
+    }
+
     function getHostedCountryName(countryCode = '') {
       const normalized = normalizeHostedProfileCountryCode(countryCode, 'US');
       return {
@@ -658,6 +743,13 @@
     }
 
     async function resolveHostedProfileRegionForState(state = {}, options = {}) {
+      const preferredCountryCode = normalizeHostedProfileCountryPreference(state?.paypalProfileCountryCode);
+      if (preferredCountryCode) {
+        return {
+          countryCode: preferredCountryCode,
+          preferenceApplied: true,
+        };
+      }
       if (typeof resolvePlusCheckoutProfileRegion === 'function') {
         const resolved = await resolvePlusCheckoutProfileRegion(state, {
           context: options?.context || 'paypal-hosted-profile',
@@ -682,6 +774,57 @@
         countryCode: normalizeHostedProfileCountryCode(exitRegion, 'US'),
         exitRegion,
         fallbackApplied: !normalizeHostedProfileCountryCode(exitRegion, ''),
+      };
+    }
+
+    async function resolveHostedPhoneSmsRegionForState(state = {}) {
+      const source = String(state?.plusCheckoutConversionProxySource || '').trim().toLowerCase();
+      const configuredRegion = normalizeHostedPhoneSmsRegionCode(
+        source === '711proxy_pool'
+          ? state?.plusCheckoutConversionProxy711Region
+          : (source === 'ip_proxy'
+            ? firstNonEmpty(
+              state?.ipProxyAppliedRegion,
+              state?.ipProxyRegion,
+              state?.ipProxyAppliedExitRegion,
+              state?.ipProxyExitRegion
+            )
+            : '')
+      );
+      if (configuredRegion) {
+        return {
+          countryCode: configuredRegion,
+          source: 'configured',
+        };
+      }
+      const detectedRegion = normalizeHostedPhoneSmsRegionCode(firstNonEmpty(
+        state?.plusCheckoutConversionProxyExitCheck?.exitRegion,
+        state?.plusCheckoutConversionProxySession?.exitRegion,
+        state?.plusCheckoutConversionProxyManualSession?.exitRegion,
+        state?.ipProxyAppliedExitRegion,
+        state?.ipProxyExitRegion
+      ));
+      if (detectedRegion) {
+        return {
+          countryCode: detectedRegion,
+          source: 'detected',
+        };
+      }
+      if (typeof resolvePlusCheckoutProfileRegion === 'function') {
+        const resolved = await resolvePlusCheckoutProfileRegion(state, {
+          context: 'paypal-hosted-phone-sms-region',
+        }).catch(() => null);
+        const fallbackRegion = normalizeHostedPhoneSmsRegionCode(resolved?.exitRegion || resolved?.countryCode || '');
+        if (fallbackRegion) {
+          return {
+            countryCode: fallbackRegion,
+            source: 'profile-region',
+          };
+        }
+      }
+      return {
+        countryCode: '',
+        source: '',
       };
     }
 
@@ -1761,6 +1904,14 @@
       return digits;
     }
 
+    function normalizeBrazilHostedPhoneForPayload(phone = '') {
+      const digits = String(phone || '').replace(/\D/g, '');
+      if (/^55\d{10,11}$/.test(digits)) {
+        return `+${digits}`;
+      }
+      return '';
+    }
+
     function normalizeHostedCheckoutPoolPhone(value = '') {
       return normalizeHostedPhoneForPayload(value);
     }
@@ -1895,7 +2046,8 @@
     }
 
     function isHostedCheckoutSmsPoolExhaustedError(error) {
-      return Boolean(error?.hostedCheckoutConfigMeta?.smsPoolExhausted);
+      return Boolean(error?.hostedCheckoutConfigMeta?.smsPoolExhausted)
+        && error?.hostedCheckoutConfigMeta?.configSource !== 'phone-sms';
     }
 
     function isPayPalHostedPhoneEmptyAfterFillError(error) {
@@ -2047,6 +2199,61 @@
         ...(latestState && typeof latestState === 'object' ? latestState : {}),
         ...(state && typeof state === 'object' ? state : {}),
       };
+      const hostedSmsSource = normalizeHostedCheckoutSmsSource(mergedState?.hostedCheckoutSmsSource);
+      const commonRuntimeConfig = () => ({
+        oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
+          mergedState?.plusHostedCheckoutOauthDelaySeconds
+        ),
+        firstDirectResendEnabled: Boolean(mergedState?.hostedCheckoutFirstDirectResendEnabled),
+        firstResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
+          mergedState?.hostedCheckoutFirstResendWaitSeconds ?? mergedState?.hostedCheckoutVerificationPopupDelaySeconds,
+          HOSTED_CHECKOUT_FIRST_RESEND_WAIT_DEFAULT_SECONDS
+        ),
+        subsequentResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
+          mergedState?.hostedCheckoutSubsequentResendWaitSeconds,
+          HOSTED_CHECKOUT_SUBSEQUENT_RESEND_WAIT_DEFAULT_SECONDS
+        ),
+        verificationResendMaxAttempts: normalizeHostedCheckoutVerificationResendMaxAttempts(
+          mergedState?.hostedCheckoutVerificationResendMaxAttempts
+        ),
+        verificationPollAttempts: normalizeHostedCheckoutVerificationPollAttempts(
+          mergedState?.hostedCheckoutVerificationPollAttempts
+        ),
+        verificationPollIntervalSeconds: normalizeHostedCheckoutVerificationPollIntervalSeconds(
+          mergedState?.hostedCheckoutVerificationPollIntervalSeconds
+        ),
+      });
+      if (hostedSmsSource === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS) {
+        const phoneSmsResult = await ensureHostedCheckoutPhoneSmsActivation(mergedState, {
+          stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+        });
+        const activation = normalizeHostedCheckoutPhoneSmsActivation(phoneSmsResult?.activation);
+        if (!activation?.phoneNumber) {
+          throw buildHostedCheckoutConfigError(
+            'PayPal 跟随手机接码配置未获取到有效手机号。',
+            {
+              configSource: 'phone-sms',
+              poolSize: 0,
+              selectedEntry: null,
+            }
+          );
+        }
+        return {
+          ...commonRuntimeConfig(),
+          verificationUrl: '',
+          phone: normalizeHostedPhoneForPayload(activation.phoneNumber),
+          hostedCheckoutSmsPoolAutoDisableEnabled: false,
+          hostedCheckoutCurrentSmsEntry: null,
+          hostedCheckoutUsesSmsPool: false,
+          hostedCheckoutUsesPhoneSms: true,
+          hostedCheckoutPhoneSmsActivation: activation,
+          hostedCheckoutPhoneSmsRequestedRegion: phoneSmsResult?.requestedRegion || '',
+          hostedCheckoutPhoneSmsResolvedRegion: phoneSmsResult?.resolvedRegion || '',
+          hostedCheckoutSmsPoolMaxUses: normalizeHostedCheckoutSmsPoolMaxUses(mergedState?.hostedCheckoutSmsPoolMaxUses),
+          configSource: 'phone-sms',
+          poolSize: 0,
+        };
+      }
       const rawPoolText = String(mergedState?.hostedCheckoutSmsPoolText || '').trim();
       const poolEntries = parseHostedCheckoutSmsPoolEntries(rawPoolText);
       const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
@@ -2117,30 +2324,11 @@
         return {
           verificationUrl: String(selectedSmsEntry.verificationUrl || '').trim(),
           phone: String(selectedSmsEntry.phone || '').trim(),
-          oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
-            mergedState?.plusHostedCheckoutOauthDelaySeconds
-          ),
+          ...commonRuntimeConfig(),
           hostedCheckoutSmsPoolAutoDisableEnabled: Boolean(mergedState?.hostedCheckoutSmsPoolAutoDisableEnabled),
-          firstDirectResendEnabled: Boolean(mergedState?.hostedCheckoutFirstDirectResendEnabled),
-          firstResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
-            mergedState?.hostedCheckoutFirstResendWaitSeconds ?? mergedState?.hostedCheckoutVerificationPopupDelaySeconds,
-            HOSTED_CHECKOUT_FIRST_RESEND_WAIT_DEFAULT_SECONDS
-          ),
-          subsequentResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
-            mergedState?.hostedCheckoutSubsequentResendWaitSeconds,
-            HOSTED_CHECKOUT_SUBSEQUENT_RESEND_WAIT_DEFAULT_SECONDS
-          ),
-          verificationResendMaxAttempts: normalizeHostedCheckoutVerificationResendMaxAttempts(
-            mergedState?.hostedCheckoutVerificationResendMaxAttempts
-          ),
-          verificationPollAttempts: normalizeHostedCheckoutVerificationPollAttempts(
-            mergedState?.hostedCheckoutVerificationPollAttempts
-          ),
-          verificationPollIntervalSeconds: normalizeHostedCheckoutVerificationPollIntervalSeconds(
-            mergedState?.hostedCheckoutVerificationPollIntervalSeconds
-          ),
           hostedCheckoutCurrentSmsEntry: selectedSmsEntry,
           hostedCheckoutUsesSmsPool: true,
+          hostedCheckoutUsesPhoneSms: false,
           hostedCheckoutSmsPoolMaxUses: smsPoolMaxUses,
           configSource: 'sms-pool',
           poolSize: poolEntries.length,
@@ -2163,30 +2351,11 @@
       return {
         verificationUrl: manualVerificationUrl,
         phone: manualPhone,
-        oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(
-          mergedState?.plusHostedCheckoutOauthDelaySeconds
-        ),
+        ...commonRuntimeConfig(),
         hostedCheckoutSmsPoolAutoDisableEnabled: Boolean(mergedState?.hostedCheckoutSmsPoolAutoDisableEnabled),
-        firstDirectResendEnabled: Boolean(mergedState?.hostedCheckoutFirstDirectResendEnabled),
-        firstResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
-          mergedState?.hostedCheckoutFirstResendWaitSeconds ?? mergedState?.hostedCheckoutVerificationPopupDelaySeconds,
-          HOSTED_CHECKOUT_FIRST_RESEND_WAIT_DEFAULT_SECONDS
-        ),
-        subsequentResendWaitSeconds: normalizeHostedCheckoutResendWaitSeconds(
-          mergedState?.hostedCheckoutSubsequentResendWaitSeconds,
-          HOSTED_CHECKOUT_SUBSEQUENT_RESEND_WAIT_DEFAULT_SECONDS
-        ),
-        verificationResendMaxAttempts: normalizeHostedCheckoutVerificationResendMaxAttempts(
-          mergedState?.hostedCheckoutVerificationResendMaxAttempts
-        ),
-        verificationPollAttempts: normalizeHostedCheckoutVerificationPollAttempts(
-          mergedState?.hostedCheckoutVerificationPollAttempts
-        ),
-        verificationPollIntervalSeconds: normalizeHostedCheckoutVerificationPollIntervalSeconds(
-          mergedState?.hostedCheckoutVerificationPollIntervalSeconds
-        ),
         hostedCheckoutCurrentSmsEntry: null,
         hostedCheckoutUsesSmsPool: false,
+        hostedCheckoutUsesPhoneSms: false,
         hostedCheckoutSmsPoolMaxUses: smsPoolMaxUses,
         configSource: 'manual-config',
         poolSize: 0,
@@ -2239,6 +2408,169 @@
       await applyHostedCheckoutRuntimePatch({
         hostedCheckoutCurrentSmsEntry: null,
       });
+    }
+
+    async function clearHostedCheckoutPhoneSmsActivation() {
+      await applyHostedCheckoutRuntimePatch({
+        [HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]: null,
+        [HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY]: '',
+        [HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY]: '',
+      });
+    }
+
+    async function persistHostedCheckoutPhoneSmsActivation(activation = null, options = {}) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return null;
+      }
+      const patch = {
+        [HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]: normalizedActivation,
+        [HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY]: normalizeHostedPhoneSmsRegionCode(options?.requestedRegion || ''),
+        [HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY]: normalizeHostedPhoneSmsRegionCode(options?.resolvedRegion || ''),
+      };
+      await applyHostedCheckoutRuntimePatch(patch);
+      return normalizedActivation;
+    }
+
+    async function finalizeHostedCheckoutPhoneSmsActivationAfterSuccess(state = {}, activation = null) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return null;
+      }
+      if (typeof phoneVerificationHelpers?.completePhoneActivation === 'function') {
+        await phoneVerificationHelpers.completePhoneActivation(state, normalizedActivation).catch(() => {});
+      }
+      if (!normalizedActivation.phoneCodeReceived) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return null;
+      }
+      const nextActivation = {
+        ...normalizedActivation,
+        successfulUses: Math.max(0, Number(normalizedActivation.successfulUses) || 0) + 1,
+      };
+      delete nextActivation.phoneCodeReceived;
+      delete nextActivation.phoneCodeReceivedAt;
+      delete nextActivation.ignoredPhoneCodeKeys;
+      if (!isHostedCheckoutPhoneSmsReusable(state, nextActivation)) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return null;
+      }
+      return persistHostedCheckoutPhoneSmsActivation(nextActivation, {
+        requestedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY],
+        resolvedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY],
+      });
+    }
+
+    async function cancelHostedCheckoutPhoneSmsActivation(state = {}, activation = null, reason = '') {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(
+        activation || state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
+      );
+      if (!normalizedActivation) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return;
+      }
+      if (typeof phoneVerificationHelpers?.cancelPhoneActivation === 'function') {
+        await phoneVerificationHelpers.cancelPhoneActivation(state, normalizedActivation).catch(() => {});
+      }
+      await clearHostedCheckoutPhoneSmsActivation();
+      if (reason) {
+        await addLog(`PayPal 手机接码号码已清理：${reason}`, 'warn');
+      }
+    }
+
+    async function banHostedCheckoutPhoneSmsActivation(state = {}, activation = null, reason = '') {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(
+        activation || state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
+      );
+      if (!normalizedActivation) {
+        await clearHostedCheckoutPhoneSmsActivation();
+        return;
+      }
+      if (typeof phoneVerificationHelpers?.banPhoneActivation === 'function') {
+        await phoneVerificationHelpers.banPhoneActivation(state, normalizedActivation).catch(() => {});
+      } else if (typeof phoneVerificationHelpers?.cancelPhoneActivation === 'function') {
+        await phoneVerificationHelpers.cancelPhoneActivation(state, normalizedActivation).catch(() => {});
+      }
+      await clearHostedCheckoutPhoneSmsActivation();
+      if (reason) {
+        await addLog(`PayPal 手机接码号码已禁用：${reason}`, 'warn');
+      }
+    }
+
+    async function requestHostedCheckoutPhoneSmsActivation(state = {}, options = {}) {
+      if (typeof phoneVerificationHelpers?.requestPhoneActivationForRegion !== 'function'
+        && typeof phoneVerificationHelpers?.requestPhoneActivation !== 'function') {
+        throw buildHostedCheckoutConfigError(
+          'PayPal 接码来源已设置为跟随手机接码配置，但当前环境未加载手机接码模块。',
+          {
+            configSource: 'phone-sms',
+            poolSize: 0,
+            selectedEntry: null,
+          }
+        );
+      }
+      const region = await resolveHostedPhoneSmsRegionForState(state);
+      const requestOptions = {
+        ...options,
+        step: options?.step || 8,
+        stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+        regionCode: region.countryCode || '',
+      };
+      const result = typeof phoneVerificationHelpers?.requestPhoneActivationForRegion === 'function'
+        ? await phoneVerificationHelpers.requestPhoneActivationForRegion(state, requestOptions)
+        : {
+          activation: await phoneVerificationHelpers.requestPhoneActivation(state, requestOptions),
+          requestedRegion: region.countryCode || '',
+          resolvedRegion: '',
+          regionMatched: false,
+        };
+      const activation = normalizeHostedCheckoutPhoneSmsActivation(result?.activation);
+      if (!activation?.phoneNumber) {
+        throw new Error('PayPal 跟随手机接码配置取号失败：接码平台未返回有效手机号。');
+      }
+      const persisted = await persistHostedCheckoutPhoneSmsActivation(activation, {
+        requestedRegion: result?.requestedRegion || region.countryCode || '',
+        resolvedRegion: result?.resolvedRegion || '',
+      });
+      await addHostedStepLog(
+        requestOptions.stepKey,
+        `步骤 ${getHostedStepNumber(requestOptions.stepKey)}：PayPal 已跟随手机接码配置获取号码 ${maskHostedPhoneForLog(persisted.phoneNumber)}${region.countryCode ? `，请求地区 ${region.countryCode}` : ''}。`,
+        'info'
+      );
+      return {
+        activation: persisted,
+        requestedRegion: result?.requestedRegion || region.countryCode || '',
+        resolvedRegion: result?.resolvedRegion || '',
+        regionMatched: Boolean(result?.regionMatched),
+      };
+    }
+
+    async function ensureHostedCheckoutPhoneSmsActivation(state = {}, options = {}) {
+      const current = normalizeHostedCheckoutPhoneSmsActivation(state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]);
+      if (current && isHostedCheckoutPhoneSmsReusable(state, current)) {
+        let reusable = current;
+        if (typeof phoneVerificationHelpers?.reactivatePhoneActivation === 'function') {
+          reusable = normalizeHostedCheckoutPhoneSmsActivation(
+            await phoneVerificationHelpers.reactivatePhoneActivation(state, current).catch(() => current)
+          ) || current;
+        }
+        const persisted = await persistHostedCheckoutPhoneSmsActivation(reusable, {
+          requestedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY],
+          resolvedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY],
+        });
+        return {
+          activation: persisted,
+          reused: true,
+          requestedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY] || '',
+          resolvedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY] || '',
+        };
+      }
+      if (current) {
+        await clearHostedCheckoutPhoneSmsActivation();
+      }
+      return requestHostedCheckoutPhoneSmsActivation(state, options);
     }
 
     async function updateHostedCheckoutPoolUsage(entry = null, options = {}) {
@@ -2389,6 +2721,13 @@
         firstName: String(source.firstName || '').trim(),
         lastName: String(source.lastName || '').trim(),
         birthday: String(source.birthday || '').trim(),
+        cpf: firstNonEmptyHostedProfileValue(source.cpf, address.cpf),
+        cpfDigits: firstNonEmptyHostedProfileValue(source.cpfDigits, address.cpfDigits),
+        cnpj: firstNonEmptyHostedProfileValue(source.cnpj, address.cnpj),
+        cnpjDigits: firstNonEmptyHostedProfileValue(source.cnpjDigits, address.cnpjDigits),
+        documentType: firstNonEmptyHostedProfileValue(source.documentType, address.documentType),
+        documentNumber: firstNonEmptyHostedProfileValue(source.documentNumber, address.documentNumber),
+        documentDigits: firstNonEmptyHostedProfileValue(source.documentDigits, address.documentDigits),
         countryCode,
         address1,
         city,
@@ -2453,9 +2792,20 @@
         context: 'paypal-hosted-profile',
       });
       const countryCode = normalizeHostedProfileCountryCode(profileRegion?.countryCode || 'US', 'US');
-      const nextPhone = normalizeHostedPhoneForPayload(
-        forceRefresh ? config.phone : (config.phone || existingProfile.phone)
-      );
+      const rawNextPhone = forceRefresh ? config.phone : (config.phone || existingProfile.phone);
+      const nextPhone = countryCode === 'BR'
+        ? normalizeBrazilHostedPhoneForPayload(rawNextPhone)
+        : normalizeHostedPhoneForPayload(rawNextPhone);
+      if (countryCode === 'BR' && !nextPhone) {
+        throw buildHostedCheckoutConfigError(
+          '需要巴西 +55 接码号码：请导入 PayPal 接码池，或填写手动 PayPal 电话。',
+          {
+            configSource: config?.configSource || 'unknown',
+            poolSize: config?.poolSize || 0,
+            selectedEntry: config?.hostedCheckoutCurrentSmsEntry || null,
+          }
+        );
+      }
       const existingAddressCountryCode = normalizeHostedProfileCountryCode(
         existingProfile?.address?.countryCode || existingProfile?.countryCode || '',
         ''
@@ -2628,12 +2978,22 @@
         oauthDelaySeconds: normalizeHostedCheckoutDelaySeconds(state?.plusHostedCheckoutOauthDelaySeconds),
         hostedCheckoutUsesSmsPool: false,
         hostedCheckoutCurrentSmsEntry: null,
+        hostedCheckoutUsesPhoneSms: false,
+        hostedCheckoutPhoneSmsActivation: null,
       };
       if (config?.hostedCheckoutUsesSmsPool && config?.hostedCheckoutCurrentSmsEntry) {
         await updateHostedCheckoutPoolUsage(config.hostedCheckoutCurrentSmsEntry, {
           incrementUseCount: true,
           success: true,
         });
+      }
+      if (config?.hostedCheckoutUsesPhoneSms && config?.hostedCheckoutPhoneSmsActivation) {
+        await finalizeHostedCheckoutPhoneSmsActivationAfterSuccess(state, config.hostedCheckoutPhoneSmsActivation)
+          .catch((error) => addHostedStepLog(
+            stepKey,
+            `步骤 ${getHostedStepNumber(stepKey)}：PayPal 手机接码复用状态更新失败：${error?.message || error}`,
+            'warn'
+          ));
       }
       const shouldWait = Boolean(options.waitBeforeComplete);
       if (shouldWait && config.oauthDelaySeconds > 0) {
@@ -3008,6 +3368,98 @@
         zip,
         countryCode: normalizedCountryCode,
         country: getHostedCountryName(normalizedCountryCode),
+        cpf: String(source.cpf || '').trim(),
+        cpfDigits: String(source.cpfDigits || '').trim(),
+        cnpj: String(source.cnpj || '').trim(),
+        cnpjDigits: String(source.cnpjDigits || '').trim(),
+        documentType: String(source.documentType || '').trim(),
+        documentNumber: String(source.documentNumber || '').trim(),
+        documentDigits: String(source.documentDigits || '').trim(),
+        source: String(source.source || '').trim(),
+      };
+    }
+
+    function normalizeBrazilHostedPostalCode(rawPostalCode = '', fallbackPostalCode = '') {
+      const raw = normalizeString(rawPostalCode).replace(/[^\d-]/g, '');
+      if (/^\d{5}-\d{3}$/.test(raw)) {
+        return raw;
+      }
+      const rawDigits = raw.replace(/\D/g, '');
+      if (rawDigits.length >= 8) {
+        return `${rawDigits.slice(0, 5)}-${rawDigits.slice(5, 8)}`;
+      }
+      const fallback = normalizeString(fallbackPostalCode).replace(/[^\d-]/g, '');
+      if (/^\d{5}-\d{3}$/.test(fallback)) {
+        return fallback;
+      }
+      const fallbackDigits = fallback.replace(/\D/g, '');
+      return fallbackDigits.length >= 8
+        ? `${fallbackDigits.slice(0, 5)}-${fallbackDigits.slice(5, 8)}`
+        : '';
+    }
+
+    function normalizeHostedBrazilAddress(address = {}, fallbackAddress = null) {
+      const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+      const fallback = fallbackAddress && typeof fallbackAddress === 'object' && !Array.isArray(fallbackAddress)
+        ? fallbackAddress
+        : {};
+      const street = firstNonEmpty(source.Trans_Address, source.Address, source.street, source.address1, fallback.street, fallback.address1);
+      const city = firstNonEmpty(source.City, source.city, fallback.city, 'Sao Paulo');
+      const state = firstNonEmpty(source.State_Full, source.State, source.state, source.region, fallback.state, fallback.region);
+      const zip = normalizeBrazilHostedPostalCode(
+        firstNonEmpty(source.Zip_Code, source.zip, source.postalCode),
+        firstNonEmpty(fallback.zip, fallback.postalCode)
+      );
+      if (!street || !city || !state || !zip) {
+        return null;
+      }
+      return {
+        street,
+        city,
+        state,
+        zip,
+        countryCode: 'BR',
+        country: 'Brazil',
+        cpf: String(source.cpf || fallback.cpf || '').trim(),
+        cpfDigits: String(source.cpfDigits || fallback.cpfDigits || '').trim(),
+        cnpj: String(source.cnpj || fallback.cnpj || '').trim(),
+        cnpjDigits: String(source.cnpjDigits || fallback.cnpjDigits || '').trim(),
+        documentType: String(source.documentType || fallback.documentType || 'cpf').trim(),
+        documentNumber: String(source.documentNumber || fallback.documentNumber || source.cpf || fallback.cpf || '').trim(),
+        documentDigits: String(source.documentDigits || fallback.documentDigits || source.cpfDigits || fallback.cpfDigits || '').trim(),
+        source: String(source.source || fallback.source || 'local_brazil_profile_fallback').trim(),
+      };
+    }
+
+    async function resolveHostedBrazilProfile(options = {}) {
+      const generator = self.MultiPageBrazilProfileGenerator;
+      if (generator?.resolveBrazilProfile) {
+        return generator.resolveBrazilProfile({
+          allowPublicLookup: typeof fetchImpl === 'function',
+          fetchImpl,
+          ...(options && typeof options === 'object' ? options : {}),
+        });
+      }
+      const fallbackAddress = getFallbackHostedCheckoutAddress('BR');
+      return {
+        countryCode: 'BR',
+        source: 'local_brazil_profile_fallback',
+        address1: fallbackAddress.street,
+        street: fallbackAddress.street,
+        city: fallbackAddress.city,
+        state: fallbackAddress.state,
+        stateCode: fallbackAddress.state,
+        postalCode: fallbackAddress.zip,
+        zip: fallbackAddress.zip,
+        cpf: '',
+        cpfDigits: '',
+        cnpj: '',
+        cnpjDigits: '',
+        documentType: 'cpf',
+        documentNumber: '',
+        documentDigits: '',
+        generatedFromCountry: 'BR',
+        generatedAt: Date.now(),
       };
     }
 
@@ -3029,6 +3481,16 @@
 
     async function fetchHostedCheckoutAddress(countryCode = 'US') {
       const normalizedCountryCode = normalizeHostedProfileCountryCode(countryCode, 'US');
+      if (normalizedCountryCode === 'BR') {
+        const profile = await resolveHostedBrazilProfile();
+        if (profile?.publicLookupError) {
+          await addLog(`步骤 6：巴西公开 CEP 地址增强不可用，使用本地巴西资料。${profile.publicLookupError}`, 'warn');
+        }
+        const address = self.MultiPageBrazilProfileGenerator?.toHostedCheckoutAddress
+          ? self.MultiPageBrazilProfileGenerator.toHostedCheckoutAddress(profile)
+          : normalizeHostedBrazilAddress(profile, getFallbackHostedCheckoutAddress('BR'));
+        return address || getFallbackHostedCheckoutAddress('BR');
+      }
       if (normalizedCountryCode !== 'US') {
         return getFallbackHostedCheckoutAddress(normalizedCountryCode);
       }
@@ -3079,9 +3541,53 @@
         cardExpiry: card.expiry,
         cardCvv: card.cvv,
         address: normalizedAddress,
+        cpf: normalizedAddress.cpf || '',
+        cpfDigits: normalizedAddress.cpfDigits || '',
+        cnpj: normalizedAddress.cnpj || '',
+        cnpjDigits: normalizedAddress.cnpjDigits || '',
+        documentType: normalizedAddress.documentType || '',
+        documentNumber: normalizedAddress.documentNumber || '',
+        documentDigits: normalizedAddress.documentDigits || '',
         countryCode: normalizedAddress.countryCode || countryCode,
         generatedFromCountry: normalizedAddress.countryCode || countryCode,
         generatedAt: Date.now(),
+      };
+    }
+
+    function getHostedProfileDocumentPayload(profile = {}) {
+      const source = profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {};
+      const address = source.address && typeof source.address === 'object' && !Array.isArray(source.address)
+        ? source.address
+        : {};
+      return {
+        documentType: firstNonEmptyHostedProfileValue(source.documentType, address.documentType),
+        documentNumber: firstNonEmptyHostedProfileValue(source.documentNumber, address.documentNumber, source.cpf, address.cpf),
+        documentDigits: firstNonEmptyHostedProfileValue(source.documentDigits, address.documentDigits, source.cpfDigits, address.cpfDigits),
+        cpf: firstNonEmptyHostedProfileValue(source.cpf, address.cpf),
+        cpfDigits: firstNonEmptyHostedProfileValue(source.cpfDigits, address.cpfDigits),
+        cnpj: firstNonEmptyHostedProfileValue(source.cnpj, address.cnpj),
+        cnpjDigits: firstNonEmptyHostedProfileValue(source.cnpjDigits, address.cnpjDigits),
+      };
+    }
+
+    function mergeHostedProfileAddress(profile = {}, address = {}) {
+      const nextAddress = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+      return {
+        ...(profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {}),
+        address: nextAddress,
+        ...getHostedProfileDocumentPayload({
+          ...(profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {}),
+          address: nextAddress,
+        }),
+      };
+    }
+
+    function buildHostedOpenAiPayload(profile = {}, extra = {}) {
+      return {
+        email: String(profile?.email || '').trim(),
+        address: profile?.address,
+        ...getHostedProfileDocumentPayload(profile),
+        ...(extra && typeof extra === 'object' ? extra : {}),
       };
     }
 
@@ -3426,6 +3932,32 @@
       const runtimeConfig = await getHostedCheckoutRuntimeConfig(state, {
         ensureCurrentSmsEntry: true,
       });
+      if (runtimeConfig?.hostedCheckoutUsesPhoneSms) {
+        const activation = normalizeHostedCheckoutPhoneSmsActivation(runtimeConfig.hostedCheckoutPhoneSmsActivation);
+        if (!activation) {
+          throw new Error('PayPal 跟随手机接码配置未找到当前取号订单。');
+        }
+        if (typeof phoneVerificationHelpers?.pollPhoneActivationCode !== 'function') {
+          throw new Error('PayPal 跟随手机接码配置无法取码：手机接码轮询模块未加载。');
+        }
+        const code = await phoneVerificationHelpers.pollPhoneActivationCode(state, activation, {
+          timeoutMs: Math.max(1, Number(runtimeConfig?.verificationPollAttempts) || 1)
+            * Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5)
+            * 1000,
+          intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
+        });
+        if (code) {
+          await persistHostedCheckoutPhoneSmsActivation({
+            ...activation,
+            phoneCodeReceived: true,
+            phoneCodeReceivedAt: Date.now(),
+          }, {
+            requestedRegion: runtimeConfig?.hostedCheckoutPhoneSmsRequestedRegion,
+            resolvedRegion: runtimeConfig?.hostedCheckoutPhoneSmsResolvedRegion,
+          });
+        }
+        return code;
+      }
       const verificationUrl = runtimeConfig.verificationUrl;
       await addLog(`步骤 6：当前 hosted checkout 验证码接口配置为 ${verificationUrl || '(空)'}。`, 'info');
       const fetcher = typeof fetchImpl === 'function'
@@ -3597,6 +4129,12 @@
         await sleepWithStop(HOSTED_CHECKOUT_FIRST_DIRECT_RESEND_DELAY_MS);
         usedResendAttempts += 1;
         await clickHostedCheckoutVerificationResend(tabId, usedResendAttempts, maxResendAttempts, '首次直接重发');
+        if (runtimeConfig?.hostedCheckoutUsesPhoneSms && runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+          await phoneVerificationHelpers?.requestAdditionalPhoneSms?.(
+            await getLatestHostedState({}),
+            runtimeConfig.hostedCheckoutPhoneSmsActivation
+          ).catch(() => {});
+        }
         const directCode = await waitForHostedCheckoutVerificationCodeWindow(firstWaitSeconds, {
           label: 'PayPal 首次重发验证码',
           ...pollOptions,
@@ -3623,6 +4161,12 @@
       while (usedResendAttempts < maxResendAttempts) {
         usedResendAttempts += 1;
         await clickHostedCheckoutVerificationResend(tabId, usedResendAttempts, maxResendAttempts, '等待窗口内未获取到有效验证码');
+        if (runtimeConfig?.hostedCheckoutUsesPhoneSms && runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+          await phoneVerificationHelpers?.requestAdditionalPhoneSms?.(
+            await getLatestHostedState({}),
+            runtimeConfig.hostedCheckoutPhoneSmsActivation
+          ).catch(() => {});
+        }
         const resentCode = await waitForHostedCheckoutVerificationCodeWindow(subsequentWaitSeconds, {
           label: 'PayPal 重发验证码',
           ...pollOptions,
@@ -3652,6 +4196,12 @@
       await clickHostedCheckoutVerificationResend(tabId, attempt, maxAttempts, 'PayPal 提示验证码错误', {
         preClickDelayMs: HOSTED_CHECKOUT_VERIFICATION_INVALID_RESEND_DELAY_MS,
       });
+      if (runtimeConfig?.hostedCheckoutUsesPhoneSms && runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+        await phoneVerificationHelpers?.requestAdditionalPhoneSms?.(
+          await getLatestHostedState({}),
+          runtimeConfig.hostedCheckoutPhoneSmsActivation
+        ).catch(() => {});
+      }
       const verificationCode = await waitForHostedCheckoutVerificationCodeWindow(waitSeconds, {
         label: 'PayPal 验证码错误后重发验证码',
         pollAttempts: runtimeConfig?.verificationPollAttempts,
@@ -3684,10 +4234,9 @@
       const firstResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
         type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
         source: 'background',
-        payload: {
+        payload: buildHostedOpenAiPayload(currentProfile, {
           email: hostedCheckoutEmail,
-          address: currentProfile.address,
-        },
+        }),
       });
       if (firstResult?.error) {
         throw new Error(firstResult.error);
@@ -3731,10 +4280,7 @@
           hostedOpenAiCardDeclinedRetries += 1;
           verificationSubmitted = false;
           const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
-          currentProfile = {
-            ...currentProfile,
-            address: retryAddress,
-          };
+          currentProfile = mergeHostedProfileAddress(currentProfile, retryAddress);
           await addLog(
             `Step 6: hosted checkout reported card declined; retrying with a fresh address (${hostedOpenAiCardDeclinedRetries}/${HOSTED_CHECKOUT_OPENAI_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedCardDeclinedErrorMessage || 'Try another card.'}`,
             'warn'
@@ -3743,10 +4289,9 @@
           const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
-            payload: {
+            payload: buildHostedOpenAiPayload(currentProfile, {
               email: hostedCheckoutEmail,
-              address: currentProfile.address,
-            },
+            }),
           });
           if (retryResult?.error) {
             throw new Error(retryResult.error);
@@ -3761,10 +4306,7 @@
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
           const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
-          currentProfile = {
-            ...currentProfile,
-            address: retryAddress,
-          };
+          currentProfile = mergeHostedProfileAddress(currentProfile, retryAddress);
           await addLog(
             `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
             'warn'
@@ -3773,10 +4315,9 @@
           const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
-            payload: {
+            payload: buildHostedOpenAiPayload(currentProfile, {
               email: hostedCheckoutEmail,
-              address: currentProfile.address,
-            },
+            }),
           });
           if (retryResult?.error) {
             throw new Error(retryResult.error);
@@ -3791,10 +4332,7 @@
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
           const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
-          currentProfile = {
-            ...currentProfile,
-            address: retryAddress,
-          };
+          currentProfile = mergeHostedProfileAddress(currentProfile, retryAddress);
           await addLog(
             `Step 6: hosted checkout billing address is empty after submit; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}).`,
             'warn'
@@ -3803,10 +4341,9 @@
           const retryResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
-            payload: {
+            payload: buildHostedOpenAiPayload(currentProfile, {
               email: hostedCheckoutEmail,
-              address: currentProfile.address,
-            },
+            }),
           });
           if (retryResult?.error) {
             throw new Error(retryResult.error);
@@ -3815,7 +4352,9 @@
           continue;
         }
         if (pageState?.hostedVerificationVisible && !verificationSubmitted) {
-          const verificationCode = await pollHostedVerificationCode(config.verificationUrl);
+          const verificationCode = config?.hostedCheckoutUsesPhoneSms
+            ? await fetchHostedCheckoutVerificationCode(config)
+            : await pollHostedVerificationCode(config.verificationUrl);
           const verifyResult = await sendTabMessageUntilStopped(tabId, PLUS_CHECKOUT_SOURCE, {
             type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
             source: 'background',
@@ -4013,6 +4552,39 @@
       const runtimeConfig = await getHostedCheckoutRuntimeConfig({}, {
         ensureCurrentSmsEntry: false,
       });
+      if (runtimeConfig?.hostedCheckoutUsesPhoneSms && runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+        const latestState = await getLatestHostedState({});
+        await banHostedCheckoutPhoneSmsActivation(
+          latestState,
+          runtimeConfig.hostedCheckoutPhoneSmsActivation,
+          `PayPal 提示号码不可用：${phoneErrorMessage}`
+        );
+        const nextResult = await requestHostedCheckoutPhoneSmsActivation(latestState, { stepKey });
+        const nextActivation = normalizeHostedCheckoutPhoneSmsActivation(nextResult?.activation);
+        if (!nextActivation?.phoneNumber) {
+          throw new Error(`步骤 ${getHostedStepNumber(stepKey)}：PayPal 提示当前号码不可用，且跟随手机接码配置未获取到新号码：${phoneErrorMessage}`);
+        }
+        const nextProfile = {
+          ...profile,
+          phone: normalizeHostedPhoneForPayload(nextActivation.phoneNumber),
+        };
+        await persistHostedGuestProfile(nextProfile);
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：PayPal 已切换到新的手机接码号码 ${maskHostedPhoneForLog(nextProfile.phone)}，准备重新填写资料页。`,
+          'info'
+        );
+        await runHostedPayPalStep(tabId, {
+          ...nextProfile,
+          expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+          phone: nextProfile.phone,
+        });
+        return {
+          handled: true,
+          profile: nextProfile,
+          phoneSmsActivation: nextActivation,
+        };
+      }
       if (
         !runtimeConfig?.hostedCheckoutUsesSmsPool
         || !runtimeConfig?.hostedCheckoutCurrentSmsEntry?.key
@@ -5336,6 +5908,14 @@
           return;
         }
         await maybeAutoDisableHostedCheckoutCurrentSmsEntry(error).catch(() => null);
+        if (shouldAutoDisableHostedCheckoutSmsEntry(error)) {
+          const latestState = await getLatestHostedState(state).catch(() => state);
+          await cancelHostedCheckoutPhoneSmsActivation(
+            latestState,
+            latestState?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY],
+            error?.message || String(error || 'PayPal 验证码失败')
+          ).catch(() => {});
+        }
         throw error;
       }
     }

@@ -4,8 +4,9 @@ const fs = require('node:fs');
 
 function loadPlusCheckoutBillingModule() {
   const source = fs.readFileSync('background/steps/fill-plus-checkout.js', 'utf8');
+  const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
   const globalScope = {};
-  return new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutBilling;`)(globalScope);
+  return new Function('self', `${brazilSource}; ${source}; return self.MultiPageBackgroundPlusCheckoutBilling;`)(globalScope);
 }
 
 function createAddressSeed() {
@@ -1205,6 +1206,64 @@ test('Classic PayPal billing falls back to local US seed when randomuser.me fail
   assert.equal(fillMessage.message.payload.addressSeed.fallback.address1, '3450 Broadway');
   assert.equal(fillMessage.message.payload.addressSeed.fallback.city, 'New York');
   assert.equal(fillMessage.message.payload.addressSeed.fallback.postalCode, '10031');
+});
+
+test('Classic PayPal Brazil billing uses shared local-first Brazil seed without meiguodizhi', async () => {
+  const fetchRequests = [];
+  const { events, executor } = createExecutorHarness({
+    frames: [
+      { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+      { frameId: 7, url: 'https://js.stripe.com/v3/elements-inner-payment.html' },
+      { frameId: 8, url: 'https://js.stripe.com/v3/elements-inner-address.html' },
+    ],
+    stateByFrame: {
+      0: { hasPayPal: false, paypalCandidates: [], hasSubscribeButton: true },
+      7: { hasPayPal: true, paypalCandidates: [{ tag: 'button', text: 'PayPal' }] },
+      8: {
+        hasPayPal: false,
+        paypalCandidates: [],
+        billingFieldsVisible: true,
+        countryText: 'Brazil',
+      },
+    },
+    fetchImpl: async (url, init) => {
+      fetchRequests.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          cep: '01414-003',
+          state: 'SP',
+          city: 'Sao Paulo',
+          neighborhood: 'Jardins',
+          street: 'Rua Haddock Lobo 1307',
+        }),
+      };
+    },
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'BR',
+      exitRegion: 'Brazil [BR]',
+      fallbackApplied: false,
+    }),
+  });
+
+  await executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' });
+
+  const fillMessage = events.messages.find((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+  const seed = fillMessage.message.payload.addressSeed;
+  assert.equal(seed.countryCode, 'BR');
+  assert.equal(seed.source, 'brasilapi');
+  assert.equal(seed.skipAutocomplete, true);
+  assert.equal(seed.fallback.address1, 'Rua Haddock Lobo 1307');
+  assert.equal(seed.fallback.city, 'Sao Paulo');
+  assert.equal(seed.fallback.region, 'SP');
+  assert.equal(seed.fallback.postalCode, '01414-003');
+  assert.match(seed.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(seed.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.equal(seed.documentType, 'cpf');
+  assert.equal(seed.documentNumber, seed.cpf);
+  assert.match(fetchRequests[0].url, /^https:\/\/brasilapi\.com\.br\/api\/cep\/v2\/\d{8}$/);
+  assert.equal(fetchRequests.some((entry) => /meiguodizhi\.com/i.test(entry.url)), false);
 });
 
 test('Classic PayPal billing can use the US 4-digit autocomplete seed mode', async () => {

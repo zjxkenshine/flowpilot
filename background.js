@@ -56,6 +56,7 @@ importScripts(
   'background/steps/registry.js',
   'data/step-definitions.js',
   'data/address-sources.js',
+  'shared/brazil-profile-generator.js',
   'background/steps/open-chatgpt.js',
   'background/steps/submit-signup-email.js',
   'background/steps/fill-password.js',
@@ -1575,6 +1576,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationPollAttempts: 6,
   hostedCheckoutVerificationPollIntervalSeconds: 5,
   hostedCheckoutVerificationResendMaxAttempts: 1,
+  hostedCheckoutSmsSource: 'fixed_pool',
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
@@ -1591,6 +1593,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   paypalEmail: '',
   paypalPassword: '',
   currentPayPalAccountId: '',
+  paypalProfileCountryCode: 'US',
   paypalGeneratedProfile: { ...DEFAULT_PAYPAL_GENERATED_PROFILE },
   gopayCountryCode: '+86',
   gopayPhone: '',
@@ -1844,6 +1847,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationPollAttempts',
   'hostedCheckoutVerificationPollIntervalSeconds',
   'hostedCheckoutVerificationResendMaxAttempts',
+  'hostedCheckoutSmsSource',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
@@ -1852,6 +1856,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutCurrentSmsEntry',
   'oauthOpenAfterRefreshWaitSeconds',
   'plusHostedCheckoutOauthDelaySeconds',
+  'paypalProfileCountryCode',
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
@@ -4242,6 +4247,26 @@ function normalizePayPalGeneratedProfileCountryCode(value = '') {
   return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
 }
 
+function normalizePayPalProfileCountryCodeSetting(value, fallback = 'US') {
+  if (value === undefined || value === null) {
+    return normalizePayPalProfileCountryCodeSetting(fallback, 'US') || 'US';
+  }
+  const raw = String(value).trim();
+  if (!raw) {
+    return '';
+  }
+  const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.includes(normalized)) {
+    return normalized;
+  }
+  const fallbackRaw = String(fallback ?? '').trim();
+  if (!fallbackRaw) {
+    return '';
+  }
+  const fallbackNormalized = fallbackRaw.toUpperCase().replace(/[^A-Z]/g, '');
+  return PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.includes(fallbackNormalized) ? fallbackNormalized : 'US';
+}
+
 function normalizePayPalGeneratedProfile(value = {}) {
   const source = isPlainObjectValue(value) ? value : {};
   const next = { ...DEFAULT_PAYPAL_GENERATED_PROFILE };
@@ -4594,6 +4619,10 @@ function normalizePersistentSettingValue(key, value) {
       const numeric = Number(value);
       return Math.min(10, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 1)));
     }
+    case 'hostedCheckoutSmsSource': {
+      const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+      return normalized === 'phone_sms' ? 'phone_sms' : 'fixed_pool';
+    }
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
@@ -4704,6 +4733,8 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '');
     case 'currentPayPalAccountId':
       return String(value || '').trim();
+    case 'paypalProfileCountryCode':
+      return normalizePayPalProfileCountryCodeSetting(value);
     case 'paypalGeneratedProfile':
       return normalizePayPalGeneratedProfile(value);
     case 'gopayCountryCode':
@@ -5780,6 +5811,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutVerificationPollAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPollAttempts']);
   assignIfUpdated('hostedCheckoutVerificationPollIntervalSeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPollIntervalSeconds']);
   assignIfUpdated('hostedCheckoutVerificationResendMaxAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationResendMaxAttempts']);
+  assignIfUpdated('hostedCheckoutSmsSource', ['flows', 'openai', 'plus', 'hostedCheckoutSmsSource']);
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
   assignIfUpdated('hostedCheckoutSmsPoolText', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolText']);
@@ -5788,6 +5820,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutCurrentSmsEntry', ['flows', 'openai', 'plus', 'hostedCheckoutCurrentSmsEntry']);
   assignIfUpdated('oauthOpenAfterRefreshWaitSeconds', ['flows', 'openai', 'oauth', 'oauthOpenAfterRefreshWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
+  assignIfUpdated('paypalProfileCountryCode', ['flows', 'openai', 'plus', 'paypalProfileCountryCode']);
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
@@ -7131,8 +7164,11 @@ async function resetState() {
       'yydsMailBaseUrl',
       'preferredIcloudHost',
       'automationWindowId',
-      ...CONTRIBUTION_RUNTIME_KEYS,
-    ]),
+    ...CONTRIBUTION_RUNTIME_KEYS,
+    'hostedCheckoutPhoneSmsActivation',
+    'hostedCheckoutPhoneSmsRequestedRegion',
+    'hostedCheckoutPhoneSmsResolvedRegion',
+  ]),
     getPersistedSettings(),
     getPersistedAliasState(),
   ]);
@@ -7177,6 +7213,15 @@ async function resetState() {
   )
     ? prev.freeReusablePhoneActivation
     : null;
+  const hostedCheckoutPhoneSmsActivation = (
+    prev.hostedCheckoutPhoneSmsActivation
+    && typeof prev.hostedCheckoutPhoneSmsActivation === 'object'
+    && !Array.isArray(prev.hostedCheckoutPhoneSmsActivation)
+    && String(prev.hostedCheckoutPhoneSmsActivation.activationId || prev.hostedCheckoutPhoneSmsActivation.id || '').trim()
+    && String(prev.hostedCheckoutPhoneSmsActivation.phoneNumber || prev.hostedCheckoutPhoneSmsActivation.phone || '').trim()
+  )
+    ? prev.hostedCheckoutPhoneSmsActivation
+    : null;
   await chrome.storage.session.clear();
   const resetPayload = buildStatePatchWithRuntimeState({}, {
     ...DEFAULT_STATE,
@@ -7206,6 +7251,9 @@ async function resetState() {
     // Keep free reuse phone activation until the user clears or the flow retires it.
     freeReusablePhoneActivation,
     phoneReusableActivationPool,
+    hostedCheckoutPhoneSmsActivation,
+    hostedCheckoutPhoneSmsRequestedRegion: hostedCheckoutPhoneSmsActivation ? String(prev.hostedCheckoutPhoneSmsRequestedRegion || '').trim() : '',
+    hostedCheckoutPhoneSmsResolvedRegion: hostedCheckoutPhoneSmsActivation ? String(prev.hostedCheckoutPhoneSmsResolvedRegion || '').trim() : '',
     preferredIcloudHost: prev.preferredIcloudHost || '',
     automationWindowId: Number.isInteger(Number(prev.automationWindowId))
       && Number(prev.automationWindowId) >= 0
@@ -17628,6 +17676,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   waitForTabCompleteUntilStopped,
   waitForTabUrlMatchUntilStopped,
   checkoutConversionProxyManager,
+  phoneVerificationHelpers,
   resolvePlusCheckoutProfileRegion,
   resolvePlusCheckoutRegionalBillingDetails,
 });

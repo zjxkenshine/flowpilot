@@ -9,6 +9,7 @@ test('sidepanel loads reusable form dialog and paypal manager before sidepanel b
   const managerIndex = html.indexOf('<script src="paypal-manager.js"></script>');
   const namesIndex = html.indexOf('<script src="../data/names.js"></script>');
   const addressSourcesIndex = html.indexOf('<script src="../data/address-sources.js"></script>');
+  const brazilProfileGeneratorIndex = html.indexOf('<script src="../shared/brazil-profile-generator.js"></script>');
   const profileGeneratorIndex = html.indexOf('<script src="paypal-profile-generator.js"></script>');
   const sidepanelIndex = html.indexOf('<script src="sidepanel.js"></script>');
 
@@ -17,10 +18,13 @@ test('sidepanel loads reusable form dialog and paypal manager before sidepanel b
   assert.notEqual(managerIndex, -1);
   assert.notEqual(namesIndex, -1);
   assert.notEqual(addressSourcesIndex, -1);
+  assert.notEqual(brazilProfileGeneratorIndex, -1);
   assert.notEqual(profileGeneratorIndex, -1);
   assert.notEqual(sidepanelIndex, -1);
   assert.ok(namesIndex < profileGeneratorIndex);
   assert.ok(addressSourcesIndex < profileGeneratorIndex);
+  assert.ok(addressSourcesIndex < brazilProfileGeneratorIndex);
+  assert.ok(brazilProfileGeneratorIndex < profileGeneratorIndex);
   assert.ok(formDialogIndex < editableListPickerIndex);
   assert.ok(editableListPickerIndex < managerIndex);
   assert.ok(managerIndex < profileGeneratorIndex);

@@ -1498,6 +1498,41 @@
       return buildRandomUserAddressSeed(data, fallbackSeed);
     }
 
+    async function buildBrazilBillingAddressSeed() {
+      const generator = self.MultiPageBrazilProfileGenerator;
+      if (generator?.resolveBrazilProfile && generator?.toClassicAddressSeed) {
+        const profile = await generator.resolveBrazilProfile({
+          allowPublicLookup: typeof fetchImpl === 'function',
+          fetchImpl,
+        });
+        if (profile?.publicLookupError) {
+          await addLog(`Step 7: Brazil public CEP lookup unavailable; using local Brazil profile. ${profile.publicLookupError}`, 'warn');
+        }
+        const seed = generator.toClassicAddressSeed(profile);
+        if (hasCompleteAddressFallback(seed)) {
+          return seed;
+        }
+      }
+      const localSeed = getLocalAddressSeed('BR');
+      if (hasCompleteAddressFallback(localSeed)) {
+        return {
+          ...localSeed,
+          countryCode: 'BR',
+          source: localSeed?.source || 'local_brazil_profile_fallback',
+          skipAutocomplete: true,
+          autoCheckAgreement: true,
+          documentType: 'cpf',
+          documentNumber: '',
+          documentDigits: '',
+          cpf: '',
+          cpfDigits: '',
+          cnpj: '',
+          cnpjDigits: '',
+        };
+      }
+      throw new Error('Step 7: unable to generate a Brazil billing address.');
+    }
+
     function resolveBillingAddressCountry(state = {}, countryOverride = '', paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
       const normalizedPaymentMethod = normalizePlusPaymentMethod(paymentMethod || state?.plusPaymentMethod);
       const checkoutCountry = resolveMeiguodizhiCountryCode(countryOverride);
@@ -1566,6 +1601,9 @@
         await addLog(`步骤 7：GoPay 账单地址将按当前代理出口地区 ${countryCode} 填写。`, 'info');
       }
       const localSeed = getLocalAddressSeed(countryCode);
+      if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && countryCode === 'BR') {
+        return buildBrazilBillingAddressSeed();
+      }
       if (paymentMethod === PLUS_PAYMENT_METHOD_PAYPAL && countryCode === 'US') {
         try {
           const randomUserSeed = await fetchRandomUserUsAddressSeed(localSeed);

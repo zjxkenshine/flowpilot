@@ -300,6 +300,7 @@ function createInput({ id = '', name = '', placeholder = '', containerText = '' 
     type: 'text',
     value: '',
     textContent: '',
+    disabled: false,
     getAttribute: (key) => attrs[key] || '',
     closest: (selector) => {
       if (selector === 'label') return null;
@@ -1191,4 +1192,155 @@ return { fillIfEmpty };
   assert.equal(api.fillIfEmpty(input, '100-0005', { overwrite: true }), true);
   assert.equal(input.value, '100-0005');
   assert.deepEqual(writes, ['100-0005']);
+});
+
+test('Brazil document filler only writes explicit CPF/CNPJ or tax document fields', () => {
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getActionText'),
+    extractFunction('getSearchText'),
+    extractFunction('getFieldText'),
+    extractFunction('getCombinedSearchText'),
+    extractFunction('getVisibleControls'),
+    extractFunction('isEnabledControl'),
+    extractFunction('getVisibleTextInputs'),
+    extractFunction('findInputByFieldText'),
+    extractFunction('getBrazilDocumentValue'),
+    extractFunction('isBrazilDocumentInputCandidate'),
+    extractFunction('findBrazilDocumentInput'),
+    extractFunction('fillIfEmpty'),
+    extractFunction('fillBrazilDocumentIfPresent'),
+  ].join('\n');
+  const postalInput = createInput({
+    id: 'billingPostalCode',
+    name: 'postalCode',
+    placeholder: 'Postal code',
+    containerText: 'Billing address Postal code',
+  });
+  const addressInput = createInput({
+    id: 'billingAddressLine1',
+    name: 'billingAddressLine1',
+    placeholder: 'Address',
+    containerText: 'Billing address',
+  });
+  const documentInput = createInput({
+    id: 'cpf',
+    name: 'cpf',
+    placeholder: 'CPF',
+    containerText: 'Tax ID / CPF',
+  });
+  const inputs = [postalInput, addressInput, documentInput];
+  const writes = [];
+  const documentMock = {
+    querySelectorAll: (selector) => {
+      const text = String(selector || '');
+      if (text.includes('label[for=')) return [];
+      if (text === 'input, textarea') return inputs;
+      if (text.includes('cpf')) return [documentInput];
+      if (text.includes('cnpj') || text.includes('tax') || text.includes('document')) return [];
+      return inputs;
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  const cssMock = {
+    escape: (value) => String(value),
+  };
+  const api = new Function('window', 'document', 'CSS', 'writes', `
+function fillInput(input, value) {
+  writes.push({ input, value });
+  input.value = value;
+}
+${bundle}
+return { fillBrazilDocumentIfPresent, isBrazilDocumentInputCandidate };
+`)(windowMock, documentMock, cssMock, writes);
+
+  assert.equal(api.isBrazilDocumentInputCandidate(postalInput), false);
+  assert.equal(api.isBrazilDocumentInputCandidate(addressInput), false);
+  assert.equal(api.isBrazilDocumentInputCandidate(documentInput), true);
+  const result = api.fillBrazilDocumentIfPresent({
+    documentNumber: '529.982.247-25',
+  });
+
+  assert.deepEqual(result, {
+    attempted: true,
+    filled: true,
+    found: true,
+    value: '529.982.247-25',
+  });
+  assert.equal(documentInput.value, '529.982.247-25');
+  assert.equal(postalInput.value, '');
+  assert.equal(addressInput.value, '');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].input, documentInput);
+});
+
+test('Brazil document filler silently skips ordinary address forms', () => {
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getActionText'),
+    extractFunction('getSearchText'),
+    extractFunction('getFieldText'),
+    extractFunction('getCombinedSearchText'),
+    extractFunction('getVisibleControls'),
+    extractFunction('isEnabledControl'),
+    extractFunction('getVisibleTextInputs'),
+    extractFunction('findInputByFieldText'),
+    extractFunction('getBrazilDocumentValue'),
+    extractFunction('isBrazilDocumentInputCandidate'),
+    extractFunction('findBrazilDocumentInput'),
+    extractFunction('fillIfEmpty'),
+    extractFunction('fillBrazilDocumentIfPresent'),
+  ].join('\n');
+  const addressInput = createInput({
+    id: 'billingAddressLine1',
+    name: 'billingAddressLine1',
+    placeholder: 'Address',
+    containerText: 'Billing address',
+  });
+  const postalInput = createInput({
+    id: 'billingPostalCode',
+    name: 'postalCode',
+    placeholder: 'Postal code',
+    containerText: 'Postal code',
+  });
+  const inputs = [addressInput, postalInput];
+  const writes = [];
+  const documentMock = {
+    querySelectorAll: (selector) => {
+      const text = String(selector || '');
+      if (text.includes('label[for=')) return [];
+      if (text === 'input, textarea') return inputs;
+      if (text.includes('cpf') || text.includes('cnpj') || text.includes('tax') || text.includes('document')) return [];
+      return inputs;
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  const cssMock = {
+    escape: (value) => String(value),
+  };
+  const api = new Function('window', 'document', 'CSS', 'writes', `
+function fillInput(input, value) {
+  writes.push({ input, value });
+  input.value = value;
+}
+${bundle}
+return { fillBrazilDocumentIfPresent };
+`)(windowMock, documentMock, cssMock, writes);
+
+  const result = api.fillBrazilDocumentIfPresent({
+    documentNumber: '529.982.247-25',
+  });
+
+  assert.equal(result.attempted, true);
+  assert.equal(result.found, false);
+  assert.equal(result.filled, false);
+  assert.equal(addressInput.value, '');
+  assert.equal(postalInput.value, '');
+  assert.deepEqual(writes, []);
 });

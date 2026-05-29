@@ -285,6 +285,8 @@ const btnPayPalAccountMenu = document.getElementById('btn-paypal-account-menu');
 const payPalAccountCurrent = document.getElementById('paypal-account-current');
 const payPalAccountMenu = document.getElementById('paypal-account-menu');
 const btnAddPayPalAccount = document.getElementById('btn-add-paypal-account');
+const rowPayPalProfileCountry = document.getElementById('row-paypal-profile-country');
+const selectPayPalProfileCountryCode = document.getElementById('select-paypal-profile-country-code');
 const rowPayPalProfileGenerator = document.getElementById('row-paypal-profile-generator');
 const payPalProfileGeneratorShell = document.getElementById('paypal-profile-generator-shell');
 const btnGeneratePayPalProfile = document.getElementById('btn-generate-paypal-profile');
@@ -297,6 +299,8 @@ const inputHostedCheckoutVerificationUrl = document.getElementById('input-hosted
 const rowHostedCheckoutManualFetch = document.getElementById('row-hosted-checkout-manual-fetch');
 const btnHostedCheckoutManualFetch = document.getElementById('btn-hosted-checkout-manual-fetch');
 const displayHostedCheckoutManualCode = document.getElementById('display-hosted-checkout-manual-code');
+const rowHostedCheckoutSmsSource = document.getElementById('row-hosted-checkout-sms-source');
+const selectHostedCheckoutSmsSource = document.getElementById('select-hosted-checkout-sms-source');
 const rowHostedCheckoutSecurityChallenge = document.getElementById('row-hosted-checkout-security-challenge');
 const inputHostedCheckoutSecurityChallengeEnabled = document.getElementById('input-hosted-checkout-security-challenge-enabled');
 const rowHostedCheckoutVerificationPopupDelay = document.getElementById('row-hosted-checkout-verification-popup-delay');
@@ -744,6 +748,8 @@ const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS = 10;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES = 3;
+const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
+const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
@@ -3837,6 +3843,33 @@ function normalizeHostedCheckoutSmsPoolMaxUsesValue(value, fallback = DEFAULT_HO
   return Math.min(99, Math.max(1, Math.floor(parsed)));
 }
 
+function normalizeHostedCheckoutSmsSourceValue(value = '') {
+  const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+  return normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
+    ? HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
+    : HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
+}
+
+function normalizePayPalProfileCountryCodeValue(value, fallback = 'US') {
+  if (value === undefined || value === null) {
+    return normalizePayPalProfileCountryCodeValue(fallback, 'US') || 'US';
+  }
+  const raw = String(value).trim();
+  if (!raw) {
+    return '';
+  }
+  const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (['US', 'JP', 'BR'].includes(normalized)) {
+    return normalized;
+  }
+  const fallbackRaw = String(fallback ?? '').trim();
+  if (!fallbackRaw) {
+    return '';
+  }
+  const fallbackNormalized = fallbackRaw.toUpperCase().replace(/[^A-Z]/g, '');
+  return ['US', 'JP', 'BR'].includes(fallbackNormalized) ? fallbackNormalized : 'US';
+}
+
 function normalizePlusCheckoutConversionProxyUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -5317,6 +5350,17 @@ function collectSettingsPayload() {
       const numeric = Number(String(value ?? '').trim());
       return Number.isFinite(numeric) ? Math.min(99, Math.max(1, Math.floor(numeric))) : fallback;
     });
+  const normalizeHostedCheckoutSmsSourceInput = typeof normalizeHostedCheckoutSmsSourceValue === 'function'
+    ? normalizeHostedCheckoutSmsSourceValue
+    : ((value = '') => (String(value || '').trim().toLowerCase().replace(/-/g, '_') === 'phone_sms' ? 'phone_sms' : 'fixed_pool'));
+  const normalizePayPalProfileCountryCodeInput = typeof normalizePayPalProfileCountryCodeValue === 'function'
+    ? normalizePayPalProfileCountryCodeValue
+    : ((value, fallback = 'US') => {
+      if (value === undefined || value === null) return fallback || 'US';
+      const normalized = String(value).trim().toUpperCase().replace(/[^A-Z]/g, '');
+      if (!String(value).trim()) return '';
+      return ['US', 'JP', 'BR'].includes(normalized) ? normalized : (fallback || 'US');
+    });
   const normalizeHostedCheckoutResendWaitSecondsInput = typeof normalizeHostedCheckoutResendWaitSecondsValue === 'function'
     ? normalizeHostedCheckoutResendWaitSecondsValue
     : ((value, fallback = 20) => {
@@ -6287,6 +6331,9 @@ function collectSettingsPayload() {
     hostedCheckoutVerificationPopupDelaySeconds: typeof inputHostedCheckoutVerificationPopupDelaySeconds !== 'undefined' && inputHostedCheckoutVerificationPopupDelaySeconds
       ? normalizeHostedCheckoutVerificationPopupDelaySecondsInput(inputHostedCheckoutVerificationPopupDelaySeconds.value)
       : defaultHostedCheckoutVerificationPopupDelaySeconds,
+    hostedCheckoutSmsSource: typeof selectHostedCheckoutSmsSource !== 'undefined' && selectHostedCheckoutSmsSource
+      ? normalizeHostedCheckoutSmsSourceInput(selectHostedCheckoutSmsSource.value)
+      : normalizeHostedCheckoutSmsSourceInput(latestState?.hostedCheckoutSmsSource),
     hostedCheckoutSmsPoolAutoDisableEnabled: typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled
       ? Boolean(inputHostedCheckoutSmsPoolAutoDisableEnabled.checked)
       : Boolean(latestState?.hostedCheckoutSmsPoolAutoDisableEnabled),
@@ -6381,6 +6428,9 @@ function collectSettingsPayload() {
     paypalPassword: String(currentPayPalAccount?.password || latestState?.paypalPassword || ''),
     currentPayPalAccountId: String(latestState?.currentPayPalAccountId || '').trim(),
     paypalAccounts: payPalAccounts,
+    paypalProfileCountryCode: typeof selectPayPalProfileCountryCode !== 'undefined' && selectPayPalProfileCountryCode
+      ? normalizePayPalProfileCountryCodeInput(selectPayPalProfileCountryCode.value)
+      : normalizePayPalProfileCountryCodeInput(latestState?.paypalProfileCountryCode),
     paypalGeneratedProfile: typeof getPayPalGeneratedProfile === 'function'
       ? (getPayPalGeneratedProfile(latestState) || {})
       : (
@@ -11992,6 +12042,7 @@ function updatePlusModeUI() {
     row.style.display = enabled && selectedMethod === paypalValue && !hostedCheckoutFinalStepEnabled ? '' : 'none';
   });
   [
+    typeof rowPayPalProfileCountry !== 'undefined' ? rowPayPalProfileCountry : null,
     typeof rowPayPalProfileGenerator !== 'undefined' ? rowPayPalProfileGenerator : null,
   ].forEach((row) => {
     if (!row) {
@@ -12000,12 +12051,42 @@ function updatePlusModeUI() {
     row.style.display = enabled && (selectedMethod === paypalValue || selectedMethod === paypalHostedValue) ? '' : 'none';
   });
   [
+    typeof rowHostedCheckoutSmsSource !== 'undefined' ? rowHostedCheckoutSmsSource : null,
+  ].forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.style.display = hostedRowsVisible ? '' : 'none';
+  });
+  const normalizeHostedCheckoutSmsSourceForUi = typeof normalizeHostedCheckoutSmsSourceValue === 'function'
+    ? normalizeHostedCheckoutSmsSourceValue
+    : ((value = '') => {
+      const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+      return normalized === 'phone_sms' ? 'phone_sms' : 'fixed_pool';
+    });
+  const hostedCheckoutSmsSource = normalizeHostedCheckoutSmsSourceForUi(
+    typeof selectHostedCheckoutSmsSource !== 'undefined' && selectHostedCheckoutSmsSource
+      ? selectHostedCheckoutSmsSource.value
+      : latestState?.hostedCheckoutSmsSource
+  );
+  const hostedCheckoutFixedSmsRowsVisible = hostedRowsVisible
+    && hostedCheckoutSmsSource === (typeof HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL !== 'undefined'
+      ? HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL
+      : 'fixed_pool');
+  [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
     typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
-    typeof rowHostedCheckoutSecurityChallenge !== 'undefined' ? rowHostedCheckoutSecurityChallenge : null,
-    typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
     typeof rowHostedCheckoutPhone !== 'undefined' ? rowHostedCheckoutPhone : null,
     typeof rowHostedCheckoutSmsPool !== 'undefined' ? rowHostedCheckoutSmsPool : null,
+  ].forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.style.display = hostedCheckoutFixedSmsRowsVisible ? '' : 'none';
+  });
+  [
+    typeof rowHostedCheckoutSecurityChallenge !== 'undefined' ? rowHostedCheckoutSecurityChallenge : null,
+    typeof rowHostedCheckoutVerificationPopupDelay !== 'undefined' ? rowHostedCheckoutVerificationPopupDelay : null,
     typeof rowHostedCheckoutResendSettings !== 'undefined' ? rowHostedCheckoutResendSettings : null,
     typeof rowPlusHostedCheckoutOauthDelay !== 'undefined' ? rowPlusHostedCheckoutOauthDelay : null,
   ].forEach((row) => {
@@ -12015,7 +12096,7 @@ function updatePlusModeUI() {
     row.style.display = hostedRowsVisible ? '' : 'none';
   });
   if (typeof rowHostedCheckoutSmsPool !== 'undefined' && rowHostedCheckoutSmsPool) {
-    if (hostedRowsVisible) {
+    if (hostedCheckoutFixedSmsRowsVisible) {
       if (hostedSmsPoolExpanded && typeof queueHostedSmsPoolRefresh === 'function') {
         queueHostedSmsPoolRefresh();
       }
@@ -13276,6 +13357,12 @@ function applySettingsState(state) {
   }
   if (typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl) {
     inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(state?.hostedCheckoutVerificationUrl || '');
+  }
+  if (typeof selectHostedCheckoutSmsSource !== 'undefined' && selectHostedCheckoutSmsSource) {
+    selectHostedCheckoutSmsSource.value = normalizeHostedCheckoutSmsSourceValue(state?.hostedCheckoutSmsSource);
+  }
+  if (typeof selectPayPalProfileCountryCode !== 'undefined' && selectPayPalProfileCountryCode) {
+    selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(state?.paypalProfileCountryCode);
   }
   if (typeof inputHostedCheckoutSecurityChallengeEnabled !== 'undefined' && inputHostedCheckoutSecurityChallengeEnabled) {
     inputHostedCheckoutSecurityChallengeEnabled.checked = Boolean(state?.hostedCheckoutSecurityChallengeEnabled);
@@ -15483,7 +15570,13 @@ function validateHostedCheckoutContactConfig(options = {}) {
   const poolText = normalizeHostedCheckoutSmsPoolTextValue(inputHostedCheckoutSmsPool?.value || latestState?.hostedCheckoutSmsPoolText || '');
   const phone = normalizeHostedCheckoutPhoneValue(inputHostedCheckoutPhone?.value || latestState?.hostedCheckoutPhoneNumber || '');
   const verificationUrl = normalizeHostedCheckoutVerificationUrlValue(inputHostedCheckoutVerificationUrl?.value || latestState?.hostedCheckoutVerificationUrl || '');
-  const required = plusModeEnabled && paymentMethod === 'paypal' && !poolText;
+  const smsSource = normalizeHostedCheckoutSmsSourceValue(
+    selectHostedCheckoutSmsSource?.value || latestState?.hostedCheckoutSmsSource
+  );
+  const required = plusModeEnabled
+    && paymentMethod === 'paypal'
+    && smsSource === HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL
+    && !poolText;
   const missingPhone = required && !phone;
   const missingVerificationUrl = required && !verificationUrl;
   const valid = !missingPhone && !missingVerificationUrl;
@@ -18956,6 +19049,27 @@ inputHostedCheckoutSecurityChallengeEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+selectHostedCheckoutSmsSource?.addEventListener('change', () => {
+  selectHostedCheckoutSmsSource.value = normalizeHostedCheckoutSmsSourceValue(selectHostedCheckoutSmsSource.value);
+  syncLatestState({ hostedCheckoutSmsSource: selectHostedCheckoutSmsSource.value });
+  validateHostedCheckoutContactConfig();
+  if (typeof updatePlusModeUI === 'function') {
+    updatePlusModeUI();
+  }
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+selectPayPalProfileCountryCode?.addEventListener('change', () => {
+  selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(selectPayPalProfileCountryCode.value);
+  syncLatestState({ paypalProfileCountryCode: selectPayPalProfileCountryCode.value });
+  if (typeof renderPayPalProfile === 'function') {
+    renderPayPalProfile();
+  }
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputHostedCheckoutSmsPoolAutoDisableEnabled?.addEventListener('change', () => {
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -21995,6 +22109,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.hostedCheckoutSecurityChallengeEnabled !== undefined && inputHostedCheckoutSecurityChallengeEnabled) {
         inputHostedCheckoutSecurityChallengeEnabled.checked = Boolean(message.payload.hostedCheckoutSecurityChallengeEnabled);
       }
+      if (message.payload.hostedCheckoutSmsSource !== undefined && selectHostedCheckoutSmsSource) {
+        selectHostedCheckoutSmsSource.value = normalizeHostedCheckoutSmsSourceValue(message.payload.hostedCheckoutSmsSource);
+        validateHostedCheckoutContactConfig();
+        if (typeof updatePlusModeUI === 'function') {
+          updatePlusModeUI();
+        }
+      }
+      if (message.payload.paypalProfileCountryCode !== undefined && selectPayPalProfileCountryCode) {
+        selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(message.payload.paypalProfileCountryCode);
+        renderPayPalProfile();
+      }
       if (message.payload.hostedCheckoutSmsPoolAutoDisableEnabled !== undefined && inputHostedCheckoutSmsPoolAutoDisableEnabled) {
         inputHostedCheckoutSmsPoolAutoDisableEnabled.checked = Boolean(message.payload.hostedCheckoutSmsPoolAutoDisableEnabled);
       }
@@ -22442,6 +22567,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined
         || message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
+        || message.payload.paypalProfileCountryCode !== undefined
         || message.payload.gopayHelperPhoneMode !== undefined
         || message.payload.gopayHelperAutoModeEnabled !== undefined
         || message.payload.gopayHelperOtpChannel !== undefined

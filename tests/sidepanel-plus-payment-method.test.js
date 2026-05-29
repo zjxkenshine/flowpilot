@@ -348,6 +348,42 @@ test('sidepanel PayPal hosted sms pool max uses renders and syncs through settin
   assert.match(dataUpdatedSnippet, /normalizeHostedCheckoutSmsPoolMaxUsesValue\(message\.payload\.hostedCheckoutSmsPoolMaxUses/);
 });
 
+test('sidepanel PayPal hosted sms source selector renders and syncs through settings', () => {
+  assert.match(sidepanelHtml, /id="row-hosted-checkout-sms-source"/);
+  assert.match(sidepanelHtml, /id="select-hosted-checkout-sms-source"/);
+  assert.match(sidepanelHtml, /<option value="fixed_pool">固定接码池（默认）<\/option>/);
+  assert.match(sidepanelHtml, /<option value="phone_sms">跟随手机接码配置<\/option>/);
+
+  const normalizeSource = extractFunction('normalizeHostedCheckoutSmsSourceValue');
+  const normalize = new Function(`
+const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
+const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
+${normalizeSource}
+return normalizeHostedCheckoutSmsSourceValue;
+`)();
+  assert.equal(normalize(undefined), 'fixed_pool');
+  assert.equal(normalize('fixed-pool'), 'fixed_pool');
+  assert.equal(normalize('phone-sms'), 'phone_sms');
+  assert.equal(normalize('bad'), 'fixed_pool');
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /hostedCheckoutSmsSource:/);
+  assert.match(collectSource, /selectHostedCheckoutSmsSource\.value/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /selectHostedCheckoutSmsSource\.value\s*=\s*normalizeHostedCheckoutSmsSourceValue/);
+
+  const updateModeSource = extractFunction('updatePlusModeUI');
+  assert.match(updateModeSource, /hostedCheckoutSmsSource/);
+  assert.match(updateModeSource, /hostedCheckoutFixedSmsRowsVisible/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 12000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutSmsSource !== undefined/);
+  assert.match(dataUpdatedSnippet, /selectHostedCheckoutSmsSource\.value\s*=\s*normalizeHostedCheckoutSmsSourceValue/);
+});
+
 test('sidepanel regional checkout switch renders and syncs through settings', () => {
   assert.match(sidepanelHtml, /id="row-plus-checkout-regional-checkout"/);
   assert.match(sidepanelHtml, /id="input-plus-checkout-regional-checkout-enabled"/);
@@ -363,6 +399,36 @@ test('sidepanel regional checkout switch renders and syncs through settings', ()
   assert.notEqual(dataUpdatedStart, -1);
   const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 16000);
   assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckoutRegionalCheckoutEnabled !== undefined/);
+});
+
+test('sidepanel PayPal profile country selector renders and syncs through settings', () => {
+  assert.match(sidepanelHtml, /id="row-paypal-profile-country"/);
+  assert.match(sidepanelHtml, /id="select-paypal-profile-country-code"/);
+  assert.match(sidepanelHtml, /<option value="">跟随 IP 出口<\/option>/);
+  assert.match(sidepanelHtml, /<option value="US" selected>US<\/option>/);
+  assert.match(sidepanelHtml, /<option value="JP">JP<\/option>/);
+  assert.match(sidepanelHtml, /<option value="BR">BR<\/option>/);
+
+  const normalizeSource = extractFunction('normalizePayPalProfileCountryCodeValue');
+  const normalize = new Function(`${normalizeSource}; return normalizePayPalProfileCountryCodeValue;`)();
+  assert.equal(normalize(undefined), 'US');
+  assert.equal(normalize(''), '');
+  assert.equal(normalize('jp'), 'JP');
+  assert.equal(normalize('br'), 'BR');
+  assert.equal(normalize('de'), 'US');
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /paypalProfileCountryCode:/);
+  assert.match(collectSource, /selectPayPalProfileCountryCode\.value/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /selectPayPalProfileCountryCode\.value\s*=\s*normalizePayPalProfileCountryCodeValue\(state\?\.paypalProfileCountryCode\)/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 12000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.paypalProfileCountryCode !== undefined/);
+  assert.match(dataUpdatedSnippet, /selectPayPalProfileCountryCode\.value\s*=\s*normalizePayPalProfileCountryCodeValue\(message\.payload\.paypalProfileCountryCode\)/);
 });
 
 test('sidepanel Plus UI restores traditional PayPal account mode when hosted final step is disabled', () => {

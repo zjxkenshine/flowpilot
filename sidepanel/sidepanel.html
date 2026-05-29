@@ -547,6 +547,18 @@
           <button id="btn-add-paypal-account" class="btn btn-outline btn-sm data-inline-btn" type="button">添加</button>
         </div>
       </div>
+      <div class="data-row" id="row-paypal-profile-country" style="display:none;">
+        <span class="data-label">资料国家</span>
+        <div class="data-inline">
+          <select id="select-paypal-profile-country-code" class="data-select">
+            <option value="">跟随 IP 出口</option>
+            <option value="US" selected>US</option>
+            <option value="JP">JP</option>
+            <option value="BR">BR</option>
+          </select>
+          <span class="setting-caption">后续 PayPal 资料按所选国家生成；留空则跟随支付出口。</span>
+        </div>
+      </div>
       <div class="data-row" id="row-paypal-profile-generator" style="display:none;">
         <span class="data-label">PayPal 资料</span>
         <div id="paypal-profile-generator-shell" class="paypal-profile-generator-shell is-collapsed">
@@ -565,6 +577,16 @@
           <div id="paypal-profile-details" class="paypal-profile-details" hidden>
             <div class="paypal-profile-empty">点击“生成 PayPal 资料”后在这里展示结果。</div>
           </div>
+        </div>
+      </div>
+      <div class="data-row" id="row-hosted-checkout-sms-source" style="display:none;">
+        <span class="data-label">PayPal 接码来源</span>
+        <div class="data-inline">
+          <select id="select-hosted-checkout-sms-source" class="data-select">
+            <option value="fixed_pool">固定接码池（默认）</option>
+            <option value="phone_sms">跟随手机接码配置</option>
+          </select>
+          <span class="setting-caption">跟随模式会单独取 PayPal 号码，并沿用手机接码服务商、地区和复用配置。</span>
         </div>
       </div>
       <div class="data-row" id="row-hosted-checkout-verification-url" style="display:none;">
@@ -2634,6 +2656,7 @@
   <script src="../shared/flow-capabilities.js"></script>
   <script src="../data/names.js"></script>
   <script src="../data/address-sources.js"></script>
+  <script src="../shared/brazil-profile-generator.js"></script>
   <script src="../data/step-definitions.js"></script>
   <script src="update-service.js"></script>
   <script src="contribution-content-update-service.js"></script>

@@ -190,6 +190,25 @@
     const normalizePlusCheckoutVerificationFailureStrategy = (value = '') => (
       String(value || '').trim().toLowerCase() === 'retry' ? 'retry' : 'continue'
     );
+    const normalizePayPalProfileCountryCode = (value, fallback = 'US') => {
+      if (value === undefined || value === null) {
+        return normalizePayPalProfileCountryCode(fallback, 'US') || 'US';
+      }
+      const raw = String(value).trim();
+      if (!raw) {
+        return '';
+      }
+      const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      if (['US', 'JP', 'BR'].includes(normalized)) {
+        return normalized;
+      }
+      const fallbackRaw = String(fallback ?? '').trim();
+      if (!fallbackRaw) {
+        return '';
+      }
+      const fallbackNormalized = fallbackRaw.toUpperCase().replace(/[^A-Z]/g, '');
+      return ['US', 'JP', 'BR'].includes(fallbackNormalized) ? fallbackNormalized : 'US';
+    };
     const normalizeBrowserFingerprintLevel = (value = '') => {
       const normalized = String(value || '').trim().toLowerCase();
       if (normalized === 'basic' || normalized === 'enhanced') {
@@ -451,6 +470,7 @@
               hostedCheckoutVerificationPollAttempts: 6,
               hostedCheckoutVerificationPollIntervalSeconds: 5,
               hostedCheckoutVerificationResendMaxAttempts: 1,
+              hostedCheckoutSmsSource: 'fixed_pool',
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               hostedCheckoutSmsPoolText: '',
@@ -459,6 +479,7 @@
               hostedCheckoutSmsPoolUsage: {},
               hostedCheckoutCurrentSmsEntry: null,
               plusHostedCheckoutOauthDelaySeconds: 3,
+              paypalProfileCountryCode: 'US',
               paypalGeneratedProfile: normalizePayPalGeneratedProfile(),
             },
             autoRun: {
@@ -911,6 +932,16 @@
                 0,
                 10
               ),
+              hostedCheckoutSmsSource: (() => {
+                const normalized = String(
+                  input?.hostedCheckoutSmsSource
+                    ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsSource
+                    ?? defaults.flows.openai.plus.hostedCheckoutSmsSource
+                ).trim().toLowerCase().replace(/-/g, '_');
+                return normalized === 'phone_sms' || normalized === 'phone-sms'
+                  ? 'phone_sms'
+                  : 'fixed_pool';
+              })(),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -976,6 +1007,11 @@
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutOauthDelaySeconds)));
               })(),
+              paypalProfileCountryCode: normalizePayPalProfileCountryCode(
+                input?.paypalProfileCountryCode
+                ?? nested?.flows?.openai?.plus?.paypalProfileCountryCode
+                ?? defaults.flows.openai.plus.paypalProfileCountryCode
+              ),
               paypalGeneratedProfile: normalizePayPalGeneratedProfile(
                 input?.paypalGeneratedProfile
                 ?? nested?.flows?.openai?.plus?.paypalGeneratedProfile
@@ -1216,6 +1252,7 @@
       next.hostedCheckoutVerificationPollAttempts = openaiState.plus.hostedCheckoutVerificationPollAttempts;
       next.hostedCheckoutVerificationPollIntervalSeconds = openaiState.plus.hostedCheckoutVerificationPollIntervalSeconds;
       next.hostedCheckoutVerificationResendMaxAttempts = openaiState.plus.hostedCheckoutVerificationResendMaxAttempts;
+      next.hostedCheckoutSmsSource = openaiState.plus.hostedCheckoutSmsSource;
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.hostedCheckoutSmsPoolText = openaiState.plus.hostedCheckoutSmsPoolText;
@@ -1224,6 +1261,7 @@
       next.hostedCheckoutSmsPoolUsage = cloneValue(openaiState.plus.hostedCheckoutSmsPoolUsage);
       next.hostedCheckoutCurrentSmsEntry = cloneValue(openaiState.plus.hostedCheckoutCurrentSmsEntry);
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
+      next.paypalProfileCountryCode = openaiState.plus.paypalProfileCountryCode;
       next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;

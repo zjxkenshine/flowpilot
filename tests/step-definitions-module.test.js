@@ -676,6 +676,7 @@ test('sidepanel html exposes Plus mode, PayPal, and GoPay settings', () => {
   assert.match(html, /id="select-browser-fingerprint-level"/);
   assert.match(html, /id="select-paypal-account"/);
   assert.match(html, /id="btn-add-paypal-account"/);
+  assert.match(html, /id="select-paypal-profile-country-code"/);
   assert.match(html, /id="input-gopay-phone"/);
   assert.match(html, /id="input-gopay-otp"/);
   assert.match(html, /id="input-gopay-pin"/);

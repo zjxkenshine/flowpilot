@@ -1095,6 +1095,97 @@ function fillHostedAddressFields(address = {}) {
   };
 }
 
+function getHostedDocumentValue(payload = {}, address = {}) {
+  const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const addressSource = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+  return normalizeText(
+    source.documentNumber
+    || addressSource.documentNumber
+    || source.cpf
+    || addressSource.cpf
+    || source.documentDigits
+    || addressSource.documentDigits
+    || source.cpfDigits
+    || addressSource.cpfDigits
+    || ''
+  );
+}
+
+function isHostedDocumentInputCandidate(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+  if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password', 'email'].includes(type)) {
+    return false;
+  }
+  const text = normalizeText([
+    getActionText(input),
+    input.getAttribute?.('data-testid'),
+    input.getAttribute?.('autocomplete'),
+    input.getAttribute?.('inputmode'),
+    input.getAttribute?.('aria-labelledby'),
+  ].filter(Boolean).join(' '));
+  const positive = /\b(?:cpf|cnpj)\b|tax\s*(?:id|number|payer|document)|taxpayer|document(?:\s*(?:number|id))?|identity\s*(?:number|document)|national\s*id/i.test(text);
+  if (!positive) {
+    return false;
+  }
+  const negative = /card|cvv|cvc|security\s*code|expiry|expiration|postal|zip|postcode|address|street|city|state|province|region|phone|mobile|tel|email|password|name/i.test(text);
+  return !negative || /\b(?:cpf|cnpj)\b/i.test(text);
+}
+
+function findHostedDocumentInput() {
+  const candidates = [
+    ...Array.from(document.querySelectorAll('input[id*="cpf" i], input[name*="cpf" i], input[placeholder*="cpf" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="cnpj" i], input[name*="cnpj" i], input[placeholder*="cnpj" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="tax" i], input[name*="tax" i], input[placeholder*="tax" i]') || []),
+    ...Array.from(document.querySelectorAll('input[id*="document" i], input[name*="document" i], input[placeholder*="document" i]') || []),
+    ...Array.from(document.querySelectorAll('input') || []),
+  ].filter(Boolean);
+  const seen = new Set();
+  return candidates.find((input) => {
+    if (seen.has(input)) return false;
+    seen.add(input);
+    return isHostedDocumentInputCandidate(input);
+  }) || null;
+}
+
+function fillHostedDocumentIfPresent(payload = {}, address = {}) {
+  const value = getHostedDocumentValue(payload, address);
+  if (!value) {
+    return {
+      attempted: false,
+      found: false,
+      filled: false,
+      descriptor: '',
+    };
+  }
+  const input = findHostedDocumentInput();
+  if (!input) {
+    return {
+      attempted: true,
+      found: false,
+      filled: false,
+      descriptor: '',
+    };
+  }
+  if (!String(input.value || '').trim()) {
+    fillInput(input, value);
+    return {
+      attempted: true,
+      found: true,
+      filled: true,
+      descriptor: getHostedInputDescriptor(input),
+    };
+  }
+  return {
+    attempted: true,
+    found: true,
+    filled: false,
+    descriptor: getHostedInputDescriptor(input),
+  };
+}
+
 function selectHostedCountryById(id = 'country', countryCode = 'US') {
   const select = document.getElementById(String(id || '').trim());
   if (!select || !isVisibleElement(select)) {
@@ -1524,6 +1615,7 @@ async function fillHostedGuestCheckout(payload = {}) {
   }
   if (payload.addressOnly === true) {
     const addressFillResult = fillHostedAddressFields(address);
+    const documentFillResult = fillHostedDocumentIfPresent(payload, address);
     const addressSuggestionResult = payload.useAddressSuggestionFallback === true
       ? await selectHostedAddressSuggestionFallback()
       : {
@@ -1543,6 +1635,8 @@ async function fillHostedGuestCheckout(payload = {}) {
       addressOnly: true,
       addressRefilled: Boolean(addressFillResult?.filledAny),
       addressFillResult,
+      hostedDocumentInputFound: Boolean(documentFillResult?.found),
+      hostedDocumentFilled: Boolean(documentFillResult?.filled),
       clicked: Boolean(clickResult?.clicked),
       ...addressSuggestionResult,
     };
@@ -1562,6 +1656,7 @@ async function fillHostedGuestCheckout(payload = {}) {
     firstName: normalizeText(payload.firstName || 'James'),
     lastName: normalizeText(payload.lastName || 'Smith'),
   };
+  let documentFillResult = null;
   const fillProfileFields = () => {
     fillHostedInputById('email', values.email);
     const phoneFill = fillHostedPhoneInput(values.phone);
@@ -1575,6 +1670,14 @@ async function fillHostedGuestCheckout(payload = {}) {
     fillHostedInputById('billingCity', address.city || '');
     fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
     selectHostedOptionByIdText('billingState', address.state || address.region || '');
+    const nextDocumentFillResult = fillHostedDocumentIfPresent(payload, address);
+    if (
+      !documentFillResult
+      || nextDocumentFillResult.filled
+      || (!documentFillResult.found && nextDocumentFillResult.found)
+    ) {
+      documentFillResult = nextDocumentFillResult;
+    }
     return phoneFill;
   };
   const phonePostFillCheckDelayMs = Math.max(
@@ -1627,6 +1730,8 @@ async function fillHostedGuestCheckout(payload = {}) {
     phonePostFillCheckDelayMs,
     phoneInputDescriptor: phoneCheck.phoneInputDescriptor || phoneInputDescriptor,
     phoneValueReady,
+    hostedDocumentInputFound: Boolean(documentFillResult?.found),
+    hostedDocumentFilled: Boolean(documentFillResult?.filled),
     ...addressSuggestionResult,
     ...phoneCheck,
   };

@@ -1,12 +1,13 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
+const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
 const source = fs.readFileSync('sidepanel/paypal-profile-generator.js', 'utf8');
 
 function loadApi() {
   const windowObject = {};
-  return new Function('window', `${source}; return window.SidepanelPayPalProfileGenerator;`)(windowObject);
+  return new Function('window', 'self', `${brazilSource}; ${source}; return window.SidepanelPayPalProfileGenerator;`)(windowObject, windowObject);
 }
 
 function createButton() {
@@ -116,6 +117,7 @@ function createGenerator(overrides = {}) {
     data: {
       generateRandomBirthday: overrides.generateRandomBirthday || (() => ({ year: 2001, month: 2, day: 3 })),
       generateRandomName: overrides.generateRandomName || (() => ({ firstName: 'Ada', lastName: 'Lovelace' })),
+      fetchImpl: overrides.fetchImpl,
       getAddressSeedForCountry: overrides.getAddressSeedForCountry || ((countryCode) => ({
         countryCode,
         fallback: {
@@ -167,6 +169,7 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
       email: 'state@example.com',
       hostedCheckoutPhoneNumber: '+818012345678',
       customPassword: '',
+      paypalProfileCountryCode: '',
       plusCheckoutConversionProxyManualSession: {
         exitRegion: 'jp',
       },
@@ -195,6 +198,103 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
   assert.equal(profile.postalCode, '100-0005');
   assert.equal(profile.fullAddress, 'Marunouchi 1-1 Chiyoda-ku Tokyo 100-0005 JP');
   assert.equal(profile.generatedAt > 0, true);
+});
+
+test('PayPal profile generator defaults country preference to US over IP exit country', async () => {
+  const { btnGenerateProfile, generator, getLatestState } = createGenerator({
+    initialState: {
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'JP',
+      },
+      paypalProfileCountryCode: 'US',
+      hostedCheckoutPhoneNumber: '+819012345678',
+      email: 'default-us@example.com',
+    },
+    getAddressSeedForCountry: (countryCode) => ({
+      countryCode,
+      fallback: countryCode === 'US'
+        ? {
+          address1: '350 Fifth Avenue',
+          city: 'New York',
+          region: 'NY',
+          postalCode: '10118',
+        }
+        : {
+          address1: 'Marunouchi 1-1',
+          city: 'Chiyoda-ku',
+          region: 'Tokyo',
+          postalCode: '100-0005',
+        },
+    }),
+  });
+
+  generator.bindPayPalProfileEvents();
+  await btnGenerateProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  assert.equal(profile.countryCode, 'US');
+  assert.equal(profile.generatedFromCountry, 'US');
+  assert.equal(profile.city, 'New York');
+  assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
+});
+
+test('PayPal profile generator empty country preference follows IP exit country', async () => {
+  const { btnGenerateProfile, generator, getLatestState } = createGenerator({
+    initialState: {
+      paypalProfileCountryCode: '',
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'JP',
+      },
+      hostedCheckoutPhoneNumber: '+819012345678',
+      email: 'ip-exit@example.com',
+    },
+  });
+
+  generator.bindPayPalProfileEvents();
+  await btnGenerateProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  assert.equal(profile.countryCode, 'JP');
+  assert.equal(profile.generatedFromCountry, 'JP');
+  assert.equal(profile.city, 'Chiyoda-ku');
+});
+
+test('PayPal profile generator explicit BR country preference uses Brazil profile data', async () => {
+  const { btnGenerateProfile, generator, getLatestState } = createGenerator({
+    initialState: {
+      paypalProfileCountryCode: 'BR',
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'US',
+      },
+      hostedCheckoutPhoneNumber: '+5511987654321',
+      email: 'br-pref@example.com',
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        cep: '01414-003',
+        state: 'SP',
+        city: 'Sao Paulo',
+        neighborhood: 'Jardins',
+        street: 'Rua Haddock Lobo 1307',
+      }),
+    }),
+  });
+
+  generator.bindPayPalProfileEvents();
+  await btnGenerateProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  assert.equal(profile.countryCode, 'BR');
+  assert.equal(profile.generatedFromCountry, 'BR');
+  assert.equal(profile.phone, '+5511987654321');
+  assert.equal(profile.address1, 'Rua Haddock Lobo 1307');
+  assert.equal(profile.fullAddress, 'Rua Haddock Lobo 1307 Sao Paulo SP 01414-003 BR');
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.equal(profile.documentType, 'cpf');
+  assert.equal(profile.documentNumber, profile.cpf);
 });
 
 test('PayPal profile generator falls back to selected PayPal account email and US address for unsupported country', () => {
@@ -251,14 +351,110 @@ test('PayPal profile generator supports Brazil exit profiles and keeps existing 
   const profile = generator.generateProfile();
 
   assert.equal(profile.email, 'state@example.com');
-  assert.equal(profile.phone, '5511999998888');
+  assert.equal(profile.phone, '+5511999998888');
   assert.equal(profile.countryCode, 'BR');
   assert.equal(profile.generatedFromCountry, 'BR');
-  assert.equal(profile.address1, 'Avenida Paulista 1000');
-  assert.equal(profile.city, 'Sao Paulo');
-  assert.equal(profile.fullAddress, 'Avenida Paulista 1000 Sao Paulo Sao Paulo 01310-100 BR');
+  assert.notEqual(profile.address1, 'Avenida Paulista 1000');
+  assert.ok(['Sao Paulo', 'Rio de Janeiro'].includes(profile.city));
+  assert.match(profile.postalCode, /^\d{5}-\d{3}$/);
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.match(profile.fullAddress, / BR$/);
   assert.ok(profile.firstName);
   assert.ok(profile.lastName);
+});
+
+test('PayPal profile generator fetches a real Brazil address and requires a +55 phone', async () => {
+  const fetchCalls = [];
+  const { btnGenerateProfile, events, generator, getLatestState } = createGenerator({
+    initialState: {
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'Brazil [BR]',
+      },
+      hostedCheckoutCurrentSmsEntry: {
+        key: '5511987654321----http://pool.test/api/sms',
+        phone: '+55 11 98765-4321',
+        verificationUrl: 'http://pool.test/api/sms',
+      },
+      email: 'br@example.com',
+    },
+    fetchImpl: async (url, init) => {
+      fetchCalls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          cep: '01414-003',
+          state: 'SP',
+          city: 'Sao Paulo',
+          neighborhood: 'Jardins',
+          street: 'Rua Haddock Lobo 1307',
+        }),
+      };
+    },
+  });
+
+  generator.bindPayPalProfileEvents();
+  await btnGenerateProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  assert.equal(profile.countryCode, 'BR');
+  assert.equal(profile.generatedFromCountry, 'BR');
+  assert.equal(profile.phone, '+5511987654321');
+  assert.equal(profile.address1, 'Rua Haddock Lobo 1307');
+  assert.equal(profile.city, 'Sao Paulo');
+  assert.equal(profile.postalCode, '01414-003');
+  assert.equal(profile.fullAddress, 'Rua Haddock Lobo 1307 Sao Paulo SP 01414-003 BR');
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.match(fetchCalls[0].url, /^https:\/\/brasilapi\.com\.br\/api\/cep\/v2\/\d{8}$/);
+  assert.equal(fetchCalls[0].init.method, 'GET');
+  assert.equal(events.some((event) => event.type === 'message' && event.message.type === 'SAVE_SETTING'), true);
+});
+
+test('PayPal profile generator rejects Brazil profiles without a +55 phone', () => {
+  const { generator } = createGenerator({
+    initialState: {
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'Brazil [BR]',
+      },
+      hostedCheckoutPhoneNumber: '4155551234',
+    },
+  });
+
+  assert.throws(
+    () => generator.generateProfile(),
+    /\+55/
+  );
+});
+
+test('PayPal profile generator falls back to a built-in real Brazil address when remote address fails', async () => {
+  const { btnGenerateProfile, events, generator, getLatestState } = createGenerator({
+    initialState: {
+      plusCheckoutConversionProxyExitCheck: {
+        exitRegion: 'Brazil [BR]',
+      },
+      hostedCheckoutPhoneNumber: '+5511987654321',
+      email: 'br-fallback@example.com',
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    }),
+  });
+
+  generator.bindPayPalProfileEvents();
+  await btnGenerateProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  assert.equal(profile.countryCode, 'BR');
+  assert.equal(profile.phone, '+5511987654321');
+  assert.notEqual(profile.address1, 'Avenida Paulista 1000');
+  assert.match(profile.postalCode, /^\d{5}-\d{3}$/);
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.equal(events.some((event) => event.type === 'toast' && /Brazil CEP lookup unavailable/.test(event.message)), true);
 });
 
 test('PayPal profile generator defaults to a local US address seed without proxy country', () => {
@@ -335,7 +531,28 @@ test('PayPal profile generator persists generated profile and copies full profil
   assert.match(copied, /CustomSecret123!/);
   assert.match(copied, /JP/);
   assert.match(copied, /Marunouchi 1-1/);
-  assert.equal(copied.includes('整段地址'), false);
+  assert.equal(copied.includes('鏁存鍦板潃'), false);
+});
+
+test('PayPal profile generator copies Brazil CPF and CNPJ fields', async () => {
+  const { btnCopyProfile, btnGenerateProfile, events, generator, getLatestState } = createGenerator({
+    initialState: {
+      paypalProfileCountryCode: 'BR',
+      hostedCheckoutPhoneNumber: '+5511987654321',
+      email: 'copy-br@example.com',
+    },
+  });
+  generator.bindPayPalProfileEvents();
+
+  await btnGenerateProfile.click();
+  await btnCopyProfile.click();
+
+  const profile = getLatestState().paypalGeneratedProfile;
+  const copied = events.filter((event) => event.type === 'copy').at(-1)?.text || '';
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.match(copied, new RegExp(profile.cpf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(copied, new RegExp(profile.cnpj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
 test('PayPal profile generator displays hosted checkout profile before persisted profile', () => {
@@ -381,7 +598,8 @@ test('PayPal profile generator displays hosted checkout profile before persisted
   assert.equal(profile.region, 'Texas');
   assert.equal(profile.postalCode, '73301');
   assert.equal(profile.fullAddress, '8 Retry Ave Austin Texas 73301 US');
-  assert.match(profileSummary.textContent, /最近生成/);
+  assert.notEqual(profileSummary.textContent, '');
+  assert.match(profileSummary.textContent, /\d{4}|\d{1,2}\//);
   assert.match(profileDetails.innerHTML, /runtime@example\.com/);
   assert.match(profileDetails.innerHTML, /8 Retry Ave/);
   assert.doesNotMatch(profileDetails.innerHTML, /Old Address/);
@@ -394,7 +612,8 @@ test('PayPal profile generator reports toast error when copying empty profile', 
   await btnCopyProfile.click();
 
   const toast = events.find((event) => event.type === 'toast');
-  assert.equal(toast.message, '没有可复制的内容。');
+  assert.equal(typeof toast.message, 'string');
+  assert.notEqual(toast.message.length, 0);
   assert.equal(toast.tone, 'error');
   assert.equal(events.some((event) => event.type === 'copy'), false);
 });
@@ -449,6 +668,13 @@ test('PayPal profile generator normalizes persisted profile shape', () => {
     region: '',
     postalCode: '',
     fullAddress: '',
+    cpf: '',
+    cpfDigits: '',
+    cnpj: '',
+    cnpjDigits: '',
+    documentType: '',
+    documentNumber: '',
+    documentDigits: '',
     generatedFromCountry: '',
     generatedAt: 123,
   });

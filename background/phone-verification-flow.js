@@ -146,6 +146,31 @@
       { prefix: '33', id: 73, label: 'France' },
       { prefix: '1', id: 187, label: 'USA' },
     ]);
+    const PHONE_SMS_REGION_FIVE_SIM_COUNTRY_BY_ISO = Object.freeze({
+      AU: 'australia',
+      BR: 'brazil',
+      CA: 'canada',
+      DE: 'germany',
+      FR: 'france',
+      GB: 'england',
+      ID: 'indonesia',
+      JP: 'japan',
+      TH: 'thailand',
+      UK: 'england',
+      US: 'usa',
+      VN: 'vietnam',
+    });
+    const PHONE_SMS_REGION_HERO_COUNTRY_BY_ISO = Object.freeze({
+      DE: { id: 43, label: 'Germany' },
+      FR: { id: 73, label: 'France' },
+      GB: { id: 16, label: 'United Kingdom' },
+      ID: { id: 6, label: 'Indonesia' },
+      JP: { id: 151, label: 'Japan' },
+      TH: { id: 52, label: 'Thailand' },
+      UK: { id: 16, label: 'United Kingdom' },
+      US: { id: 187, label: 'USA' },
+      VN: { id: 10, label: 'Vietnam' },
+    });
     const activationPriceHintsByKey = new Map();
     let activePhoneVerificationLogStep = null;
     let activePhoneVerificationLogStepKey = null;
@@ -5986,6 +6011,139 @@
       return resolveCountryCandidates(state);
     }
 
+    function normalizePhoneSmsIsoRegion(value = '') {
+      const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      if (normalized === 'UK') {
+        return 'GB';
+      }
+      return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+    }
+
+    function matchPhoneSmsCountryCandidateForRegion(candidates = [], providerId = '', regionCode = '') {
+      const normalizedProvider = normalizePhoneSmsProvider(providerId);
+      const normalizedRegion = normalizePhoneSmsIsoRegion(regionCode);
+      if (!normalizedRegion || !Array.isArray(candidates) || !candidates.length) {
+        return null;
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+        const fiveSimCountry = PHONE_SMS_REGION_FIVE_SIM_COUNTRY_BY_ISO[normalizedRegion] || '';
+        if (!fiveSimCountry) {
+          return null;
+        }
+        return candidates.find((entry) => (
+          normalizeFiveSimCountryId(entry?.id || entry?.code || '', '') === fiveSimCountry
+        )) || {
+          id: fiveSimCountry,
+          code: fiveSimCountry,
+          label: normalizeFiveSimCountryLabel('', fiveSimCountry),
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_NEXSMS) {
+        return null;
+      }
+      const heroCountry = PHONE_SMS_REGION_HERO_COUNTRY_BY_ISO[normalizedRegion] || null;
+      if (!heroCountry?.id) {
+        return null;
+      }
+      return candidates.find((entry) => normalizeCountryId(entry?.id, 0) === heroCountry.id)
+        || {
+          id: heroCountry.id,
+          label: heroCountry.label,
+        };
+    }
+
+    function buildPhoneSmsRegionOverrideState(state = {}, providerId = '', regionCode = '') {
+      const normalizedProvider = normalizePhoneSmsProvider(providerId || state?.phoneSmsProvider);
+      const normalizedRegion = normalizePhoneSmsIsoRegion(regionCode);
+      const candidates = resolveCountryCandidatesForProvider(state, normalizedProvider);
+      const matched = matchPhoneSmsCountryCandidateForRegion(candidates, normalizedProvider, normalizedRegion);
+      if (!normalizedRegion || !matched) {
+        return {
+          state,
+          requestedRegion: normalizedRegion,
+          resolvedRegion: '',
+          regionMatched: false,
+          countryConfig: null,
+        };
+      }
+      if (normalizedProvider === PHONE_SMS_PROVIDER_FIVE_SIM) {
+        const countryId = normalizeFiveSimCountryId(matched.id || matched.code, '');
+        return {
+          state: {
+            ...state,
+            fiveSimCountryOrder: [countryId],
+            fiveSimCountryId: countryId,
+            fiveSimCountryFallback: [],
+          },
+          requestedRegion: normalizedRegion,
+          resolvedRegion: normalizedRegion,
+          regionMatched: true,
+          countryConfig: {
+            ...matched,
+            id: countryId,
+            code: countryId,
+          },
+        };
+      }
+      const countryId = normalizeCountryId(matched.id, 0);
+      const countryLabel = normalizeCountryLabel(matched.label, `Country #${countryId}`);
+      const nextState = {
+        ...state,
+        heroSmsCountryId: countryId,
+        heroSmsCountryLabel: countryLabel,
+        heroSmsCountryFallback: [],
+      };
+      if (normalizedProvider === PHONE_SMS_PROVIDER_SMSBOWER) {
+        nextState.smsBowerCountryId = countryId;
+        nextState.smsBowerCountryLabel = countryLabel;
+        nextState.smsBowerCountryFallback = [];
+      } else if (normalizedProvider === PHONE_SMS_PROVIDER_SMS_VERIFICATION_NUMBER) {
+        nextState.smsVerificationNumberCountryId = countryId;
+        nextState.smsVerificationNumberCountryLabel = countryLabel;
+        nextState.smsVerificationNumberCountryFallback = [];
+      } else if (normalizedProvider === PHONE_SMS_PROVIDER_GRIZZLYSMS) {
+        nextState.grizzlySmsCountryId = countryId;
+        nextState.grizzlySmsCountryLabel = countryLabel;
+        nextState.grizzlySmsCountryFallback = [];
+      } else if (normalizedProvider === PHONE_SMS_PROVIDER_SMSPOOL) {
+        nextState.smsPoolCountryId = countryId;
+        nextState.smsPoolCountryLabel = countryLabel;
+        nextState.smsPoolCountryFallback = [];
+      }
+      return {
+        state: nextState,
+        requestedRegion: normalizedRegion,
+        resolvedRegion: normalizedRegion,
+        regionMatched: true,
+        countryConfig: {
+          id: countryId,
+          label: countryLabel,
+        },
+      };
+    }
+
+    async function requestPhoneActivationForRegion(state = {}, options = {}) {
+      const providerId = normalizePhoneSmsProvider(options?.providerId || state?.phoneSmsProvider);
+      const requestedRegion = normalizePhoneSmsIsoRegion(options?.regionCode || options?.requestedRegion || '');
+      const override = buildPhoneSmsRegionOverrideState(state, providerId, requestedRegion);
+      if (requestedRegion && !override.regionMatched) {
+        await addLog(
+          `PayPal 接码请求地区 ${requestedRegion} 未匹配到当前接码服务商国家，已沿用手机接码配置。`,
+          'warn',
+          { step: options?.step || 8, stepKey: options?.stepKey || 'paypal-hosted-card' }
+        );
+      }
+      const activation = await requestPhoneActivation(override.state, options);
+      return {
+        activation,
+        state: override.state,
+        requestedRegion: requestedRegion || '',
+        resolvedRegion: override.resolvedRegion || '',
+        regionMatched: Boolean(override.regionMatched),
+        countryConfig: override.countryConfig || null,
+      };
+    }
+
     function resolveCountryConfigFromActivation(activation, fallbackState = {}) {
       const providerId = getActivationProviderId(activation, fallbackState);
       const candidates = resolveCountryCandidatesForProvider(fallbackState, providerId);
@@ -8690,6 +8848,9 @@
 
     return {
       cancelSignupPhoneActivation,
+      banPhoneActivation,
+      cancelPhoneActivation,
+      completePhoneActivation,
       completeLoginPhoneVerificationFlow,
       completePhoneVerificationFlow,
       completeSignupPhoneVerificationFlow,
@@ -8701,7 +8862,10 @@
       prepareLoginPhoneActivation,
       prepareSignupPhoneActivation,
       reactivatePhoneActivation,
+      requestAdditionalPhoneSms,
       requestPhoneActivation,
+      requestPhoneActivationForRegion,
+      resolveCountryCandidatesForProvider,
       shouldPreserveSignupPhoneActivationForRetry,
       waitForLoginPhoneCode,
       waitForSignupPhoneCode,

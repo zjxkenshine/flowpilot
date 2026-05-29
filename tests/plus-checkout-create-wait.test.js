@@ -7,8 +7,9 @@ const source = fs.readFileSync('background/steps/create-plus-checkout.js', 'utf8
 const checkoutConversionProxySource = fs.readFileSync('background/checkout-conversion-proxy.js', 'utf8');
 const plusCheckoutSource = fs.readFileSync('content/plus-checkout.js', 'utf8');
 const gopayUtilsSource = fs.readFileSync('gopay-utils.js', 'utf8');
+const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
 const globalScope = {};
-new Function('self', `${gopayUtilsSource};`)(globalScope);
+new Function('self', `${gopayUtilsSource}; ${brazilSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 const PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
@@ -3153,7 +3154,7 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
     plusHostedCheckoutOauthDelaySeconds: 0,
   });
 
-  const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)?.payload || {};
+  const profileState = events.filter((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile).at(-1)?.payload || {};
   assert.equal(profileState.plusHostedCheckoutGuestProfile.phone, '2125550000');
   assert.equal(profileState.plusHostedCheckoutPhoneDigits, '2125550000');
   assert.equal(profileState.paypalGeneratedProfile.email, 'generated-run@example.com');
@@ -3200,6 +3201,7 @@ test('PayPal hosted auto profile follows payment exit region and preserves SMS p
       email: 'jp-run@example.com',
       hostedCheckoutPhoneNumber: '08012345678',
       hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
+      paypalProfileCountryCode: '',
       plusCheckoutConversionProxyExitCheck: {
         exitRegion: 'JP',
         exitIp: '203.0.113.9',
@@ -3248,6 +3250,7 @@ test('PayPal hosted auto profile follows payment exit region and preserves SMS p
     plusCheckoutTabId: 55,
     plusPaymentMethod: 'paypal-hosted',
     hostedCheckoutPhoneNumber: '08012345678',
+    paypalProfileCountryCode: '',
     plusHostedCheckoutOauthDelaySeconds: 0,
   });
 
@@ -3256,7 +3259,7 @@ test('PayPal hosted auto profile follows payment exit region and preserves SMS p
   assert.equal(profileState.plusHostedCheckoutGuestProfile.countryCode, 'JP');
   assert.equal(profileState.plusHostedCheckoutGuestProfile.address.countryCode, 'JP');
   assert.equal(profileState.paypalGeneratedProfile.countryCode, 'JP');
-  assert.equal(profileState.paypalGeneratedProfile.city, 'Chiyoda-ku');
+  assert.ok(['Chiyoda-ku', 'Kita-ku'].includes(profileState.paypalGeneratedProfile.city));
   assert.equal(profileState.paypalGeneratedProfile.phone, '08012345678');
   const hostedPayload = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP')?.message?.payload;
   assert.equal(hostedPayload.address.countryCode, 'JP');
@@ -5526,6 +5529,157 @@ test('Phone Plus hosted card refresh keeps saved payment email while refreshing 
   );
 });
 
+test('Phone Plus hosted card refresh uses Brazil address source and normalizes +55 phone', async () => {
+  const events = [];
+  const fetchCalls = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let latestState = createHostedRuntimeState({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    paypalProfileCountryCode: 'BR',
+    hostedCheckoutPhoneNumber: '+55 11 98765-4321',
+    plusPaymentEmailState: {
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    },
+  });
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url, init) => {
+      fetchCalls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          cep: '01414-003',
+          state: 'SP',
+          city: 'Sao Paulo',
+          neighborhood: 'Jardins',
+          street: 'Rua Haddock Lobo 1307',
+        }),
+      };
+    },
+    getPlusPaymentEmailState: () => latestState.plusPaymentEmailState,
+    getState: async () => latestState,
+    registerTab: async () => {},
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'BR',
+      exitRegion: 'Brazil [BR]',
+    }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return {
+          submitted: true,
+          phoneMatched: true,
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return currentUrl.includes('/create-account')
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async () => {},
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 456,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+  });
+
+  const profileState = events.filter((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile).at(-1)
+    ?.payload
+    ?.plusHostedCheckoutGuestProfile;
+  assert.ok(profileState);
+  assert.equal(profileState.countryCode, 'BR');
+  assert.equal(profileState.generatedFromCountry, 'BR');
+  assert.equal(profileState.phone, '+5511987654321');
+  assert.equal(profileState.address.street, 'Rua Haddock Lobo 1307');
+  assert.equal(profileState.address.city, 'Sao Paulo');
+  assert.equal(profileState.address.zip, '01414-003');
+  assert.match(profileState.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.match(profileState.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
+  assert.equal(profileState.documentType, 'cpf');
+  assert.equal(profileState.documentNumber, profileState.cpf);
+  assert.match(fetchCalls[0].url, /^https:\/\/brasilapi\.com\.br\/api\/cep\/v2\/\d{8}$/);
+  assert.equal(fetchCalls[0].init.method, 'GET');
+  const submitEvent = events.find((event) => (
+    event.type === 'tab-message'
+    && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
+  ));
+  assert.equal(submitEvent.message.payload.documentNumber, profileState.cpf);
+  assert.equal(submitEvent.message.payload.cnpj, profileState.cnpj);
+});
+
+test('Phone Plus hosted card rejects Brazil profile without a +55 phone', async () => {
+  const events = [];
+  let latestState = createHostedRuntimeState({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    paypalProfileCountryCode: 'BR',
+    hostedCheckoutPhoneNumber: '4155551234',
+    plusPaymentEmailState: {
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    },
+  });
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test', status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getPlusPaymentEmailState: () => latestState.plusPaymentEmailState,
+    getState: async () => latestState,
+    registerTab: async () => {},
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'BR',
+      exitRegion: 'Brazil [BR]',
+    }),
+    sendTabMessageUntilStopped: async () => {
+      throw new Error('content step should not run without a +55 phone');
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executePayPalHostedCard({
+      plusCheckoutTabId: 456,
+      phonePlusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+    }),
+    /需要巴西 \+55 接码号码/
+  );
+  assert.equal(events.some((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile), false);
+});
+
 test('Plus checkout content routes billing operations through the operation delay gate', async () => {
   const { checkoutEvents, send } = createCheckoutContentHarness();
 
@@ -7373,6 +7527,166 @@ test('hosted checkout success increments exhausted current sms pool entry before
     events.some((event) => event.type === 'set-state' && event.payload.hostedCheckoutCurrentSmsEntry?.phone === '4155555678'),
     false
   );
+});
+
+test('PayPal hosted phone-sms mode follows configured 711 region and reuses received code activation after success', async () => {
+  const events = [];
+  const currentUrl = 'https://chatgpt.com/payments/success';
+  const activation = {
+    activationId: 'pp-activation-1',
+    phoneNumber: '+819012345678',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 151,
+    countryLabel: 'Japan',
+    successfulUses: 0,
+    maxUses: 3,
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'phone_sms',
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'JP',
+    plusCheckoutConversionProxyExitCheck: {
+      exitRegion: 'US',
+    },
+    phoneSmsReuseEnabled: true,
+  });
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: (record) => record && ({
+        activationId: record.activationId,
+        phoneNumber: record.phoneNumber,
+        provider: record.provider,
+        serviceCode: record.serviceCode || 'dr',
+        countryId: record.countryId,
+        countryLabel: record.countryLabel,
+        successfulUses: Number(record.successfulUses) || 0,
+        maxUses: Number(record.maxUses) || 3,
+        ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+        ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: record.phoneCodeReceivedAt } : {}),
+      }),
+      requestPhoneActivationForRegion: async (_state, options) => {
+        phoneCalls.push({ type: 'request', options });
+        return {
+          activation,
+          requestedRegion: options.regionCode,
+          resolvedRegion: options.regionCode,
+          regionMatched: true,
+        };
+      },
+      completePhoneActivation: async (_state, item) => {
+        phoneCalls.push({ type: 'complete', activation: item });
+      },
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+    hostedCheckoutSmsSource: 'phone_sms',
+    hostedCheckoutPhoneSmsActivation: {
+      ...activation,
+      phoneCodeReceived: true,
+      phoneCodeReceivedAt: 100,
+    },
+  });
+
+  assert.equal(phoneCalls.some((call) => call.type === 'request'), false);
+  const activationUpdates = events
+    .filter((event) => event.type === 'set-state' && Object.prototype.hasOwnProperty.call(event.payload, 'hostedCheckoutPhoneSmsActivation'))
+    .map((event) => event.payload.hostedCheckoutPhoneSmsActivation)
+    .filter(Boolean);
+  assert.equal(activationUpdates.at(-1).phoneNumber, '+819012345678');
+  assert.equal(activationUpdates.at(-1).successfulUses, 1);
+  assert.equal(phoneCalls.some((call) => call.type === 'complete'), true);
+});
+
+test('PayPal hosted phone-sms mode polls phone provider code without manual verification URL', async () => {
+  const events = [];
+  const activation = {
+    activationId: 'pp-activation-2',
+    phoneNumber: '+14155550123',
+    provider: 'hero-sms',
+    serviceCode: 'dr',
+    countryId: 187,
+    successfulUses: 0,
+    maxUses: 3,
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'phone_sms',
+    hostedCheckoutVerificationUrl: '',
+    hostedCheckoutPhoneNumber: '',
+    plusCheckoutConversionProxySource: 'direct',
+    plusCheckoutConversionProxyExitCheck: {
+      exitRegion: 'US',
+    },
+    phoneSmsReuseEnabled: true,
+  });
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: (record) => record && ({
+        activationId: record.activationId,
+        phoneNumber: record.phoneNumber,
+        provider: record.provider,
+        serviceCode: record.serviceCode || 'dr',
+        countryId: record.countryId,
+        successfulUses: Number(record.successfulUses) || 0,
+        maxUses: Number(record.maxUses) || 3,
+        ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+      }),
+      requestPhoneActivationForRegion: async (_state, options) => {
+        phoneCalls.push({ type: 'request', options });
+        return {
+          activation,
+          requestedRegion: options.regionCode,
+          resolvedRegion: options.regionCode,
+          regionMatched: true,
+        };
+      },
+      pollPhoneActivationCode: async (_state, item, options) => {
+        phoneCalls.push({ type: 'poll', activation: item, options });
+        return '123456';
+      },
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+  });
+
+  const result = await executor.fetchHostedCheckoutVerificationCodeManually({
+    state: {
+      hostedCheckoutSmsSource: 'phone_sms',
+      hostedCheckoutVerificationUrl: '',
+      hostedCheckoutPhoneNumber: '',
+    },
+  });
+
+  assert.equal(result.code, '123456');
+  assert.equal(result.verificationUrl, '');
+  assert.equal(phoneCalls.find((call) => call.type === 'request')?.options?.regionCode, 'US');
+  assert.equal(phoneCalls.find((call) => call.type === 'poll')?.activation?.phoneNumber, '+14155550123');
+  assert.equal(latestState.hostedCheckoutPhoneSmsActivation.phoneCodeReceived, true);
 });
 
 test('PayPal hosted email falls back to OAuth tail when Phone Plus sms pool is exhausted', async () => {
