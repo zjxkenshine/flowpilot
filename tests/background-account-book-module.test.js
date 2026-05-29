@@ -243,6 +243,85 @@ test('account book helper supports phone_verification_passed stage and upgrades 
   assert.equal(storedEntries[0].captureStage, 'flow_completed');
 });
 
+test('account book helper supports profile_submitted stage and upgrades without downgrade', async () => {
+  const source = fs.readFileSync('background/account-book.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAccountBook;`)(globalScope);
+
+  let storedEntries = [];
+  const helpers = api.createAccountBookHelpers({
+    ACCOUNT_BOOK_STORAGE_KEY: 'accountBookEntries',
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({ accountBookEntries: storedEntries }),
+          set: async (payload) => {
+            storedEntries = payload.accountBookEntries;
+          },
+        },
+      },
+    },
+    getState: async () => ({
+      email: 'profile@example.com',
+      signupPhoneNumber: '',
+      signupPhoneCompletedActivation: {
+        activationId: 'done-profile',
+        phoneNumber: '+44 7700 900321',
+      },
+      password: 'profile-secret',
+      activeFlowId: 'openai',
+      panelMode: 'sub2api',
+    }),
+  });
+
+  const profileEntry = await helpers.upsertAccountBookEntry('profile_submitted');
+  assert.equal(profileEntry.recordId, 'profile@example.com');
+  assert.equal(profileEntry.email, 'profile@example.com');
+  assert.equal(profileEntry.phoneNumber, '');
+  assert.equal(profileEntry.password, 'profile-secret');
+  assert.equal(profileEntry.captureStage, 'profile_submitted');
+  assert.equal(storedEntries.length, 1);
+
+  const registrationEntry = await helpers.upsertAccountBookEntry('registration_success', {
+    email: 'profile@example.com',
+    signupPhoneNumber: '',
+    password: 'profile-secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(registrationEntry.captureStage, 'registration_success');
+  assert.equal(storedEntries.length, 1);
+
+  const downgradeAttempt = await helpers.upsertAccountBookEntry('profile_submitted', {
+    email: 'profile@example.com',
+    signupPhoneNumber: '',
+    password: 'profile-secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(downgradeAttempt.captureStage, 'registration_success');
+
+  const completedEntry = await helpers.upsertAccountBookEntry('flow_completed', {
+    email: 'profile@example.com',
+    signupPhoneNumber: '',
+    password: 'profile-secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(completedEntry.captureStage, 'flow_completed');
+
+  const secondDowngradeAttempt = await helpers.upsertAccountBookEntry('profile_submitted', {
+    email: 'profile@example.com',
+    signupPhoneNumber: '',
+    password: 'profile-secret',
+    activeFlowId: 'openai',
+    panelMode: 'sub2api',
+  });
+  assert.equal(secondDowngradeAttempt.captureStage, 'flow_completed');
+  assert.equal(storedEntries.length, 1);
+  assert.equal(storedEntries[0].captureStage, 'flow_completed');
+});
+
 test('account book helper merges phone registration into email flow completion when phone runtime was cleared', async () => {
   const source = fs.readFileSync('background/account-book.js', 'utf8');
   const globalScope = {};

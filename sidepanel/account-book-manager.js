@@ -30,6 +30,9 @@
       if (normalized === 'phone_verification_passed') {
         return normalized;
       }
+      if (normalized === 'profile_submitted') {
+        return normalized;
+      }
       if (normalized === 'registration_success') {
         return normalized;
       }
@@ -50,6 +53,11 @@
           return {
             label: '验证成功',
             className: 'status-phone-verified',
+          };
+        case 'profile_submitted':
+          return {
+            label: '填写成功',
+            className: 'status-profile-submitted',
           };
         case 'registration_success':
           return {

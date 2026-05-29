@@ -162,6 +162,7 @@ test('sidepanel css keeps confirm modal above account book overlay', () => {
   assert.ok(modalMatch, 'missing modal overlay z-index');
   assert.ok(Number(modalMatch[1]) > Number(overlayMatch[1]));
   assert.match(css, /\.account-book-status-chip\.status-phone-verified/);
+  assert.match(css, /\.account-book-status-chip\.status-profile-submitted/);
   assert.match(css, /\.account-book-status-chip\.status-registration-success/);
   assert.match(css, /\.account-book-status-chip\.status-flow-completed/);
   assert.match(css, /\.account-book-status-chip\.status-unknown/);
@@ -319,7 +320,7 @@ test('account book manager exports utf8 bom txt with readable 6-column table', a
             email: '',
             phoneNumber: '',
             password: '',
-            captureStage: 'registration_success',
+            captureStage: 'profile_submitted',
             createdAt: '2026-05-23T10:00:00.000Z',
             updatedAt: '2026-05-23T10:00:00.000Z',
             signupIp: '',
@@ -352,7 +353,7 @@ test('account book manager exports utf8 bom txt with readable 6-column table', a
   assert.match(downloads[0].content, /^# FlowPilot Account Book Export\r\n# schemaVersion=1\r\n# encoding=UTF-8\r\n# exportedAt=/);
   assert.match(downloads[0].content, /\r\n# count=2\r\n\r\n邮箱\t手机号\t密码\t状态\t免费\tIP\r\n/);
   assert.match(downloads[0].content, /complete@example\.com\t\+15551234567\tsecret-pass\t导入成功\t免费\t203\.0\.113\.8 \[US\]\r\n/);
-  assert.match(downloads[0].content, /--\t--\t--\t注册成功\t未知\t--\r\n$/);
+  assert.match(downloads[0].content, /--\t--\t--\t填写成功\t未知\t--\r\n$/);
 });
 
 test('account book manager renders all status labels with matching classes', () => {
@@ -377,6 +378,15 @@ test('account book manager renders all status labels with matching classes', () 
             captureStage: 'phone_verification_passed',
             createdAt: '2026-05-24T10:03:00.000Z',
             updatedAt: '2026-05-24T10:03:00.000Z',
+          },
+          {
+            recordId: 'profile-submitted@example.com',
+            email: 'profile-submitted@example.com',
+            phoneNumber: '+15550004444',
+            password: '',
+            captureStage: 'profile_submitted',
+            createdAt: '2026-05-24T10:02:30.000Z',
+            updatedAt: '2026-05-24T10:02:30.000Z',
           },
           {
             recordId: 'registered@example.com',
@@ -409,9 +419,11 @@ test('account book manager renders all status labels with matching classes', () 
   manager.render();
 
   assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-phone-verified/);
+  assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-profile-submitted/);
   assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-registration-success/);
   assert.match(dom.accountBookBody.innerHTML, /account-book-status-chip status-flow-completed/);
   assert.match(dom.accountBookBody.innerHTML, />验证成功</);
+  assert.match(dom.accountBookBody.innerHTML, />填写成功</);
   assert.match(dom.accountBookBody.innerHTML, />注册成功</);
   assert.match(dom.accountBookBody.innerHTML, />导入成功</);
 });

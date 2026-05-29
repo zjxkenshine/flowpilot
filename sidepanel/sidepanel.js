@@ -8695,6 +8695,28 @@ function getSelectedPhonePreferredActivation() {
   return activation ? { ...activation } : null;
 }
 
+function resolveFailedSignupPhoneReuseActivationForDisplay(state = {}) {
+  const hasStateValue = state
+    && typeof state === 'object'
+    && Object.prototype.hasOwnProperty.call(state, 'failedSignupPhoneReuseActivation');
+  const activation = hasStateValue
+    ? state.failedSignupPhoneReuseActivation
+    : latestState?.failedSignupPhoneReuseActivation;
+  if (!activation || typeof activation !== 'object' || Array.isArray(activation)) {
+    return null;
+  }
+  const phoneNumber = String(activation.phoneNumber ?? activation.phone ?? activation.number ?? '').trim();
+  if (!phoneNumber) {
+    return null;
+  }
+  const activationId = String(activation.activationId ?? activation.id ?? activation.activation ?? '').trim();
+  return {
+    ...activation,
+    phoneNumber,
+    activationId,
+  };
+}
+
 function updateHeroSmsRuntimeDisplay(state = {}) {
   if (displayHeroSmsCurrentNumber) {
     const activation = normalizePhoneActivationState(state?.currentPhoneActivation || latestState?.currentPhoneActivation);
@@ -8749,7 +8771,7 @@ function updateHeroSmsRuntimeDisplay(state = {}) {
     }
   }
   if (rowFailedSignupPhoneReuse || displayFailedSignupPhoneReuse || displayFailedSignupPhoneReuseCountry) {
-    const activation = state?.failedSignupPhoneReuseActivation ?? latestState?.failedSignupPhoneReuseActivation ?? null;
+    const activation = resolveFailedSignupPhoneReuseActivationForDisplay(state);
     const phoneNumber = String(activation?.phoneNumber || '').trim();
     const activationId = String(activation?.activationId || '').trim();
     const countryLabel = normalizePhoneSmsCountryLabel(
@@ -11209,6 +11231,8 @@ function updatePhoneVerificationSettingsUI() {
     rowFreePhoneReuseAutoEnabled.classList.toggle('is-disabled', phoneSignupReuseLocked || !freePhoneReuseAutoAvailable);
   }
   const runtimeVisible = enabled;
+  const failedSignupPhoneReuseVisible = runtimeVisible
+    && Boolean(resolveFailedSignupPhoneReuseActivationForDisplay(latestState));
   [
     typeof rowHeroSmsRuntimePair !== 'undefined' ? rowHeroSmsRuntimePair : null,
     typeof rowHeroSmsCurrentNumber !== 'undefined' ? rowHeroSmsCurrentNumber : null,
@@ -11221,6 +11245,9 @@ function updatePhoneVerificationSettingsUI() {
       row.style.display = runtimeVisible ? '' : 'none';
     }
   });
+  if (typeof rowFailedSignupPhoneReuse !== 'undefined' && rowFailedSignupPhoneReuse) {
+    rowFailedSignupPhoneReuse.style.display = failedSignupPhoneReuseVisible ? '' : 'none';
+  }
   if (typeof syncSignupPhoneInputFromState === 'function') {
     syncSignupPhoneInputFromState(latestState);
   }

@@ -14191,6 +14191,13 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
 
   if (normalizedNodeId === 'fill-profile') {
     await clearFailedSignupPhoneReuseActivation({ silent: true });
+    if (completionPayload?.profileSubmitted === true && typeof upsertAndBroadcastAccountBookEntry === 'function') {
+      try {
+        await upsertAndBroadcastAccountBookEntry('profile_submitted', await getState());
+      } catch (accountBookError) {
+        await addLog(`步骤 5：账号簿写入“填写成功”状态失败：${getErrorMessage(accountBookError)}`, 'warn', { nodeId: normalizedNodeId });
+      }
+    }
     const signupTabId = await getTabId('signup-page');
     if (signupTabId) {
       await addLog('自动运行：填写资料节点已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');

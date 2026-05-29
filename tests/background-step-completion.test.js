@@ -124,6 +124,92 @@ return { completeNodeFromBackground };
 `)(events, lastNodeId, options);
 }
 
+function createExecuteNodeAndWaitApi(events, options = {}) {
+  return new Function('events', 'options', `
+let stopRequested = false;
+const state = {
+  nodeStatuses: { 'fill-profile': 'pending' },
+  email: 'profile@example.com',
+  password: 'secret',
+  activeFlowId: 'openai',
+  ...(options.state || {}),
+};
+function getErrorMessage(error) {
+  return error?.message || String(error || '');
+}
+function throwIfStopped() {
+  if (stopRequested) {
+    throw new Error('stopped');
+  }
+}
+async function getState() {
+  events.push({ type: 'get-state' });
+  return { ...state, nodeStatuses: { ...(state.nodeStatuses || {}) } };
+}
+async function setState(updates) {
+  Object.assign(state, updates || {});
+  events.push({ type: 'set-state', updates });
+}
+function broadcastDataUpdate(payload) {
+  events.push({ type: 'broadcast', payload });
+}
+async function addLog(message, level, meta) {
+  events.push({ type: 'log', message, level, meta });
+}
+function normalizeAutoStepDelaySeconds() { return 0; }
+function getStepIdByNodeIdForState(nodeId) { return nodeId === 'fill-profile' ? 5 : 0; }
+function getAutoRunPreExecutionDelayMsForNode() { return 0; }
+function getAutoRunPreExecutionDelayReasonForNode() { return ''; }
+function doesNodeUseBackgroundCompletion() { return false; }
+function doesNodeUseCompletionSignal(nodeId) { return nodeId === 'fill-profile'; }
+function getNodeCompletionSignalTimeoutMs() { return 150000; }
+async function executeNodeViaCompletionSignal(nodeId, timeoutMs) {
+  events.push({ type: 'execute-signal', nodeId, timeoutMs });
+  return options.completionPayload || { profileSubmitted: true };
+}
+async function executeNode(nodeId) {
+  events.push({ type: 'execute-node', nodeId });
+}
+async function clearFailedSignupPhoneReuseActivation(optionsArg) {
+  events.push({ type: 'clear-reuse', options: optionsArg });
+  return { ok: true };
+}
+async function upsertAndBroadcastAccountBookEntry(stage, stateArg) {
+  events.push({ type: 'account-book', stage, state: stateArg });
+  if (options.accountBookError) {
+    throw options.accountBookError;
+  }
+  return { captureStage: stage };
+}
+async function getTabId(source) {
+  events.push({ type: 'get-tab', source });
+  return options.signupTabId === undefined ? 77 : options.signupTabId;
+}
+async function waitForTabStableComplete(tabId, waitOptions) {
+  events.push({ type: 'wait-tab', tabId, waitOptions });
+}
+async function validateStep5PostCompletion(tabId, payload) {
+  events.push({ type: 'validate-step5', tabId, payload });
+  if (options.validationError) {
+    throw options.validationError;
+  }
+  return { successState: 'logged_in_home' };
+}
+async function setNodeStatus(nodeId, status) {
+  events.push({ type: 'status', nodeId, status });
+  state.nodeStatuses = { ...(state.nodeStatuses || {}), [nodeId]: status };
+}
+async function sleepWithStop(ms) {
+  events.push({ type: 'sleep', ms });
+}
+function getRegistrationStageWaitSecondsForState() { return 0; }
+function isOpenAiRegistrationStageWaitNode() { return false; }
+
+${extractFunction('executeNodeAndWait')}
+return { executeNodeAndWait };
+`)(events, options);
+}
+
 test('completeNodeFromBackground releases final node before slow post-completion side effects', async () => {
   const events = [];
   const api = createApi(events, 'platform-verify');
@@ -151,6 +237,38 @@ test('completeNodeFromBackground keeps non-final node data handling before compl
   const types = events.map((event) => event.type);
   assert.equal(types.indexOf('handle-done') < types.indexOf('notify'), true);
   assert.equal(types.includes('record'), false);
+});
+
+test('executeNodeAndWait writes profile-submitted account book entry before step 5 validation', async () => {
+  const events = [];
+  const api = createExecuteNodeAndWaitApi(events);
+
+  await api.executeNodeAndWait('fill-profile', 0);
+
+  const accountBookIndex = events.findIndex((event) => event.type === 'account-book');
+  const validateIndex = events.findIndex((event) => event.type === 'validate-step5');
+  assert.ok(accountBookIndex >= 0);
+  assert.ok(validateIndex >= 0);
+  assert.equal(accountBookIndex < validateIndex, true);
+  assert.equal(events[accountBookIndex].stage, 'profile_submitted');
+  assert.equal(events[accountBookIndex].state.email, 'profile@example.com');
+  assert.deepStrictEqual(events[validateIndex].payload, { profileSubmitted: true });
+});
+
+test('executeNodeAndWait keeps profile-submitted write when step 5 post-validation fails', async () => {
+  const events = [];
+  const validationError = new Error('profile validation failed');
+  const api = createExecuteNodeAndWaitApi(events, { validationError });
+
+  await assert.rejects(
+    () => api.executeNodeAndWait('fill-profile', 0),
+    /profile validation failed/
+  );
+
+  assert.ok(events.some((event) => event.type === 'account-book' && event.stage === 'profile_submitted'));
+  assert.ok(events.some((event) => event.type === 'status' && event.nodeId === 'fill-profile' && event.status === 'failed'));
+  assert.equal(validationError.signupProfileSubmitted, true);
+  assert.equal(validationError.skipFailedSignupPhoneReusePreserve, true);
 });
 
 test('completeNodeFromBackground writes registration-success account book entry for step 6 success hook', async () => {

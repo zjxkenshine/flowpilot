@@ -55,6 +55,9 @@
       if (normalized === 'registration_success') {
         return 'registration_success';
       }
+      if (normalized === 'profile_submitted') {
+        return 'profile_submitted';
+      }
       return normalized === 'phone_verification_passed' ? 'phone_verification_passed' : '';
     }
 
@@ -62,10 +65,12 @@
       switch (normalizeCaptureStage(value)) {
         case 'phone_verification_passed':
           return 1;
-        case 'registration_success':
+        case 'profile_submitted':
           return 2;
-        case 'flow_completed':
+        case 'registration_success':
           return 3;
+        case 'flow_completed':
+          return 4;
         default:
           return 0;
       }
@@ -114,7 +119,7 @@
         ? normalizeString(state.accountIdentifier)
         : '';
 
-      if (stage === 'phone_verification_passed' || stage === 'registration_success') {
+      if (stage === 'phone_verification_passed' || stage === 'profile_submitted' || stage === 'registration_success') {
         return normalizeString(
           state.signupPhoneNumber
           || phoneIdentifier

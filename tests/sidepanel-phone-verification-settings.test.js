@@ -132,6 +132,11 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="btn-save-free-reusable-phone"/);
   assert.match(html, /id="btn-clear-free-reusable-phone"/);
   assert.match(html, /id="row-failed-signup-phone-reuse"/);
+  assert.ok(
+    html.indexOf('id="row-failed-signup-phone-reuse"') > html.indexOf('id="row-hero-sms-runtime-pair"')
+      && html.indexOf('id="row-failed-signup-phone-reuse"') < html.indexOf('id="row-hero-sms-preferred-activation"'),
+    'failed signup phone reuse row should stay inside the SMS runtime status area'
+  );
   assert.match(html, /id="display-failed-signup-phone-reuse"/);
   assert.match(html, /id="display-failed-signup-phone-reuse-country"/);
   assert.match(html, /id="btn-clear-failed-signup-phone-reuse"/);
@@ -241,11 +246,85 @@ test('sidepanel source wires failed signup phone reuse display and clear action'
   assert.match(sidepanelSource, /const btnClearFailedSignupPhoneReuse = document\.getElementById\('btn-clear-failed-signup-phone-reuse'\);/);
   assert.match(
     sidepanelSource,
-    /const activation = state\?\.failedSignupPhoneReuseActivation \?\? latestState\?\.failedSignupPhoneReuseActivation \?\? null;[\s\S]*rowFailedSignupPhoneReuse\.style\.display = phoneNumber \? '' : 'none';/
+    /function resolveFailedSignupPhoneReuseActivationForDisplay\(state = \{\}\) \{[\s\S]*Object\.prototype\.hasOwnProperty\.call\(state, 'failedSignupPhoneReuseActivation'\)[\s\S]*return \{\s*\.\.\.activation,\s*phoneNumber,\s*activationId,\s*\};[\s\S]*\}/
+  );
+  assert.match(
+    sidepanelSource,
+    /const activation = resolveFailedSignupPhoneReuseActivationForDisplay\(state\);[\s\S]*rowFailedSignupPhoneReuse\.style\.display = phoneNumber \? '' : 'none';/
+  );
+  assert.match(
+    sidepanelSource,
+    /const failedSignupPhoneReuseVisible = runtimeVisible[\s\S]*resolveFailedSignupPhoneReuseActivationForDisplay\(latestState\)[\s\S]*rowFailedSignupPhoneReuse\.style\.display = failedSignupPhoneReuseVisible \? '' : 'none';/
   );
   assert.match(sidepanelSource, /type:\s*'CLEAR_FAILED_SIGNUP_PHONE_REUSE'/);
   assert.match(sidepanelSource, /failedSignupPhoneReuseActivation:\s*response\?\.failedSignupPhoneReuseActivation \?\? null/);
-  assert.match(sidepanelSource, /message\.payload\.failedSignupPhoneReuseActivation !== undefined/);
+  assert.match(
+    sidepanelSource,
+    /message\.payload\.failedSignupPhoneReuseActivation !== undefined[\s\S]*updateHeroSmsRuntimeDisplay\(\{\s*\.\.\.latestState,\s*\.\.\.message\.payload,\s*\}\);/
+  );
+});
+
+test('updateHeroSmsRuntimeDisplay shows failed signup phone reuse only when a phone exists', () => {
+  const api = new Function(`
+let latestState = {};
+const displayHeroSmsCurrentNumber = null;
+const displayHeroSmsCurrentCode = null;
+const displayFreeReusablePhone = null;
+const displayFreeReusablePhoneCountry = null;
+const inputFreeReusablePhone = null;
+const rowFailedSignupPhoneReuse = { style: { display: 'none' } };
+const displayFailedSignupPhoneReuse = { textContent: '' };
+const displayFailedSignupPhoneReuseCountry = { textContent: '' };
+function normalizePhoneActivationState(record) { return record || null; }
+function normalizePhoneSmsCountryLabel(value = '') { return String(value || '').trim(); }
+function getHeroSmsCountryLabelById(value = '') { return value ? 'Country #' + value : ''; }
+function getSelectedPhoneSmsProvider() { return 'hero-sms'; }
+function syncPhoneRuntimeCountdown() {}
+function renderPhonePreferredActivationOptions() {}
+${extractFunction('resolveFailedSignupPhoneReuseActivationForDisplay')}
+${extractFunction('updateHeroSmsRuntimeDisplay')}
+return {
+  rowFailedSignupPhoneReuse,
+  displayFailedSignupPhoneReuse,
+  displayFailedSignupPhoneReuseCountry,
+  setLatestState(value) { latestState = value || {}; },
+  updateHeroSmsRuntimeDisplay,
+};
+`)();
+
+  api.setLatestState({
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-1',
+      phoneNumber: '+66951112233',
+      countryId: 52,
+      countryLabel: 'Thailand',
+    },
+  });
+  api.updateHeroSmsRuntimeDisplay();
+
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, '');
+  assert.equal(api.displayFailedSignupPhoneReuse.textContent, '+66951112233 (#failed-reuse-1)');
+  assert.match(api.displayFailedSignupPhoneReuseCountry.textContent, /Thailand/);
+
+  api.updateHeroSmsRuntimeDisplay({
+    failedSignupPhoneReuseActivation: null,
+  });
+
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, 'none');
+  assert.doesNotMatch(api.displayFailedSignupPhoneReuse.textContent, /\+66951112233/);
+
+  api.setLatestState({
+    failedSignupPhoneReuseActivation: {
+      id: 'alias-id',
+      phone: ' 15550001111 ',
+      countryLabel: 'Vietnam',
+    },
+  });
+  api.updateHeroSmsRuntimeDisplay();
+
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, '');
+  assert.equal(api.displayFailedSignupPhoneReuse.textContent, '15550001111 (#alias-id)');
+  assert.match(api.displayFailedSignupPhoneReuseCountry.textContent, /Vietnam/);
 });
 
 test('sidepanel keeps free reuse switches realtime and locks them during auto run', () => {
@@ -775,6 +854,7 @@ const rowHeroSmsCurrentCountdown = { style: { display: 'none' } };
 const rowHeroSmsPriceTiers = { style: { display: 'none' } };
 const rowHeroSmsCurrentCode = { style: { display: 'none' } };
 const rowHeroSmsPreferredActivation = createMockRow();
+const rowFailedSignupPhoneReuse = createMockRow();
 const rowPhoneVerificationResendCount = { style: { display: 'none' } };
 const rowPhoneReplacementLimit = { style: { display: 'none' } };
 const rowPhoneCodeWaitSeconds = { style: { display: 'none' } };
@@ -820,6 +900,7 @@ function isAutoRunScheduledPhase() { return false; }
 
 ${extractFunction('normalizeSignupMethod')}
 ${extractFunction('normalizeHeroSmsReuseEnabledValue')}
+${extractFunction('resolveFailedSignupPhoneReuseActivationForDisplay')}
 ${extractFunction('isPhoneSignupReuseLocked')}
 ${extractFunction('getStoredPhoneSmsReuseEnabled')}
 ${extractFunction('getStoredFreePhoneReuseEnabled')}
@@ -863,6 +944,7 @@ return {
   rowHeroSmsPriceTiers,
   rowHeroSmsCurrentCode,
   rowHeroSmsPreferredActivation,
+  rowFailedSignupPhoneReuse,
   rowFreePhoneReuseEnabled,
   rowFreePhoneReuseAutoEnabled,
   rowFreeReusablePhone,
@@ -908,6 +990,7 @@ return {
   assert.equal(api.rowHeroSmsPriceTiers.style.display, 'none');
   assert.equal(api.rowHeroSmsCurrentCode.style.display, 'none');
   assert.equal(api.rowHeroSmsPreferredActivation.style.display, 'none');
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, 'none');
   assert.equal(api.rowPhoneVerificationResendCount.style.display, 'none');
   assert.equal(api.rowPhoneReplacementLimit.style.display, 'none');
   assert.equal(api.rowPhoneCodeWaitSeconds.style.display, 'none');
@@ -936,6 +1019,26 @@ return {
   assert.equal(api.rowHeroSmsCurrentCountdown.style.display, '');
   assert.equal(api.rowHeroSmsCurrentCode.style.display, '');
   assert.equal(api.rowHeroSmsPreferredActivation.style.display, '');
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, 'none');
+
+  api.setLatestState({
+    signupPhoneNumber: '66959916439',
+    failedSignupPhoneReuseActivation: {
+      activationId: 'failed-reuse-1',
+      phoneNumber: '+66951112233',
+      countryId: 52,
+      countryLabel: 'Thailand',
+    },
+  });
+  api.updatePhoneVerificationSettingsUI();
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, '');
+
+  api.setLatestState({
+    signupPhoneNumber: '66959916439',
+    failedSignupPhoneReuseActivation: null,
+  });
+  api.updatePhoneVerificationSettingsUI();
+  assert.equal(api.rowFailedSignupPhoneReuse.style.display, 'none');
 
   api.setExpanded(true);
   api.updatePhoneVerificationSettingsUI();
@@ -1086,6 +1189,9 @@ const inputAutoSkipFailuresThreadIntervalMinutes = { value: '0' };
 const inputAutoDelayEnabled = { checked: false };
 const inputAutoDelayMinutes = { value: '30' };
 const inputAutoStepDelaySeconds = { value: '' };
+const inputRegistrationStageWaitSeconds = { value: '30' };
+const inputSignupIdentityRedirectTimeoutSeconds = { value: '45' };
+const inputAuthContentScriptRecoveryTimeoutSeconds = { value: '30' };
 const inputPhoneVerificationEnabled = { checked: true };
 const inputPhoneSignupPhonePrefixedEmail = { checked: false };
 const inputFreePhoneReuseEnabled = { checked: true };
@@ -1169,6 +1275,9 @@ const DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS = 20;
 const DEFAULT_PLUS_HOSTED_CHECKOUT_OAUTH_DELAY_SECONDS = 3;
 const DEFAULT_OAUTH_OPEN_AFTER_REFRESH_WAIT_SECONDS = 5;
 const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
+const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
+const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
+const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
@@ -1210,6 +1319,9 @@ function normalizePlusCheckoutConversionProxyInput(value) { return String(value 
 function normalizeAutoRunThreadIntervalMinutes(value) { return Number(value) || 0; }
 function normalizeAutoDelayMinutes(value) { return Number(value) || 30; }
 function normalizeAutoStepDelaySeconds(value) { return value === '' ? null : Number(value); }
+function normalizeRegistrationStageWaitSeconds(value, fallback = DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS) { return Number(value) || fallback; }
+function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS) { return Number(value) || fallback; }
+function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS) { return Number(value) || fallback; }
 function normalizeVerificationResendCount(value, fallback) { return Number(value) || fallback; }
 function normalizePlusAccountAccessStrategy(value = '') { return String(value || '').trim().toLowerCase() === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION : PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH; }
 ${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}

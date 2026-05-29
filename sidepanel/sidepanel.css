@@ -3568,6 +3568,11 @@ header {
   color: var(--cyan);
 }
 
+.account-book-status-chip.status-profile-submitted {
+  background: color-mix(in srgb, var(--blue) 14%, var(--bg-surface));
+  color: var(--blue);
+}
+
 .account-book-status-chip.status-registration-success {
   background: var(--green-soft);
   color: var(--green);
