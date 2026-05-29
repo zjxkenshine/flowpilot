@@ -44,6 +44,7 @@ test('sidepanel no longer exposes operation delay switch and places step executi
 
   const step6CookieIndex = html.indexOf('id="row-step6-cookie-settings"');
   const autoDelayIndex = html.indexOf('id="row-auto-delay-settings"');
+  const autoRetryIndex = html.indexOf('id="row-auto-retry-settings"');
   const oauthTimeoutIndex = html.indexOf('id="row-oauth-flow-timeout"');
   const oauthOpenWaitIndex = html.indexOf('id="row-oauth-open-after-refresh-wait"');
   const stepRangeIndex = html.indexOf('id="row-step-execution-range"');
@@ -51,11 +52,14 @@ test('sidepanel no longer exposes operation delay switch and places step executi
 
   assert.notEqual(step6CookieIndex, -1);
   assert.notEqual(autoDelayIndex, -1);
+  assert.notEqual(autoRetryIndex, -1);
   assert.notEqual(oauthTimeoutIndex, -1);
   assert.notEqual(oauthOpenWaitIndex, -1);
   assert.notEqual(stepRangeIndex, -1);
   assert.notEqual(oauthDisplayIndex, -1);
   assert.ok(autoDelayIndex > step6CookieIndex, 'startup delay row should render below the openai step6 cookie row');
+  assert.ok(autoRetryIndex > autoDelayIndex, 'auto retry settings should render below startup delay settings');
+  assert.ok(oauthTimeoutIndex > autoRetryIndex, 'oauth timeout should render below auto retry settings');
   assert.ok(stepRangeIndex > autoDelayIndex, 'step execution range should still remain below the startup delay row');
   assert.ok(oauthOpenWaitIndex > oauthTimeoutIndex, 'oauth open wait should render below oauth timeout');
   assert.ok(oauthOpenWaitIndex < stepRangeIndex, 'oauth open wait should render above step execution range');
@@ -76,11 +80,25 @@ test('sidepanel exposes and wires OAuth open-after-refresh wait setting', () => 
 
 test('sidepanel exposes and wires auto-run issue log preservation switch', () => {
   assert.match(html, /id="input-auto-run-preserve-issue-logs-on-restart"/);
+  assert.match(html, /id="row-auto-retry-settings"/);
   assert.match(html, /重开留错/);
   assert.match(source, /const inputAutoRunPreserveIssueLogsOnRestart = document\.getElementById\('input-auto-run-preserve-issue-logs-on-restart'\);/);
   assert.match(source, /autoRunPreserveIssueLogsOnRestart:\s*typeof inputAutoRunPreserveIssueLogsOnRestart/);
   assert.match(source, /inputAutoRunPreserveIssueLogsOnRestart\.checked = Boolean\(state\?\.autoRunPreserveIssueLogsOnRestart\);/);
   assert.match(source, /inputAutoRunPreserveIssueLogsOnRestart\?\.addEventListener\('change'/);
+});
+
+test('sidepanel places thread interval inside auto retry settings grid', () => {
+  const autoRetryIndex = html.indexOf('id="row-auto-retry-settings"');
+  const oauthTimeoutIndex = html.indexOf('id="row-oauth-flow-timeout"');
+  const threadIntervalIndex = html.indexOf('id="input-auto-skip-failures-thread-interval-minutes"');
+
+  assert.notEqual(autoRetryIndex, -1);
+  assert.notEqual(oauthTimeoutIndex, -1);
+  assert.notEqual(threadIntervalIndex, -1);
+  assert.ok(threadIntervalIndex > autoRetryIndex, 'thread interval should be after auto retry row start');
+  assert.ok(threadIntervalIndex < oauthTimeoutIndex, 'thread interval should be inside auto retry settings, not oauth timeout');
+  assert.match(html, /class="data-inline setting-pair auto-retry-setting-grid"/);
 });
 
 test('sidepanel operation delay state is always normalized back to enabled', () => {

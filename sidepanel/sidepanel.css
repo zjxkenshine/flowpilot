@@ -2531,12 +2531,21 @@ header {
   justify-content: flex-end;
 }
 
+.delay-settings-row {
+  align-items: flex-start;
+}
+
+.delay-settings-row > .data-label {
+  padding-top: 6px;
+}
+
 .auto-delay-setting-pair {
-  flex-wrap: nowrap;
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 #row-auto-delay-settings .setting-group-secondary {
-  margin-left: auto;
+  margin-left: 0;
   min-width: 0;
 }
 
@@ -2548,12 +2557,30 @@ header {
   margin-left: auto;
 }
 
-.step-execution-range-setting {
-  align-items: center;
+.step-execution-range-setting,
+.compact-delay-setting-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.compact-delay-setting-row .setting-group-primary,
+.step-execution-range-setting .setting-group-primary {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.compact-delay-setting-row > .setting-caption {
+  flex: 1 1 220px;
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
 }
 
 .step-range-controls {
   gap: 6px;
+  margin-left: 0;
+  min-width: 0;
 }
 
 .step-range-input {
@@ -2562,7 +2589,22 @@ header {
 }
 
 .auto-run-delay-setting {
-  margin-left: auto !important;
+  margin-left: 0 !important;
+}
+
+.auto-retry-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.auto-retry-setting-cell {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .auto-step-delay-setting,
@@ -2583,12 +2625,38 @@ header {
 
 .oauth-flow-timeout-caption {
   min-width: 0 !important;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-#row-auto-delay-settings .setting-caption {
+#row-auto-delay-settings .setting-caption,
+#row-auto-retry-settings .setting-caption {
   min-width: auto;
+  text-align: left;
+}
+
+@media (max-width: 680px) {
+  .auto-retry-setting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .auto-retry-setting-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .delay-settings-row {
+    flex-wrap: wrap;
+  }
+
+  .delay-settings-row > .data-label {
+    width: 100%;
+    padding-top: 0;
+  }
 }
 
 .setting-caption-left {
