@@ -5946,6 +5946,12 @@ function buildFreshAutoRunKeepState(prevState = {}) {
   keepState.browserFingerprintAppliedAt = 0;
   keepState.browserFingerprintExitIp = '';
   keepState.browserFingerprintExitRegion = '';
+  keepState.ipProxyAppliedExitIp = String(sourceState.ipProxyAppliedExitIp || '').trim();
+  keepState.ipProxyAppliedExitRegion = String(sourceState.ipProxyAppliedExitRegion || '').trim();
+  keepState.ipProxyAppliedExitDetecting = Boolean(sourceState.ipProxyAppliedExitDetecting);
+  keepState.ipProxyAppliedExitError = String(sourceState.ipProxyAppliedExitError || '').trim();
+  keepState.ipProxyAppliedExitSource = String(sourceState.ipProxyAppliedExitSource || '').trim().toLowerCase();
+  keepState.ipProxyAppliedExitEndpoint = String(sourceState.ipProxyAppliedExitEndpoint || '').trim();
   if (Object.prototype.hasOwnProperty.call(sourceState, 'failedSignupPhoneReuseActivation')) {
     keepState.failedSignupPhoneReuseActivation = normalizeFailedSignupPhoneReuseActivation(
       sourceState.failedSignupPhoneReuseActivation

@@ -181,6 +181,12 @@ let currentState = {
   heroSmsLastPriceCountryLabel: 'Thailand',
   heroSmsLastPriceUserLimit: '0.08',
   heroSmsLastPriceAt: 123456789,
+  ipProxyAppliedExitIp: '203.0.113.8',
+  ipProxyAppliedExitRegion: 'JP',
+  ipProxyAppliedExitDetecting: false,
+  ipProxyAppliedExitError: '',
+  ipProxyAppliedExitSource: 'page_context',
+  ipProxyAppliedExitEndpoint: 'https://ipinfo.io/json',
   mailProvider: '163',
   emailGenerator: 'duck',
   gmailBaseEmail: 'demo@gmail.com',
@@ -492,6 +498,12 @@ return {
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceCountryLabel, '', 'price snapshot label should be cleared on reset');
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceUserLimit, '', 'price snapshot user limit should be cleared on reset');
   assert.strictEqual(snapshot.currentState.heroSmsLastPriceAt, 0, 'price snapshot timestamp should be cleared on reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitIp, '203.0.113.8', 'IP proxy exit IP should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitRegion, 'JP', 'IP proxy exit region should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitDetecting, false, 'IP proxy exit detecting state should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitError, '', 'IP proxy exit error should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitSource, 'page_context', 'IP proxy exit source should survive fresh-attempt reset');
+  assert.strictEqual(snapshot.currentState.ipProxyAppliedExitEndpoint, 'https://ipinfo.io/json', 'IP proxy exit endpoint should survive fresh-attempt reset');
   assert.deepStrictEqual(
     snapshot.currentState.reusablePhoneActivation,
     {
