@@ -608,6 +608,12 @@ test('buildPersistentSettingsPayload persists browser fingerprint switch level a
   assert.equal(nested.browserFingerprintLanguage, 'en-US');
   assert.equal(nested.settingsState.flows.openai.browserFingerprint.level, 'basic');
   assert.equal(nested.settingsState.flows.openai.browserFingerprint.language, 'en-US');
+
+  const random = api.buildPersistentSettingsPayload({
+    browserFingerprintLanguage: 'random',
+  }, { fillDefaults: true });
+  assert.equal(random.browserFingerprintLanguage, 'random');
+  assert.equal(random.settingsState.flows.openai.browserFingerprint.language, 'random');
 });
 
 test('buildPersistentSettingsPayload persists phone signup phone-prefixed email switch into settings schema', () => {

@@ -34,6 +34,33 @@ function buildHeroSmsStatusV2Payload({ smsCode = '', smsText = '', callCode = ''
   });
 }
 
+test('signup phone helper classifies step 4 activation reuse exclusions', () => {
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    fetchImpl: async () => {
+      throw new Error('unexpected fetch');
+    },
+    getState: async () => ({}),
+    setState: async () => {},
+  });
+  const activation = {
+    activationId: 'reuse-classification',
+    phoneNumber: '66953330001',
+    provider: 'hero-sms',
+  };
+
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('temporary content script failure'), activation), true);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('PHONE_RESEND_SERVER_ERROR::HTTP ERROR 500'), activation), true);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('PHONE_ROUTE_405_RECOVERY_FAILED::405 Method Not Allowed'), activation), true);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('PHONE_CODE_TIMEOUT::waiting for phone verification code timed out'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('PHONE_RESEND_BANNED_NUMBER::Unable to send a text message'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('PHONE_MAX_USAGE_EXCEEDED::phone_max_usage_exceeded'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('invalid code'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::create account failed'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('SIGNUP_USER_ALREADY_EXISTS::user_already_exists'), activation), false);
+  assert.equal(helpers.shouldPreserveSignupPhoneActivationForRetry(new Error('activation not found'), activation), false);
+});
+
 async function collectHeroSmsTierGetNumberTrace(options = {}) {
   const {
     acquirePriority = 'country',
@@ -979,12 +1006,13 @@ test('signup phone helper does not generate phone-prefixed email when code submi
     /invalid code/
   );
   assert.equal(phoneEmailCalls, 0);
-  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'failed-reuse-invalid');
-  assert.equal(setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'failedSignupPhoneReuseActivation')), false);
+  assert.equal(currentState.failedSignupPhoneReuseActivation, null);
+  assert.equal(setStateCalls.some((updates) => updates.failedSignupPhoneReuseActivation === null), true);
 });
 
 test('signup phone helper preserves failed reuse slot when code submit throws', async () => {
   const setStateCalls = [];
+  const requests = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
     phoneCodeWaitSeconds: 15,
@@ -1017,6 +1045,7 @@ test('signup phone helper preserves failed reuse slot when code submit throws', 
     ensureStep8SignupPageReady: async () => {},
     fetchImpl: async (url) => {
       const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
       const action = parsedUrl.searchParams.get('action');
       if (action === 'getStatus') {
         return { ok: true, text: async () => 'STATUS_OK:778899' };
@@ -1053,8 +1082,10 @@ test('signup phone helper preserves failed reuse slot when code submit throws', 
     () => helpers.completeSignupPhoneVerificationFlow(77, { state: currentState }),
     /submit failed/
   );
-  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'failed-reuse-throws');
-  assert.equal(setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'failedSignupPhoneReuseActivation')), false);
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, 'signup-submit-throws');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-phone-verification-error-reuse');
+  assert.match(currentState.failedSignupPhoneReuseActivation.reason, /submit failed/);
+  assert.equal(requests.some((request) => request.searchParams.get('action') === 'setStatus'), false);
 });
 
 test('signup phone helper writes account book entry before email-verification handoff continues', async () => {
@@ -8573,7 +8604,7 @@ test('phone verification helper stops when add-phone recovery cannot be verified
   }
 });
 
-test('signup phone verification cancels activation when resend lands on contact-verification HTTP 500 page', async () => {
+test('signup phone verification preserves activation when resend lands on contact-verification HTTP 500 page', async () => {
   const requests = [];
   let currentState = {
     heroSmsApiKey: 'demo-key',
@@ -8633,10 +8664,19 @@ test('signup phone verification cancels activation when resend lands on contact-
     }
   );
 
-  assert.equal(currentState.signupPhoneActivation, null);
+  assert.equal(currentState.signupPhoneActivation.activationId, '920001');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, '920001');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-phone-verification-error-reuse');
+  assert.equal(
+    requests.some((request) => (
+      request.searchParams.get('action') === 'setStatus'
+      && request.searchParams.get('status') === '8'
+    )),
+    false
+  );
 });
 
-test('signup phone verification cancels activation when resend lands on contact-verification 500 page but content script drops', async () => {
+test('signup phone verification preserves activation when resend lands on contact-verification 500 page but content script drops', async () => {
   const requests = [];
   const tabSnapshots = [];
   let resendAttempted = false;
@@ -8722,8 +8762,17 @@ test('signup phone verification cancels activation when resend lands on contact-
   );
 
   assert.equal(tabSnapshots.length >= 1, true);
-  assert.equal(currentState.signupPhoneActivation, null);
+  assert.equal(currentState.signupPhoneActivation.activationId, '930001');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, '930001');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-phone-verification-error-reuse');
   assert.equal(requests.filter((request) => request.searchParams.get('action') === 'getStatus').length, 1);
+  assert.equal(
+    requests.some((request) => (
+      request.searchParams.get('action') === 'setStatus'
+      && request.searchParams.get('status') === '8'
+    )),
+    false
+  );
 });
 
 test('signup phone verification refreshes contact-verification after resend 500 and continues when prompt recovers', async () => {
@@ -8829,6 +8878,7 @@ test('signup phone verification refreshes contact-verification after resend 500 
     assert.equal(tabSnapshots.length >= 2, true);
     assert.equal(requests.filter((request) => request.searchParams.get('action') === 'getStatus').length, 2);
     assert.equal(currentState.signupPhoneActivation, null);
+    assert.equal(currentState.failedSignupPhoneReuseActivation, undefined);
   } finally {
     Date.now = realDateNow;
   }
@@ -8926,7 +8976,9 @@ test('signup phone verification refreshes contact-verification after resend 500 
 
     assert.equal(refreshCalls.length >= 1, true);
     assert.equal(tabSnapshots.length >= 1, true);
-    assert.equal(currentState.signupPhoneActivation, null);
+    assert.equal(currentState.signupPhoneActivation.activationId, '930001-fail');
+    assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, '930001-fail');
+    assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-phone-verification-error-reuse');
   } finally {
     Date.now = realDateNow;
   }
@@ -9101,7 +9153,9 @@ test('signup phone verification fails when contact-verification 500 appears afte
     'RESEND_VERIFICATION_CODE',
     'STEP8_GET_STATE',
   ]);
-  assert.equal(currentState.signupPhoneActivation, null);
+  assert.equal(currentState.signupPhoneActivation.activationId, '930003');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.activationId, '930003');
+  assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-phone-verification-error-reuse');
 });
 
 test('phone verification helper skips page resend for 5sim timeouts and rotates number directly', async () => {

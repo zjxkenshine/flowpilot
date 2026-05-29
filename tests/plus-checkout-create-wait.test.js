@@ -5671,6 +5671,7 @@ test('GPC manual checkout injects Plus script before reading ChatGPT session tok
   assert.equal(fetchCalls[0].url, 'https://gpc.qlhazycoder.top/api/gp/balance');
   assert.equal(fetchCalls[0].options.headers['X-API-Key'], 'gpc_test_123');
   assert.equal(fetchCalls[1].url, 'https://gpc.qlhazycoder.top/api/gp/tasks');
+  assert.equal(fetchCalls[1].options.headers['Accept-Language'], 'zh-CN,zh;q=0.9,en;q=0.8');
   const helperPayload = JSON.parse(fetchCalls[1].options.body);
   assert.deepEqual(helperPayload, {
     access_token: 'session-access-token',
@@ -5694,6 +5695,68 @@ test('GPC manual checkout injects Plus script before reading ChatGPT session tok
   assert.ok(events.find((event) => event.type === 'set-state')?.payload?.gopayHelperOrderCreatedAt > 0);
   assert.equal(events.find((event) => event.type === 'complete')?.step, 'plus-checkout-create');
   assert.equal(events.find((event) => event.type === 'complete')?.payload?.plusCheckoutSource, 'gpc-helper');
+});
+
+test('Plus checkout API requests follow browser fingerprint accept language', async () => {
+  const events = [];
+  const fetchCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'tab-create', payload });
+          return { id: 91, url: payload.url, status: 'complete' };
+        },
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: payload.url, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => events.push({ type: 'ready' }),
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          preferredCheckoutUrl: 'https://pay.openai.com/c/pay/cloud_session',
+          country: 'US',
+          currency: 'USD',
+        }),
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return { accessToken: 'session-access-token' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusPaymentMethod: 'paypal',
+    plusCheckoutCloudConversionEnabled: true,
+    plusCheckoutCloudConversionApiUrl: 'https://cloud.example.test/api/checkout',
+    plusCheckoutCloudConversionApiKey: 'cloud_key',
+    plusCheckoutOpenStableWaitSeconds: 0,
+    browserFingerprintProfile: {
+      acceptLanguage: 'en-US,en;q=0.9',
+    },
+  });
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, 'https://cloud.example.test/api/checkout');
+  assert.equal(fetchCalls[0].options.headers['Accept-Language'], 'en-US,en;q=0.9');
+  assert.equal(fetchCalls[0].options.headers['X-API-Key'], 'cloud_key');
+  assert.equal(events.find((event) => event.type === 'complete')?.payload?.plusCheckoutSource, 'cloud-converted-checkout');
 });
 
 
@@ -5762,6 +5825,52 @@ test('GPC auto checkout only sends access token and API Key', async () => {
   assert.equal(Object.prototype.hasOwnProperty.call(statePayload, 'gopayHelperPhoneMode'), false);
   assert.equal(statePayload.gopayHelperTaskStatus, 'queued');
   assert.equal(events.find((event) => event.type === 'complete')?.step, 'plus-checkout-create');
+});
+
+test('GPC checkout create follows browser fingerprint accept language', async () => {
+  const fetchCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async () => {
+          throw new Error('should not open token tab when direct access token exists');
+        },
+        remove: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => url.endsWith('/api/gp/balance')
+          ? createGpcBalanceResponse({ auto_mode_enabled: true, remaining_uses: 10 })
+          : createGpcTaskResponse({ task_id: 'task_en', status: 'queued' }),
+      };
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusPaymentMethod: 'gpc-helper',
+    chatgptAccessToken: 'state-access-token',
+    gopayHelperPhoneMode: 'auto',
+    gopayHelperApiUrl: 'https://gpc.qlhazycoder.top/',
+    gopayHelperApiKey: 'gpc_en_123',
+    browserFingerprintProfile: {
+      acceptLanguage: 'en-US,en;q=0.9',
+    },
+  });
+
+  const taskRequest = fetchCalls.find((call) => call.url === 'https://gpc.qlhazycoder.top/api/gp/tasks');
+  assert.equal(taskRequest?.options?.headers?.['Accept-Language'], 'en-US,en;q=0.9');
 });
 
 test('GPC auto checkout keeps running when balance payload omits auto mode permission', async () => {

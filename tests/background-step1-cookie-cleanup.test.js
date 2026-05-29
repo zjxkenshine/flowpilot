@@ -27,6 +27,7 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
     openedSteps: [],
     completedNodes: [],
     cacheClears: 0,
+    fingerprintCalls: 0,
   };
 
   const chromeApi = {
@@ -80,6 +81,12 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
     clearSignupVerifiedPhoneCache: async () => {
       events.cacheClears += 1;
     },
+    getState: async () => ({ ipProxyEnabled: false }),
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.fingerprintCalls += 1;
+      assert.deepStrictEqual(routing, { skipped: true, reason: 'proxy_disabled' });
+      return { profile: { exitRegion: 'US' } };
+    },
     openSignupEntryTab: async (step) => {
       events.openedSteps.push(step);
     },
@@ -121,6 +128,7 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
   assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
   assert.ok(events.browsingDataCalls[0].origins.includes('https://pay.openai.com'));
   assert.ok(events.browsingDataCalls[0].origins.includes('https://checkout.stripe.com'));
+  assert.equal(events.fingerprintCalls, 1);
   assert.deepStrictEqual(events.openedSteps, [1]);
   assert.deepStrictEqual(events.completedNodes, ['open-chatgpt']);
 });
@@ -130,6 +138,7 @@ test('step 1 cookie cleanup still runs browsingData sweep when no direct cookie 
   const events = {
     removedCookies: 0,
     browsingDataCalls: [],
+    fingerprintCalls: 0,
   };
 
   const chromeApi = {
@@ -151,6 +160,11 @@ test('step 1 cookie cleanup still runs browsingData sweep when no direct cookie 
   const executor = api.createStep1Executor({
     addLog: async () => {},
     chrome: chromeApi,
+    getState: async () => ({ ipProxyEnabled: false }),
+    ensureBrowserFingerprintForProxyExit: async () => {
+      events.fingerprintCalls += 1;
+      return { profile: { exitRegion: 'US' } };
+    },
     openSignupEntryTab: async () => {},
     completeNodeFromBackground: async () => {},
   });
@@ -160,9 +174,10 @@ test('step 1 cookie cleanup still runs browsingData sweep when no direct cookie 
   assert.equal(events.removedCookies, 0);
   assert.equal(events.browsingDataCalls.length, 1);
   assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
+  assert.equal(events.fingerprintCalls, 1);
 });
 
-test('step 1 skips proxy probe when IP proxy is disabled', async () => {
+test('step 1 generates browser fingerprint and skips proxy probe when IP proxy is disabled', async () => {
   const api = loadStep1Module();
   const events = {
     openedSteps: [],
@@ -179,8 +194,10 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
       return { proxyRouting: { exitIp: '203.0.113.8', reason: 'applied' } };
     },
     switchIpProxy: async () => {},
-    ensureBrowserFingerprintForProxyExit: async () => {
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
       events.fingerprintCalls += 1;
+      assert.deepStrictEqual(routing, { skipped: true, reason: 'proxy_disabled' });
+      return { profile: { exitRegion: 'US' } };
     },
     openSignupEntryTab: async (step) => {
       events.openedSteps.push(step);
@@ -191,7 +208,7 @@ test('step 1 skips proxy probe when IP proxy is disabled', async () => {
   await executor.executeStep1();
 
   assert.equal(events.probeCalls, 0);
-  assert.equal(events.fingerprintCalls, 0);
+  assert.equal(events.fingerprintCalls, 1);
   assert.deepStrictEqual(events.openedSteps, [1]);
 });
 
@@ -541,6 +558,7 @@ test('step 1 switches to next proxy when proxy probe throws', async () => {
 test('step 1 stops before opening ChatGPT after three failed proxy exit probes', async () => {
   const api = loadStep1Module();
   const events = {
+    fingerprintCalls: 0,
     openCalls: 0,
     probeCalls: 0,
     switchCalls: 0,
@@ -564,6 +582,11 @@ test('step 1 stops before opening ChatGPT after three failed proxy exit probes',
     switchIpProxy: async () => {
       events.switchCalls += 1;
     },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      events.fingerprintCalls += 1;
+      assert.deepStrictEqual(routing, {});
+      return { profile: { exitRegion: 'US' } };
+    },
     openSignupEntryTab: async () => {
       events.openCalls += 1;
     },
@@ -577,5 +600,6 @@ test('step 1 stops before opening ChatGPT after three failed proxy exit probes',
 
   assert.equal(events.probeCalls, 3);
   assert.equal(events.switchCalls, 2);
+  assert.equal(events.fingerprintCalls, 1);
   assert.equal(events.openCalls, 0);
 });

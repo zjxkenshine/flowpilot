@@ -16,9 +16,11 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
   assert.match(html, /<option value="enhanced">/);
   assert.match(html, /<option value="zh-CN">/);
   assert.match(html, /<option value="en-US">English<\/option>/);
+  assert.match(html, /<option value="random">随机<\/option>/);
 
   assert.match(source, /function normalizeBrowserFingerprintLevel/);
   assert.match(source, /function normalizeBrowserFingerprintLanguage/);
+  assert.match(source, /normalized === 'random'/);
   assert.match(source, /browserFingerprintEnabled:\s*typeof inputBrowserFingerprintEnabled/);
   assert.match(source, /browserFingerprintLevel:\s*typeof selectBrowserFingerprintLevel/);
   assert.match(source, /browserFingerprintLanguage:\s*typeof selectBrowserFingerprintLanguage/);

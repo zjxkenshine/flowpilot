@@ -378,9 +378,6 @@
     }
 
     async function ensureBrowserFingerprintAfterProxyExit(routing = {}) {
-      if (!hasReadyProxyExit(routing)) {
-        return null;
-      }
       const latestState = typeof getState === 'function' ? await getState() : {};
       if (!isBrowserFingerprintEnabledForStep1(latestState)) {
         await addLog('步骤 1：浏览器指纹已关闭，跳过本轮指纹生成。', 'info');
@@ -401,14 +398,30 @@
         || latestState?.ipProxyAppliedExitRegion
         || ''
       ).trim() || 'US';
-      await addLog(`步骤 1：已根据代理出口 ${region} 生成并应用本轮浏览器指纹。`, 'ok');
+      const exitIp = String(result?.profile?.exitIp || routing?.exitIp || latestState?.ipProxyAppliedExitIp || '').trim();
+      await addLog(
+        exitIp
+          ? `步骤 1：已生成并应用本轮浏览器指纹（地区 ${region}，代理 IP 仅用于诊断，不参与指纹随机种子）。`
+          : `步骤 1：已生成并应用本轮随机浏览器指纹（地区 ${region}，未绑定代理 IP）。`,
+        'ok'
+      );
       return result;
     }
 
     async function executeStep1() {
       await clearOpenAiCookiesBeforeStep1();
-      const proxyRouting = await ensureIpProxyExitReadyBeforeStep1();
+      let proxyRouting = {};
+      let proxyRoutingError = null;
+      try {
+        proxyRouting = await ensureIpProxyExitReadyBeforeStep1();
+      } catch (error) {
+        proxyRoutingError = error;
+        proxyRouting = {};
+      }
       await ensureBrowserFingerprintAfterProxyExit(proxyRouting);
+      if (proxyRoutingError) {
+        throw proxyRoutingError;
+      }
       await addLog('步骤 1：正在打开 ChatGPT 官网...');
       await openSignupEntryTab(1);
       await completeNodeFromBackground('open-chatgpt', {});

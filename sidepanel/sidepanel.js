@@ -3696,6 +3696,9 @@ function normalizeBrowserFingerprintLevel(value = '') {
 
 function normalizeBrowserFingerprintLanguage(value = '') {
   const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+  if (normalized === 'random' || normalized === 'auto') {
+    return 'random';
+  }
   if (normalized === 'en' || normalized === 'en-us') {
     return 'en-US';
   }
@@ -5172,6 +5175,9 @@ function collectSettingsPayload() {
     ? normalizeBrowserFingerprintLanguage
     : ((value = '') => {
       const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+      if (normalized === 'random' || normalized === 'auto') {
+        return 'random';
+      }
       return normalized === 'en' || normalized === 'en-us' ? 'en-US' : 'zh-CN';
     });
   const { domains, activeDomain } = getCloudflareDomainsFromState();

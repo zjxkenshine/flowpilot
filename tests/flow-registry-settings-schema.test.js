@@ -235,6 +235,22 @@ test('settings schema preserves browser fingerprint defaults and nested override
   assert.equal(view.browserFingerprintEnabled, false);
   assert.equal(view.browserFingerprintLevel, 'enhanced');
   assert.equal(view.browserFingerprintLanguage, 'en-US');
+
+  const random = schema.normalizeSettingsState({
+    settingsState: {
+      flows: {
+        openai: {
+          browserFingerprint: {
+            language: 'random',
+          },
+        },
+      },
+    },
+  });
+  const randomView = schema.buildSettingsView(random);
+
+  assert.equal(random.flows.openai.browserFingerprint.language, 'random');
+  assert.equal(randomView.browserFingerprintLanguage, 'random');
 });
 
 test('settings schema preserves Plus checkout conversion proxy in canonical state and read view', () => {

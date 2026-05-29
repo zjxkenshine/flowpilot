@@ -86,6 +86,7 @@
   const HOSTED_CHECKOUT_PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
   const HOSTED_CHECKOUT_CARD_ERROR_RETRY_MAX_ATTEMPTS = 3;
   const PHONE_PLUS_CHECK_MAX_ATTEMPTS = 3;
+  const DEFAULT_BROWSER_FINGERPRINT_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8';
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
@@ -183,6 +184,11 @@
         stepKey,
         ...(options && typeof options === 'object' ? options : {}),
       });
+    }
+
+    function getBrowserFingerprintAcceptLanguageForState(state = {}) {
+      const acceptLanguage = String(state?.browserFingerprintProfile?.acceptLanguage || '').trim();
+      return acceptLanguage || DEFAULT_BROWSER_FINGERPRINT_ACCEPT_LANGUAGE;
     }
 
     function normalizeRetryCookieDomain(domain) {
@@ -5799,7 +5805,7 @@
       const billingDetails = getCheckoutBillingDetailsForPaymentMethod(paymentMethod);
       const headers = {
         Accept: 'application/json',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Language': getBrowserFingerprintAcceptLanguageForState(state),
         'Content-Type': 'application/json',
       };
       const apiKey = String(state?.plusCheckoutCloudConversionApiKey || '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y').trim();
@@ -5904,7 +5910,7 @@
         method: 'POST',
         headers: {
           Accept: '*/*',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Accept-Language': getBrowserFingerprintAcceptLanguageForState(state),
           'Content-Type': 'application/json',
           'X-API-Key': apiKey,
         },

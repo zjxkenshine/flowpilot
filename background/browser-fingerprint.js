@@ -24,6 +24,12 @@
   const BROWSER_FINGERPRINT_LEVEL_ENHANCED = 'enhanced';
   const BROWSER_FINGERPRINT_LANGUAGE_EN_US = 'en-US';
   const BROWSER_FINGERPRINT_LANGUAGE_ZH_CN = 'zh-CN';
+  const BROWSER_FINGERPRINT_LANGUAGE_RANDOM = 'random';
+  const RANDOM_LANGUAGE_FINGERPRINT_OPTIONS = Object.freeze([
+    BROWSER_FINGERPRINT_LANGUAGE_ZH_CN,
+    BROWSER_FINGERPRINT_LANGUAGE_EN_US,
+  ]);
+  let randomFingerprintSeedCounter = 0;
 
   const REGION_DEFAULTS = Object.freeze({
     US: Object.freeze({
@@ -137,6 +143,9 @@
 
   function normalizeBrowserFingerprintLanguage(value = '') {
     const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+    if (normalized === 'random' || normalized === 'auto') {
+      return BROWSER_FINGERPRINT_LANGUAGE_RANDOM;
+    }
     if (normalized === 'en' || normalized === 'en-us') {
       return BROWSER_FINGERPRINT_LANGUAGE_EN_US;
     }
@@ -193,6 +202,42 @@
     };
   }
 
+  function bytesToHex(values = []) {
+    return Array.from(values || [])
+      .map((value) => Number(value || 0).toString(16).padStart(8, '0'))
+      .join('');
+  }
+
+  function createRandomFingerprintSeed(options = {}) {
+    const explicitSeed = String(
+      options?.seedKey
+      ?? options?.randomSeed
+      ?? options?.seed
+      ?? ''
+    ).trim();
+    if (explicitSeed) {
+      return explicitSeed;
+    }
+
+    randomFingerprintSeedCounter += 1;
+    const prefix = `fp_seed_${Date.now().toString(36)}_${randomFingerprintSeedCounter.toString(36)}`;
+    try {
+      const cryptoApi = globalThis.crypto;
+      if (cryptoApi?.randomUUID) {
+        return `${prefix}_${cryptoApi.randomUUID()}`;
+      }
+      if (cryptoApi?.getRandomValues) {
+        const values = new Uint32Array(4);
+        cryptoApi.getRandomValues(values);
+        return `${prefix}_${bytesToHex(values)}`;
+      }
+    } catch {
+      // Fall back below; random seed generation must not block the flow.
+    }
+
+    return `${prefix}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+  }
+
   function pickFrom(list = [], random = Math.random) {
     if (!Array.isArray(list) || !list.length) {
       return null;
@@ -203,6 +248,14 @@
   function resolveLanguageFingerprintProfile(language = '') {
     const normalizedLanguage = normalizeBrowserFingerprintLanguage(language);
     return LANGUAGE_FINGERPRINT_PROFILES[normalizedLanguage] || LANGUAGE_FINGERPRINT_PROFILES[BROWSER_FINGERPRINT_LANGUAGE_ZH_CN];
+  }
+
+  function resolveBrowserFingerprintLanguage(language = '', random = Math.random) {
+    const normalizedLanguage = normalizeBrowserFingerprintLanguage(language);
+    if (normalizedLanguage === BROWSER_FINGERPRINT_LANGUAGE_RANDOM) {
+      return pickFrom(RANDOM_LANGUAGE_FINGERPRINT_OPTIONS, random) || BROWSER_FINGERPRINT_LANGUAGE_ZH_CN;
+    }
+    return normalizedLanguage;
   }
 
   function roundCoordinate(value) {
@@ -280,6 +333,8 @@
       : null;
     return {
       profileId: String(profile.profileId || '').trim(),
+      level: normalizeBrowserFingerprintLevel(profile.level),
+      language: String(profile.language || '').trim(),
       exitRegion: String(profile.exitRegion || '').trim(),
       fallbackRegion: Boolean(profile.fallbackRegion),
       locale: String(profile.locale || '').trim(),
@@ -291,6 +346,32 @@
       deviceMemory: Number(profile.deviceMemory) || 0,
       webglRenderer: abbreviateFingerprintLogText(profile.webglRenderer),
     };
+  }
+
+  function formatBrowserFingerprintLogSummary(profile = {}) {
+    const summary = summarizeBrowserFingerprintForConsole(profile);
+    const screen = summary.screen
+      ? `${summary.screen.width}x${summary.screen.height}`
+        + ` avail=${summary.screen.availWidth}x${summary.screen.availHeight}`
+        + ` scale=${summary.screen.deviceScaleFactor}`
+      : 'unknown';
+    const region = summary.exitRegion || 'US';
+    const regionText = summary.fallbackRegion ? `${region}（默认）` : region;
+    const ipBindingText = String(profile.exitIp || '').trim()
+      ? '代理 IP 仅用于诊断，不参与指纹随机种子'
+      : '未绑定代理 IP，使用随机指纹';
+    return '步骤 1：浏览器指纹已生成：'
+      + `profile=${summary.profileId || 'unknown'}，`
+      + `level=${summary.level}，`
+      + `language=${summary.language || summary.locale || 'unknown'}/${summary.locale || 'unknown'}，`
+      + `timezone=${summary.timezoneId || 'unknown'}，`
+      + `platform=${summary.platform || 'unknown'}，`
+      + `screen=${screen}，`
+      + `hardwareConcurrency=${summary.hardwareConcurrency}，`
+      + `deviceMemory=${summary.deviceMemory}GB，`
+      + `webglRenderer=${summary.webglRenderer || 'unknown'}，`
+      + `region=${regionText}，`
+      + `${ipBindingText}。`;
   }
 
   function logGeneratedBrowserFingerprint(profile = {}) {
@@ -310,24 +391,14 @@
     const normalizedRegion = normalizeRegionCode(rawRegion);
     const regionCode = normalizedRegion || 'US';
     const regionDefaults = REGION_DEFAULTS[regionCode] || REGION_DEFAULTS.US;
-    const browserFingerprintLanguage = normalizeBrowserFingerprintLanguage(
+    const browserFingerprintLanguageSetting = normalizeBrowserFingerprintLanguage(
       options?.language ?? options?.browserFingerprintLanguage ?? getBrowserFingerprintLanguageFromState(state)
     );
-    const languageProfile = resolveLanguageFingerprintProfile(browserFingerprintLanguage);
-    const runId = String(
-      state?.activeRunId
-      || state?.runId
-      || state?.autoRunSessionId
-      || state?.flowStartTime
-      || options?.runId
-      || 'manual'
-    ).trim();
-    const seedKey = [
-      exitIp || 'no-exit-ip',
-      regionCode,
-      runId || 'manual',
-    ].join('|');
+    const seedKey = createRandomFingerprintSeed(options);
     const random = createSeededRandom(seedKey);
+    const languageRandom = createSeededRandom(`${seedKey}|language`);
+    const browserFingerprintLanguage = resolveBrowserFingerprintLanguage(browserFingerprintLanguageSetting, languageRandom);
+    const languageProfile = resolveLanguageFingerprintProfile(browserFingerprintLanguage);
     const chromeMajor = getChromeMajorVersion(options?.baseUserAgent || globalThis.navigator?.userAgent || '');
     const osProfile = random() < 0.82
       ? { userAgentOs: 'windows', platform: 'Win32' }
@@ -349,7 +420,7 @@
     const userAgent = buildUserAgent(osProfile, chromeMajor);
 
     return {
-      profileId: `fp_${hashString(seedKey).toString(16)}`,
+      profileId: `fp_${hashString(`profile|${seedKey}`).toString(16)}`,
       level: normalizeBrowserFingerprintLevel(
         options?.level ?? options?.browserFingerprintLevel ?? getBrowserFingerprintLevelFromState(state)
       ),
@@ -829,9 +900,6 @@
         return { skipped: true, reason: 'disabled', ...clearResult };
       }
       const profile = buildBrowserFingerprintProfile(proxyRouting, state, options);
-      if (!String(profile.exitIp || '').trim()) {
-        return { skipped: true, reason: 'missing_exit_ip' };
-      }
       await applyBrowserFingerprintHeaderRules(chromeApi, profile);
       const updates = {
         browserFingerprintProfile: profile,
@@ -846,6 +914,9 @@
         broadcastDataUpdate(updates);
       }
       logGeneratedBrowserFingerprint(profile);
+      if (typeof addLog === 'function') {
+        await addLog(formatBrowserFingerprintLogSummary(profile), 'info');
+      }
       if (typeof addLog === 'function' && profile.fallbackRegion) {
         await addLog('步骤 1：代理出口地区未识别，已使用默认 US 浏览器指纹。', 'warn');
       }
@@ -887,6 +958,7 @@
       isValidBrowserFingerprintProfile,
       normalizeBrowserFingerprintLanguage,
       normalizeBrowserFingerprintLevel,
+      resolveBrowserFingerprintLanguage,
       shouldApplyBrowserFingerprintToSource,
     };
   }
@@ -898,6 +970,7 @@
     BROWSER_FINGERPRINT_LEVEL_STANDARD,
     BROWSER_FINGERPRINT_LEVEL_ENHANCED,
     BROWSER_FINGERPRINT_LANGUAGE_EN_US,
+    BROWSER_FINGERPRINT_LANGUAGE_RANDOM,
     BROWSER_FINGERPRINT_LANGUAGE_ZH_CN,
     applyBrowserFingerprintHeaderRules,
     applyBrowserFingerprintToTab,
@@ -910,9 +983,11 @@
     getBrowserFingerprintLanguageFromState,
     isBrowserFingerprintEnabled,
     isValidBrowserFingerprintProfile,
+    formatBrowserFingerprintLogSummary,
     normalizeBrowserFingerprintLanguage,
     normalizeBrowserFingerprintLevel,
     normalizeRegionCode,
+    resolveBrowserFingerprintLanguage,
     resolveLanguageFingerprintProfile,
     shouldApplyBrowserFingerprintToSource,
   };

@@ -4098,6 +4098,7 @@ function normalizePersistentSettingValue(key, value) {
         ? self.MultiPageBackgroundBrowserFingerprint.normalizeBrowserFingerprintLanguage(value)
         : (() => {
           const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+          if (normalized === 'random' || normalized === 'auto') return 'random';
           if (normalized === 'en' || normalized === 'en-us') return 'en-US';
           return 'zh-CN';
         })();
