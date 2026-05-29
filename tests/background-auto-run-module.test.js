@@ -35,10 +35,18 @@ const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
+const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
 const PERSISTED_SETTING_DEFAULTS = {
   registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
   signupIdentityRedirectTimeoutSeconds: DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS,
   authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
+  signupVerificationReadyTimeoutSeconds: DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS,
+  signupVerificationReadyMaxRounds: DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS,
 };
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -83,6 +91,8 @@ function collectAutoRunFreshResetRuntimeSettingKeys() {
 ${extractFunction('normalizeRegistrationStageWaitSeconds')}
 ${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
 ${extractFunction('normalizeAuthContentScriptRecoveryTimeoutSeconds')}
+${extractFunction('normalizeSignupVerificationReadyTimeoutSeconds')}
+${extractFunction('normalizeSignupVerificationReadyMaxRounds')}
 ${extractFunction('buildAutoRunFreshResetSettingsState')}
 ${extractFunction('filterAutoRunIssueLogsForRestart')}
 ${extractFunction('buildFreshAutoRunKeepState')}

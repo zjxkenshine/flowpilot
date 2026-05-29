@@ -5265,7 +5265,19 @@ async function waitForSignupVerificationTransition(timeout = 5000, options = {})
   return inspectSignupVerificationState(options);
 }
 
-async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
+async function prepareSignupVerificationFlow(payload = {}, timeout = null) {
+  const normalizeBoundedInteger = (value, fallback, min, max) => {
+    const fallbackNumber = Math.min(max, Math.max(min, Math.floor(Number(fallback) || min)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
   const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
     ? getOperationDelayRunner()
     : async (metadata, operation) => {
@@ -5280,9 +5292,26 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
   const prepareSource = String(payload?.prepareSource || '').trim() || 'step4_execute';
   const prepareLogLabel = String(payload?.prepareLogLabel || '').trim()
     || (prepareSource === 'step3_finalize' ? '步骤 3 收尾' : '步骤 4 执行');
+  const configuredTimeoutSeconds = normalizeBoundedInteger(
+    payload?.signupVerificationReadyTimeoutSeconds,
+    60,
+    5,
+    300
+  );
+  const configuredTimeoutMs = configuredTimeoutSeconds * 1000;
+  const legacyTimeoutMs = Number(timeout) > 0 ? Math.floor(Number(timeout)) : configuredTimeoutMs;
+  const totalTimeoutMs = Math.min(
+    configuredTimeoutMs,
+    Math.max(1000, legacyTimeoutMs)
+  );
+  const maxRecoveryRounds = normalizeBoundedInteger(
+    payload?.signupVerificationReadyMaxRounds,
+    5,
+    1,
+    20
+  );
   const start = Date.now();
   let recoveryRound = 0;
-  const maxRecoveryRounds = 3;
   let passwordPageDiagnosticsLogged = false;
   const isPasswordSubmitButtonReadyForRetry = (button) => {
     if (!button || !isActionEnabled(button)) {
@@ -5328,12 +5357,17 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
     return true;
   };
 
-  while (Date.now() - start < timeout && recoveryRound < maxRecoveryRounds) {
+  while (Date.now() - start < totalTimeoutMs && recoveryRound < maxRecoveryRounds) {
     throwIfStopped();
 
     const roundNo = recoveryRound + 1;
-    log(`${prepareLogLabel}：等待页面进入验证码阶段（第 ${roundNo}/${maxRecoveryRounds} 轮，先等待 5 秒）...`, 'info');
-    const snapshot = await waitForSignupVerificationTransition(5000, {
+    const elapsedMs = Date.now() - start;
+    const remainingMs = Math.max(0, totalTimeoutMs - elapsedMs);
+    const remainingRounds = Math.max(1, maxRecoveryRounds - recoveryRound);
+    const roundWaitMs = Math.max(1000, Math.ceil(remainingMs / remainingRounds));
+    const roundWaitSeconds = Math.max(1, Math.ceil(roundWaitMs / 1000));
+    log(`${prepareLogLabel}：等待页面进入验证码阶段（第 ${roundNo}/${maxRecoveryRounds} 轮，本轮最多等待 ${roundWaitSeconds} 秒，总超时 ${configuredTimeoutSeconds} 秒）...`, 'info');
+    const snapshot = await waitForSignupVerificationTransition(Math.min(roundWaitMs, remainingMs), {
       signupMethod,
       accountIdentifierType,
       phoneNumber,
@@ -5430,7 +5464,7 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
     log(`${prepareLogLabel}：页面仍在切换中，准备继续等待（${recoveryRound}/${maxRecoveryRounds}）...`, 'warn');
   }
 
-  throw new Error(`等待注册验证码页面就绪超时或自动恢复失败（已尝试 ${recoveryRound}/${maxRecoveryRounds} 轮）。URL: ${location.href}`);
+  throw new Error(`等待注册验证码页面就绪超时或自动恢复失败（总超时 ${configuredTimeoutSeconds} 秒，已尝试 ${recoveryRound}/${maxRecoveryRounds} 轮）。URL: ${location.href}`);
 }
 
 

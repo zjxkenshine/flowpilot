@@ -33,7 +33,24 @@
       phoneVerificationHelpers = null,
       resolveSignupMethod = () => 'email',
       getAuthContentScriptRecoveryTimeoutMsForState = () => 30000,
+      getSignupVerificationReadyConfigForState = () => ({ timeoutSeconds: 60, timeoutMs: 60000, maxRounds: 5 }),
     } = deps;
+
+    function resolveSignupVerificationReadyConfig(state = {}) {
+      const configured = typeof getSignupVerificationReadyConfigForState === 'function'
+        ? getSignupVerificationReadyConfigForState(state)
+        : null;
+      const rawTimeoutSeconds = configured?.timeoutSeconds
+        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
+        ?? 60;
+      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(rawTimeoutSeconds) || 60)));
+      const maxRounds = Math.min(20, Math.max(1, Math.floor(Number(configured?.maxRounds) || 5)));
+      return {
+        timeoutSeconds,
+        timeoutMs: timeoutSeconds * 1000,
+        maxRounds,
+      };
+    }
 
     function buildSignupProfileForVerificationStep() {
       const name = typeof generateRandomName === 'function' ? generateRandomName() : null;
@@ -225,9 +242,12 @@
             || '',
         },
       };
-      const prepareTimeoutMs = Math.max(5000, Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000);
-      const prepareResponseTimeoutMs = 30000;
-      const prepareAttemptTimeoutMs = 15000;
+      const readyConfig = resolveSignupVerificationReadyConfig(state);
+      prepareRequest.payload.signupVerificationReadyTimeoutSeconds = readyConfig.timeoutSeconds;
+      prepareRequest.payload.signupVerificationReadyMaxRounds = readyConfig.maxRounds;
+      const prepareTimeoutMs = readyConfig.timeoutMs;
+      const transportRecoveryTimeoutMs = Math.max(5000, Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000);
+      const prepareResponseTimeoutMs = Math.max(45000, prepareTimeoutMs);
       const prepareStartAt = Date.now();
       let prepareResult = null;
 
@@ -241,8 +261,8 @@
         try {
           prepareResult = typeof sendToContentScriptResilient === 'function'
             ? await sendToContentScriptResilient('signup-page', prepareRequest, {
-              timeoutMs: Math.max(1000, Math.min(prepareAttemptTimeoutMs, remainingBeforePrepareMs)),
-              transportRecoveryTimeoutMs: Math.max(1000, Math.min(prepareTimeoutMs, remainingBeforePrepareMs)),
+              timeoutMs: Math.max(1000, remainingBeforePrepareMs),
+              transportRecoveryTimeoutMs: Math.max(1000, Math.min(transportRecoveryTimeoutMs, remainingBeforePrepareMs)),
               responseTimeoutMs: prepareResponseTimeoutMs,
               retryDelayMs: 700,
               logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',
@@ -275,7 +295,7 @@
               },
             }, {
               timeoutMs: Math.min(12000, remainingMs),
-              transportRecoveryTimeoutMs: Math.min(prepareTimeoutMs, remainingMs),
+              transportRecoveryTimeoutMs: Math.min(transportRecoveryTimeoutMs, remainingMs),
               responseTimeoutMs: Math.min(12000, remainingMs),
               retryDelayMs: 700,
               logMessage: '步骤 4：认证页正在切换，等待页面重新就绪后继续检测...',

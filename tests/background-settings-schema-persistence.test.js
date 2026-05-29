@@ -119,6 +119,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunPreserveIssueLogsOnRestart',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
+  'signupVerificationReadyTimeoutSeconds',
+  'signupVerificationReadyMaxRounds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -134,6 +136,12 @@ const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
+const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
 const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   panelMode: 'cpa',
@@ -191,6 +199,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunPreserveIssueLogsOnRestart: false,
   signupIdentityRedirectTimeoutSeconds: 45,
   authContentScriptRecoveryTimeoutSeconds: 30,
+  signupVerificationReadyTimeoutSeconds: 60,
+  signupVerificationReadyMaxRounds: 5,
   sub2apiUrl: '',
   sub2apiEmail: '',
   sub2apiPassword: '',
@@ -363,7 +373,10 @@ function resolveSignupMethod(state = {}) {
 function resolveLegacyAutoStepDelaySeconds() { return undefined; }
 ${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
 ${extractFunction('normalizeAuthContentScriptRecoveryTimeoutSeconds')}
+${extractFunction('normalizeSignupVerificationReadyTimeoutSeconds')}
+${extractFunction('normalizeSignupVerificationReadyMaxRounds')}
 ${extractFunction('getAuthContentScriptRecoveryTimeoutMsForState')}
+${extractFunction('getSignupVerificationReadyConfigForState')}
 ${extractFunction('normalizePersistentSettingValue')}
 ${extractFunction('getSettingsSchemaApi')}
 ${extractFunction('projectSettingsSchemaView')}
@@ -381,6 +394,7 @@ return {
   getPersistedSettings,
   setPersistentSettings,
   getAuthContentScriptRecoveryTimeoutMsForState,
+  getSignupVerificationReadyConfigForState,
   getRequestedKeys: typeof getRequestedKeys === 'function' ? getRequestedKeys : () => [],
   getPersistedWrites: typeof getPersistedWrites === 'function' ? getPersistedWrites : () => [],
   getRemovedKeys: typeof getRemovedKeys === 'function' ? getRemovedKeys : () => [],
@@ -564,6 +578,96 @@ test('auth content script recovery timeout helper returns normalized millisecond
   assert.equal(api.getAuthContentScriptRecoveryTimeoutMsForState({
     authContentScriptRecoveryTimeoutSeconds: 'slow',
   }), 30000);
+});
+
+test('buildPersistentSettingsPayload persists signup verification ready wait config into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.signupVerificationReadyTimeoutSeconds, 60);
+  assert.equal(defaults.signupVerificationReadyMaxRounds, 5);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 60);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 5);
+
+  const flat = api.buildPersistentSettingsPayload({
+    signupVerificationReadyTimeoutSeconds: 90,
+    signupVerificationReadyMaxRounds: 8,
+  }, { fillDefaults: true });
+  assert.equal(flat.signupVerificationReadyTimeoutSeconds, 90);
+  assert.equal(flat.signupVerificationReadyMaxRounds, 8);
+  assert.equal(flat.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 90);
+  assert.equal(flat.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 8);
+
+  const clampedLow = api.buildPersistentSettingsPayload({
+    signupVerificationReadyTimeoutSeconds: 1,
+    signupVerificationReadyMaxRounds: 0,
+  }, { fillDefaults: true });
+  assert.equal(clampedLow.signupVerificationReadyTimeoutSeconds, 5);
+  assert.equal(clampedLow.signupVerificationReadyMaxRounds, 1);
+  assert.equal(clampedLow.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 5);
+  assert.equal(clampedLow.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 1);
+
+  const clampedHigh = api.buildPersistentSettingsPayload({
+    signupVerificationReadyTimeoutSeconds: 999,
+    signupVerificationReadyMaxRounds: 99,
+  }, { fillDefaults: true });
+  assert.equal(clampedHigh.signupVerificationReadyTimeoutSeconds, 300);
+  assert.equal(clampedHigh.signupVerificationReadyMaxRounds, 20);
+  assert.equal(clampedHigh.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 300);
+  assert.equal(clampedHigh.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 20);
+
+  const invalid = api.buildPersistentSettingsPayload({
+    signupVerificationReadyTimeoutSeconds: 'slow',
+    signupVerificationReadyMaxRounds: 'many',
+  }, { fillDefaults: true });
+  assert.equal(invalid.signupVerificationReadyTimeoutSeconds, 60);
+  assert.equal(invalid.signupVerificationReadyMaxRounds, 5);
+  assert.equal(invalid.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 60);
+  assert.equal(invalid.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 5);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            signupVerificationReadyTimeoutSeconds: 120,
+            signupVerificationReadyMaxRounds: 6,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.signupVerificationReadyTimeoutSeconds, 120);
+  assert.equal(nested.signupVerificationReadyMaxRounds, 6);
+  assert.equal(nested.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 120);
+  assert.equal(nested.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 6);
+});
+
+test('signup verification ready helper returns normalized total budget and rounds', () => {
+  const api = buildHarness();
+
+  assert.deepEqual(api.getSignupVerificationReadyConfigForState({
+    signupVerificationReadyTimeoutSeconds: 75,
+    signupVerificationReadyMaxRounds: 7,
+  }), {
+    timeoutSeconds: 75,
+    timeoutMs: 75000,
+    maxRounds: 7,
+  });
+  assert.deepEqual(api.getSignupVerificationReadyConfigForState({}), {
+    timeoutSeconds: 60,
+    timeoutMs: 60000,
+    maxRounds: 5,
+  });
+  assert.deepEqual(api.getSignupVerificationReadyConfigForState({
+    signupVerificationReadyTimeoutSeconds: 'slow',
+    signupVerificationReadyMaxRounds: 'many',
+  }), {
+    timeoutSeconds: 60,
+    timeoutMs: 60000,
+    maxRounds: 5,
+  });
 });
 
 test('buildPersistentSettingsPayload persists browser fingerprint switch level and language into settings schema', () => {

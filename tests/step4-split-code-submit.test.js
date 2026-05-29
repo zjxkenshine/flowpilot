@@ -933,7 +933,7 @@ ${extractFunction('prepareSignupVerificationFlow')}
 
 return {
   run() {
-    return prepareSignupVerificationFlow({ prepareLogLabel: '步骤 4 执行' }, 10000);
+    return prepareSignupVerificationFlow({ prepareLogLabel: '步骤 4 执行' });
   },
   snapshot() {
     return { logs, sleepCalls, targetChecks, readyState: document.readyState };
@@ -948,6 +948,10 @@ return {
   assert.equal(snapshot.readyState, 'complete');
   assert.equal(snapshot.sleepCalls >= 3, true);
   assert.equal(snapshot.targetChecks >= 1, true);
+  assert.equal(
+    snapshot.logs.some(({ message }) => /等待页面进入验证码阶段（第 1\/5 轮，本轮最多等待 12 秒，总超时 60 秒）/.test(message)),
+    true
+  );
 });
 
 test('prepareSignupVerificationFlow stops immediately when password page shows phone/password mismatch', async () => {
@@ -1226,6 +1230,8 @@ return {
       await prepareSignupVerificationFlow({
         password: 'Secret123!',
         prepareLogLabel: 'step 3 finalize',
+        signupVerificationReadyTimeoutSeconds: 11,
+        signupVerificationReadyMaxRounds: 5,
       }, 11000);
       return { threw: false, logs, clicks, now };
     } catch (error) {
@@ -1239,7 +1245,9 @@ return {
 
   assert.equal(result.threw, true);
   assert.equal(result.clicks.length, 0);
-  assert.equal(result.error.includes('0/3'), true);
+  assert.equal(result.error.includes('总超时 11 秒'), true);
+  assert.equal(result.error.includes('0/5'), true);
+  assert.equal(result.logs.some(({ message }) => /第 1\/5 轮，本轮最多等待 3 秒，总超时 11 秒/.test(message)), true);
   assert.equal(result.now >= 11000, true);
 });
 

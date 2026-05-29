@@ -1322,8 +1322,8 @@ test('signup flow helper finalizes step 3 submit by reusing signup verification 
     isSignupEmailVerificationPageUrl: () => false,
     isSignupPasswordPageUrl: () => true,
     reuseOrCreateTab: async () => 31,
-    sendToContentScriptResilient: async (_source, message) => {
-      messages.push({ type: 'send', message });
+    sendToContentScriptResilient: async (_source, message, options) => {
+      messages.push({ type: 'send', message, options });
       return { ready: true, retried: 1 };
     },
     setEmailState: async () => {},
@@ -1348,8 +1348,12 @@ test('signup flow helper finalizes step 3 submit by reusing signup verification 
       signupMethod: '',
       accountIdentifierType: '',
       phoneNumber: '',
+      signupVerificationReadyTimeoutSeconds: 60,
+      signupVerificationReadyMaxRounds: 5,
     },
   });
+  assert.equal(messages.find((item) => item.type === 'send')?.options.timeoutMs, 60000);
+  assert.equal(messages.find((item) => item.type === 'send')?.options.transportRecoveryTimeoutMs, 60000);
 });
 
 test('signup flow helper rewrites retryable step 3 finalize transport timeout into a Chinese error', async () => {
@@ -1421,9 +1425,19 @@ test('signup flow helper treats step 3 finalize reconnect error as ready when ta
     SIGNUP_ENTRY_URL: 'https://chatgpt.com/',
     SIGNUP_PAGE_INJECT_FILES: ['content/utils.js', 'content/signup-page.js'],
     waitForTabUrlMatch: async () => null,
+    getSignupVerificationReadyConfigForState: () => ({
+      timeoutSeconds: 60,
+      timeoutMs: 60000,
+      maxRounds: 5,
+    }),
   });
 
-  const result = await helpers.finalizeSignupPasswordSubmitInTab(31, 'Secret123!', 3);
+  const result = await helpers.finalizeSignupPasswordSubmitInTab(31, 'Secret123!', 3, {
+    state: {
+      signupVerificationReadyTimeoutSeconds: 60,
+      signupVerificationReadyMaxRounds: 5,
+    },
+  });
 
   assert.deepStrictEqual(result, {
     ready: true,

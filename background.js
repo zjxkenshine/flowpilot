@@ -742,6 +742,12 @@ const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
+const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -1627,6 +1633,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
   signupIdentityRedirectTimeoutSeconds: DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS,
   authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
+  signupVerificationReadyTimeoutSeconds: DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS,
+  signupVerificationReadyMaxRounds: DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS,
   step6CookieCleanupEnabled: false,
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
@@ -1828,6 +1836,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'registrationStageWaitSeconds',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
+  'signupVerificationReadyTimeoutSeconds',
+  'signupVerificationReadyMaxRounds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2061,6 +2071,54 @@ function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFA
   return Math.min(
     AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS,
     Math.max(AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupVerificationReadyTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS,
+    Math.max(SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX,
+    Math.max(SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN, Math.floor(numeric))
   );
 }
 
@@ -4460,6 +4518,16 @@ function normalizePersistentSettingValue(key, value) {
         value,
         PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
       );
+    case 'signupVerificationReadyTimeoutSeconds':
+      return normalizeSignupVerificationReadyTimeoutSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+      );
+    case 'signupVerificationReadyMaxRounds':
+      return normalizeSignupVerificationReadyMaxRounds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
+      );
     case 'verificationResendCount':
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
@@ -5349,6 +5417,8 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
   assignIfUpdated('signupIdentityRedirectTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupIdentityRedirectTimeoutSeconds']);
   assignIfUpdated('authContentScriptRecoveryTimeoutSeconds', ['flows', 'openai', 'autoRun', 'authContentScriptRecoveryTimeoutSeconds']);
+  assignIfUpdated('signupVerificationReadyTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupVerificationReadyTimeoutSeconds']);
+  assignIfUpdated('signupVerificationReadyMaxRounds', ['flows', 'openai', 'autoRun', 'signupVerificationReadyMaxRounds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5509,6 +5579,14 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
           authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
             prevState?.authContentScriptRecoveryTimeoutSeconds,
             PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
+          ),
+          signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
+            prevState?.signupVerificationReadyTimeoutSeconds,
+            PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+          ),
+          signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
+            prevState?.signupVerificationReadyMaxRounds,
+            PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
           ),
           ...(normalizedStepExecutionRangeByFlow.openai
             ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }
@@ -13104,6 +13182,22 @@ function getAuthContentScriptRecoveryTimeoutMsForState(state = {}) {
   ) * 1000;
 }
 
+function getSignupVerificationReadyConfigForState(state = {}) {
+  const timeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+    state?.signupVerificationReadyTimeoutSeconds,
+    PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+  );
+  const maxRounds = normalizeSignupVerificationReadyMaxRounds(
+    state?.signupVerificationReadyMaxRounds,
+    PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
+  );
+  return {
+    timeoutSeconds,
+    timeoutMs: timeoutSeconds * 1000,
+    maxRounds,
+  };
+}
+
 function notifyNodeComplete(nodeId, payload) {
   const normalizedNodeId = String(nodeId || '').trim();
   const waiter = nodeWaiters.get(normalizedNodeId);
@@ -16592,6 +16686,7 @@ const signupFlowHelpers = self.MultiPageSignupFlowHelpers?.createSignupFlowHelpe
   SIGNUP_PAGE_INJECT_FILES,
   waitForTabStableComplete,
   waitForTabUrlMatch,
+  getSignupVerificationReadyConfigForState,
 });
 const openAiMailRules = self.MultiPageOpenAiMailRules?.createOpenAiMailRules({
   getHotmailVerificationRequestTimestamp,
@@ -16787,6 +16882,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   phoneVerificationHelpers,
   resolveSignupMethod,
   getAuthContentScriptRecoveryTimeoutMsForState,
+  getSignupVerificationReadyConfigForState,
 });
 const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
   addLog,
@@ -17316,6 +17412,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
         phoneNumber: currentState.signupPhoneNumber
           || (String(currentState.accountIdentifierType || '').trim().toLowerCase() === 'phone' ? currentState.accountIdentifier : '')
           || '',
+        state: currentState,
       }
     );
   },

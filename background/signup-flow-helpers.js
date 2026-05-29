@@ -29,7 +29,34 @@
       SIGNUP_PAGE_INJECT_FILES,
       waitForTabStableComplete = null,
       waitForTabUrlMatch,
+      getSignupVerificationReadyConfigForState = null,
     } = deps;
+
+    function resolveSignupVerificationReadyConfig(options = {}) {
+      const fallback = {
+        timeoutSeconds: 60,
+        timeoutMs: 60000,
+        maxRounds: 5,
+      };
+      const sourceState = options.state || options.currentState || {};
+      const configured = typeof getSignupVerificationReadyConfigForState === 'function'
+        ? getSignupVerificationReadyConfigForState(sourceState)
+        : null;
+      const rawTimeoutSeconds = options.signupVerificationReadyTimeoutSeconds
+        ?? configured?.timeoutSeconds
+        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
+        ?? fallback.timeoutSeconds;
+      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(rawTimeoutSeconds) || fallback.timeoutSeconds)));
+      const rawMaxRounds = options.signupVerificationReadyMaxRounds
+        ?? configured?.maxRounds
+        ?? fallback.maxRounds;
+      const maxRounds = Math.min(20, Math.max(1, Math.floor(Number(rawMaxRounds) || fallback.maxRounds)));
+      return {
+        timeoutSeconds,
+        timeoutMs: timeoutSeconds * 1000,
+        maxRounds,
+      };
+    }
 
     async function waitForSignupEntryTabToSettle(tabId, step = 1) {
       if (step !== 2 || !Number.isInteger(tabId) || typeof waitForTabStableComplete !== 'function') {
@@ -301,6 +328,7 @@
         return null;
       }
 
+      const readyConfig = resolveSignupVerificationReadyConfig(options);
       let result;
       try {
         result = await sendToContentScriptResilient('signup-page', {
@@ -314,9 +342,12 @@
             signupMethod: options.signupMethod || '',
             accountIdentifierType: options.accountIdentifierType || '',
             phoneNumber: options.phoneNumber || '',
+            signupVerificationReadyTimeoutSeconds: readyConfig.timeoutSeconds,
+            signupVerificationReadyMaxRounds: readyConfig.maxRounds,
           },
         }, {
-          timeoutMs: 30000,
+          timeoutMs: readyConfig.timeoutMs,
+          transportRecoveryTimeoutMs: readyConfig.timeoutMs,
           retryDelayMs: 700,
           logMessage: `步骤 ${step}：密码已提交，正在确认是否进入下一页面，必要时自动恢复重试页...`,
         });

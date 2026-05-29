@@ -572,6 +572,8 @@ const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay
 const inputRegistrationStageWaitSeconds = document.getElementById('input-registration-stage-wait-seconds');
 const inputSignupIdentityRedirectTimeoutSeconds = document.getElementById('input-signup-identity-redirect-timeout-seconds');
 const inputAuthContentScriptRecoveryTimeoutSeconds = document.getElementById('input-auth-content-script-recovery-timeout-seconds');
+const inputSignupVerificationReadyTimeoutSeconds = document.getElementById('input-signup-verification-ready-timeout-seconds');
+const inputSignupVerificationReadyMaxRounds = document.getElementById('input-signup-verification-ready-max-rounds');
 const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
 const inputOAuthOpenAfterRefreshWaitSeconds = document.getElementById('input-oauth-open-after-refresh-wait-seconds');
 const rowStepExecutionRange = document.getElementById('row-step-execution-range');
@@ -825,6 +827,12 @@ const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MIN_SECONDS = 5;
 const AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_MAX_SECONDS = 180;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
+const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -4559,6 +4567,54 @@ function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFA
   );
 }
 
+function normalizeSignupVerificationReadyTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_TIMEOUT_MAX_SECONDS,
+    Math.max(SIGNUP_VERIFICATION_READY_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX,
+    Math.max(SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
 function normalizeVerificationResendCount(value, fallback) {
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
@@ -4591,6 +4647,14 @@ function formatSignupIdentityRedirectTimeoutInputValue(value) {
 
 function formatAuthContentScriptRecoveryTimeoutInputValue(value) {
   return String(normalizeAuthContentScriptRecoveryTimeoutSeconds(value));
+}
+
+function formatSignupVerificationReadyTimeoutInputValue(value) {
+  return String(normalizeSignupVerificationReadyTimeoutSeconds(value));
+}
+
+function formatSignupVerificationReadyMaxRoundsInputValue(value) {
+  return String(normalizeSignupVerificationReadyMaxRounds(value));
 }
 
 function normalizeCustomEmailPoolEntries(value = '') {
@@ -6150,6 +6214,14 @@ function collectSettingsPayload() {
     authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
       inputAuthContentScriptRecoveryTimeoutSeconds?.value,
       DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS
+    ),
+    signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
+      inputSignupVerificationReadyTimeoutSeconds?.value,
+      DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS
+    ),
+    signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
+      inputSignupVerificationReadyMaxRounds?.value,
+      DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS
     ),
     oauthFlowTimeoutEnabled: typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
@@ -13321,6 +13393,16 @@ function applySettingsState(state) {
   if (typeof inputAuthContentScriptRecoveryTimeoutSeconds !== 'undefined' && inputAuthContentScriptRecoveryTimeoutSeconds) {
     inputAuthContentScriptRecoveryTimeoutSeconds.value = formatAuthContentScriptRecoveryTimeoutInputValue(
       state?.authContentScriptRecoveryTimeoutSeconds
+    );
+  }
+  if (typeof inputSignupVerificationReadyTimeoutSeconds !== 'undefined' && inputSignupVerificationReadyTimeoutSeconds) {
+    inputSignupVerificationReadyTimeoutSeconds.value = formatSignupVerificationReadyTimeoutInputValue(
+      state?.signupVerificationReadyTimeoutSeconds
+    );
+  }
+  if (typeof inputSignupVerificationReadyMaxRounds !== 'undefined' && inputSignupVerificationReadyMaxRounds) {
+    inputSignupVerificationReadyMaxRounds.value = formatSignupVerificationReadyMaxRoundsInputValue(
+      state?.signupVerificationReadyMaxRounds
     );
   }
   if (typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
@@ -20730,6 +20812,22 @@ function syncAuthContentScriptRecoveryTimeoutInputs() {
   }
 }
 
+function syncSignupVerificationReadyTimeoutInputs() {
+  if (typeof inputSignupVerificationReadyTimeoutSeconds !== 'undefined' && inputSignupVerificationReadyTimeoutSeconds) {
+    inputSignupVerificationReadyTimeoutSeconds.value = formatSignupVerificationReadyTimeoutInputValue(
+      inputSignupVerificationReadyTimeoutSeconds.value
+    );
+  }
+}
+
+function syncSignupVerificationReadyMaxRoundsInputs() {
+  if (typeof inputSignupVerificationReadyMaxRounds !== 'undefined' && inputSignupVerificationReadyMaxRounds) {
+    inputSignupVerificationReadyMaxRounds.value = formatSignupVerificationReadyMaxRoundsInputValue(
+      inputSignupVerificationReadyMaxRounds.value
+    );
+  }
+}
+
 inputAutoStepDelaySeconds.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -20763,6 +20861,24 @@ inputAuthContentScriptRecoveryTimeoutSeconds?.addEventListener('input', () => {
 });
 inputAuthContentScriptRecoveryTimeoutSeconds?.addEventListener('blur', () => {
   syncAuthContentScriptRecoveryTimeoutInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputSignupVerificationReadyTimeoutSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupVerificationReadyTimeoutSeconds?.addEventListener('blur', () => {
+  syncSignupVerificationReadyTimeoutInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputSignupVerificationReadyMaxRounds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupVerificationReadyMaxRounds?.addEventListener('blur', () => {
+  syncSignupVerificationReadyMaxRoundsInputs();
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -22060,6 +22176,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       ) {
         inputAuthContentScriptRecoveryTimeoutSeconds.value = formatAuthContentScriptRecoveryTimeoutInputValue(
           message.payload.authContentScriptRecoveryTimeoutSeconds
+        );
+      }
+      if (
+        message.payload.signupVerificationReadyTimeoutSeconds !== undefined
+        && typeof inputSignupVerificationReadyTimeoutSeconds !== 'undefined'
+        && inputSignupVerificationReadyTimeoutSeconds
+      ) {
+        inputSignupVerificationReadyTimeoutSeconds.value = formatSignupVerificationReadyTimeoutInputValue(
+          message.payload.signupVerificationReadyTimeoutSeconds
+        );
+      }
+      if (
+        message.payload.signupVerificationReadyMaxRounds !== undefined
+        && typeof inputSignupVerificationReadyMaxRounds !== 'undefined'
+        && inputSignupVerificationReadyMaxRounds
+      ) {
+        inputSignupVerificationReadyMaxRounds.value = formatSignupVerificationReadyMaxRoundsInputValue(
+          message.payload.signupVerificationReadyMaxRounds
         );
       }
       if (message.payload.oauthFlowTimeoutEnabled !== undefined && typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {

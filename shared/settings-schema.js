@@ -68,6 +68,32 @@
     return Math.min(180, Math.max(5, Math.floor(numeric)));
   }
 
+  function normalizeSignupVerificationReadyTimeoutSeconds(value, fallback = 60) {
+    const fallbackNumber = Math.min(300, Math.max(5, Math.floor(Number(fallback) || 60)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(300, Math.max(5, Math.floor(numeric)));
+  }
+
+  function normalizeSignupVerificationReadyMaxRounds(value, fallback = 5) {
+    const fallbackNumber = Math.min(20, Math.max(1, Math.floor(Number(fallback) || 5)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(20, Math.max(1, Math.floor(numeric)));
+  }
+
   function createSettingsSchema(deps = {}) {
     const rootScope = typeof self !== 'undefined' ? self : globalThis;
     const flowRegistry = deps.flowRegistry || rootScope.MultiPageFlowRegistry || {};
@@ -375,6 +401,8 @@
               registrationStageWaitSeconds: 30,
               signupIdentityRedirectTimeoutSeconds: 45,
               authContentScriptRecoveryTimeoutSeconds: 30,
+              signupVerificationReadyTimeoutSeconds: 60,
+              signupVerificationReadyMaxRounds: 5,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -872,6 +900,18 @@
                 ?? defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds,
                 defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds
               ),
+              signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
+                input?.signupVerificationReadyTimeoutSeconds
+                ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyTimeoutSeconds
+                ?? defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds,
+                defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
+              ),
+              signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
+                input?.signupVerificationReadyMaxRounds
+                ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyMaxRounds
+                ?? defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds,
+                defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
                   ?? nested?.flows?.openai?.autoRun?.stepExecutionRange
@@ -1060,6 +1100,8 @@
       next.registrationStageWaitSeconds = openaiState.autoRun.registrationStageWaitSeconds;
       next.signupIdentityRedirectTimeoutSeconds = openaiState.autoRun.signupIdentityRedirectTimeoutSeconds;
       next.authContentScriptRecoveryTimeoutSeconds = openaiState.autoRun.authContentScriptRecoveryTimeoutSeconds;
+      next.signupVerificationReadyTimeoutSeconds = openaiState.autoRun.signupVerificationReadyTimeoutSeconds;
+      next.signupVerificationReadyMaxRounds = openaiState.autoRun.signupVerificationReadyMaxRounds;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

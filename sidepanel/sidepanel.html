@@ -1041,6 +1041,24 @@
               <span class="data-unit">秒</span>
             </div>
           </div>
+          <div class="setting-group setting-group-secondary signup-verification-ready-timeout-setting auto-retry-setting-cell">
+            <span class="setting-caption">验证码页就绪超时</span>
+            <div class="setting-controls">
+              <input type="number" id="input-signup-verification-ready-timeout-seconds"
+                class="data-input auto-delay-input" value="60" min="5" max="300" step="1"
+                title="步骤 3 收尾和步骤 4 等待进入注册验证码阶段的总超时秒数" />
+              <span class="data-unit">秒</span>
+            </div>
+          </div>
+          <div class="setting-group setting-group-secondary signup-verification-ready-rounds-setting auto-retry-setting-cell">
+            <span class="setting-caption">验证码页等待轮次</span>
+            <div class="setting-controls">
+              <input type="number" id="input-signup-verification-ready-max-rounds"
+                class="data-input auto-delay-input" value="5" min="1" max="20" step="1"
+                title="验证码页就绪总超时内最多分几轮等待和恢复" />
+              <span class="data-unit">轮</span>
+            </div>
+          </div>
           <div class="setting-group setting-group-secondary auto-retry-setting-cell">
             <span class="setting-caption">PAYPAL回调自动重试</span>
             <label class="toggle-switch" for="input-auto-run-retry-paypal-callback"

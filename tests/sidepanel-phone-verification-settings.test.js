@@ -1192,6 +1192,8 @@ const inputAutoStepDelaySeconds = { value: '' };
 const inputRegistrationStageWaitSeconds = { value: '30' };
 const inputSignupIdentityRedirectTimeoutSeconds = { value: '45' };
 const inputAuthContentScriptRecoveryTimeoutSeconds = { value: '30' };
+const inputSignupVerificationReadyTimeoutSeconds = { value: '60' };
+const inputSignupVerificationReadyMaxRounds = { value: '5' };
 const inputPhoneVerificationEnabled = { checked: true };
 const inputPhoneSignupPhonePrefixedEmail = { checked: false };
 const inputFreePhoneReuseEnabled = { checked: true };
@@ -1278,6 +1280,8 @@ const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
 const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
+const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
+const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
@@ -1322,6 +1326,8 @@ function normalizeAutoStepDelaySeconds(value) { return value === '' ? null : Num
 function normalizeRegistrationStageWaitSeconds(value, fallback = DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS) { return Number(value) || fallback; }
 function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS) { return Number(value) || fallback; }
 function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS) { return Number(value) || fallback; }
+function normalizeSignupVerificationReadyTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS) { return Number(value) || fallback; }
+function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS) { return Number(value) || fallback; }
 function normalizeVerificationResendCount(value, fallback) { return Number(value) || fallback; }
 function normalizePlusAccountAccessStrategy(value = '') { return String(value || '').trim().toLowerCase() === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION : PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH; }
 ${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}
@@ -1395,6 +1401,8 @@ return { collectSettingsPayload };
   assert.deepStrictEqual(payload.phoneSmsProviderOrder, ['nexsms', '5sim']);
   assert.equal(payload.accountRunHistoryTextEnabled, true);
   assert.equal(payload.accountRunHistoryHelperBaseUrl, 'http://127.0.0.1:17373');
+  assert.equal(payload.signupVerificationReadyTimeoutSeconds, 60);
+  assert.equal(payload.signupVerificationReadyMaxRounds, 5);
   assert.equal(payload.heroSmsApiKey, 'demo-key');
   assert.equal(payload.fiveSimApiKey, 'five-sim-key');
   assert.deepStrictEqual(payload.fiveSimCountryOrder, ['thailand', 'vietnam']);
