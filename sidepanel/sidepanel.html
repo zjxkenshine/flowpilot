@@ -84,6 +84,20 @@
     <span class="auto-run-ad-badge auto-run-ad-badge--end">售后保障</span>
   </div>
 
+  <div class="update-card" hidden aria-hidden="true">
+    <div class="update-card-header">
+      <div class="update-card-copy">
+        <span id="update-card-version" class="update-card-version"></span>
+        <span id="update-card-summary" class="update-card-summary"></span>
+      </div>
+      <div class="update-card-actions">
+        <button id="btn-open-release" class="btn btn-primary btn-sm" type="button" hidden>前往更新</button>
+        <button id="btn-ignore-release" class="btn btn-ghost btn-sm" type="button" hidden>忽略</button>
+      </div>
+    </div>
+    <p class="update-card-reminder">一定请先导出配置，再执行更新</p>
+  </div>
+
   <div id="contribution-update-layer" class="contribution-update-layer" hidden>
     <div id="contribution-update-hint" class="contribution-update-hint" aria-live="polite" hidden>
       <p id="contribution-update-hint-text" class="contribution-update-hint-text">
@@ -1041,12 +1055,12 @@
               <span class="data-unit">秒</span>
             </div>
           </div>
-          <div class="setting-group setting-group-secondary signup-verification-ready-timeout-setting auto-retry-setting-cell">
-            <span class="setting-caption">验证码页就绪超时</span>
+          <div class="setting-group setting-group-secondary signup-verification-ready-round-wait-setting auto-retry-setting-cell">
+            <span class="setting-caption">验证码页每轮等待</span>
             <div class="setting-controls">
-              <input type="number" id="input-signup-verification-ready-timeout-seconds"
-                class="data-input auto-delay-input" value="60" min="5" max="300" step="1"
-                title="步骤 3 收尾和步骤 4 等待进入注册验证码阶段的总超时秒数" />
+              <input type="number" id="input-signup-verification-ready-round-wait-seconds"
+                class="data-input auto-delay-input" value="12" min="1" max="300" step="1"
+                title="步骤 3 收尾和步骤 4 等待进入注册验证码阶段时，每一轮最多等待的秒数" />
               <span class="data-unit">秒</span>
             </div>
           </div>
@@ -1055,8 +1069,26 @@
             <div class="setting-controls">
               <input type="number" id="input-signup-verification-ready-max-rounds"
                 class="data-input auto-delay-input" value="5" min="1" max="20" step="1"
-                title="验证码页就绪总超时内最多分几轮等待和恢复" />
+                title="验证码页就绪最多分几轮等待和恢复" />
               <span class="data-unit">轮</span>
+            </div>
+          </div>
+          <div class="setting-group setting-group-secondary step5-submit-result-rounds-setting auto-retry-setting-cell">
+            <span class="setting-caption">资料提交判断轮次</span>
+            <div class="setting-controls">
+              <input type="number" id="input-step5-profile-submit-result-max-rounds"
+                class="data-input auto-delay-input" value="12" min="1" max="60" step="1"
+                title="步骤 5 资料提交后，最多检查几轮跳转、重试页或最终状态" />
+              <span class="data-unit">轮</span>
+            </div>
+          </div>
+          <div class="setting-group setting-group-secondary step5-submit-result-round-wait-setting auto-retry-setting-cell">
+            <span class="setting-caption">资料提交每轮等待</span>
+            <div class="setting-controls">
+              <input type="number" id="input-step5-profile-submit-result-round-wait-seconds"
+                class="data-input auto-delay-input" value="10" min="1" max="120" step="1"
+                title="步骤 5 资料提交后，每轮等待跳转或最终状态的秒数" />
+              <span class="data-unit">秒</span>
             </div>
           </div>
           <div class="setting-group setting-group-secondary auto-retry-setting-cell">
@@ -2270,6 +2302,20 @@
                   <div class="setting-controls">
                     <input type="number" id="input-phone-code-poll-max-rounds" class="data-input auto-delay-input" value="4" min="1" max="120" step="1" title="每个验证码等待窗口的基础轮询次数；如果低于等待时长和轮询间隔所需次数，会自动补足，避免提前结束" />
                     <span class="data-unit">次</span>
+                  </div>
+                </div>
+                <div id="row-signup-phone-submit-result-max-rounds" class="hero-sms-settings-cell" style="display:none;">
+                  <span class="hero-sms-settings-caption">手机码提交判断轮次</span>
+                  <div class="setting-controls">
+                    <input type="number" id="input-signup-phone-verification-submit-result-max-rounds" class="data-input auto-delay-input" value="6" min="1" max="60" step="1" title="手机号注册步骤 4 提交短信验证码后，最多检查几轮资料页、邮箱验证页、错误页或重试页" />
+                    <span class="data-unit">轮</span>
+                  </div>
+                </div>
+                <div id="row-signup-phone-submit-result-round-wait-seconds" class="hero-sms-settings-cell" style="display:none;">
+                  <span class="hero-sms-settings-caption">手机码提交每轮等待</span>
+                  <div class="setting-controls">
+                    <input type="number" id="input-signup-phone-verification-submit-result-round-wait-seconds" class="data-input auto-delay-input" value="5" min="1" max="120" step="1" title="手机号注册步骤 4 提交短信验证码后，每轮等待页面反馈的秒数" />
+                    <span class="data-unit">秒</span>
                   </div>
                 </div>
                 <div id="row-free-phone-reuse-enabled" class="hero-sms-settings-cell hero-sms-reuse-cell" style="display:none;">

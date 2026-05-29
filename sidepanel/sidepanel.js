@@ -574,6 +574,9 @@ const inputSignupIdentityRedirectTimeoutSeconds = document.getElementById('input
 const inputAuthContentScriptRecoveryTimeoutSeconds = document.getElementById('input-auth-content-script-recovery-timeout-seconds');
 const inputSignupVerificationReadyTimeoutSeconds = document.getElementById('input-signup-verification-ready-timeout-seconds');
 const inputSignupVerificationReadyMaxRounds = document.getElementById('input-signup-verification-ready-max-rounds');
+const inputSignupVerificationReadyRoundWaitSeconds = document.getElementById('input-signup-verification-ready-round-wait-seconds');
+const inputStep5ProfileSubmitResultMaxRounds = document.getElementById('input-step5-profile-submit-result-max-rounds');
+const inputStep5ProfileSubmitResultRoundWaitSeconds = document.getElementById('input-step5-profile-submit-result-round-wait-seconds');
 const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
 const inputOAuthOpenAfterRefreshWaitSeconds = document.getElementById('input-oauth-open-after-refresh-wait-seconds');
 const rowStepExecutionRange = document.getElementById('row-step-execution-range');
@@ -627,6 +630,8 @@ const rowPhoneCodeWaitSeconds = document.getElementById('row-phone-code-wait-sec
 const rowPhoneCodeTimeoutWindows = document.getElementById('row-phone-code-timeout-windows');
 const rowPhoneCodePollIntervalSeconds = document.getElementById('row-phone-code-poll-interval-seconds');
 const rowPhoneCodePollMaxRounds = document.getElementById('row-phone-code-poll-max-rounds');
+const rowSignupPhoneVerificationSubmitResultMaxRounds = document.getElementById('row-signup-phone-submit-result-max-rounds');
+const rowSignupPhoneVerificationSubmitResultRoundWaitSeconds = document.getElementById('row-signup-phone-submit-result-round-wait-seconds');
 const rowFreePhoneReuseEnabled = document.getElementById('row-free-phone-reuse-enabled');
 const rowFreePhoneReuseAutoEnabled = document.getElementById('row-free-phone-reuse-auto-enabled');
 const rowFreeReusablePhone = document.getElementById('row-free-reusable-phone');
@@ -649,6 +654,8 @@ const inputPhoneCodeWaitSeconds = document.getElementById('input-phone-code-wait
 const inputPhoneCodeTimeoutWindows = document.getElementById('input-phone-code-timeout-windows');
 const inputPhoneCodePollIntervalSeconds = document.getElementById('input-phone-code-poll-interval-seconds');
 const inputPhoneCodePollMaxRounds = document.getElementById('input-phone-code-poll-max-rounds');
+const inputSignupPhoneVerificationSubmitResultMaxRounds = document.getElementById('input-signup-phone-verification-submit-result-max-rounds');
+const inputSignupPhoneVerificationSubmitResultRoundWaitSeconds = document.getElementById('input-signup-phone-verification-submit-result-round-wait-seconds');
 const inputHeroSmsReuseEnabled = document.getElementById('input-hero-sms-reuse-enabled');
 const inputFreePhoneReuseEnabled = document.getElementById('input-free-phone-reuse-enabled');
 const inputFreePhoneReuseAutoEnabled = document.getElementById('input-free-phone-reuse-auto-enabled');
@@ -833,6 +840,21 @@ const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
 const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS = 12;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS = 6;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 5;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS = 12;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 10;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -4615,6 +4637,126 @@ function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIG
   );
 }
 
+function normalizeSignupVerificationReadyRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX,
+    Math.max(SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupPhoneVerificationSubmitResultMaxRounds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(
+      SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeStep5ProfileSubmitResultMaxRounds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(
+      STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeStep5ProfileSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
+  );
+}
+
 function normalizeVerificationResendCount(value, fallback) {
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
@@ -4655,6 +4797,26 @@ function formatSignupVerificationReadyTimeoutInputValue(value) {
 
 function formatSignupVerificationReadyMaxRoundsInputValue(value) {
   return String(normalizeSignupVerificationReadyMaxRounds(value));
+}
+
+function formatSignupVerificationReadyRoundWaitInputValue(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS) {
+  return String(normalizeSignupVerificationReadyRoundWaitSeconds(value, fallback));
+}
+
+function formatSignupPhoneVerificationSubmitResultMaxRoundsInputValue(value) {
+  return String(normalizeSignupPhoneVerificationSubmitResultMaxRounds(value));
+}
+
+function formatSignupPhoneVerificationSubmitResultRoundWaitInputValue(value) {
+  return String(normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value));
+}
+
+function formatStep5ProfileSubmitResultMaxRoundsInputValue(value) {
+  return String(normalizeStep5ProfileSubmitResultMaxRounds(value));
+}
+
+function formatStep5ProfileSubmitResultRoundWaitInputValue(value) {
+  return String(normalizeStep5ProfileSubmitResultRoundWaitSeconds(value));
 }
 
 function normalizeCustomEmailPoolEntries(value = '') {
@@ -5418,6 +5580,98 @@ function collectSettingsPayload() {
   const defaultPhoneCodePollMaxRounds = typeof DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS !== 'undefined'
     ? DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
     : 12;
+  const normalizeSettingsIntegerInput = (value, fallback, min, max) => {
+    const fallbackNumeric = Number(fallback);
+    const fallbackNumber = Math.min(
+      max,
+      Math.max(min, Number.isFinite(fallbackNumeric) ? Math.floor(fallbackNumeric) : min)
+    );
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  const defaultSignupVerificationReadyTimeoutSeconds = typeof DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS !== 'undefined'
+    ? DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS
+    : 60;
+  const defaultSignupVerificationReadyMaxRounds = typeof DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS !== 'undefined'
+    ? DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS
+    : 5;
+  const defaultSignupVerificationReadyRoundWaitSeconds = typeof DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS
+    : 12;
+  const defaultSignupPhoneVerificationSubmitResultMaxRounds = typeof DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS !== 'undefined'
+    ? DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS
+    : 6;
+  const defaultSignupPhoneVerificationSubmitResultRoundWaitSeconds = typeof DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS
+    : 5;
+  const defaultStep5ProfileSubmitResultMaxRounds = typeof DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS !== 'undefined'
+    ? DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS
+    : 12;
+  const defaultStep5ProfileSubmitResultRoundWaitSeconds = typeof DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS
+    : 10;
+  const normalizeSignupVerificationReadyTimeoutSecondsForPayload = typeof normalizeSignupVerificationReadyTimeoutSeconds === 'function'
+    ? normalizeSignupVerificationReadyTimeoutSeconds
+    : ((value, fallback = defaultSignupVerificationReadyTimeoutSeconds) => (
+      normalizeSettingsIntegerInput(value, fallback, 5, 300)
+    ));
+  const normalizeSignupVerificationReadyMaxRoundsForPayload = typeof normalizeSignupVerificationReadyMaxRounds === 'function'
+    ? normalizeSignupVerificationReadyMaxRounds
+    : ((value, fallback = defaultSignupVerificationReadyMaxRounds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 20)
+    ));
+  const normalizeSignupVerificationReadyRoundWaitSecondsForPayload = typeof normalizeSignupVerificationReadyRoundWaitSeconds === 'function'
+    ? normalizeSignupVerificationReadyRoundWaitSeconds
+    : ((value, fallback = defaultSignupVerificationReadyRoundWaitSeconds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 300)
+    ));
+  const normalizeSignupPhoneVerificationSubmitResultMaxRoundsForPayload = typeof normalizeSignupPhoneVerificationSubmitResultMaxRounds === 'function'
+    ? normalizeSignupPhoneVerificationSubmitResultMaxRounds
+    : ((value, fallback = defaultSignupPhoneVerificationSubmitResultMaxRounds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 60)
+    ));
+  const normalizeSignupPhoneVerificationSubmitResultRoundWaitSecondsForPayload = typeof normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds === 'function'
+    ? normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds
+    : ((value, fallback = defaultSignupPhoneVerificationSubmitResultRoundWaitSeconds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 120)
+    ));
+  const normalizeStep5ProfileSubmitResultMaxRoundsForPayload = typeof normalizeStep5ProfileSubmitResultMaxRounds === 'function'
+    ? normalizeStep5ProfileSubmitResultMaxRounds
+    : ((value, fallback = defaultStep5ProfileSubmitResultMaxRounds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 60)
+    ));
+  const normalizeStep5ProfileSubmitResultRoundWaitSecondsForPayload = typeof normalizeStep5ProfileSubmitResultRoundWaitSeconds === 'function'
+    ? normalizeStep5ProfileSubmitResultRoundWaitSeconds
+    : ((value, fallback = defaultStep5ProfileSubmitResultRoundWaitSeconds) => (
+      normalizeSettingsIntegerInput(value, fallback, 1, 120)
+    ));
+  const normalizeRegistrationStageWaitSecondsForPayload = typeof normalizeRegistrationStageWaitSeconds === 'function'
+    ? normalizeRegistrationStageWaitSeconds
+    : ((value, fallback = 30) => normalizeSettingsIntegerInput(value, fallback, 0, 600));
+  const normalizeSignupIdentityRedirectTimeoutSecondsForPayload = typeof normalizeSignupIdentityRedirectTimeoutSeconds === 'function'
+    ? normalizeSignupIdentityRedirectTimeoutSeconds
+    : ((value, fallback = 45) => normalizeSettingsIntegerInput(value, fallback, 5, 300));
+  const normalizeAuthContentScriptRecoveryTimeoutSecondsForPayload = typeof normalizeAuthContentScriptRecoveryTimeoutSeconds === 'function'
+    ? normalizeAuthContentScriptRecoveryTimeoutSeconds
+    : ((value, fallback = 30) => normalizeSettingsIntegerInput(value, fallback, 5, 180));
+  const defaultRegistrationStageWaitSeconds = typeof DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS !== 'undefined'
+    ? DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS
+    : 30;
+  const defaultSignupIdentityRedirectTimeoutSeconds = typeof DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS !== 'undefined'
+    ? DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS
+    : 45;
+  const defaultAuthContentScriptRecoveryTimeoutSeconds = typeof DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS !== 'undefined'
+    ? DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS
+    : 30;
   const selectedSignupMethod = typeof getSelectedSignupMethod === 'function'
     ? getSelectedSignupMethod()
     : (
@@ -5627,6 +5881,54 @@ function collectSettingsPayload() {
       latestState?.phoneCodePollMaxRounds
     )
     : defaultPhoneCodePollMaxRounds;
+  const signupPhoneVerificationSubmitResultMaxRoundsValue = typeof inputSignupPhoneVerificationSubmitResultMaxRounds !== 'undefined' && inputSignupPhoneVerificationSubmitResultMaxRounds
+    ? normalizeSignupPhoneVerificationSubmitResultMaxRoundsForPayload(
+      inputSignupPhoneVerificationSubmitResultMaxRounds.value,
+      latestState?.signupPhoneVerificationSubmitResultMaxRounds
+    )
+    : defaultSignupPhoneVerificationSubmitResultMaxRounds;
+  const signupPhoneVerificationSubmitResultRoundWaitSecondsValue = typeof inputSignupPhoneVerificationSubmitResultRoundWaitSeconds !== 'undefined' && inputSignupPhoneVerificationSubmitResultRoundWaitSeconds
+    ? normalizeSignupPhoneVerificationSubmitResultRoundWaitSecondsForPayload(
+      inputSignupPhoneVerificationSubmitResultRoundWaitSeconds.value,
+      latestState?.signupPhoneVerificationSubmitResultRoundWaitSeconds
+    )
+    : defaultSignupPhoneVerificationSubmitResultRoundWaitSeconds;
+  const signupVerificationReadyMaxRoundsValue = normalizeSignupVerificationReadyMaxRoundsForPayload(
+    typeof inputSignupVerificationReadyMaxRounds !== 'undefined' && inputSignupVerificationReadyMaxRounds
+      ? inputSignupVerificationReadyMaxRounds.value
+      : undefined,
+    latestState?.signupVerificationReadyMaxRounds ?? defaultSignupVerificationReadyMaxRounds
+  );
+  const legacySignupVerificationReadyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSecondsForPayload(
+    latestState?.signupVerificationReadyTimeoutSeconds,
+    defaultSignupVerificationReadyTimeoutSeconds
+  );
+  const signupVerificationReadyRoundWaitFallback = Math.max(
+    1,
+    Math.ceil(legacySignupVerificationReadyTimeoutSeconds / Math.max(1, signupVerificationReadyMaxRoundsValue))
+  );
+  const signupVerificationReadyRoundWaitSecondsValue = normalizeSignupVerificationReadyRoundWaitSecondsForPayload(
+    typeof inputSignupVerificationReadyRoundWaitSeconds !== 'undefined' && inputSignupVerificationReadyRoundWaitSeconds
+      ? inputSignupVerificationReadyRoundWaitSeconds.value
+      : undefined,
+    latestState?.signupVerificationReadyRoundWaitSeconds ?? signupVerificationReadyRoundWaitFallback
+  );
+  const signupVerificationReadyTimeoutSecondsValue = normalizeSignupVerificationReadyTimeoutSecondsForPayload(
+    signupVerificationReadyMaxRoundsValue * signupVerificationReadyRoundWaitSecondsValue,
+    defaultSignupVerificationReadyTimeoutSeconds
+  );
+  const step5ProfileSubmitResultMaxRoundsValue = normalizeStep5ProfileSubmitResultMaxRoundsForPayload(
+    typeof inputStep5ProfileSubmitResultMaxRounds !== 'undefined' && inputStep5ProfileSubmitResultMaxRounds
+      ? inputStep5ProfileSubmitResultMaxRounds.value
+      : undefined,
+    latestState?.step5ProfileSubmitResultMaxRounds ?? defaultStep5ProfileSubmitResultMaxRounds
+  );
+  const step5ProfileSubmitResultRoundWaitSecondsValue = normalizeStep5ProfileSubmitResultRoundWaitSecondsForPayload(
+    typeof inputStep5ProfileSubmitResultRoundWaitSeconds !== 'undefined' && inputStep5ProfileSubmitResultRoundWaitSeconds
+      ? inputStep5ProfileSubmitResultRoundWaitSeconds.value
+      : undefined,
+    latestState?.step5ProfileSubmitResultRoundWaitSeconds ?? defaultStep5ProfileSubmitResultRoundWaitSeconds
+  );
   const selectedPhoneSmsCountry = phoneSmsProviderValue === PHONE_SMS_PROVIDER_FIVE_SIM
     ? ((typeof getSelectedFiveSimCountries === 'function' ? getSelectedFiveSimCountries()[0] : null)
       || { id: DEFAULT_FIVE_SIM_COUNTRY_ID, code: DEFAULT_FIVE_SIM_COUNTRY_ID, label: DEFAULT_FIVE_SIM_COUNTRY_LABEL })
@@ -6203,26 +6505,31 @@ function collectSettingsPayload() {
     autoRunDelayEnabled: inputAutoDelayEnabled.checked,
     autoRunDelayMinutes: normalizeAutoDelayMinutes(inputAutoDelayMinutes.value),
     autoStepDelaySeconds: normalizeAutoStepDelaySeconds(inputAutoStepDelaySeconds.value),
-    registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
-      inputRegistrationStageWaitSeconds?.value,
-      DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS
+    registrationStageWaitSeconds: normalizeRegistrationStageWaitSecondsForPayload(
+      typeof inputRegistrationStageWaitSeconds !== 'undefined' && inputRegistrationStageWaitSeconds
+        ? inputRegistrationStageWaitSeconds.value
+        : undefined,
+      defaultRegistrationStageWaitSeconds
     ),
-    signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSeconds(
-      inputSignupIdentityRedirectTimeoutSeconds?.value,
-      DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS
+    signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSecondsForPayload(
+      typeof inputSignupIdentityRedirectTimeoutSeconds !== 'undefined' && inputSignupIdentityRedirectTimeoutSeconds
+        ? inputSignupIdentityRedirectTimeoutSeconds.value
+        : undefined,
+      defaultSignupIdentityRedirectTimeoutSeconds
     ),
-    authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
-      inputAuthContentScriptRecoveryTimeoutSeconds?.value,
-      DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS
+    authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSecondsForPayload(
+      typeof inputAuthContentScriptRecoveryTimeoutSeconds !== 'undefined' && inputAuthContentScriptRecoveryTimeoutSeconds
+        ? inputAuthContentScriptRecoveryTimeoutSeconds.value
+        : undefined,
+      defaultAuthContentScriptRecoveryTimeoutSeconds
     ),
-    signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
-      inputSignupVerificationReadyTimeoutSeconds?.value,
-      DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS
-    ),
-    signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
-      inputSignupVerificationReadyMaxRounds?.value,
-      DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS
-    ),
+    signupVerificationReadyTimeoutSeconds: signupVerificationReadyTimeoutSecondsValue,
+    signupVerificationReadyMaxRounds: signupVerificationReadyMaxRoundsValue,
+    signupVerificationReadyRoundWaitSeconds: signupVerificationReadyRoundWaitSecondsValue,
+    signupPhoneVerificationSubmitResultMaxRounds: signupPhoneVerificationSubmitResultMaxRoundsValue,
+    signupPhoneVerificationSubmitResultRoundWaitSeconds: signupPhoneVerificationSubmitResultRoundWaitSecondsValue,
+    step5ProfileSubmitResultMaxRounds: step5ProfileSubmitResultMaxRoundsValue,
+    step5ProfileSubmitResultRoundWaitSeconds: step5ProfileSubmitResultRoundWaitSecondsValue,
     oauthFlowTimeoutEnabled: typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
       : true,
@@ -6294,6 +6601,8 @@ function collectSettingsPayload() {
     phoneCodeTimeoutWindows: phoneCodeTimeoutWindowsValue,
     phoneCodePollIntervalSeconds: phoneCodePollIntervalSecondsValue,
     phoneCodePollMaxRounds: phoneCodePollMaxRoundsValue,
+    signupPhoneVerificationSubmitResultMaxRounds: signupPhoneVerificationSubmitResultMaxRoundsValue,
+    signupPhoneVerificationSubmitResultRoundWaitSeconds: signupPhoneVerificationSubmitResultRoundWaitSecondsValue,
     heroSmsCountryId: heroSmsCountry.id,
     heroSmsCountryLabel: heroSmsCountry.label,
     heroSmsCountryFallback,
@@ -10962,6 +11271,15 @@ function updateSignupMethodUI(options = {}) {
   if (rowSignupMethod) {
     rowSignupMethod.style.display = showSignupMethod ? '' : 'none';
   }
+  const showSignupPhoneSubmitResultSettings = showSignupMethod && normalizeSignupMethod(getSelectedSignupMethod()) === SIGNUP_METHOD_PHONE;
+  [
+    typeof rowSignupPhoneVerificationSubmitResultMaxRounds !== 'undefined' ? rowSignupPhoneVerificationSubmitResultMaxRounds : null,
+    typeof rowSignupPhoneVerificationSubmitResultRoundWaitSeconds !== 'undefined' ? rowSignupPhoneVerificationSubmitResultRoundWaitSeconds : null,
+  ].forEach((row) => {
+    if (row) {
+      row.style.display = showSignupPhoneSubmitResultSettings ? '' : 'none';
+    }
+  });
 
   let selectedMethod = normalizeSignupMethod(getSelectedSignupMethod());
   const phoneSelectable = canSelectPhoneSignupMethod();
@@ -13405,6 +13723,31 @@ function applySettingsState(state) {
       state?.signupVerificationReadyMaxRounds
     );
   }
+  if (typeof inputSignupVerificationReadyRoundWaitSeconds !== 'undefined' && inputSignupVerificationReadyRoundWaitSeconds) {
+    const readyMaxRounds = normalizeSignupVerificationReadyMaxRounds(
+      state?.signupVerificationReadyMaxRounds,
+      DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS
+    );
+    const readyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+      state?.signupVerificationReadyTimeoutSeconds,
+      DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS
+    );
+    const readyRoundWaitFallback = Math.max(1, Math.ceil(readyTimeoutSeconds / Math.max(1, readyMaxRounds)));
+    inputSignupVerificationReadyRoundWaitSeconds.value = formatSignupVerificationReadyRoundWaitInputValue(
+      state?.signupVerificationReadyRoundWaitSeconds,
+      readyRoundWaitFallback
+    );
+  }
+  if (typeof inputStep5ProfileSubmitResultMaxRounds !== 'undefined' && inputStep5ProfileSubmitResultMaxRounds) {
+    inputStep5ProfileSubmitResultMaxRounds.value = formatStep5ProfileSubmitResultMaxRoundsInputValue(
+      state?.step5ProfileSubmitResultMaxRounds
+    );
+  }
+  if (typeof inputStep5ProfileSubmitResultRoundWaitSeconds !== 'undefined' && inputStep5ProfileSubmitResultRoundWaitSeconds) {
+    inputStep5ProfileSubmitResultRoundWaitSeconds.value = formatStep5ProfileSubmitResultRoundWaitInputValue(
+      state?.step5ProfileSubmitResultRoundWaitSeconds
+    );
+  }
   if (typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
     inputOAuthFlowTimeoutEnabled.checked = state?.oauthFlowTimeoutEnabled !== undefined
       ? Boolean(state.oauthFlowTimeoutEnabled)
@@ -13641,6 +13984,16 @@ function applySettingsState(state) {
   if (typeof inputPhoneCodePollMaxRounds !== 'undefined' && inputPhoneCodePollMaxRounds) {
     inputPhoneCodePollMaxRounds.value = String(
       normalizePhoneCodePollMaxRoundsValue(state?.phoneCodePollMaxRounds, DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS)
+    );
+  }
+  if (typeof inputSignupPhoneVerificationSubmitResultMaxRounds !== 'undefined' && inputSignupPhoneVerificationSubmitResultMaxRounds) {
+    inputSignupPhoneVerificationSubmitResultMaxRounds.value = formatSignupPhoneVerificationSubmitResultMaxRoundsInputValue(
+      state?.signupPhoneVerificationSubmitResultMaxRounds
+    );
+  }
+  if (typeof inputSignupPhoneVerificationSubmitResultRoundWaitSeconds !== 'undefined' && inputSignupPhoneVerificationSubmitResultRoundWaitSeconds) {
+    inputSignupPhoneVerificationSubmitResultRoundWaitSeconds.value = formatSignupPhoneVerificationSubmitResultRoundWaitInputValue(
+      state?.signupPhoneVerificationSubmitResultRoundWaitSeconds
     );
   }
   if (typeof applyHeroSmsFallbackSelection === 'function') {
@@ -20818,12 +21171,43 @@ function syncSignupVerificationReadyTimeoutInputs() {
       inputSignupVerificationReadyTimeoutSeconds.value
     );
   }
+  if (typeof inputSignupVerificationReadyRoundWaitSeconds !== 'undefined' && inputSignupVerificationReadyRoundWaitSeconds) {
+    inputSignupVerificationReadyRoundWaitSeconds.value = formatSignupVerificationReadyRoundWaitInputValue(
+      inputSignupVerificationReadyRoundWaitSeconds.value
+    );
+  }
 }
 
 function syncSignupVerificationReadyMaxRoundsInputs() {
   if (typeof inputSignupVerificationReadyMaxRounds !== 'undefined' && inputSignupVerificationReadyMaxRounds) {
     inputSignupVerificationReadyMaxRounds.value = formatSignupVerificationReadyMaxRoundsInputValue(
       inputSignupVerificationReadyMaxRounds.value
+    );
+  }
+}
+
+function syncSignupPhoneVerificationSubmitResultInputs() {
+  if (typeof inputSignupPhoneVerificationSubmitResultMaxRounds !== 'undefined' && inputSignupPhoneVerificationSubmitResultMaxRounds) {
+    inputSignupPhoneVerificationSubmitResultMaxRounds.value = formatSignupPhoneVerificationSubmitResultMaxRoundsInputValue(
+      inputSignupPhoneVerificationSubmitResultMaxRounds.value
+    );
+  }
+  if (typeof inputSignupPhoneVerificationSubmitResultRoundWaitSeconds !== 'undefined' && inputSignupPhoneVerificationSubmitResultRoundWaitSeconds) {
+    inputSignupPhoneVerificationSubmitResultRoundWaitSeconds.value = formatSignupPhoneVerificationSubmitResultRoundWaitInputValue(
+      inputSignupPhoneVerificationSubmitResultRoundWaitSeconds.value
+    );
+  }
+}
+
+function syncStep5ProfileSubmitResultInputs() {
+  if (typeof inputStep5ProfileSubmitResultMaxRounds !== 'undefined' && inputStep5ProfileSubmitResultMaxRounds) {
+    inputStep5ProfileSubmitResultMaxRounds.value = formatStep5ProfileSubmitResultMaxRoundsInputValue(
+      inputStep5ProfileSubmitResultMaxRounds.value
+    );
+  }
+  if (typeof inputStep5ProfileSubmitResultRoundWaitSeconds !== 'undefined' && inputStep5ProfileSubmitResultRoundWaitSeconds) {
+    inputStep5ProfileSubmitResultRoundWaitSeconds.value = formatStep5ProfileSubmitResultRoundWaitInputValue(
+      inputStep5ProfileSubmitResultRoundWaitSeconds.value
     );
   }
 }
@@ -20872,6 +21256,14 @@ inputSignupVerificationReadyTimeoutSeconds?.addEventListener('blur', () => {
   syncSignupVerificationReadyTimeoutInputs();
   saveSettings({ silent: true }).catch(() => { });
 });
+inputSignupVerificationReadyRoundWaitSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupVerificationReadyRoundWaitSeconds?.addEventListener('blur', () => {
+  syncSignupVerificationReadyTimeoutInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
 
 inputSignupVerificationReadyMaxRounds?.addEventListener('input', () => {
   markSettingsDirty(true);
@@ -20879,6 +21271,23 @@ inputSignupVerificationReadyMaxRounds?.addEventListener('input', () => {
 });
 inputSignupVerificationReadyMaxRounds?.addEventListener('blur', () => {
   syncSignupVerificationReadyMaxRoundsInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputStep5ProfileSubmitResultMaxRounds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputStep5ProfileSubmitResultMaxRounds?.addEventListener('blur', () => {
+  syncStep5ProfileSubmitResultInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+inputStep5ProfileSubmitResultRoundWaitSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputStep5ProfileSubmitResultRoundWaitSeconds?.addEventListener('blur', () => {
+  syncStep5ProfileSubmitResultInputs();
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -21235,6 +21644,22 @@ inputPhoneCodePollMaxRounds?.addEventListener('blur', () => {
       DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS
     )
   );
+  saveSettings({ silent: true }).catch(() => { });
+});
+inputSignupPhoneVerificationSubmitResultMaxRounds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupPhoneVerificationSubmitResultMaxRounds?.addEventListener('blur', () => {
+  syncSignupPhoneVerificationSubmitResultInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+inputSignupPhoneVerificationSubmitResultRoundWaitSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupPhoneVerificationSubmitResultRoundWaitSeconds?.addEventListener('blur', () => {
+  syncSignupPhoneVerificationSubmitResultInputs();
   saveSettings({ silent: true }).catch(() => { });
 });
 selectHeroSmsCountry?.addEventListener('change', () => {
@@ -22196,6 +22621,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.signupVerificationReadyMaxRounds
         );
       }
+      if (
+        message.payload.signupVerificationReadyRoundWaitSeconds !== undefined
+        && typeof inputSignupVerificationReadyRoundWaitSeconds !== 'undefined'
+        && inputSignupVerificationReadyRoundWaitSeconds
+      ) {
+        inputSignupVerificationReadyRoundWaitSeconds.value = formatSignupVerificationReadyRoundWaitInputValue(
+          message.payload.signupVerificationReadyRoundWaitSeconds
+        );
+      }
+      if (
+        message.payload.step5ProfileSubmitResultMaxRounds !== undefined
+        && typeof inputStep5ProfileSubmitResultMaxRounds !== 'undefined'
+        && inputStep5ProfileSubmitResultMaxRounds
+      ) {
+        inputStep5ProfileSubmitResultMaxRounds.value = formatStep5ProfileSubmitResultMaxRoundsInputValue(
+          message.payload.step5ProfileSubmitResultMaxRounds
+        );
+      }
+      if (
+        message.payload.step5ProfileSubmitResultRoundWaitSeconds !== undefined
+        && typeof inputStep5ProfileSubmitResultRoundWaitSeconds !== 'undefined'
+        && inputStep5ProfileSubmitResultRoundWaitSeconds
+      ) {
+        inputStep5ProfileSubmitResultRoundWaitSeconds.value = formatStep5ProfileSubmitResultRoundWaitInputValue(
+          message.payload.step5ProfileSubmitResultRoundWaitSeconds
+        );
+      }
       if (message.payload.oauthFlowTimeoutEnabled !== undefined && typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
         inputOAuthFlowTimeoutEnabled.checked = Boolean(message.payload.oauthFlowTimeoutEnabled);
       }
@@ -22338,6 +22790,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.phoneCodePollMaxRounds !== undefined && inputPhoneCodePollMaxRounds) {
         inputPhoneCodePollMaxRounds.value = String(
           normalizePhoneCodePollMaxRoundsValue(message.payload.phoneCodePollMaxRounds, DEFAULT_PHONE_CODE_POLL_MAX_ROUNDS)
+        );
+      }
+      if (message.payload.signupPhoneVerificationSubmitResultMaxRounds !== undefined && inputSignupPhoneVerificationSubmitResultMaxRounds) {
+        inputSignupPhoneVerificationSubmitResultMaxRounds.value = formatSignupPhoneVerificationSubmitResultMaxRoundsInputValue(
+          message.payload.signupPhoneVerificationSubmitResultMaxRounds
+        );
+      }
+      if (message.payload.signupPhoneVerificationSubmitResultRoundWaitSeconds !== undefined && inputSignupPhoneVerificationSubmitResultRoundWaitSeconds) {
+        inputSignupPhoneVerificationSubmitResultRoundWaitSeconds.value = formatSignupPhoneVerificationSubmitResultRoundWaitInputValue(
+          message.payload.signupPhoneVerificationSubmitResultRoundWaitSeconds
         );
       }
       if (

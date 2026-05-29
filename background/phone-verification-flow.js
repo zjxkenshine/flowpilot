@@ -54,6 +54,7 @@
       DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS = 2,
       DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS = 5,
       DEFAULT_PHONE_CODE_POLL_ROUNDS = 4,
+      getSignupPhoneVerificationSubmitResultConfigForState = null,
     } = deps;
 
     const PHONE_ACTIVATION_STATE_KEY = 'currentPhoneActivation';
@@ -6135,9 +6136,16 @@
 
     async function submitSignupPhoneVerificationCode(tabId, code, options = {}) {
       const visibleStep = 4;
+      const flowState = options.state || (typeof getState === 'function' ? await getState().catch(() => ({})) : {});
+      const submitResultConfig = typeof getSignupPhoneVerificationSubmitResultConfigForState === 'function'
+        ? getSignupPhoneVerificationSubmitResultConfigForState(flowState)
+        : null;
+      const maxRounds = Math.min(60, Math.max(1, Math.floor(Number(submitResultConfig?.maxRounds) || 6)));
+      const roundWaitSeconds = Math.min(120, Math.max(1, Math.floor(Number(submitResultConfig?.roundWaitSeconds) || 5)));
+      const submitResultTimeoutMs = Math.max(30000, maxRounds * roundWaitSeconds * 1000);
       const timeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
-        ? await getOAuthFlowStepTimeoutMs(45000, { step: visibleStep, actionLabel: '提交注册手机验证码' })
-        : 45000;
+        ? await getOAuthFlowStepTimeoutMs(Math.max(45000, submitResultTimeoutMs), { step: visibleStep, actionLabel: '提交注册手机验证码' })
+        : Math.max(45000, submitResultTimeoutMs);
       const result = await sendToContentScriptResilient('signup-page', {
         type: 'SUBMIT_PHONE_VERIFICATION_CODE',
         step: visibleStep,
@@ -6146,6 +6154,8 @@
           code,
           purpose: 'signup',
           signupProfile: options.signupProfile || null,
+          signupPhoneVerificationSubmitResultMaxRounds: maxRounds,
+          signupPhoneVerificationSubmitResultRoundWaitSeconds: roundWaitSeconds,
         },
       }, {
         timeoutMs,
@@ -7545,6 +7555,7 @@
             let submitResult = null;
             submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
               signupProfile: options.signupProfile || null,
+              state,
             });
 
             if (submitResult.invalidCode) {

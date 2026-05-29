@@ -1350,6 +1350,7 @@ test('signup flow helper finalizes step 3 submit by reusing signup verification 
       phoneNumber: '',
       signupVerificationReadyTimeoutSeconds: 60,
       signupVerificationReadyMaxRounds: 5,
+      signupVerificationReadyRoundWaitSeconds: 12,
     },
   });
   assert.equal(messages.find((item) => item.type === 'send')?.options.timeoutMs, 60000);

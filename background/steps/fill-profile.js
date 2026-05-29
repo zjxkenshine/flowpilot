@@ -6,6 +6,7 @@
       addLog,
       generateRandomBirthday,
       generateRandomName,
+      getStep5ProfileSubmitResultConfigForState = null,
       resolveSignupMethod = () => 'email',
       sendToContentScript,
     } = deps;
@@ -37,6 +38,11 @@
       const { firstName, lastName } = generateRandomName();
       const { year, month, day } = generateRandomBirthday();
       const signupContext = resolveStep5SignupContext(state);
+      const submitResultConfig = typeof getStep5ProfileSubmitResultConfigForState === 'function'
+        ? getStep5ProfileSubmitResultConfigForState(state)
+        : null;
+      const submitResultMaxRounds = Math.min(60, Math.max(1, Math.floor(Number(submitResultConfig?.maxRounds) || 12)));
+      const submitResultRoundWaitSeconds = Math.min(120, Math.max(1, Math.floor(Number(submitResultConfig?.roundWaitSeconds) || 10)));
 
       await addLog(`步骤 5：已生成姓名 ${firstName} ${lastName}，生日 ${year}-${month}-${day}`);
 
@@ -52,6 +58,8 @@
           year,
           month,
           day,
+          step5ProfileSubmitResultMaxRounds: submitResultMaxRounds,
+          step5ProfileSubmitResultRoundWaitSeconds: submitResultRoundWaitSeconds,
         },
       });
     }

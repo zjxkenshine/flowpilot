@@ -748,6 +748,21 @@ const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
 const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS = 12;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS = 6;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 5;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS = 12;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 10;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -1635,6 +1650,11 @@ const PERSISTED_SETTING_DEFAULTS = {
   authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
   signupVerificationReadyTimeoutSeconds: DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS,
   signupVerificationReadyMaxRounds: DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS,
+  signupVerificationReadyRoundWaitSeconds: DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS,
+  signupPhoneVerificationSubmitResultMaxRounds: DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS,
+  signupPhoneVerificationSubmitResultRoundWaitSeconds: DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS,
+  step5ProfileSubmitResultMaxRounds: DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS,
+  step5ProfileSubmitResultRoundWaitSeconds: DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS,
   step6CookieCleanupEnabled: false,
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
@@ -1838,6 +1858,11 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'authContentScriptRecoveryTimeoutSeconds',
   'signupVerificationReadyTimeoutSeconds',
   'signupVerificationReadyMaxRounds',
+  'signupVerificationReadyRoundWaitSeconds',
+  'signupPhoneVerificationSubmitResultMaxRounds',
+  'signupPhoneVerificationSubmitResultRoundWaitSeconds',
+  'step5ProfileSubmitResultMaxRounds',
+  'step5ProfileSubmitResultRoundWaitSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2119,6 +2144,126 @@ function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIG
   return Math.min(
     SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX,
     Math.max(SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupVerificationReadyRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX,
+    Math.max(SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupPhoneVerificationSubmitResultMaxRounds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(
+      SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeStep5ProfileSubmitResultMaxRounds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS) {
+  const fallbackNumber = Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(
+      STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX,
+    Math.max(STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN, Math.floor(numeric))
+  );
+}
+
+function normalizeStep5ProfileSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(
+      STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN,
+      Math.floor(Number(fallback) || DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX,
+    Math.max(STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN, Math.floor(numeric))
   );
 }
 
@@ -4528,6 +4673,31 @@ function normalizePersistentSettingValue(key, value) {
         value,
         PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
       );
+    case 'signupVerificationReadyRoundWaitSeconds':
+      return normalizeSignupVerificationReadyRoundWaitSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupVerificationReadyRoundWaitSeconds
+      );
+    case 'signupPhoneVerificationSubmitResultMaxRounds':
+      return normalizeSignupPhoneVerificationSubmitResultMaxRounds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupPhoneVerificationSubmitResultMaxRounds
+      );
+    case 'signupPhoneVerificationSubmitResultRoundWaitSeconds':
+      return normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupPhoneVerificationSubmitResultRoundWaitSeconds
+      );
+    case 'step5ProfileSubmitResultMaxRounds':
+      return normalizeStep5ProfileSubmitResultMaxRounds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.step5ProfileSubmitResultMaxRounds
+      );
+    case 'step5ProfileSubmitResultRoundWaitSeconds':
+      return normalizeStep5ProfileSubmitResultRoundWaitSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.step5ProfileSubmitResultRoundWaitSeconds
+      );
     case 'verificationResendCount':
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
@@ -5259,6 +5429,19 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
           settingsSchemaInput[key] = payload[key];
         }
       }
+      if (
+        normalizedInput.signupVerificationReadyRoundWaitSeconds === undefined
+        && !Object.prototype.hasOwnProperty.call(normalizedInput?.settingsState?.flows?.openai?.autoRun || {}, 'signupVerificationReadyRoundWaitSeconds')
+      ) {
+        delete settingsSchemaInput.signupVerificationReadyRoundWaitSeconds;
+      }
+      const baseSettingsSchemaPayload = { ...payload };
+      if (
+        normalizedInput.signupVerificationReadyRoundWaitSeconds === undefined
+        && !Object.prototype.hasOwnProperty.call(normalizedInput?.settingsState?.flows?.openai?.autoRun || {}, 'signupVerificationReadyRoundWaitSeconds')
+      ) {
+        delete baseSettingsSchemaPayload.signupVerificationReadyRoundWaitSeconds;
+      }
       Object.assign(payload, projectSettingsSchemaView(settingsSchemaApi, {
         ...settingsSchemaInput,
         ...(isPlainObjectForSettingsSchema(normalizedInput.settingsState)
@@ -5267,7 +5450,7 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
         ...(Object.prototype.hasOwnProperty.call(normalizedInput, 'settingsSchemaVersion')
           ? { settingsSchemaVersion: normalizedInput.settingsSchemaVersion }
           : {}),
-      }, payload));
+      }, baseSettingsSchemaPayload));
       applyPhonePlusPersistentConstraints();
       applySub2ApiReloginPersistentConstraints();
       if (Object.prototype.hasOwnProperty.call(payload, 'phoneVerificationEnabled')
@@ -5419,6 +5602,11 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('authContentScriptRecoveryTimeoutSeconds', ['flows', 'openai', 'autoRun', 'authContentScriptRecoveryTimeoutSeconds']);
   assignIfUpdated('signupVerificationReadyTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupVerificationReadyTimeoutSeconds']);
   assignIfUpdated('signupVerificationReadyMaxRounds', ['flows', 'openai', 'autoRun', 'signupVerificationReadyMaxRounds']);
+  assignIfUpdated('signupVerificationReadyRoundWaitSeconds', ['flows', 'openai', 'autoRun', 'signupVerificationReadyRoundWaitSeconds']);
+  assignIfUpdated('signupPhoneVerificationSubmitResultMaxRounds', ['flows', 'openai', 'autoRun', 'signupPhoneVerificationSubmitResultMaxRounds']);
+  assignIfUpdated('signupPhoneVerificationSubmitResultRoundWaitSeconds', ['flows', 'openai', 'autoRun', 'signupPhoneVerificationSubmitResultRoundWaitSeconds']);
+  assignIfUpdated('step5ProfileSubmitResultMaxRounds', ['flows', 'openai', 'autoRun', 'step5ProfileSubmitResultMaxRounds']);
+  assignIfUpdated('step5ProfileSubmitResultRoundWaitSeconds', ['flows', 'openai', 'autoRun', 'step5ProfileSubmitResultRoundWaitSeconds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5543,11 +5731,104 @@ function collectAutoRunFreshResetRuntimeSettingKeys() {
 }
 
 function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFAULT_ACTIVE_FLOW_ID) {
+  const persistedDefaults = typeof PERSISTED_SETTING_DEFAULTS !== 'undefined' && PERSISTED_SETTING_DEFAULTS
+    ? PERSISTED_SETTING_DEFAULTS
+    : {};
+  const getPersistedDefault = (key, fallback) => (
+    persistedDefaults[key] === undefined || persistedDefaults[key] === null
+      ? fallback
+      : persistedDefaults[key]
+  );
+  const normalizeFreshResetInteger = (value, fallback, min, max) => {
+    const fallbackNumeric = Number(fallback);
+    const fallbackNumber = Math.min(
+      max,
+      Math.max(min, Number.isFinite(fallbackNumeric) ? Math.floor(fallbackNumeric) : min)
+    );
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  const normalizeRegistrationStageWaitSecondsForReset = typeof normalizeRegistrationStageWaitSeconds === 'function'
+    ? normalizeRegistrationStageWaitSeconds
+    : ((value, fallback = getPersistedDefault('registrationStageWaitSeconds', 30)) => (
+      normalizeFreshResetInteger(value, fallback, 0, 600)
+    ));
+  const normalizeSignupIdentityRedirectTimeoutSecondsForReset = typeof normalizeSignupIdentityRedirectTimeoutSeconds === 'function'
+    ? normalizeSignupIdentityRedirectTimeoutSeconds
+    : ((value, fallback = getPersistedDefault('signupIdentityRedirectTimeoutSeconds', 45)) => (
+      normalizeFreshResetInteger(value, fallback, 5, 300)
+    ));
+  const normalizeAuthContentScriptRecoveryTimeoutSecondsForReset = typeof normalizeAuthContentScriptRecoveryTimeoutSeconds === 'function'
+    ? normalizeAuthContentScriptRecoveryTimeoutSeconds
+    : ((value, fallback = getPersistedDefault('authContentScriptRecoveryTimeoutSeconds', 30)) => (
+      normalizeFreshResetInteger(value, fallback, 5, 180)
+    ));
+  const normalizeSignupVerificationReadyTimeoutSecondsForReset = typeof normalizeSignupVerificationReadyTimeoutSeconds === 'function'
+    ? normalizeSignupVerificationReadyTimeoutSeconds
+    : ((value, fallback = getPersistedDefault('signupVerificationReadyTimeoutSeconds', 60)) => (
+      normalizeFreshResetInteger(value, fallback, 5, 300)
+    ));
+  const normalizeSignupVerificationReadyMaxRoundsForReset = typeof normalizeSignupVerificationReadyMaxRounds === 'function'
+    ? normalizeSignupVerificationReadyMaxRounds
+    : ((value, fallback = getPersistedDefault('signupVerificationReadyMaxRounds', 5)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 20)
+    ));
+  const normalizeSignupVerificationReadyRoundWaitSecondsForReset = typeof normalizeSignupVerificationReadyRoundWaitSeconds === 'function'
+    ? normalizeSignupVerificationReadyRoundWaitSeconds
+    : ((value, fallback = getPersistedDefault('signupVerificationReadyRoundWaitSeconds', 12)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 300)
+    ));
+  const normalizeSignupPhoneVerificationSubmitResultMaxRoundsForReset = typeof normalizeSignupPhoneVerificationSubmitResultMaxRounds === 'function'
+    ? normalizeSignupPhoneVerificationSubmitResultMaxRounds
+    : ((value, fallback = getPersistedDefault('signupPhoneVerificationSubmitResultMaxRounds', 6)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 60)
+    ));
+  const normalizeSignupPhoneVerificationSubmitResultRoundWaitSecondsForReset = typeof normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds === 'function'
+    ? normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds
+    : ((value, fallback = getPersistedDefault('signupPhoneVerificationSubmitResultRoundWaitSeconds', 5)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 120)
+    ));
+  const normalizeStep5ProfileSubmitResultMaxRoundsForReset = typeof normalizeStep5ProfileSubmitResultMaxRounds === 'function'
+    ? normalizeStep5ProfileSubmitResultMaxRounds
+    : ((value, fallback = getPersistedDefault('step5ProfileSubmitResultMaxRounds', 12)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 60)
+    ));
+  const normalizeStep5ProfileSubmitResultRoundWaitSecondsForReset = typeof normalizeStep5ProfileSubmitResultRoundWaitSeconds === 'function'
+    ? normalizeStep5ProfileSubmitResultRoundWaitSeconds
+    : ((value, fallback = getPersistedDefault('step5ProfileSubmitResultRoundWaitSeconds', 10)) => (
+      normalizeFreshResetInteger(value, fallback, 1, 120)
+    ));
   const currentSettingsState = isPlainObjectValue(prevState?.settingsState)
     ? prevState.settingsState
     : {};
   const normalizedStepExecutionRangeByFlow = normalizeStepExecutionRangeByFlow(prevState?.stepExecutionRangeByFlow || {});
   const preserveIssueLogs = Boolean(prevState?.autoRunPreserveIssueLogsOnRestart);
+  const readyMaxRounds = normalizeSignupVerificationReadyMaxRoundsForReset(
+    prevState?.signupVerificationReadyMaxRounds,
+    getPersistedDefault('signupVerificationReadyMaxRounds', 5)
+  );
+  const legacyReadyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSecondsForReset(
+    prevState?.signupVerificationReadyTimeoutSeconds,
+    getPersistedDefault('signupVerificationReadyTimeoutSeconds', 60)
+  );
+  const readyRoundWaitFallback = Math.max(1, Math.ceil(legacyReadyTimeoutSeconds / Math.max(1, readyMaxRounds)));
+  const readyRoundWaitSeconds = normalizeSignupVerificationReadyRoundWaitSecondsForReset(
+    prevState?.signupVerificationReadyRoundWaitSeconds,
+    readyRoundWaitFallback
+  );
+  const readyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSecondsForReset(
+    readyMaxRounds * readyRoundWaitSeconds,
+    getPersistedDefault('signupVerificationReadyTimeoutSeconds', 60)
+  );
   const nextSettingsStatePatch = {
     activeFlowId,
     services: {
@@ -5568,25 +5849,36 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         integrationTargetId: prevState?.openaiIntegrationTargetId || prevState?.panelMode,
         autoRun: {
           autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
-          registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
+          registrationStageWaitSeconds: normalizeRegistrationStageWaitSecondsForReset(
             prevState?.registrationStageWaitSeconds,
-            PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds
+            getPersistedDefault('registrationStageWaitSeconds', 30)
           ),
-          signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSeconds(
+          signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSecondsForReset(
             prevState?.signupIdentityRedirectTimeoutSeconds,
-            PERSISTED_SETTING_DEFAULTS.signupIdentityRedirectTimeoutSeconds
+            getPersistedDefault('signupIdentityRedirectTimeoutSeconds', 45)
           ),
-          authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSeconds(
+          authContentScriptRecoveryTimeoutSeconds: normalizeAuthContentScriptRecoveryTimeoutSecondsForReset(
             prevState?.authContentScriptRecoveryTimeoutSeconds,
-            PERSISTED_SETTING_DEFAULTS.authContentScriptRecoveryTimeoutSeconds
+            getPersistedDefault('authContentScriptRecoveryTimeoutSeconds', 30)
           ),
-          signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
-            prevState?.signupVerificationReadyTimeoutSeconds,
-            PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+          signupVerificationReadyTimeoutSeconds: readyTimeoutSeconds,
+          signupVerificationReadyMaxRounds: readyMaxRounds,
+          signupVerificationReadyRoundWaitSeconds: readyRoundWaitSeconds,
+          signupPhoneVerificationSubmitResultMaxRounds: normalizeSignupPhoneVerificationSubmitResultMaxRoundsForReset(
+            prevState?.signupPhoneVerificationSubmitResultMaxRounds,
+            getPersistedDefault('signupPhoneVerificationSubmitResultMaxRounds', 6)
           ),
-          signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
-            prevState?.signupVerificationReadyMaxRounds,
-            PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
+          signupPhoneVerificationSubmitResultRoundWaitSeconds: normalizeSignupPhoneVerificationSubmitResultRoundWaitSecondsForReset(
+            prevState?.signupPhoneVerificationSubmitResultRoundWaitSeconds,
+            getPersistedDefault('signupPhoneVerificationSubmitResultRoundWaitSeconds', 5)
+          ),
+          step5ProfileSubmitResultMaxRounds: normalizeStep5ProfileSubmitResultMaxRoundsForReset(
+            prevState?.step5ProfileSubmitResultMaxRounds,
+            getPersistedDefault('step5ProfileSubmitResultMaxRounds', 12)
+          ),
+          step5ProfileSubmitResultRoundWaitSeconds: normalizeStep5ProfileSubmitResultRoundWaitSecondsForReset(
+            prevState?.step5ProfileSubmitResultRoundWaitSeconds,
+            getPersistedDefault('step5ProfileSubmitResultRoundWaitSeconds', 10)
           ),
           ...(normalizedStepExecutionRangeByFlow.openai
             ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }
@@ -13151,7 +13443,11 @@ function getAutoRunPreExecutionDelayMs(step, state = {}) {
 
 function getNodeCompletionSignalTimeoutMs(nodeId, state = {}) {
   const executionKey = getNodeExecutionKeyForState(nodeId, state);
-  return STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY.get(executionKey || nodeId) || AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
+  const normalizedExecutionKey = executionKey || nodeId;
+  if (normalizedExecutionKey === 'fill-profile') {
+    return getStep5ProfileSubmitResultConfigForState(state).completionSignalTimeoutMs;
+  }
+  return STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY.get(normalizedExecutionKey) || AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS;
 }
 
 function getStepCompletionSignalTimeoutMs(step, state = {}) {
@@ -13183,18 +13479,68 @@ function getAuthContentScriptRecoveryTimeoutMsForState(state = {}) {
 }
 
 function getSignupVerificationReadyConfigForState(state = {}) {
-  const timeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
-    state?.signupVerificationReadyTimeoutSeconds,
-    PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
-  );
+  const hasRoundWaitSetting = Object.prototype.hasOwnProperty.call(state || {}, 'signupVerificationReadyRoundWaitSeconds');
   const maxRounds = normalizeSignupVerificationReadyMaxRounds(
     state?.signupVerificationReadyMaxRounds,
     PERSISTED_SETTING_DEFAULTS.signupVerificationReadyMaxRounds
   );
+  const legacyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+    state?.signupVerificationReadyTimeoutSeconds,
+    PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+  );
+  const roundWaitFallback = Math.max(1, Math.ceil(legacyTimeoutSeconds / Math.max(1, maxRounds)));
+  const roundWaitSeconds = normalizeSignupVerificationReadyRoundWaitSeconds(
+    state?.signupVerificationReadyRoundWaitSeconds,
+    roundWaitFallback
+  );
+  const timeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+    hasRoundWaitSetting ? maxRounds * roundWaitSeconds : legacyTimeoutSeconds,
+    PERSISTED_SETTING_DEFAULTS.signupVerificationReadyTimeoutSeconds
+  );
+  const totalTimeoutMs = timeoutSeconds * 1000;
   return {
     timeoutSeconds,
-    timeoutMs: timeoutSeconds * 1000,
+    timeoutMs: totalTimeoutMs,
+    totalTimeoutMs,
     maxRounds,
+    roundWaitSeconds,
+    roundWaitMs: roundWaitSeconds * 1000,
+  };
+}
+
+function getSignupPhoneVerificationSubmitResultConfigForState(state = {}) {
+  const maxRounds = normalizeSignupPhoneVerificationSubmitResultMaxRounds(
+    state?.signupPhoneVerificationSubmitResultMaxRounds,
+    PERSISTED_SETTING_DEFAULTS.signupPhoneVerificationSubmitResultMaxRounds
+  );
+  const roundWaitSeconds = normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(
+    state?.signupPhoneVerificationSubmitResultRoundWaitSeconds,
+    PERSISTED_SETTING_DEFAULTS.signupPhoneVerificationSubmitResultRoundWaitSeconds
+  );
+  return {
+    maxRounds,
+    roundWaitSeconds,
+    roundWaitMs: roundWaitSeconds * 1000,
+    totalTimeoutMs: maxRounds * roundWaitSeconds * 1000,
+  };
+}
+
+function getStep5ProfileSubmitResultConfigForState(state = {}) {
+  const maxRounds = normalizeStep5ProfileSubmitResultMaxRounds(
+    state?.step5ProfileSubmitResultMaxRounds,
+    PERSISTED_SETTING_DEFAULTS.step5ProfileSubmitResultMaxRounds
+  );
+  const roundWaitSeconds = normalizeStep5ProfileSubmitResultRoundWaitSeconds(
+    state?.step5ProfileSubmitResultRoundWaitSeconds,
+    PERSISTED_SETTING_DEFAULTS.step5ProfileSubmitResultRoundWaitSeconds
+  );
+  const totalTimeoutMs = maxRounds * roundWaitSeconds * 1000;
+  return {
+    maxRounds,
+    roundWaitSeconds,
+    roundWaitMs: roundWaitSeconds * 1000,
+    totalTimeoutMs,
+    completionSignalTimeoutMs: totalTimeoutMs + 30000,
   };
 }
 
@@ -14317,7 +14663,18 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
         initialDelayMs: 800,
       });
       try {
-        await validateStep5PostCompletion(signupTabId, completionPayload || {});
+        const validationState = await getState().catch(() => ({}));
+        const validationConfig = typeof getStep5ProfileSubmitResultConfigForState === 'function'
+          ? getStep5ProfileSubmitResultConfigForState(validationState)
+          : {
+              maxRounds: 12,
+              roundWaitSeconds: 10,
+            };
+        await validateStep5PostCompletion(signupTabId, {
+          ...(completionPayload || {}),
+          step5ProfileSubmitResultMaxRounds: completionPayload?.step5ProfileSubmitResultMaxRounds ?? validationConfig.maxRounds,
+          step5ProfileSubmitResultRoundWaitSeconds: completionPayload?.step5ProfileSubmitResultRoundWaitSeconds ?? validationConfig.roundWaitSeconds,
+        });
       } catch (step5ValidationError) {
         step5ValidationError.skipFailedSignupPhoneReusePreserve = true;
         step5ValidationError.signupProfileSubmitted = true;
@@ -16508,7 +16865,10 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         const authChainStartNodeId = String(getNodeIdByStepForState(restartDecision.restartStep, await getState()) || 'oauth-login').trim();
         await addLog(`节点 ${getNodeLabel(nodeId, latestState)}：检测到认证流程进入 add-phone（${addPhoneUrl}），停止自动回到节点 ${authChainStartNodeId} 重开。`, 'warn');
       }
-      if (isProtectedSignupPhoneReuseNode(nodeId)) {
+      const isProtectedSignupPhoneReuseNodeForRun = typeof isProtectedSignupPhoneReuseNode === 'function'
+        ? isProtectedSignupPhoneReuseNode
+        : ((candidateNodeId = '') => ['fill-password', 'fetch-signup-code', 'fill-profile'].includes(String(candidateNodeId || '').trim()));
+      if (isProtectedSignupPhoneReuseNodeForRun(nodeId) && typeof preserveFailedSignupPhoneReuseActivationForProtectedStep === 'function') {
         await preserveFailedSignupPhoneReuseActivationForProtectedStep(nodeId, latestState, err);
       }
       throw err;
@@ -16756,6 +17116,7 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
   DEFAULT_PHONE_CODE_TIMEOUT_WINDOWS,
   DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
   DEFAULT_PHONE_CODE_POLL_ROUNDS,
+  getSignupPhoneVerificationSubmitResultConfigForState,
   readAuthTabSnapshot,
   ensureStep8SignupPageReady,
   upsertAccountBookEntry: (...args) => upsertAndBroadcastAccountBookEntry(...args),
@@ -16888,6 +17249,7 @@ const step5Executor = self.MultiPageBackgroundStep5?.createStep5Executor({
   addLog,
   generateRandomBirthday,
   generateRandomName,
+  getStep5ProfileSubmitResultConfigForState,
   resolveSignupMethod,
   sendToContentScript,
 });
@@ -18280,11 +18642,38 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
     throw new Error('步骤 5：缺少有效的资料页标签页，无法确认提交后的最终状态。');
   }
 
+  const normalizeBoundedInteger = (value, fallback, min, max) => {
+    const fallbackNumber = Math.min(max, Math.max(min, Math.floor(Number(fallback) || min)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  const maxValidationRounds = normalizeBoundedInteger(
+    completionPayload?.step5ProfileSubmitResultMaxRounds,
+    12,
+    1,
+    60
+  );
+  const validationRoundWaitSeconds = normalizeBoundedInteger(
+    completionPayload?.step5ProfileSubmitResultRoundWaitSeconds,
+    10,
+    1,
+    120
+  );
+  const validationRoundWaitMs = validationRoundWaitSeconds * 1000;
   const maxAuthRetryRecoveries = Math.max(1, Number(completionPayload?.maxAuthRetryRecoveries) || 2);
   const isPhoneSignupCompletion = isStep5PhoneSignupCompletionPayload(completionPayload);
   let authRetryRecoveryCount = 0;
+  let validationRound = 0;
 
-  while (true) {
+  while (validationRound < maxValidationRounds) {
+    validationRound += 1;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const currentUrl = String(tab?.url || completionPayload?.url || '').trim();
     if (currentUrl && isLikelyLoggedInChatgptHomeUrl(currentUrl)) {
@@ -18295,11 +18684,15 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
     }
 
     const pageState = await getStep5SubmitStateFromContent({
-      payload: completionPayload,
-      timeoutMs: 15000,
-      responseTimeoutMs: 15000,
+      payload: {
+        ...completionPayload,
+        step5ProfileSubmitResultMaxRounds: maxValidationRounds,
+        step5ProfileSubmitResultRoundWaitSeconds: validationRoundWaitSeconds,
+      },
+      timeoutMs: Math.max(1000, validationRoundWaitMs),
+      responseTimeoutMs: Math.max(1000, validationRoundWaitMs),
       retryDelayMs: 500,
-      logMessage: '步骤 5：资料提交已触发页面跳转，正在确认最终页面状态...',
+      logMessage: `步骤 5：资料提交后正在确认最终页面状态（第 ${validationRound}/${maxValidationRounds} 轮，每轮 ${validationRoundWaitSeconds} 秒）...`,
     });
 
     if (pageState.userAlreadyExistsBlocked) {
@@ -18359,6 +18752,8 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
 
     throw new Error(`步骤 5：资料提交后未能确认最终状态。URL: ${pageState.url || currentUrl || 'unknown'}`);
   }
+
+  throw new Error(`步骤 5：资料提交后等待最终状态超时（${maxValidationRounds} 轮，每轮 ${validationRoundWaitSeconds} 秒）。URL: ${completionPayload?.url || 'unknown'}`);
 }
 
 async function ensureStep8VerificationPageReady(options = {}) {

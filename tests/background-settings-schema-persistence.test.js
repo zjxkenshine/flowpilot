@@ -121,6 +121,11 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'authContentScriptRecoveryTimeoutSeconds',
   'signupVerificationReadyTimeoutSeconds',
   'signupVerificationReadyMaxRounds',
+  'signupVerificationReadyRoundWaitSeconds',
+  'signupPhoneVerificationSubmitResultMaxRounds',
+  'signupPhoneVerificationSubmitResultRoundWaitSeconds',
+  'step5ProfileSubmitResultMaxRounds',
+  'step5ProfileSubmitResultRoundWaitSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -142,6 +147,21 @@ const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MIN = 1;
 const SIGNUP_VERIFICATION_READY_MAX_ROUNDS_MAX = 20;
 const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS_MAX = 300;
+const DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS = 12;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS = 6;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 5;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS = 12;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS_MAX = 60;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 10;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MIN = 1;
+const STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS_MAX = 120;
 const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   panelMode: 'cpa',
@@ -201,6 +221,11 @@ const PERSISTED_SETTING_DEFAULTS = {
   authContentScriptRecoveryTimeoutSeconds: 30,
   signupVerificationReadyTimeoutSeconds: 60,
   signupVerificationReadyMaxRounds: 5,
+  signupVerificationReadyRoundWaitSeconds: 12,
+  signupPhoneVerificationSubmitResultMaxRounds: 6,
+  signupPhoneVerificationSubmitResultRoundWaitSeconds: 5,
+  step5ProfileSubmitResultMaxRounds: 12,
+  step5ProfileSubmitResultRoundWaitSeconds: 10,
   sub2apiUrl: '',
   sub2apiEmail: '',
   sub2apiPassword: '',
@@ -375,6 +400,11 @@ ${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
 ${extractFunction('normalizeAuthContentScriptRecoveryTimeoutSeconds')}
 ${extractFunction('normalizeSignupVerificationReadyTimeoutSeconds')}
 ${extractFunction('normalizeSignupVerificationReadyMaxRounds')}
+${extractFunction('normalizeSignupVerificationReadyRoundWaitSeconds')}
+${extractFunction('normalizeSignupPhoneVerificationSubmitResultMaxRounds')}
+${extractFunction('normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds')}
+${extractFunction('normalizeStep5ProfileSubmitResultMaxRounds')}
+${extractFunction('normalizeStep5ProfileSubmitResultRoundWaitSeconds')}
 ${extractFunction('getAuthContentScriptRecoveryTimeoutMsForState')}
 ${extractFunction('getSignupVerificationReadyConfigForState')}
 ${extractFunction('normalizePersistentSettingValue')}
@@ -586,8 +616,14 @@ test('buildPersistentSettingsPayload persists signup verification ready wait con
   const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
   assert.equal(defaults.signupVerificationReadyTimeoutSeconds, 60);
   assert.equal(defaults.signupVerificationReadyMaxRounds, 5);
+  assert.equal(defaults.signupVerificationReadyRoundWaitSeconds, 12);
+  assert.equal(defaults.signupPhoneVerificationSubmitResultMaxRounds, 6);
+  assert.equal(defaults.signupPhoneVerificationSubmitResultRoundWaitSeconds, 5);
+  assert.equal(defaults.step5ProfileSubmitResultMaxRounds, 12);
+  assert.equal(defaults.step5ProfileSubmitResultRoundWaitSeconds, 10);
   assert.equal(defaults.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 60);
   assert.equal(defaults.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 5);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.signupVerificationReadyRoundWaitSeconds, 12);
 
   const flat = api.buildPersistentSettingsPayload({
     signupVerificationReadyTimeoutSeconds: 90,
@@ -595,24 +631,64 @@ test('buildPersistentSettingsPayload persists signup verification ready wait con
   }, { fillDefaults: true });
   assert.equal(flat.signupVerificationReadyTimeoutSeconds, 90);
   assert.equal(flat.signupVerificationReadyMaxRounds, 8);
+  assert.equal(flat.signupVerificationReadyRoundWaitSeconds, 12);
   assert.equal(flat.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 90);
   assert.equal(flat.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 8);
+  assert.equal(flat.settingsState.flows.openai.autoRun.signupVerificationReadyRoundWaitSeconds, 12);
+
+  const flatRoundWait = api.buildPersistentSettingsPayload({
+    signupVerificationReadyMaxRounds: 8,
+    signupVerificationReadyRoundWaitSeconds: 9,
+    signupPhoneVerificationSubmitResultMaxRounds: 7,
+    signupPhoneVerificationSubmitResultRoundWaitSeconds: 4,
+    step5ProfileSubmitResultMaxRounds: 13,
+    step5ProfileSubmitResultRoundWaitSeconds: 8,
+  }, { fillDefaults: true });
+  assert.equal(flatRoundWait.signupVerificationReadyTimeoutSeconds, 72);
+  assert.equal(flatRoundWait.signupVerificationReadyMaxRounds, 8);
+  assert.equal(flatRoundWait.signupVerificationReadyRoundWaitSeconds, 9);
+  assert.equal(flatRoundWait.signupPhoneVerificationSubmitResultMaxRounds, 7);
+  assert.equal(flatRoundWait.signupPhoneVerificationSubmitResultRoundWaitSeconds, 4);
+  assert.equal(flatRoundWait.step5ProfileSubmitResultMaxRounds, 13);
+  assert.equal(flatRoundWait.step5ProfileSubmitResultRoundWaitSeconds, 8);
+  assert.equal(flatRoundWait.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 72);
+  assert.equal(flatRoundWait.settingsState.flows.openai.autoRun.signupVerificationReadyRoundWaitSeconds, 9);
 
   const clampedLow = api.buildPersistentSettingsPayload({
     signupVerificationReadyTimeoutSeconds: 1,
     signupVerificationReadyMaxRounds: 0,
+    signupVerificationReadyRoundWaitSeconds: 0,
+    signupPhoneVerificationSubmitResultMaxRounds: 0,
+    signupPhoneVerificationSubmitResultRoundWaitSeconds: 0,
+    step5ProfileSubmitResultMaxRounds: 0,
+    step5ProfileSubmitResultRoundWaitSeconds: 0,
   }, { fillDefaults: true });
   assert.equal(clampedLow.signupVerificationReadyTimeoutSeconds, 5);
   assert.equal(clampedLow.signupVerificationReadyMaxRounds, 1);
+  assert.equal(clampedLow.signupVerificationReadyRoundWaitSeconds, 1);
+  assert.equal(clampedLow.signupPhoneVerificationSubmitResultMaxRounds, 1);
+  assert.equal(clampedLow.signupPhoneVerificationSubmitResultRoundWaitSeconds, 1);
+  assert.equal(clampedLow.step5ProfileSubmitResultMaxRounds, 1);
+  assert.equal(clampedLow.step5ProfileSubmitResultRoundWaitSeconds, 1);
   assert.equal(clampedLow.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 5);
   assert.equal(clampedLow.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 1);
 
   const clampedHigh = api.buildPersistentSettingsPayload({
     signupVerificationReadyTimeoutSeconds: 999,
     signupVerificationReadyMaxRounds: 99,
+    signupVerificationReadyRoundWaitSeconds: 999,
+    signupPhoneVerificationSubmitResultMaxRounds: 999,
+    signupPhoneVerificationSubmitResultRoundWaitSeconds: 999,
+    step5ProfileSubmitResultMaxRounds: 999,
+    step5ProfileSubmitResultRoundWaitSeconds: 999,
   }, { fillDefaults: true });
   assert.equal(clampedHigh.signupVerificationReadyTimeoutSeconds, 300);
   assert.equal(clampedHigh.signupVerificationReadyMaxRounds, 20);
+  assert.equal(clampedHigh.signupVerificationReadyRoundWaitSeconds, 300);
+  assert.equal(clampedHigh.signupPhoneVerificationSubmitResultMaxRounds, 60);
+  assert.equal(clampedHigh.signupPhoneVerificationSubmitResultRoundWaitSeconds, 120);
+  assert.equal(clampedHigh.step5ProfileSubmitResultMaxRounds, 60);
+  assert.equal(clampedHigh.step5ProfileSubmitResultRoundWaitSeconds, 120);
   assert.equal(clampedHigh.settingsState.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds, 300);
   assert.equal(clampedHigh.settingsState.flows.openai.autoRun.signupVerificationReadyMaxRounds, 20);
 
@@ -653,12 +729,30 @@ test('signup verification ready helper returns normalized total budget and round
   }), {
     timeoutSeconds: 75,
     timeoutMs: 75000,
+    totalTimeoutMs: 75000,
     maxRounds: 7,
+    roundWaitSeconds: 11,
+    roundWaitMs: 11000,
+  });
+  assert.deepEqual(api.getSignupVerificationReadyConfigForState({
+    signupVerificationReadyTimeoutSeconds: 75,
+    signupVerificationReadyMaxRounds: 7,
+    signupVerificationReadyRoundWaitSeconds: 9,
+  }), {
+    timeoutSeconds: 63,
+    timeoutMs: 63000,
+    totalTimeoutMs: 63000,
+    maxRounds: 7,
+    roundWaitSeconds: 9,
+    roundWaitMs: 9000,
   });
   assert.deepEqual(api.getSignupVerificationReadyConfigForState({}), {
     timeoutSeconds: 60,
     timeoutMs: 60000,
+    totalTimeoutMs: 60000,
     maxRounds: 5,
+    roundWaitSeconds: 12,
+    roundWaitMs: 12000,
   });
   assert.deepEqual(api.getSignupVerificationReadyConfigForState({
     signupVerificationReadyTimeoutSeconds: 'slow',
@@ -666,7 +760,10 @@ test('signup verification ready helper returns normalized total budget and round
   }), {
     timeoutSeconds: 60,
     timeoutMs: 60000,
+    totalTimeoutMs: 60000,
     maxRounds: 5,
+    roundWaitSeconds: 12,
+    roundWaitMs: 12000,
   });
 });
 

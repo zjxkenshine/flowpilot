@@ -5298,17 +5298,35 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = null) {
     5,
     300
   );
-  const configuredTimeoutMs = configuredTimeoutSeconds * 1000;
-  const legacyTimeoutMs = Number(timeout) > 0 ? Math.floor(Number(timeout)) : configuredTimeoutMs;
-  const totalTimeoutMs = Math.min(
-    configuredTimeoutMs,
-    Math.max(1000, legacyTimeoutMs)
-  );
   const maxRecoveryRounds = normalizeBoundedInteger(
     payload?.signupVerificationReadyMaxRounds,
     5,
     1,
     20
+  );
+  const hasRoundWaitSetting = Object.prototype.hasOwnProperty.call(payload || {}, 'signupVerificationReadyRoundWaitSeconds');
+  const roundWaitFallbackSeconds = Math.max(
+    1,
+    Math.ceil(configuredTimeoutSeconds / Math.max(1, maxRecoveryRounds))
+  );
+  const configuredRoundWaitSeconds = normalizeBoundedInteger(
+    payload?.signupVerificationReadyRoundWaitSeconds,
+    roundWaitFallbackSeconds,
+    1,
+    300
+  );
+  const configuredRoundWaitMs = configuredRoundWaitSeconds * 1000;
+  const configuredTotalTimeoutSeconds = normalizeBoundedInteger(
+    hasRoundWaitSetting ? maxRecoveryRounds * configuredRoundWaitSeconds : configuredTimeoutSeconds,
+    configuredTimeoutSeconds,
+    5,
+    300
+  );
+  const configuredTotalTimeoutMs = configuredTotalTimeoutSeconds * 1000;
+  const legacyTimeoutMs = Number(timeout) > 0 ? Math.floor(Number(timeout)) : configuredTotalTimeoutMs;
+  const totalTimeoutMs = Math.min(
+    configuredTotalTimeoutMs,
+    Math.max(1000, legacyTimeoutMs)
   );
   const start = Date.now();
   let recoveryRound = 0;
@@ -5363,11 +5381,10 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = null) {
     const roundNo = recoveryRound + 1;
     const elapsedMs = Date.now() - start;
     const remainingMs = Math.max(0, totalTimeoutMs - elapsedMs);
-    const remainingRounds = Math.max(1, maxRecoveryRounds - recoveryRound);
-    const roundWaitMs = Math.max(1000, Math.ceil(remainingMs / remainingRounds));
-    const roundWaitSeconds = Math.max(1, Math.ceil(roundWaitMs / 1000));
-    log(`${prepareLogLabel}：等待页面进入验证码阶段（第 ${roundNo}/${maxRecoveryRounds} 轮，本轮最多等待 ${roundWaitSeconds} 秒，总超时 ${configuredTimeoutSeconds} 秒）...`, 'info');
-    const snapshot = await waitForSignupVerificationTransition(Math.min(roundWaitMs, remainingMs), {
+    const roundWaitMs = Math.max(1000, Math.min(configuredRoundWaitMs, remainingMs));
+    const roundWaitSeconds = configuredRoundWaitSeconds;
+    log(`${prepareLogLabel}：验证码页就绪等待第 ${roundNo}/${maxRecoveryRounds} 轮，每轮最多等待 ${configuredRoundWaitSeconds} 秒，总等待 ${configuredTotalTimeoutSeconds} 秒。`, 'info');
+    const snapshot = await waitForSignupVerificationTransition(roundWaitMs, {
       signupMethod,
       accountIdentifierType,
       phoneNumber,
@@ -5464,19 +5481,51 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = null) {
     log(`${prepareLogLabel}：页面仍在切换中，准备继续等待（${recoveryRound}/${maxRecoveryRounds}）...`, 'warn');
   }
 
-  throw new Error(`等待注册验证码页面就绪超时或自动恢复失败（总超时 ${configuredTimeoutSeconds} 秒，已尝试 ${recoveryRound}/${maxRecoveryRounds} 轮）。URL: ${location.href}`);
+  throw new Error(`等待注册验证码页就绪超时或自动恢复失败（最多 ${maxRecoveryRounds} 轮，每轮 ${configuredRoundWaitSeconds} 秒，总等待 ${configuredTotalTimeoutSeconds} 秒，已尝试 ${recoveryRound}/${maxRecoveryRounds} 轮）。URL: ${location.href}`);
 }
 
 
 async function waitForVerificationSubmitOutcome(step, timeout, options = {}) {
-  const resolvedTimeout = timeout ?? (step === 8 ? 30000 : 12000);
+  const normalizeBoundedInteger = (value, fallback, min, max) => {
+    const fallbackNumber = Math.min(max, Math.max(min, Math.floor(Number(fallback) || min)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
   const purpose = options?.purpose || '';
+  const isSignupStep4Submit = step === 4 && String(purpose || '').trim().toLowerCase() === 'signup';
+  const submitResultMaxRounds = isSignupStep4Submit
+    ? normalizeBoundedInteger(options?.signupPhoneVerificationSubmitResultMaxRounds, 6, 1, 60)
+    : 1;
+  const submitResultRoundWaitSeconds = isSignupStep4Submit
+    ? normalizeBoundedInteger(options?.signupPhoneVerificationSubmitResultRoundWaitSeconds, 5, 1, 120)
+    : Math.ceil((step === 8 ? 30000 : 12000) / 1000);
+  const submitResultTimeoutMs = submitResultMaxRounds * submitResultRoundWaitSeconds * 1000;
+  const resolvedTimeout = timeout ?? (isSignupStep4Submit ? submitResultTimeoutMs : (step === 8 ? 30000 : 12000));
   const start = Date.now();
   let recoveryCount = 0;
   const maxRecoveryCount = 2;
+  let lastLoggedRound = 0;
 
   while (Date.now() - start < resolvedTimeout) {
     throwIfStopped();
+    if (isSignupStep4Submit) {
+      const elapsedMs = Date.now() - start;
+      const currentRound = Math.min(
+        submitResultMaxRounds,
+        Math.max(1, Math.floor(elapsedMs / Math.max(1000, submitResultRoundWaitSeconds * 1000)) + 1)
+      );
+      if (currentRound !== lastLoggedRound) {
+        lastLoggedRound = currentRound;
+        log(`步骤 4：提交手机验证码后等待资料页或邮箱验证页（第 ${currentRound}/${submitResultMaxRounds} 轮，每轮 ${submitResultRoundWaitSeconds} 秒）。`, 'info');
+      }
+    }
 
     const retryFlow = step === 4 ? 'signup' : 'login';
     const retryState = getCurrentAuthRetryPageState(retryFlow);
@@ -7124,7 +7173,7 @@ function getSerializableRect(el) {
 // Step 5: Fill Name & Birthday / Age
 // ============================================================
 
-function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted = false, outcome = null, signupContext = null } = {}) {
+function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted = false, outcome = null, signupContext = null, submitResultConfig = null } = {}) {
   const payload = {
     profileSubmitted: true,
     postSubmitChecked: true,
@@ -7150,6 +7199,10 @@ function getStep5DirectCompletionPayload({ isAgeMode = false, navigationStarted 
   }
   if (outcome?.url) {
     payload.url = outcome.url;
+  }
+  if (submitResultConfig) {
+    payload.step5ProfileSubmitResultMaxRounds = submitResultConfig.maxRounds;
+    payload.step5ProfileSubmitResultRoundWaitSeconds = submitResultConfig.roundWaitSeconds;
   }
   return payload;
 }
@@ -7548,23 +7601,50 @@ function installStep5NavigationCompletionReporter(completeOnce) {
 }
 
 async function waitForStep5SubmitOutcome(options = {}) {
+  const normalizeBoundedInteger = (value, fallback, min, max) => {
+    const fallbackNumber = Math.min(max, Math.max(min, Math.floor(Number(fallback) || min)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
   const {
-    timeoutMs = 120000,
     maxAuthRetryRecoveries = 2,
     maxPasskeySkipAttempts = 2,
     maxSubmitClicks = 3,
     retryClickIntervalMs = 3500,
     signupContext = {},
   } = options;
+  const submitResultMaxRounds = normalizeBoundedInteger(options.step5ProfileSubmitResultMaxRounds, 12, 1, 60);
+  const submitResultRoundWaitSeconds = normalizeBoundedInteger(options.step5ProfileSubmitResultRoundWaitSeconds, 10, 1, 120);
+  const configuredTimeoutMs = submitResultMaxRounds * submitResultRoundWaitSeconds * 1000;
+  const timeoutMs = Number(options.timeoutMs) > 0
+    ? Math.floor(Number(options.timeoutMs))
+    : configuredTimeoutMs;
   const start = Date.now();
   let authRetryRecoveryCount = 0;
   let passkeySkipCount = 0;
   let submitClickCount = 1;
   let lastSubmitClickAt = Date.now();
   let lastStep5Error = '';
+  let lastLoggedRound = 0;
 
   while (Date.now() - start < timeoutMs) {
     throwIfStopped();
+    const elapsedMs = Date.now() - start;
+    const currentRound = Math.min(
+      submitResultMaxRounds,
+      Math.max(1, Math.floor(elapsedMs / Math.max(1000, submitResultRoundWaitSeconds * 1000)) + 1)
+    );
+    if (currentRound !== lastLoggedRound) {
+      lastLoggedRound = currentRound;
+      log(`步骤 5：资料提交后等待跳转验证第 ${currentRound}/${submitResultMaxRounds} 轮，每轮 ${submitResultRoundWaitSeconds} 秒。`, 'info');
+    }
 
     const retryState = getStep5AuthRetryPageState();
     if (retryState?.userAlreadyExistsBlocked) {
@@ -7663,6 +7743,26 @@ async function waitForStep5SubmitOutcome(options = {}) {
 async function step5_fillNameBirthday(payload) {
   const { firstName, lastName, age, year, month, day, prefillOnly = false } = payload;
   const signupContext = normalizeStep5SignupContext(payload);
+  const normalizeBoundedInteger = (value, fallback, min, max) => {
+    const fallbackNumber = Math.min(max, Math.max(min, Math.floor(Number(fallback) || min)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  const hasSubmitResultConfig = payload?.step5ProfileSubmitResultMaxRounds !== undefined
+    || payload?.step5ProfileSubmitResultRoundWaitSeconds !== undefined;
+  const submitResultConfig = hasSubmitResultConfig
+    ? {
+        maxRounds: normalizeBoundedInteger(payload?.step5ProfileSubmitResultMaxRounds, 12, 1, 60),
+        roundWaitSeconds: normalizeBoundedInteger(payload?.step5ProfileSubmitResultRoundWaitSeconds, 10, 1, 120),
+      }
+    : null;
   if (!firstName || !lastName) throw new Error('未提供姓名数据。');
   const performOperationWithDelay = typeof getOperationDelayRunner === 'function'
     ? getOperationDelayRunner()
@@ -7683,6 +7783,7 @@ async function step5_fillNameBirthday(payload) {
     const completionPayload = getStep5DirectCompletionPayload({
       outcome: adoptableSuccessState,
       signupContext,
+      submitResultConfig,
     });
     reportComplete(5, completionPayload);
     log(`步骤 5：检测到当前页面已进入 ${adoptableSuccessState.state}，本步骤按已完成处理。`, 'ok');
@@ -7933,6 +8034,7 @@ async function step5_fillNameBirthday(payload) {
       navigationStarted: Boolean(extra.navigationStarted),
       outcome: extra.outcome || null,
       signupContext,
+      submitResultConfig,
     });
     reportedCompletionPayload = completionPayload;
     reportComplete(5, completionPayload);
@@ -7948,7 +8050,15 @@ async function step5_fillNameBirthday(payload) {
   log('步骤 5：已点击“完成帐户创建”，正在等待页面跳转、重试页或提交结果。');
 
   try {
-    const outcome = await waitForStep5SubmitOutcome({ signupContext });
+    const outcome = await waitForStep5SubmitOutcome({
+      signupContext,
+      ...(submitResultConfig
+        ? {
+            step5ProfileSubmitResultMaxRounds: submitResultConfig.maxRounds,
+            step5ProfileSubmitResultRoundWaitSeconds: submitResultConfig.roundWaitSeconds,
+          }
+        : {}),
+    });
     cleanupNavigationReporter();
 
     const completionPayload = completeStep5Once({ outcome });

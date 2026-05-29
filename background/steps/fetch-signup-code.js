@@ -33,22 +33,41 @@
       phoneVerificationHelpers = null,
       resolveSignupMethod = () => 'email',
       getAuthContentScriptRecoveryTimeoutMsForState = () => 30000,
-      getSignupVerificationReadyConfigForState = () => ({ timeoutSeconds: 60, timeoutMs: 60000, maxRounds: 5 }),
+      getSignupVerificationReadyConfigForState = () => ({
+        timeoutSeconds: 60,
+        timeoutMs: 60000,
+        totalTimeoutMs: 60000,
+        maxRounds: 5,
+        roundWaitSeconds: 12,
+        roundWaitMs: 12000,
+      }),
     } = deps;
 
     function resolveSignupVerificationReadyConfig(state = {}) {
       const configured = typeof getSignupVerificationReadyConfigForState === 'function'
         ? getSignupVerificationReadyConfigForState(state)
         : null;
-      const rawTimeoutSeconds = configured?.timeoutSeconds
-        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
-        ?? 60;
-      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(rawTimeoutSeconds) || 60)));
+      const hasRoundWaitSetting = configured && Object.prototype.hasOwnProperty.call(configured, 'roundWaitSeconds');
       const maxRounds = Math.min(20, Math.max(1, Math.floor(Number(configured?.maxRounds) || 5)));
+      const legacyTimeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(
+        configured?.timeoutSeconds
+        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
+        ?? 60
+      ) || 60)));
+      const roundWaitFallback = Math.max(1, Math.ceil(legacyTimeoutSeconds / Math.max(1, maxRounds)));
+      const rawRoundWaitSeconds = configured?.roundWaitSeconds
+        ?? (Number(configured?.roundWaitMs) > 0 ? Number(configured.roundWaitMs) / 1000 : undefined)
+        ?? roundWaitFallback;
+      const roundWaitSeconds = Math.min(300, Math.max(1, Math.floor(Number(rawRoundWaitSeconds) || roundWaitFallback)));
+      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(hasRoundWaitSetting ? maxRounds * roundWaitSeconds : legacyTimeoutSeconds)));
+      const totalTimeoutMs = timeoutSeconds * 1000;
       return {
         timeoutSeconds,
-        timeoutMs: timeoutSeconds * 1000,
+        timeoutMs: totalTimeoutMs,
+        totalTimeoutMs,
         maxRounds,
+        roundWaitSeconds,
+        roundWaitMs: roundWaitSeconds * 1000,
       };
     }
 
@@ -245,7 +264,8 @@
       const readyConfig = resolveSignupVerificationReadyConfig(state);
       prepareRequest.payload.signupVerificationReadyTimeoutSeconds = readyConfig.timeoutSeconds;
       prepareRequest.payload.signupVerificationReadyMaxRounds = readyConfig.maxRounds;
-      const prepareTimeoutMs = readyConfig.timeoutMs;
+      prepareRequest.payload.signupVerificationReadyRoundWaitSeconds = readyConfig.roundWaitSeconds;
+      const prepareTimeoutMs = readyConfig.totalTimeoutMs || readyConfig.timeoutMs;
       const transportRecoveryTimeoutMs = Math.max(5000, Number(getAuthContentScriptRecoveryTimeoutMsForState(state)) || 30000);
       const prepareResponseTimeoutMs = Math.max(45000, prepareTimeoutMs);
       const prepareStartAt = Date.now();

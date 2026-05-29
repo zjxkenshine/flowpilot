@@ -36,25 +36,42 @@
       const fallback = {
         timeoutSeconds: 60,
         timeoutMs: 60000,
+        totalTimeoutMs: 60000,
         maxRounds: 5,
+        roundWaitSeconds: 12,
+        roundWaitMs: 12000,
       };
       const sourceState = options.state || options.currentState || {};
       const configured = typeof getSignupVerificationReadyConfigForState === 'function'
         ? getSignupVerificationReadyConfigForState(sourceState)
         : null;
-      const rawTimeoutSeconds = options.signupVerificationReadyTimeoutSeconds
-        ?? configured?.timeoutSeconds
-        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
-        ?? fallback.timeoutSeconds;
-      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(rawTimeoutSeconds) || fallback.timeoutSeconds)));
+      const hasRoundWaitSetting = Object.prototype.hasOwnProperty.call(options || {}, 'signupVerificationReadyRoundWaitSeconds')
+        || (configured && Object.prototype.hasOwnProperty.call(configured, 'roundWaitSeconds'));
       const rawMaxRounds = options.signupVerificationReadyMaxRounds
         ?? configured?.maxRounds
         ?? fallback.maxRounds;
       const maxRounds = Math.min(20, Math.max(1, Math.floor(Number(rawMaxRounds) || fallback.maxRounds)));
+      const legacyTimeoutSeconds = Math.min(300, Math.max(5, Math.floor(Number(
+        options.signupVerificationReadyTimeoutSeconds
+        ?? configured?.timeoutSeconds
+        ?? (Number(configured?.timeoutMs) > 0 ? Number(configured.timeoutMs) / 1000 : undefined)
+        ?? fallback.timeoutSeconds
+      ) || fallback.timeoutSeconds)));
+      const roundWaitFallback = Math.max(1, Math.ceil(legacyTimeoutSeconds / Math.max(1, maxRounds)));
+      const rawRoundWaitSeconds = options.signupVerificationReadyRoundWaitSeconds
+        ?? configured?.roundWaitSeconds
+        ?? (Number(configured?.roundWaitMs) > 0 ? Number(configured.roundWaitMs) / 1000 : undefined)
+        ?? roundWaitFallback;
+      const roundWaitSeconds = Math.min(300, Math.max(1, Math.floor(Number(rawRoundWaitSeconds) || roundWaitFallback)));
+      const timeoutSeconds = Math.min(300, Math.max(5, Math.floor(hasRoundWaitSetting ? maxRounds * roundWaitSeconds : legacyTimeoutSeconds)));
+      const totalTimeoutMs = timeoutSeconds * 1000;
       return {
         timeoutSeconds,
-        timeoutMs: timeoutSeconds * 1000,
+        timeoutMs: totalTimeoutMs,
+        totalTimeoutMs,
         maxRounds,
+        roundWaitSeconds,
+        roundWaitMs: roundWaitSeconds * 1000,
       };
     }
 
@@ -344,10 +361,11 @@
             phoneNumber: options.phoneNumber || '',
             signupVerificationReadyTimeoutSeconds: readyConfig.timeoutSeconds,
             signupVerificationReadyMaxRounds: readyConfig.maxRounds,
+            signupVerificationReadyRoundWaitSeconds: readyConfig.roundWaitSeconds,
           },
         }, {
-          timeoutMs: readyConfig.timeoutMs,
-          transportRecoveryTimeoutMs: readyConfig.timeoutMs,
+          timeoutMs: readyConfig.totalTimeoutMs || readyConfig.timeoutMs,
+          transportRecoveryTimeoutMs: readyConfig.totalTimeoutMs || readyConfig.timeoutMs,
           retryDelayMs: 700,
           logMessage: `步骤 ${step}：密码已提交，正在确认是否进入下一页面，必要时自动恢复重试页...`,
         });

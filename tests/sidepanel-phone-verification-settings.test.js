@@ -1194,6 +1194,11 @@ const inputSignupIdentityRedirectTimeoutSeconds = { value: '45' };
 const inputAuthContentScriptRecoveryTimeoutSeconds = { value: '30' };
 const inputSignupVerificationReadyTimeoutSeconds = { value: '60' };
 const inputSignupVerificationReadyMaxRounds = { value: '5' };
+const inputSignupVerificationReadyRoundWaitSeconds = { value: '12' };
+const inputSignupPhoneVerificationSubmitResultMaxRounds = { value: '6' };
+const inputSignupPhoneVerificationSubmitResultRoundWaitSeconds = { value: '5' };
+const inputStep5ProfileSubmitResultMaxRounds = { value: '12' };
+const inputStep5ProfileSubmitResultRoundWaitSeconds = { value: '10' };
 const inputPhoneVerificationEnabled = { checked: true };
 const inputPhoneSignupPhonePrefixedEmail = { checked: false };
 const inputFreePhoneReuseEnabled = { checked: true };
@@ -1282,6 +1287,11 @@ const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS = 30;
 const DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS = 60;
 const DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS = 5;
+const DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS = 12;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS = 6;
+const DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 5;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS = 12;
+const DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS = 10;
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL = 'https://gujumpgate.zg.fyi/api/checkout';
 const BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY = '2KwVxE6f0ABH002JLkoQJ9ReRf4_d01y';
 const DEFAULT_FIVE_SIM_COUNTRY_ID = 'vietnam';
@@ -1328,6 +1338,11 @@ function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT
 function normalizeAuthContentScriptRecoveryTimeoutSeconds(value, fallback = DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS) { return Number(value) || fallback; }
 function normalizeSignupVerificationReadyTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS) { return Number(value) || fallback; }
 function normalizeSignupVerificationReadyMaxRounds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS) { return Number(value) || fallback; }
+function normalizeSignupVerificationReadyRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_VERIFICATION_READY_ROUND_WAIT_SECONDS) { return Number(value) || fallback; }
+function normalizeSignupPhoneVerificationSubmitResultMaxRounds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_MAX_ROUNDS) { return Number(value) || fallback; }
+function normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_SIGNUP_PHONE_VERIFICATION_SUBMIT_RESULT_ROUND_WAIT_SECONDS) { return Number(value) || fallback; }
+function normalizeStep5ProfileSubmitResultMaxRounds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS) { return Number(value) || fallback; }
+function normalizeStep5ProfileSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS) { return Number(value) || fallback; }
 function normalizeVerificationResendCount(value, fallback) { return Number(value) || fallback; }
 function normalizePlusAccountAccessStrategy(value = '') { return String(value || '').trim().toLowerCase() === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION : PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH; }
 ${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}
@@ -1403,6 +1418,11 @@ return { collectSettingsPayload };
   assert.equal(payload.accountRunHistoryHelperBaseUrl, 'http://127.0.0.1:17373');
   assert.equal(payload.signupVerificationReadyTimeoutSeconds, 60);
   assert.equal(payload.signupVerificationReadyMaxRounds, 5);
+  assert.equal(payload.signupVerificationReadyRoundWaitSeconds, 12);
+  assert.equal(payload.signupPhoneVerificationSubmitResultMaxRounds, 6);
+  assert.equal(payload.signupPhoneVerificationSubmitResultRoundWaitSeconds, 5);
+  assert.equal(payload.step5ProfileSubmitResultMaxRounds, 12);
+  assert.equal(payload.step5ProfileSubmitResultRoundWaitSeconds, 10);
   assert.equal(payload.heroSmsApiKey, 'demo-key');
   assert.equal(payload.fiveSimApiKey, 'five-sim-key');
   assert.deepStrictEqual(payload.fiveSimCountryOrder, ['thailand', 'vietnam']);

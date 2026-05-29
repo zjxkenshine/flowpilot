@@ -429,7 +429,10 @@ test('step 4 prepare retries reconnect error after step 3 landed on verification
     getSignupVerificationReadyConfigForState: () => ({
       timeoutSeconds: 60,
       timeoutMs: 60000,
+      totalTimeoutMs: 60000,
       maxRounds: 5,
+      roundWaitSeconds: 12,
+      roundWaitMs: 12000,
     }),
     sendToContentScriptResilient: async (_source, message, options) => {
       if (message.type === 'PREPARE_SIGNUP_VERIFICATION') {
@@ -437,6 +440,7 @@ test('step 4 prepare retries reconnect error after step 3 landed on verification
         prepareOptions.push(options);
         assert.equal(message.payload.signupVerificationReadyTimeoutSeconds, 60);
         assert.equal(message.payload.signupVerificationReadyMaxRounds, 5);
+        assert.equal(message.payload.signupVerificationReadyRoundWaitSeconds, 12);
         if (prepareCalls === 1) {
           throw new Error('认证页 页面刚完成跳转或刷新，内容脚本还没有重新接回；扩展已自动重试，但仍未恢复。请重试当前步骤。');
         }
@@ -500,8 +504,9 @@ test('step 4 prepare uses signup verification ready config as the total wait bud
     sendToContentScriptResilient: async (_source, message, options) => {
       if (message.type === 'PREPARE_SIGNUP_VERIFICATION') {
         prepareOptions.push(options);
-        assert.equal(message.payload.signupVerificationReadyTimeoutSeconds, 75);
+        assert.equal(message.payload.signupVerificationReadyTimeoutSeconds, 78);
         assert.equal(message.payload.signupVerificationReadyMaxRounds, 6);
+        assert.equal(message.payload.signupVerificationReadyRoundWaitSeconds, 13);
         return { ready: true };
       }
       throw new Error(`unexpected message ${message.type}`);
@@ -510,7 +515,10 @@ test('step 4 prepare uses signup verification ready config as the total wait bud
     getSignupVerificationReadyConfigForState: () => ({
       timeoutSeconds: 75,
       timeoutMs: 75000,
+      totalTimeoutMs: 75000,
       maxRounds: 6,
+      roundWaitSeconds: 13,
+      roundWaitMs: 13000,
     }),
     isRetryableContentScriptTransportError: () => false,
     shouldUseCustomRegistrationEmail: () => false,
@@ -524,9 +532,9 @@ test('step 4 prepare uses signup verification ready config as the total wait bud
   });
 
   assert.equal(prepareOptions.length, 1);
-  assert.equal(prepareOptions[0].timeoutMs, 75000);
+  assert.equal(prepareOptions[0].timeoutMs, 78000);
   assert.equal(prepareOptions[0].transportRecoveryTimeoutMs, 30000);
-  assert.equal(prepareOptions[0].responseTimeoutMs, 75000);
+  assert.equal(prepareOptions[0].responseTimeoutMs, 78000);
 });
 
 test('step 4 prepare keeps waiting when retry-page recovery also loses content script', async () => {

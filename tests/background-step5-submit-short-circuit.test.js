@@ -48,6 +48,8 @@ test('step 5 forwards generated profile data and relies on completion signal flo
           year: 2003,
           month: 6,
           day: 19,
+          step5ProfileSubmitResultMaxRounds: 12,
+          step5ProfileSubmitResultRoundWaitSeconds: 10,
         },
       },
     },

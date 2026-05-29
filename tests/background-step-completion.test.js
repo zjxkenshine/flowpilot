@@ -252,7 +252,11 @@ test('executeNodeAndWait writes profile-submitted account book entry before step
   assert.equal(accountBookIndex < validateIndex, true);
   assert.equal(events[accountBookIndex].stage, 'profile_submitted');
   assert.equal(events[accountBookIndex].state.email, 'profile@example.com');
-  assert.deepStrictEqual(events[validateIndex].payload, { profileSubmitted: true });
+  assert.deepStrictEqual(events[validateIndex].payload, {
+    profileSubmitted: true,
+    step5ProfileSubmitResultMaxRounds: 12,
+    step5ProfileSubmitResultRoundWaitSeconds: 10,
+  });
 });
 
 test('executeNodeAndWait keeps profile-submitted write when step 5 post-validation fails', async () => {

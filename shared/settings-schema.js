@@ -94,6 +94,71 @@
     return Math.min(20, Math.max(1, Math.floor(numeric)));
   }
 
+  function normalizeSignupVerificationReadyRoundWaitSeconds(value, fallback = 12) {
+    const fallbackNumber = Math.min(300, Math.max(1, Math.floor(Number(fallback) || 12)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(300, Math.max(1, Math.floor(numeric)));
+  }
+
+  function normalizeSignupPhoneVerificationSubmitResultMaxRounds(value, fallback = 6) {
+    const fallbackNumber = Math.min(60, Math.max(1, Math.floor(Number(fallback) || 6)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(60, Math.max(1, Math.floor(numeric)));
+  }
+
+  function normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value, fallback = 5) {
+    const fallbackNumber = Math.min(120, Math.max(1, Math.floor(Number(fallback) || 5)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(120, Math.max(1, Math.floor(numeric)));
+  }
+
+  function normalizeStep5ProfileSubmitResultMaxRounds(value, fallback = 12) {
+    const fallbackNumber = Math.min(60, Math.max(1, Math.floor(Number(fallback) || 12)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(60, Math.max(1, Math.floor(numeric)));
+  }
+
+  function normalizeStep5ProfileSubmitResultRoundWaitSeconds(value, fallback = 10) {
+    const fallbackNumber = Math.min(120, Math.max(1, Math.floor(Number(fallback) || 10)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(120, Math.max(1, Math.floor(numeric)));
+  }
+
   function createSettingsSchema(deps = {}) {
     const rootScope = typeof self !== 'undefined' ? self : globalThis;
     const flowRegistry = deps.flowRegistry || rootScope.MultiPageFlowRegistry || {};
@@ -403,6 +468,11 @@
               authContentScriptRecoveryTimeoutSeconds: 30,
               signupVerificationReadyTimeoutSeconds: 60,
               signupVerificationReadyMaxRounds: 5,
+              signupVerificationReadyRoundWaitSeconds: 12,
+              signupPhoneVerificationSubmitResultMaxRounds: 6,
+              signupPhoneVerificationSubmitResultRoundWaitSeconds: 5,
+              step5ProfileSubmitResultMaxRounds: 12,
+              step5ProfileSubmitResultRoundWaitSeconds: 10,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -466,6 +536,41 @@
       const stepExecutionRangeByFlow = isPlainObject(input?.stepExecutionRangeByFlow)
         ? input.stepExecutionRangeByFlow
         : {};
+      const hasReadyRoundWaitSetting = Object.prototype.hasOwnProperty.call(input || {}, 'signupVerificationReadyRoundWaitSeconds')
+        || Object.prototype.hasOwnProperty.call(nested?.flows?.openai?.autoRun || {}, 'signupVerificationReadyRoundWaitSeconds');
+      const baseInputHasReadyRoundWaitSetting = isPlainObject(input?.baseInput)
+        ? (
+            Object.prototype.hasOwnProperty.call(input.baseInput, 'signupVerificationReadyRoundWaitSeconds')
+            || Object.prototype.hasOwnProperty.call(input.baseInput?.baseInput || {}, 'signupVerificationReadyRoundWaitSeconds')
+            || Object.prototype.hasOwnProperty.call(input.baseInput?.settingsState?.flows?.openai?.autoRun || {}, 'signupVerificationReadyRoundWaitSeconds')
+          )
+        : hasReadyRoundWaitSetting;
+      const readyMaxRounds = normalizeSignupVerificationReadyMaxRounds(
+        input?.signupVerificationReadyMaxRounds
+        ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyMaxRounds
+        ?? defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds,
+        defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds
+      );
+      const legacyReadyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+        input?.signupVerificationReadyTimeoutSeconds
+        ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyTimeoutSeconds
+        ?? defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds,
+        defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
+      );
+      const readyRoundWaitFallback = Math.max(
+        1,
+        Math.ceil(legacyReadyTimeoutSeconds / Math.max(1, readyMaxRounds))
+      );
+      const readyRoundWaitSeconds = normalizeSignupVerificationReadyRoundWaitSeconds(
+        input?.signupVerificationReadyRoundWaitSeconds
+        ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyRoundWaitSeconds
+        ?? readyRoundWaitFallback,
+        readyRoundWaitFallback
+      );
+      const readyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
+        baseInputHasReadyRoundWaitSetting ? readyMaxRounds * readyRoundWaitSeconds : legacyReadyTimeoutSeconds,
+        defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
+      );
 
       return {
         schemaVersion: Number(input?.settingsSchemaVersion || nested?.schemaVersion || defaults.schemaVersion) || defaults.schemaVersion,
@@ -900,17 +1005,32 @@
                 ?? defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds,
                 defaults.flows.openai.autoRun.authContentScriptRecoveryTimeoutSeconds
               ),
-              signupVerificationReadyTimeoutSeconds: normalizeSignupVerificationReadyTimeoutSeconds(
-                input?.signupVerificationReadyTimeoutSeconds
-                ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyTimeoutSeconds
-                ?? defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds,
-                defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
+              signupVerificationReadyTimeoutSeconds: readyTimeoutSeconds,
+              signupVerificationReadyMaxRounds: readyMaxRounds,
+              signupVerificationReadyRoundWaitSeconds: readyRoundWaitSeconds,
+              signupPhoneVerificationSubmitResultMaxRounds: normalizeSignupPhoneVerificationSubmitResultMaxRounds(
+                input?.signupPhoneVerificationSubmitResultMaxRounds
+                ?? nested?.flows?.openai?.autoRun?.signupPhoneVerificationSubmitResultMaxRounds
+                ?? defaults.flows.openai.autoRun.signupPhoneVerificationSubmitResultMaxRounds,
+                defaults.flows.openai.autoRun.signupPhoneVerificationSubmitResultMaxRounds
               ),
-              signupVerificationReadyMaxRounds: normalizeSignupVerificationReadyMaxRounds(
-                input?.signupVerificationReadyMaxRounds
-                ?? nested?.flows?.openai?.autoRun?.signupVerificationReadyMaxRounds
-                ?? defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds,
-                defaults.flows.openai.autoRun.signupVerificationReadyMaxRounds
+              signupPhoneVerificationSubmitResultRoundWaitSeconds: normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(
+                input?.signupPhoneVerificationSubmitResultRoundWaitSeconds
+                ?? nested?.flows?.openai?.autoRun?.signupPhoneVerificationSubmitResultRoundWaitSeconds
+                ?? defaults.flows.openai.autoRun.signupPhoneVerificationSubmitResultRoundWaitSeconds,
+                defaults.flows.openai.autoRun.signupPhoneVerificationSubmitResultRoundWaitSeconds
+              ),
+              step5ProfileSubmitResultMaxRounds: normalizeStep5ProfileSubmitResultMaxRounds(
+                input?.step5ProfileSubmitResultMaxRounds
+                ?? nested?.flows?.openai?.autoRun?.step5ProfileSubmitResultMaxRounds
+                ?? defaults.flows.openai.autoRun.step5ProfileSubmitResultMaxRounds,
+                defaults.flows.openai.autoRun.step5ProfileSubmitResultMaxRounds
+              ),
+              step5ProfileSubmitResultRoundWaitSeconds: normalizeStep5ProfileSubmitResultRoundWaitSeconds(
+                input?.step5ProfileSubmitResultRoundWaitSeconds
+                ?? nested?.flows?.openai?.autoRun?.step5ProfileSubmitResultRoundWaitSeconds
+                ?? defaults.flows.openai.autoRun.step5ProfileSubmitResultRoundWaitSeconds,
+                defaults.flows.openai.autoRun.step5ProfileSubmitResultRoundWaitSeconds
               ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
@@ -1031,7 +1151,10 @@
     }
 
     function buildSettingsView(settingsState = {}, baseInput = {}) {
-      const normalizedState = normalizeSettingsState(settingsState);
+      const normalizedState = normalizeSettingsState({
+        ...(isPlainObject(settingsState) ? settingsState : {}),
+        baseInput: isPlainObject(baseInput) ? baseInput : {},
+      });
       const next = {
         ...(isPlainObject(baseInput) ? cloneValue(baseInput) : {}),
       };
@@ -1102,6 +1225,11 @@
       next.authContentScriptRecoveryTimeoutSeconds = openaiState.autoRun.authContentScriptRecoveryTimeoutSeconds;
       next.signupVerificationReadyTimeoutSeconds = openaiState.autoRun.signupVerificationReadyTimeoutSeconds;
       next.signupVerificationReadyMaxRounds = openaiState.autoRun.signupVerificationReadyMaxRounds;
+      next.signupVerificationReadyRoundWaitSeconds = openaiState.autoRun.signupVerificationReadyRoundWaitSeconds;
+      next.signupPhoneVerificationSubmitResultMaxRounds = openaiState.autoRun.signupPhoneVerificationSubmitResultMaxRounds;
+      next.signupPhoneVerificationSubmitResultRoundWaitSeconds = openaiState.autoRun.signupPhoneVerificationSubmitResultRoundWaitSeconds;
+      next.step5ProfileSubmitResultMaxRounds = openaiState.autoRun.step5ProfileSubmitResultMaxRounds;
+      next.step5ProfileSubmitResultRoundWaitSeconds = openaiState.autoRun.step5ProfileSubmitResultRoundWaitSeconds;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;
