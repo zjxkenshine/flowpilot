@@ -6143,9 +6143,19 @@ function isSignupPhoneKnownBadNumberFailure(error) {
   return /PHONE_RESEND_BANNED_NUMBER::|SIGNUP_PHONE_PASSWORD_MISMATCH::|unable\s+to\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number|can(?:not|'t)\s+send\s+(?:an?\s+)?(?:sms|text(?:\s+message)?)\s+to\s+(?:this|that)\s+(?:phone\s+)?number|account.*associated.*phone.*already\s+exists|phone.*password.*mismatch|手机号\/密码不匹配|无法向此(?:电话|手机)号码发送短信|无法发送短信到此(?:电话|手机)号码|手机号.*(?:已关联|已存在)/i.test(message);
 }
 
-function shouldPreserveSignupPhoneForProtectedStepFailure(nodeId = '', error = null) {
+function shouldPreserveSignupPhoneForProtectedStepFailure(nodeId = '', error = null, state = {}) {
   if (!isProtectedSignupPhoneReuseNode(nodeId)) {
     return false;
+  }
+  const activation = resolveFailedSignupPhoneReuseSourceActivation(state, nodeId);
+  if (
+    String(nodeId || '').trim() === 'fetch-signup-code'
+    && typeof phoneVerificationHelpers !== 'undefined'
+    && typeof phoneVerificationHelpers?.shouldPreserveSignupPhoneActivationForRetry === 'function'
+  ) {
+    if (activation) {
+      return phoneVerificationHelpers.shouldPreserveSignupPhoneActivationForRetry(error, activation);
+    }
   }
   if (isStopError(error)
     || error?.skipFailedSignupPhoneReusePreserve
@@ -6199,15 +6209,18 @@ async function preserveFailedSignupPhoneReuseActivationFromState(state = {}, err
   const updates = { failedSignupPhoneReuseActivation: activation };
   await setState(updates);
   broadcastDataUpdate(updates);
+  const reuseReasonText = source === 'signup-page-ready-timeout-reuse'
+    ? '验证码页就绪超时'
+    : '手机号验证码流程异常';
   await addLog(
-    `步骤 4：验证码页就绪超时，已将当前注册手机号 ${activation.phoneNumber} 保留到失败复用槽位，下一次步骤 2 将优先复用。`,
+    `步骤 4：${reuseReasonText}，已将当前注册手机号 ${activation.phoneNumber} 保留到失败复用槽位，下一次步骤 2 将优先复用。`,
     'warn'
   );
   return activation;
 }
 
 async function preserveFailedSignupPhoneReuseActivationForProtectedStep(nodeId = '', state = {}, error = null) {
-  if (!shouldPreserveSignupPhoneForProtectedStepFailure(nodeId, error)) {
+  if (!shouldPreserveSignupPhoneForProtectedStepFailure(nodeId, error, state)) {
     return null;
   }
   return preserveFailedSignupPhoneReuseActivationFromState(state, error, { nodeId });

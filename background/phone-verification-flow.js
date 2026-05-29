@@ -2251,6 +2251,26 @@
       );
     }
 
+    function isSignupUserAlreadyExistsFailure(error) {
+      const message = String(error?.message || error || '').trim();
+      return /SIGNUP_USER_ALREADY_EXISTS::|user_already_exists/i.test(message);
+    }
+
+    function isSignupPhonePasswordMismatchFailure(error) {
+      const message = String(error?.message || error || '').trim();
+      return /SIGNUP_PHONE_PASSWORD_MISMATCH::|phone.*password.*mismatch|incorrect\s+phone\s+number\s+or\s+password|account.*associated.*phone.*already\s+exists|手机号\/密码不匹配|手机号.*(?:已关联|已存在)/i.test(message);
+    }
+
+    function isSignupPhoneRetryFromStep2Failure(error) {
+      const message = String(error?.message || error || '').trim();
+      return /SIGNUP_PHONE_RETRY_FROM_STEP2::/i.test(message);
+    }
+
+    function isSignupPhoneInvalidCodeFailure(error) {
+      const message = String(error?.message || error || '').trim();
+      return /invalid\s+code|incorrect\s+code|verification\s+code.*(?:invalid|incorrect)|验证码.*(?:被拒|不正确|无效)|code.*rejected/i.test(message);
+    }
+
     function isPhoneResendThrottledError(error) {
       const message = String(error?.message || error || '').trim();
       if (!message) {
@@ -2513,6 +2533,26 @@
     function isPhoneMaxUsageExceededFlowError(error) {
       const message = String(error?.message || error || '').trim();
       return message.startsWith('PHONE_MAX_USAGE_EXCEEDED::') || isPhoneNumberUsedError(message);
+    }
+
+    function shouldPreserveSignupPhoneActivationForRetry(error, activation = null) {
+      const normalizedActivation = normalizeActivation(activation);
+      if (!normalizedActivation) {
+        return false;
+      }
+      if (isStopRequestedError(error)
+        || isPhoneCodeTimeoutError(error)
+        || isPhoneResendBannedNumberError(error)
+        || isPhoneMaxUsageExceededFlowError(error)
+        || isPhoneActivationOrderMissingError(error, normalizedActivation.provider)
+        || isStaleSignupPhoneEmailVerificationError(error)
+        || isSignupPhoneInvalidCodeFailure(error)
+        || isSignupPhonePasswordMismatchFailure(error)
+        || isSignupPhoneRetryFromStep2Failure(error)
+        || isSignupUserAlreadyExistsFailure(error)) {
+        return false;
+      }
+      return true;
     }
 
     function isPhoneRoute405RecoveryError(error) {
@@ -6418,6 +6458,32 @@
       });
     }
 
+    async function persistFailedSignupPhoneReuseActivation(activation, error = null, options = {}) {
+      const normalizedActivation = normalizeActivation(activation);
+      if (!normalizedActivation) {
+        return null;
+      }
+      const reuseActivation = {
+        ...normalizedActivation,
+        source: String(options?.source || 'signup-phone-verification-error-reuse').trim()
+          || 'signup-phone-verification-error-reuse',
+        reason: String(error?.message || error || options?.reason || '').trim(),
+        recordedAt: Date.now(),
+      };
+      delete reuseActivation.phoneCodeReceived;
+      delete reuseActivation.phoneCodeReceivedAt;
+      delete reuseActivation.ignoredPhoneCodeKeys;
+      await setPhoneRuntimeState({
+        failedSignupPhoneReuseActivation: reuseActivation,
+      });
+      await addLog(
+        `步骤 4：手机号验证码流程异常，已保留注册手机号 ${reuseActivation.phoneNumber}，下一轮步骤 2 将继续复用该接码订单。`,
+        'warn',
+        { step: 4, stepKey: 'fetch-signup-code' }
+      );
+      return reuseActivation;
+    }
+
     async function acquirePhoneActivation(state = {}, options = {}) {
       const provider = normalizePhoneSmsProvider(state?.phoneSmsProvider || DEFAULT_PHONE_SMS_PROVIDER);
       const providerOrder = resolvePhoneProviderOrder(state, provider);
@@ -7534,12 +7600,24 @@
 
           throw new Error('步骤 4：手机验证码未能成功提交。');
         } catch (error) {
-          if (shouldCancelActivation && activation) {
+          const shouldPreserveFailedSignupReuse = shouldPreserveSignupPhoneActivationForRetry(error, activation);
+          if (shouldPreserveFailedSignupReuse) {
+            await persistFailedSignupPhoneReuseActivation(activation, error).catch(() => {});
+          }
+          if (shouldCancelActivation && activation && !shouldPreserveFailedSignupReuse) {
             await cancelSignupPhoneActivation(state, activation).catch(() => {});
           }
-          const shouldClearFailedReuseCache = isPhoneCodeTimeoutError(error)
+          const shouldClearFailedReuseCache = !shouldPreserveFailedSignupReuse && (
+            isPhoneCodeTimeoutError(error)
             || isPhoneResendBannedNumberError(error)
-            || isStaleSignupPhoneEmailVerificationError(error);
+            || isPhoneMaxUsageExceededFlowError(error)
+            || isPhoneActivationOrderMissingError(error, activation?.provider)
+            || isStaleSignupPhoneEmailVerificationError(error)
+            || isSignupPhoneInvalidCodeFailure(error)
+            || isSignupPhonePasswordMismatchFailure(error)
+            || isSignupPhoneRetryFromStep2Failure(error)
+            || isSignupUserAlreadyExistsFailure(error)
+          );
           await setPhoneRuntimeState({
             [PHONE_VERIFICATION_CODE_STATE_KEY]: '',
             signupPhoneVerificationRequestedAt: null,
@@ -8613,6 +8691,7 @@
       prepareSignupPhoneActivation,
       reactivatePhoneActivation,
       requestPhoneActivation,
+      shouldPreserveSignupPhoneActivationForRetry,
       waitForLoginPhoneCode,
       waitForSignupPhoneCode,
     };
