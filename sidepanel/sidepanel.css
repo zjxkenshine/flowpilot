@@ -2605,6 +2605,11 @@ header {
   min-width: 96px;
 }
 
+.browser-fingerprint-language-select {
+  flex: 0 0 128px;
+  min-width: 128px;
+}
+
 .browser-fingerprint-caption {
   min-width: 128px;
   text-align: left;

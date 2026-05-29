@@ -1524,6 +1524,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   customPassword: '',
   browserFingerprintEnabled: true,
   browserFingerprintLevel: 'standard',
+  browserFingerprintLanguage: 'zh-CN',
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
@@ -1788,6 +1789,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phoneSignupPhonePrefixedEmailEnabled',
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
+  'browserFingerprintLanguage',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -4062,6 +4064,14 @@ function normalizePersistentSettingValue(key, value) {
         : (String(value || '').trim().toLowerCase() === 'basic' || String(value || '').trim().toLowerCase() === 'enhanced'
           ? String(value || '').trim().toLowerCase()
           : 'standard');
+    case 'browserFingerprintLanguage':
+      return self.MultiPageBackgroundBrowserFingerprint?.normalizeBrowserFingerprintLanguage
+        ? self.MultiPageBackgroundBrowserFingerprint.normalizeBrowserFingerprintLanguage(value)
+        : (() => {
+          const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+          if (normalized === 'en' || normalized === 'en-us') return 'en-US';
+          return 'zh-CN';
+        })();
     case 'plusPaymentMethod':
       return normalizePlusPaymentMethod(value);
     case 'plusHostedCheckoutIsFinalStep':
@@ -5268,6 +5278,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('phoneSignupPhonePrefixedEmailEnabled', ['flows', 'openai', 'signup', 'phoneSignupPhonePrefixedEmailEnabled']);
   assignIfUpdated('browserFingerprintEnabled', ['flows', 'openai', 'browserFingerprint', 'enabled']);
   assignIfUpdated('browserFingerprintLevel', ['flows', 'openai', 'browserFingerprint', 'level']);
+  assignIfUpdated('browserFingerprintLanguage', ['flows', 'openai', 'browserFingerprint', 'language']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);

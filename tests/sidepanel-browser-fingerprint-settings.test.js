@@ -7,16 +7,23 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
   const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
 
   assert.match(html, /id="row-browser-fingerprint"/);
+  assert.match(html, /id="row-browser-fingerprint-language"/);
   assert.match(html, /id="input-browser-fingerprint-enabled"/);
   assert.match(html, /id="select-browser-fingerprint-level"/);
-  assert.match(html, /<option value="basic">基础<\/option>/);
-  assert.match(html, /<option value="standard">标准<\/option>/);
-  assert.match(html, /<option value="enhanced">增强<\/option>/);
+  assert.match(html, /id="select-browser-fingerprint-language"/);
+  assert.match(html, /<option value="basic">/);
+  assert.match(html, /<option value="standard">/);
+  assert.match(html, /<option value="enhanced">/);
+  assert.match(html, /<option value="zh-CN">/);
+  assert.match(html, /<option value="en-US">English<\/option>/);
 
   assert.match(source, /function normalizeBrowserFingerprintLevel/);
+  assert.match(source, /function normalizeBrowserFingerprintLanguage/);
   assert.match(source, /browserFingerprintEnabled:\s*typeof inputBrowserFingerprintEnabled/);
   assert.match(source, /browserFingerprintLevel:\s*typeof selectBrowserFingerprintLevel/);
+  assert.match(source, /browserFingerprintLanguage:\s*typeof selectBrowserFingerprintLanguage/);
   assert.match(source, /inputBrowserFingerprintEnabled\?\.addEventListener\('change'/);
   assert.match(source, /selectBrowserFingerprintLevel\?\.addEventListener\('change'/);
+  assert.match(source, /selectBrowserFingerprintLanguage\?\.addEventListener\('change'/);
   assert.match(source, /updateBrowserFingerprintUI\(state\)/);
 });

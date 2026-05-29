@@ -93,6 +93,16 @@
       }
       return 'standard';
     };
+    const normalizeBrowserFingerprintLanguage = (value = '') => {
+      const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+      if (normalized === 'en' || normalized === 'en-us') {
+        return 'en-US';
+      }
+      if (normalized === 'zh' || normalized === 'zh-cn' || normalized === 'zh-hans') {
+        return 'zh-CN';
+      }
+      return 'zh-CN';
+    };
     const defaultPayPalGeneratedProfile = Object.freeze({
       email: '',
       phone: '',
@@ -307,6 +317,7 @@
             browserFingerprint: {
               enabled: true,
               level: 'standard',
+              language: 'zh-CN',
             },
             oauth: {
               oauthOpenAfterRefreshWaitSeconds: 5,
@@ -580,6 +591,11 @@
                 input?.browserFingerprintLevel
                 ?? nested?.flows?.openai?.browserFingerprint?.level
                 ?? defaults.flows.openai.browserFingerprint.level
+              ),
+              language: normalizeBrowserFingerprintLanguage(
+                input?.browserFingerprintLanguage
+                ?? nested?.flows?.openai?.browserFingerprint?.language
+                ?? defaults.flows.openai.browserFingerprint.language
               ),
             },
             oauth: {
@@ -985,6 +1001,7 @@
       next.phoneSignupPhonePrefixedEmailEnabled = openaiState.signup.phoneSignupPhonePrefixedEmailEnabled;
       next.browserFingerprintEnabled = openaiState.browserFingerprint.enabled;
       next.browserFingerprintLevel = openaiState.browserFingerprint.level;
+      next.browserFingerprintLanguage = openaiState.browserFingerprint.language;
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;

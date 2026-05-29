@@ -208,9 +208,11 @@ test('settings schema preserves browser fingerprint defaults and nested override
   assert.deepEqual(defaults.flows.openai.browserFingerprint, {
     enabled: true,
     level: 'standard',
+    language: 'zh-CN',
   });
   assert.equal(defaultView.browserFingerprintEnabled, true);
   assert.equal(defaultView.browserFingerprintLevel, 'standard');
+  assert.equal(defaultView.browserFingerprintLanguage, 'zh-CN');
 
   const normalized = schema.normalizeSettingsState({
     settingsState: {
@@ -219,6 +221,7 @@ test('settings schema preserves browser fingerprint defaults and nested override
           browserFingerprint: {
             enabled: false,
             level: 'enhanced',
+            language: 'en-US',
           },
         },
       },
@@ -228,8 +231,10 @@ test('settings schema preserves browser fingerprint defaults and nested override
 
   assert.equal(normalized.flows.openai.browserFingerprint.enabled, false);
   assert.equal(normalized.flows.openai.browserFingerprint.level, 'enhanced');
+  assert.equal(normalized.flows.openai.browserFingerprint.language, 'en-US');
   assert.equal(view.browserFingerprintEnabled, false);
   assert.equal(view.browserFingerprintLevel, 'enhanced');
+  assert.equal(view.browserFingerprintLanguage, 'en-US');
 });
 
 test('settings schema preserves Plus checkout conversion proxy in canonical state and read view', () => {

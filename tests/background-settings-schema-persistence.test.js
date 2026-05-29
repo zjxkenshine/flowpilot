@@ -86,6 +86,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'phoneSignupPhonePrefixedEmailEnabled',
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
+  'browserFingerprintLanguage',
   'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
@@ -135,6 +136,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   signupMethod: 'email',
   browserFingerprintEnabled: true,
   browserFingerprintLevel: 'standard',
+  browserFingerprintLanguage: 'zh-CN',
   oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
@@ -497,23 +499,28 @@ test('buildPersistentSettingsPayload persists signup identity redirect timeout i
   assert.equal(nested.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 120);
 });
 
-test('buildPersistentSettingsPayload persists browser fingerprint switch and level into settings schema', () => {
+test('buildPersistentSettingsPayload persists browser fingerprint switch level and language into settings schema', () => {
   const api = buildHarness();
 
   const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
   assert.equal(defaults.browserFingerprintEnabled, true);
   assert.equal(defaults.browserFingerprintLevel, 'standard');
+  assert.equal(defaults.browserFingerprintLanguage, 'zh-CN');
   assert.equal(defaults.settingsState.flows.openai.browserFingerprint.enabled, true);
   assert.equal(defaults.settingsState.flows.openai.browserFingerprint.level, 'standard');
+  assert.equal(defaults.settingsState.flows.openai.browserFingerprint.language, 'zh-CN');
 
   const flat = api.buildPersistentSettingsPayload({
     browserFingerprintEnabled: false,
     browserFingerprintLevel: 'enhanced',
+    browserFingerprintLanguage: 'en-US',
   }, { fillDefaults: true });
   assert.equal(flat.browserFingerprintEnabled, false);
   assert.equal(flat.browserFingerprintLevel, 'enhanced');
+  assert.equal(flat.browserFingerprintLanguage, 'en-US');
   assert.equal(flat.settingsState.flows.openai.browserFingerprint.enabled, false);
   assert.equal(flat.settingsState.flows.openai.browserFingerprint.level, 'enhanced');
+  assert.equal(flat.settingsState.flows.openai.browserFingerprint.language, 'en-US');
 
   const nested = api.buildPersistentSettingsPayload({
     settingsSchemaVersion: 4,
@@ -523,6 +530,7 @@ test('buildPersistentSettingsPayload persists browser fingerprint switch and lev
           browserFingerprint: {
             enabled: true,
             level: 'basic',
+            language: 'en-US',
           },
         },
       },
@@ -530,7 +538,9 @@ test('buildPersistentSettingsPayload persists browser fingerprint switch and lev
   }, { requireKnownKeys: true });
   assert.equal(nested.browserFingerprintEnabled, true);
   assert.equal(nested.browserFingerprintLevel, 'basic');
+  assert.equal(nested.browserFingerprintLanguage, 'en-US');
   assert.equal(nested.settingsState.flows.openai.browserFingerprint.level, 'basic');
+  assert.equal(nested.settingsState.flows.openai.browserFingerprint.language, 'en-US');
 });
 
 test('buildPersistentSettingsPayload persists phone signup phone-prefixed email switch into settings schema', () => {

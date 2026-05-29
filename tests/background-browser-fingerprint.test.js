@@ -37,6 +37,7 @@ test('browser fingerprint profile is stable for the same proxy exit and run id',
   assert.equal(first.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
   assert.equal(first.timezoneId, 'Asia/Tokyo');
   assert.equal(first.level, 'standard');
+  assert.equal(first.language, 'zh-CN');
 });
 
 test('browser fingerprint level normalization supports basic standard and enhanced', () => {
@@ -73,7 +74,7 @@ test('browser fingerprint profile changes when exit or run changes', () => {
   assert.equal(api.isValidBrowserFingerprintProfile(base), true);
 });
 
-test('browser fingerprint maps common regions to matching locale timezone and coordinates', () => {
+test('browser fingerprint maps common regions to matching timezone and coordinates while defaulting language to simplified Chinese', () => {
   const api = loadBrowserFingerprintModule();
   const jp = api.buildBrowserFingerprintProfile({ exitIp: '1.1.1.1', exitRegion: 'JP' }, { runId: 'a' }, { createdAt: 1 });
   const th = api.buildBrowserFingerprintProfile({ exitIp: '1.1.1.2', exitRegion: 'TH' }, { runId: 'a' }, { createdAt: 1 });
@@ -94,35 +95,35 @@ test('browser fingerprint maps common regions to matching locale timezone and co
   assert.equal(th.timezoneId, 'Asia/Bangkok');
   assert.ok(th.geolocation.latitude > 13 && th.geolocation.latitude < 14.5);
 
-  assert.equal(sg.locale, 'en-US');
-  assert.deepEqual(sg.languages, ['en-US', 'en']);
-  assert.equal(sg.acceptLanguage, 'en-US,en;q=0.9');
+  assert.equal(sg.locale, 'zh-CN');
+  assert.deepEqual(sg.languages, ['zh-CN', 'zh']);
+  assert.equal(sg.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
   assert.equal(sg.timezoneId, 'Asia/Singapore');
   assert.ok(sg.geolocation.longitude > 103 && sg.geolocation.longitude < 105);
 
   assert.equal(br.exitRegion, 'BR');
   assert.equal(br.fallbackRegion, false);
-  assert.equal(br.locale, 'en-US');
-  assert.deepEqual(br.languages, ['en-US', 'en']);
-  assert.equal(br.acceptLanguage, 'en-US,en;q=0.9');
+  assert.equal(br.locale, 'zh-CN');
+  assert.deepEqual(br.languages, ['zh-CN', 'zh']);
+  assert.equal(br.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
   assert.equal(br.timezoneId, 'America/Sao_Paulo');
   assert.ok(br.geolocation.latitude > -24 && br.geolocation.latitude < -23);
   assert.ok(br.geolocation.longitude > -47 && br.geolocation.longitude < -46);
 
   assert.equal(unknown.exitRegion, 'US');
   assert.equal(unknown.fallbackRegion, true);
-  assert.equal(unknown.locale, 'en-US');
-  assert.deepEqual(unknown.languages, ['en-US', 'en']);
-  assert.equal(unknown.acceptLanguage, 'en-US,en;q=0.9');
+  assert.equal(unknown.locale, 'zh-CN');
+  assert.deepEqual(unknown.languages, ['zh-CN', 'zh']);
+  assert.equal(unknown.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
 
   for (const profile of [jp, th, sg, br, unknown]) {
     assertAllowedLanguageProfile(profile);
   }
 });
 
-test('browser fingerprint language falls back to simplified Chinese for non-English regions', () => {
+test('browser fingerprint language defaults to simplified Chinese regardless of region', () => {
   const api = loadBrowserFingerprintModule();
-  for (const region of ['KR', 'DE', 'FR']) {
+  for (const region of ['US', 'SG', 'BR', 'KR', 'DE', 'FR']) {
     const profile = api.buildBrowserFingerprintProfile(
       { exitIp: `203.0.113.${region.charCodeAt(0)}`, exitRegion: region },
       { runId: 'language-whitelist' },
@@ -137,15 +138,16 @@ test('browser fingerprint language falls back to simplified Chinese for non-Engl
   }
 });
 
-test('browser fingerprint language stays English for English regions', () => {
+test('browser fingerprint language uses manual English setting for any region', () => {
   const api = loadBrowserFingerprintModule();
-  for (const region of ['US', 'SG', 'BR']) {
+  for (const region of ['US', 'SG', 'BR', 'JP', 'TH']) {
     const profile = api.buildBrowserFingerprintProfile(
       { exitIp: `203.0.113.${region.charCodeAt(0)}`, exitRegion: region },
-      { runId: 'language-whitelist' },
+      { runId: 'language-whitelist', browserFingerprintLanguage: 'en-US' },
       { createdAt: 1 }
     );
     assert.equal(profile.exitRegion, region);
+    assert.equal(profile.language, 'en-US');
     assert.equal(profile.locale, 'en-US');
     assert.deepEqual(profile.languages, ['en-US', 'en']);
     assert.equal(profile.acceptLanguage, 'en-US,en;q=0.9');
@@ -163,12 +165,30 @@ test('browser fingerprint normalizes Brazil region names to BR', () => {
     );
     assert.equal(profile.exitRegion, 'BR');
     assert.equal(profile.fallbackRegion, false);
-    assert.equal(profile.locale, 'en-US');
-    assert.deepEqual(profile.languages, ['en-US', 'en']);
-    assert.equal(profile.acceptLanguage, 'en-US,en;q=0.9');
+    assert.equal(profile.locale, 'zh-CN');
+    assert.deepEqual(profile.languages, ['zh-CN', 'zh']);
+    assert.equal(profile.acceptLanguage, 'zh-CN,zh;q=0.9,en;q=0.8');
     assert.equal(profile.timezoneId, 'America/Sao_Paulo');
     assertAllowedLanguageProfile(profile);
   }
+});
+
+test('browser fingerprint keeps Brazil region parameters when language is set to English', () => {
+  const api = loadBrowserFingerprintModule();
+  const profile = api.buildBrowserFingerprintProfile(
+    { exitIp: '203.0.113.44', exitRegion: 'BR' },
+    { runId: 'br-english', browserFingerprintLanguage: 'en-US' },
+    { createdAt: 1 }
+  );
+
+  assert.equal(profile.exitRegion, 'BR');
+  assert.equal(profile.language, 'en-US');
+  assert.equal(profile.locale, 'en-US');
+  assert.deepEqual(profile.languages, ['en-US', 'en']);
+  assert.equal(profile.acceptLanguage, 'en-US,en;q=0.9');
+  assert.equal(profile.timezoneId, 'America/Sao_Paulo');
+  assert.ok(profile.geolocation.latitude > -24 && profile.geolocation.latitude < -23);
+  assert.ok(profile.geolocation.longitude > -47 && profile.geolocation.longitude < -46);
 });
 
 test('browser fingerprint manager persists runtime-only profile fields', async () => {
@@ -305,8 +325,8 @@ test('browser fingerprint manager logs generated profile summary without exit ip
     assert.equal(summary.profileId, result.profile.profileId);
     assert.equal(summary.exitRegion, 'SG');
     assert.equal(summary.fallbackRegion, false);
-    assert.equal(summary.locale, 'en-US');
-    assert.deepEqual(summary.languages, ['en-US', 'en']);
+    assert.equal(summary.locale, 'zh-CN');
+    assert.deepEqual(summary.languages, ['zh-CN', 'zh']);
     assert.equal(summary.timezoneId, 'Asia/Singapore');
     assert.equal(summary.platform, result.profile.platform);
     assert.deepEqual(summary.screen, {

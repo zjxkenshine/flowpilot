@@ -258,8 +258,10 @@ const inputPlusModeEnabled = document.getElementById('input-plus-mode-enabled');
 const rowPhonePlusMode = document.getElementById('row-phone-plus-mode');
 const inputPhonePlusModeEnabled = document.getElementById('input-phone-plus-mode-enabled');
 const rowBrowserFingerprint = document.getElementById('row-browser-fingerprint');
+const rowBrowserFingerprintLanguage = document.getElementById('row-browser-fingerprint-language');
 const inputBrowserFingerprintEnabled = document.getElementById('input-browser-fingerprint-enabled');
 const selectBrowserFingerprintLevel = document.getElementById('select-browser-fingerprint-level');
+const selectBrowserFingerprintLanguage = document.getElementById('select-browser-fingerprint-language');
 const browserFingerprintCaption = document.getElementById('browser-fingerprint-caption');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
@@ -738,6 +740,7 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX_SESSION_UI = 'codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY = 'continue';
 const DEFAULT_BROWSER_FINGERPRINT_LEVEL = 'standard';
+const DEFAULT_BROWSER_FINGERPRINT_LANGUAGE = 'zh-CN';
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 const DEFAULT_SIGNUP_METHOD = SIGNUP_METHOD_EMAIL;
@@ -3687,6 +3690,17 @@ function normalizeBrowserFingerprintLevel(value = '') {
   return DEFAULT_BROWSER_FINGERPRINT_LEVEL;
 }
 
+function normalizeBrowserFingerprintLanguage(value = '') {
+  const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+  if (normalized === 'en' || normalized === 'en-us') {
+    return 'en-US';
+  }
+  if (normalized === 'zh' || normalized === 'zh-cn' || normalized === 'zh-hans') {
+    return 'zh-CN';
+  }
+  return DEFAULT_BROWSER_FINGERPRINT_LANGUAGE;
+}
+
 function normalizePlusHostedCheckoutOauthDelaySeconds(value) {
   const numeric = Number(String(value ?? '').trim());
   if (!Number.isFinite(numeric)) {
@@ -5122,6 +5136,12 @@ function collectSettingsPayload() {
       }
       return 'standard';
     });
+  const normalizeBrowserFingerprintLanguageInput = typeof normalizeBrowserFingerprintLanguage === 'function'
+    ? normalizeBrowserFingerprintLanguage
+    : ((value = '') => {
+      const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+      return normalized === 'en' || normalized === 'en-us' ? 'en-US' : 'zh-CN';
+    });
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
@@ -5830,6 +5850,9 @@ function collectSettingsPayload() {
     browserFingerprintLevel: typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel
       ? normalizeBrowserFingerprintLevelInput(selectBrowserFingerprintLevel.value)
       : normalizeBrowserFingerprintLevelInput(latestState?.browserFingerprintLevel),
+    browserFingerprintLanguage: typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage
+      ? normalizeBrowserFingerprintLanguageInput(selectBrowserFingerprintLanguage.value)
+      : normalizeBrowserFingerprintLanguageInput(latestState?.browserFingerprintLanguage),
     plusModeEnabled: payloadPlusModeEnabled,
     phonePlusModeEnabled: payloadPhonePlusModeEnabled,
     plusPaymentMethod,
@@ -12692,6 +12715,9 @@ function applySettingsState(state) {
   if (typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel) {
     selectBrowserFingerprintLevel.value = normalizeBrowserFingerprintLevel(state?.browserFingerprintLevel);
   }
+  if (typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage) {
+    selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(state?.browserFingerprintLanguage);
+  }
   if (typeof updateBrowserFingerprintUI === 'function') {
     updateBrowserFingerprintUI(state);
   }
@@ -15367,9 +15393,17 @@ function updateBrowserFingerprintUI(state = latestState) {
       ? selectBrowserFingerprintLevel.value
       : state?.browserFingerprintLevel
   );
+  const language = normalizeBrowserFingerprintLanguage(
+    typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage
+      ? selectBrowserFingerprintLanguage.value
+      : state?.browserFingerprintLanguage
+  );
 
   if (typeof rowBrowserFingerprint !== 'undefined' && rowBrowserFingerprint) {
     rowBrowserFingerprint.style.display = visible ? '' : 'none';
+  }
+  if (typeof rowBrowserFingerprintLanguage !== 'undefined' && rowBrowserFingerprintLanguage) {
+    rowBrowserFingerprintLanguage.style.display = visible ? '' : 'none';
   }
   if (typeof inputBrowserFingerprintEnabled !== 'undefined' && inputBrowserFingerprintEnabled) {
     inputBrowserFingerprintEnabled.checked = enabled;
@@ -15377,6 +15411,10 @@ function updateBrowserFingerprintUI(state = latestState) {
   if (typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel) {
     selectBrowserFingerprintLevel.value = level;
     selectBrowserFingerprintLevel.disabled = !enabled;
+  }
+  if (typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage) {
+    selectBrowserFingerprintLanguage.value = language;
+    selectBrowserFingerprintLanguage.disabled = !enabled;
   }
   if (typeof browserFingerprintCaption !== 'undefined' && browserFingerprintCaption) {
     browserFingerprintCaption.textContent = enabled
@@ -18676,6 +18714,13 @@ selectBrowserFingerprintLevel?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+selectBrowserFingerprintLanguage?.addEventListener('change', () => {
+  selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(selectBrowserFingerprintLanguage.value);
+  updateBrowserFingerprintUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 btnGpcHelperConvertApiKey?.addEventListener('click', () => {
   openExternalUrl(GPC_HELPER_PORTAL_URL);
 });
@@ -21654,9 +21699,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.browserFingerprintLevel !== undefined && selectBrowserFingerprintLevel) {
         selectBrowserFingerprintLevel.value = normalizeBrowserFingerprintLevel(message.payload.browserFingerprintLevel);
       }
+      if (message.payload.browserFingerprintLanguage !== undefined && selectBrowserFingerprintLanguage) {
+        selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(message.payload.browserFingerprintLanguage);
+      }
       if (
         message.payload.browserFingerprintEnabled !== undefined
         || message.payload.browserFingerprintLevel !== undefined
+        || message.payload.browserFingerprintLanguage !== undefined
       ) {
         updateBrowserFingerprintUI(latestState);
       }

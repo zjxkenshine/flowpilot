@@ -22,73 +22,44 @@
   const BROWSER_FINGERPRINT_LEVEL_BASIC = 'basic';
   const BROWSER_FINGERPRINT_LEVEL_STANDARD = 'standard';
   const BROWSER_FINGERPRINT_LEVEL_ENHANCED = 'enhanced';
+  const BROWSER_FINGERPRINT_LANGUAGE_EN_US = 'en-US';
+  const BROWSER_FINGERPRINT_LANGUAGE_ZH_CN = 'zh-CN';
 
   const REGION_DEFAULTS = Object.freeze({
     US: Object.freeze({
-      locale: 'en-US',
-      languages: Object.freeze(['en-US', 'en']),
-      acceptLanguage: 'en-US,en;q=0.9',
       timezoneIds: Object.freeze(['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles']),
       geolocation: Object.freeze({ latitude: 39.8283, longitude: -98.5795, accuracy: 80 }),
     }),
     JP: Object.freeze({
-      locale: 'zh-CN',
-      languages: Object.freeze(['zh-CN', 'zh']),
-      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
       timezoneIds: Object.freeze(['Asia/Tokyo']),
       geolocation: Object.freeze({ latitude: 35.6762, longitude: 139.6503, accuracy: 70 }),
     }),
     TH: Object.freeze({
-      locale: 'zh-CN',
-      languages: Object.freeze(['zh-CN', 'zh']),
-      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
       timezoneIds: Object.freeze(['Asia/Bangkok']),
       geolocation: Object.freeze({ latitude: 13.7563, longitude: 100.5018, accuracy: 80 }),
     }),
     SG: Object.freeze({
-      locale: 'en-US',
-      languages: Object.freeze(['en-US', 'en']),
-      acceptLanguage: 'en-US,en;q=0.9',
       timezoneIds: Object.freeze(['Asia/Singapore']),
       geolocation: Object.freeze({ latitude: 1.3521, longitude: 103.8198, accuracy: 60 }),
     }),
     BR: Object.freeze({
-      locale: 'en-US',
-      languages: Object.freeze(['en-US', 'en']),
-      acceptLanguage: 'en-US,en;q=0.9',
       timezoneIds: Object.freeze(['America/Sao_Paulo']),
       geolocation: Object.freeze({ latitude: -23.5505, longitude: -46.6333, accuracy: 90 }),
     }),
   });
 
   const LANGUAGE_FINGERPRINT_PROFILES = Object.freeze({
-    EN: Object.freeze({
+    [BROWSER_FINGERPRINT_LANGUAGE_EN_US]: Object.freeze({
       locale: 'en-US',
       languages: Object.freeze(['en-US', 'en']),
       acceptLanguage: 'en-US,en;q=0.9',
     }),
-    ZH_CN: Object.freeze({
+    [BROWSER_FINGERPRINT_LANGUAGE_ZH_CN]: Object.freeze({
       locale: 'zh-CN',
       languages: Object.freeze(['zh-CN', 'zh']),
       acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
     }),
   });
-
-  const ENGLISH_LANGUAGE_REGIONS = Object.freeze(new Set([
-    'US',
-    'SG',
-    'BR',
-    'GB',
-    'UK',
-    'CA',
-    'AU',
-    'NZ',
-    'IE',
-  ]));
-
-  const SIMPLIFIED_CHINESE_LANGUAGE_REGIONS = Object.freeze(new Set([
-    'CN',
-  ]));
 
   const REGION_NAME_ALIASES = Object.freeze({
     AUSTRALIA: 'AU',
@@ -164,6 +135,17 @@
     return BROWSER_FINGERPRINT_LEVEL_STANDARD;
   }
 
+  function normalizeBrowserFingerprintLanguage(value = '') {
+    const normalized = String(value || '').trim().replace(/_/g, '-').toLowerCase();
+    if (normalized === 'en' || normalized === 'en-us') {
+      return BROWSER_FINGERPRINT_LANGUAGE_EN_US;
+    }
+    if (normalized === 'zh' || normalized === 'zh-cn' || normalized === 'zh-hans') {
+      return BROWSER_FINGERPRINT_LANGUAGE_ZH_CN;
+    }
+    return BROWSER_FINGERPRINT_LANGUAGE_ZH_CN;
+  }
+
   function isBrowserFingerprintEnabled(state = {}) {
     const nestedEnabled = state?.settingsState?.flows?.openai?.browserFingerprint?.enabled;
     if (nestedEnabled === false) {
@@ -179,6 +161,15 @@
       return normalizeBrowserFingerprintLevel(fallback);
     }
     return normalizeBrowserFingerprintLevel(rawLevel);
+  }
+
+  function getBrowserFingerprintLanguageFromState(state = {}, fallback = BROWSER_FINGERPRINT_LANGUAGE_ZH_CN) {
+    const rawLanguage = state?.browserFingerprintLanguage
+      ?? state?.settingsState?.flows?.openai?.browserFingerprint?.language;
+    if (rawLanguage === undefined || rawLanguage === null || String(rawLanguage || '').trim() === '') {
+      return normalizeBrowserFingerprintLanguage(fallback);
+    }
+    return normalizeBrowserFingerprintLanguage(rawLanguage);
   }
 
   function hashString(value = '') {
@@ -209,15 +200,9 @@
     return list[Math.floor(random() * list.length) % list.length];
   }
 
-  function resolveLanguageFingerprintProfile(regionCode = '') {
-    const normalizedRegion = normalizeRegionCode(regionCode);
-    if (ENGLISH_LANGUAGE_REGIONS.has(normalizedRegion)) {
-      return LANGUAGE_FINGERPRINT_PROFILES.EN;
-    }
-    if (SIMPLIFIED_CHINESE_LANGUAGE_REGIONS.has(normalizedRegion)) {
-      return LANGUAGE_FINGERPRINT_PROFILES.ZH_CN;
-    }
-    return LANGUAGE_FINGERPRINT_PROFILES.ZH_CN;
+  function resolveLanguageFingerprintProfile(language = '') {
+    const normalizedLanguage = normalizeBrowserFingerprintLanguage(language);
+    return LANGUAGE_FINGERPRINT_PROFILES[normalizedLanguage] || LANGUAGE_FINGERPRINT_PROFILES[BROWSER_FINGERPRINT_LANGUAGE_ZH_CN];
   }
 
   function roundCoordinate(value) {
@@ -325,7 +310,10 @@
     const normalizedRegion = normalizeRegionCode(rawRegion);
     const regionCode = normalizedRegion || 'US';
     const regionDefaults = REGION_DEFAULTS[regionCode] || REGION_DEFAULTS.US;
-    const languageProfile = resolveLanguageFingerprintProfile(regionCode);
+    const browserFingerprintLanguage = normalizeBrowserFingerprintLanguage(
+      options?.language ?? options?.browserFingerprintLanguage ?? getBrowserFingerprintLanguageFromState(state)
+    );
+    const languageProfile = resolveLanguageFingerprintProfile(browserFingerprintLanguage);
     const runId = String(
       state?.activeRunId
       || state?.runId
@@ -371,6 +359,7 @@
       rawExitRegion: rawRegion,
       exitSource: String(proxyRouting?.exitSource || '').trim().toLowerCase(),
       fallbackRegion: !normalizedRegion,
+      language: browserFingerprintLanguage,
       locale: languageProfile.locale,
       languages: [...languageProfile.languages],
       acceptLanguage: languageProfile.acceptLanguage,
@@ -896,6 +885,7 @@
       clearBrowserFingerprint,
       ensureBrowserFingerprintForProxyExit,
       isValidBrowserFingerprintProfile,
+      normalizeBrowserFingerprintLanguage,
       normalizeBrowserFingerprintLevel,
       shouldApplyBrowserFingerprintToSource,
     };
@@ -907,6 +897,8 @@
     BROWSER_FINGERPRINT_LEVEL_BASIC,
     BROWSER_FINGERPRINT_LEVEL_STANDARD,
     BROWSER_FINGERPRINT_LEVEL_ENHANCED,
+    BROWSER_FINGERPRINT_LANGUAGE_EN_US,
+    BROWSER_FINGERPRINT_LANGUAGE_ZH_CN,
     applyBrowserFingerprintHeaderRules,
     applyBrowserFingerprintToTab,
     buildClearedBrowserFingerprintState,
@@ -915,8 +907,10 @@
     clearBrowserFingerprintHeaderRules,
     createBrowserFingerprintManager,
     getBrowserFingerprintLevelFromState,
+    getBrowserFingerprintLanguageFromState,
     isBrowserFingerprintEnabled,
     isValidBrowserFingerprintProfile,
+    normalizeBrowserFingerprintLanguage,
     normalizeBrowserFingerprintLevel,
     normalizeRegionCode,
     resolveLanguageFingerprintProfile,
