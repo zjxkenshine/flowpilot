@@ -92,6 +92,38 @@ test('step 2 keeps password flow when landing on password page', async () => {
   ]);
 });
 
+test('step 2 passes configured signup identity redirect timeout to email landing wait', async () => {
+  const landingOptions = [];
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 13 }),
+    ensureSignupPostEmailPageReadyInTab: async (_tabId, _step, options = {}) => {
+      landingOptions.push(options);
+      return {
+        state: 'password_page',
+        url: 'https://auth.openai.com/create-account/password',
+      };
+    },
+    getTabId: async () => 13,
+    isTabAlive: async () => true,
+    resolveSignupEmailForFlow: async () => 'user@example.com',
+    sendToContentScriptResilient: async () => ({ submitted: true }),
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({
+    email: 'user@example.com',
+    signupIdentityRedirectTimeoutSeconds: 90,
+  });
+
+  assert.equal(landingOptions.length, 1);
+  assert.equal(landingOptions[0].timeoutMs, 90000);
+});
+
 test('step 2 uses phone activation when resolved signup method is phone', async () => {
   const completedPayloads = [];
   const sequence = [];
@@ -194,6 +226,102 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   assert.deepStrictEqual(stateUpdates, [
     { failedSignupPhoneReuseActivation: null },
   ]);
+});
+
+test('step 2 passes configured signup identity redirect timeout to phone final landing wait', async () => {
+  const landingOptions = [];
+  const activation = {
+    activationId: 'signup-timeout-activation',
+    phoneNumber: '+15550123456',
+    countryId: 187,
+    countryLabel: 'United States',
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 15 }),
+    ensureSignupPostIdentityPageReadyInTab: async (_tabId, _step, options = {}) => {
+      landingOptions.push(options);
+      if (options.timeoutMs === 8000) {
+        throw new Error('等待注册身份提交后的页面跳转超时，请检查页面是否仍停留在输入页。');
+      }
+      return {
+        state: 'phone_verification_page',
+        url: 'https://auth.openai.com/phone-verification',
+      };
+    },
+    getTabId: async () => 15,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      prepareSignupPhoneActivation: async () => activation,
+      cancelSignupPhoneActivation: async () => {
+        throw new Error('activation should not be cancelled on success');
+      },
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        return { ready: true, state: 'phone_entry' };
+      }
+      if (message.type === 'RECOVER_SIGNUP_PHONE_SIGNIN_ISSUE') {
+        return { recovered: false, reason: 'not_signin_issue_page' };
+      }
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2({
+    signupMethod: 'phone',
+    signupIdentityRedirectTimeoutSeconds: 120,
+  });
+
+  assert.deepStrictEqual(landingOptions.map((options) => options.timeoutMs), [8000, 120000]);
+});
+
+test('step 2 normalizes signup identity redirect timeout values before landing wait', async () => {
+  const cases = [
+    [{}, 45000],
+    [{ signupIdentityRedirectTimeoutSeconds: 'slow' }, 45000],
+    [{ signupIdentityRedirectTimeoutSeconds: 1 }, 5000],
+    [{ signupIdentityRedirectTimeoutSeconds: 999 }, 300000],
+  ];
+
+  for (const [state, expectedTimeoutMs] of cases) {
+    const landingOptions = [];
+    const executor = step2Api.createStep2Executor({
+      addLog: async () => {},
+      chrome: { tabs: { update: async () => {} } },
+      completeNodeFromBackground: async () => {},
+      ensureContentScriptReadyOnTab: async () => {},
+      ensureSignupEntryPageReady: async () => ({ tabId: 16 }),
+      ensureSignupPostEmailPageReadyInTab: async (_tabId, _step, options = {}) => {
+        landingOptions.push(options);
+        return {
+          state: 'password_page',
+          url: 'https://auth.openai.com/create-account/password',
+        };
+      },
+      getTabId: async () => 16,
+      isTabAlive: async () => true,
+      resolveSignupEmailForFlow: async () => 'user@example.com',
+      sendToContentScriptResilient: async () => ({ submitted: true }),
+      SIGNUP_PAGE_INJECT_FILES: [],
+    });
+
+    await executor.executeStep2({
+      email: 'user@example.com',
+      ...state,
+    });
+
+    assert.equal(landingOptions[0].timeoutMs, expectedTimeoutMs);
+  }
 });
 
 test('step 2 recovers phone signup Oops page once and reuses the same activation', async () => {

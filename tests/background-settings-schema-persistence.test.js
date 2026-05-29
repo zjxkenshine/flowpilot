@@ -116,6 +116,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
+  'signupIdentityRedirectTimeoutSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -125,6 +126,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'stepExecutionRangeByFlow',
 ]);
 const SETTINGS_SCHEMA_VIEW_KEY_SET = new Set(SETTINGS_SCHEMA_VIEW_KEYS);
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const PERSISTED_SETTING_DEFAULTS = {
   activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
   panelMode: 'cpa',
@@ -179,6 +183,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   },
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
+  signupIdentityRedirectTimeoutSeconds: 45,
   sub2apiUrl: '',
   sub2apiEmail: '',
   sub2apiPassword: '',
@@ -349,6 +354,7 @@ function resolveSignupMethod(state = {}) {
   return String(state?.signupMethod || '').trim().toLowerCase() === 'phone' ? 'phone' : 'email';
 }
 function resolveLegacyAutoStepDelaySeconds() { return undefined; }
+${extractFunction('normalizeSignupIdentityRedirectTimeoutSeconds')}
 ${extractFunction('normalizePersistentSettingValue')}
 ${extractFunction('getSettingsSchemaApi')}
 ${extractFunction('projectSettingsSchemaView')}
@@ -442,6 +448,53 @@ test('buildPersistentSettingsPayload persists auto-run issue log preservation in
   assert.equal(nested.autoRunPreserveIssueLogsOnRestart, true);
   assert.equal(nested.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, true);
   assert.equal(nested.settingsState.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart, false);
+});
+
+test('buildPersistentSettingsPayload persists signup identity redirect timeout into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.signupIdentityRedirectTimeoutSeconds, 45);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 45);
+
+  const flat = api.buildPersistentSettingsPayload({
+    signupIdentityRedirectTimeoutSeconds: 90,
+  }, { fillDefaults: true });
+  assert.equal(flat.signupIdentityRedirectTimeoutSeconds, 90);
+  assert.equal(flat.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 90);
+
+  const clampedLow = api.buildPersistentSettingsPayload({
+    signupIdentityRedirectTimeoutSeconds: 1,
+  }, { fillDefaults: true });
+  assert.equal(clampedLow.signupIdentityRedirectTimeoutSeconds, 5);
+  assert.equal(clampedLow.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 5);
+
+  const clampedHigh = api.buildPersistentSettingsPayload({
+    signupIdentityRedirectTimeoutSeconds: 999,
+  }, { fillDefaults: true });
+  assert.equal(clampedHigh.signupIdentityRedirectTimeoutSeconds, 300);
+  assert.equal(clampedHigh.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 300);
+
+  const invalid = api.buildPersistentSettingsPayload({
+    signupIdentityRedirectTimeoutSeconds: 'slow',
+  }, { fillDefaults: true });
+  assert.equal(invalid.signupIdentityRedirectTimeoutSeconds, 45);
+  assert.equal(invalid.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 45);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            signupIdentityRedirectTimeoutSeconds: 120,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.signupIdentityRedirectTimeoutSeconds, 120);
+  assert.equal(nested.settingsState.flows.openai.autoRun.signupIdentityRedirectTimeoutSeconds, 120);
 });
 
 test('buildPersistentSettingsPayload persists browser fingerprint switch and level into settings schema', () => {

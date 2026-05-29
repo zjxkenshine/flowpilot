@@ -736,6 +736,9 @@ const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;
 const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;
 const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -1618,6 +1621,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,
   registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
+  signupIdentityRedirectTimeoutSeconds: DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS,
   step6CookieCleanupEnabled: false,
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
@@ -1816,6 +1820,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
   'registrationStageWaitSeconds',
+  'signupIdentityRedirectTimeoutSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -2001,6 +2006,30 @@ function normalizeRegistrationStageWaitSeconds(value, fallback = DEFAULT_REGISTR
   return Math.min(
     AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS,
     Math.max(AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS,
+    Math.max(
+      SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS,
+    Math.max(SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
   );
 }
 
@@ -4381,6 +4410,11 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeAutoStepDelaySeconds(value, PERSISTED_SETTING_DEFAULTS.autoStepDelaySeconds);
     case 'registrationStageWaitSeconds':
       return normalizeRegistrationStageWaitSeconds(value, PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds);
+    case 'signupIdentityRedirectTimeoutSeconds':
+      return normalizeSignupIdentityRedirectTimeoutSeconds(
+        value,
+        PERSISTED_SETTING_DEFAULTS.signupIdentityRedirectTimeoutSeconds
+      );
     case 'verificationResendCount':
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
@@ -5267,6 +5301,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
   assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
+  assignIfUpdated('signupIdentityRedirectTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupIdentityRedirectTimeoutSeconds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5419,6 +5454,10 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
           registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
             prevState?.registrationStageWaitSeconds,
             PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds
+          ),
+          signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSeconds(
+            prevState?.signupIdentityRedirectTimeoutSeconds,
+            PERSISTED_SETTING_DEFAULTS.signupIdentityRedirectTimeoutSeconds
           ),
           ...(normalizedStepExecutionRangeByFlow.openai
             ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }

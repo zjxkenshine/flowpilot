@@ -237,6 +237,23 @@
       return /等待注册身份提交后的页面跳转超时|注册身份提交后未能识别当前页面|当前页面没有可用的手机号注册入口|等待进入密码页超时/i.test(message);
     }
 
+    function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = 45) {
+      const fallbackNumber = Math.min(300, Math.max(5, Math.floor(Number(fallback) || 45)));
+      const rawValue = String(value ?? '').trim();
+      if (!rawValue) {
+        return fallbackNumber;
+      }
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric)) {
+        return fallbackNumber;
+      }
+      return Math.min(300, Math.max(5, Math.floor(numeric)));
+    }
+
+    function getSignupIdentityRedirectTimeoutMs(state = {}) {
+      return normalizeSignupIdentityRedirectTimeoutSeconds(state?.signupIdentityRedirectTimeoutSeconds) * 1000;
+    }
+
     async function recoverSignupPhoneSigninIssueOnce(tabId, phoneNumber, activation, options = {}) {
       if (!Number.isInteger(tabId) || !phoneNumber) {
         return {
@@ -276,7 +293,8 @@
       };
     }
 
-    async function ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(tabId, phoneNumber, activation, step2Result) {
+    async function ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(tabId, phoneNumber, activation, step2Result, options = {}) {
+      const finalTimeoutMs = Math.max(1000, Math.floor(Number(options.timeoutMs) || 45000));
       if (!step2Result?.alreadyOnPasswordPage) {
         try {
           return await ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
@@ -294,6 +312,7 @@
             await addLog('步骤 2：已从 Oops 异常页返回并复用当前手机号重新提交，继续等待下一页...', 'warn');
             return ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
               skipUrlWait: Boolean(earlyRecoveryResult?.alreadyOnPasswordPage),
+              timeoutMs: finalTimeoutMs,
             });
           }
         }
@@ -302,6 +321,7 @@
       try {
         return await ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
           skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
+          timeoutMs: finalTimeoutMs,
         });
       } catch (landingError) {
         if (!isStep2PhoneLandingWaitError(landingError)) {
@@ -317,6 +337,7 @@
         await addLog('步骤 2：已从 Oops 异常页返回并复用当前手机号重新提交，继续等待下一页...', 'warn');
         return ensureSignupPostIdentityPageReadyInTab(tabId, 2, {
           skipUrlWait: Boolean(recoveryResult?.alreadyOnPasswordPage),
+          timeoutMs: finalTimeoutMs,
         });
       }
     }
@@ -510,7 +531,10 @@
         signupTabId,
         phoneNumber,
         activation,
-        step2Result
+        step2Result,
+        {
+          timeoutMs: getSignupIdentityRedirectTimeoutMs(state),
+        }
       );
 
       await completeNodeFromBackground('submit-signup-email', {
@@ -604,6 +628,7 @@
 
       const landingResult = await ensureSignupPostEmailPageReadyInTab(signupTabId, 2, {
         skipUrlWait: Boolean(step2Result?.alreadyOnPasswordPage),
+        timeoutMs: getSignupIdentityRedirectTimeoutMs(state),
       });
 
       await completeNodeFromBackground('submit-signup-email', {

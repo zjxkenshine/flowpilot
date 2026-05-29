@@ -568,6 +568,7 @@ const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled'
 const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes');
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
 const inputRegistrationStageWaitSeconds = document.getElementById('input-registration-stage-wait-seconds');
+const inputSignupIdentityRedirectTimeoutSeconds = document.getElementById('input-signup-identity-redirect-timeout-seconds');
 const inputOAuthFlowTimeoutEnabled = document.getElementById('input-oauth-flow-timeout-enabled');
 const inputOAuthOpenAfterRefreshWaitSeconds = document.getElementById('input-oauth-open-after-refresh-wait-seconds');
 const rowStepExecutionRange = document.getElementById('row-step-execution-range');
@@ -814,6 +815,9 @@ const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 const AUTO_STEP_DELAY_MIN_SECONDS = 0;
 const AUTO_STEP_DELAY_MAX_SECONDS = 600;
 const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS = 5;
+const SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS = 300;
+const DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS = 45;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -4486,6 +4490,30 @@ function normalizeRegistrationStageWaitSeconds(value, fallback = DEFAULT_REGISTR
   return Math.min(AUTO_STEP_DELAY_MAX_SECONDS, Math.max(AUTO_STEP_DELAY_MIN_SECONDS, Math.floor(numeric)));
 }
 
+function normalizeSignupIdentityRedirectTimeoutSeconds(value, fallback = DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS) {
+  const fallbackNumber = Math.min(
+    SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS,
+    Math.max(
+      SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS,
+      Math.floor(Number(fallback) || DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS)
+    )
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+
+  return Math.min(
+    SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MAX_SECONDS,
+    Math.max(SIGNUP_IDENTITY_REDIRECT_TIMEOUT_MIN_SECONDS, Math.floor(numeric))
+  );
+}
+
 function normalizeVerificationResendCount(value, fallback) {
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
@@ -4510,6 +4538,10 @@ function formatAutoStepDelayInputValue(value) {
 
 function formatRegistrationStageWaitInputValue(value) {
   return String(normalizeRegistrationStageWaitSeconds(value));
+}
+
+function formatSignupIdentityRedirectTimeoutInputValue(value) {
+  return String(normalizeSignupIdentityRedirectTimeoutSeconds(value));
 }
 
 function normalizeCustomEmailPoolEntries(value = '') {
@@ -6049,6 +6081,10 @@ function collectSettingsPayload() {
     registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
       inputRegistrationStageWaitSeconds?.value,
       DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS
+    ),
+    signupIdentityRedirectTimeoutSeconds: normalizeSignupIdentityRedirectTimeoutSeconds(
+      inputSignupIdentityRedirectTimeoutSeconds?.value,
+      DEFAULT_SIGNUP_IDENTITY_REDIRECT_TIMEOUT_SECONDS
     ),
     oauthFlowTimeoutEnabled: typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled
       ? Boolean(inputOAuthFlowTimeoutEnabled.checked)
@@ -13181,6 +13217,11 @@ function applySettingsState(state) {
   inputAutoStepDelaySeconds.value = formatAutoStepDelayInputValue(state?.autoStepDelaySeconds);
   if (typeof inputRegistrationStageWaitSeconds !== 'undefined' && inputRegistrationStageWaitSeconds) {
     inputRegistrationStageWaitSeconds.value = formatRegistrationStageWaitInputValue(state?.registrationStageWaitSeconds);
+  }
+  if (typeof inputSignupIdentityRedirectTimeoutSeconds !== 'undefined' && inputSignupIdentityRedirectTimeoutSeconds) {
+    inputSignupIdentityRedirectTimeoutSeconds.value = formatSignupIdentityRedirectTimeoutInputValue(
+      state?.signupIdentityRedirectTimeoutSeconds
+    );
   }
   if (typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
     inputOAuthFlowTimeoutEnabled.checked = state?.oauthFlowTimeoutEnabled !== undefined
@@ -20554,6 +20595,14 @@ function syncRegistrationStageWaitInputs() {
   }
 }
 
+function syncSignupIdentityRedirectTimeoutInputs() {
+  if (typeof inputSignupIdentityRedirectTimeoutSeconds !== 'undefined' && inputSignupIdentityRedirectTimeoutSeconds) {
+    inputSignupIdentityRedirectTimeoutSeconds.value = formatSignupIdentityRedirectTimeoutInputValue(
+      inputSignupIdentityRedirectTimeoutSeconds.value
+    );
+  }
+}
+
 inputAutoStepDelaySeconds.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -20569,6 +20618,15 @@ inputRegistrationStageWaitSeconds?.addEventListener('input', () => {
 });
 inputRegistrationStageWaitSeconds?.addEventListener('blur', () => {
   syncRegistrationStageWaitInputs();
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputSignupIdentityRedirectTimeoutSeconds?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputSignupIdentityRedirectTimeoutSeconds?.addEventListener('blur', () => {
+  syncSignupIdentityRedirectTimeoutInputs();
   saveSettings({ silent: true }).catch(() => { });
 });
 
@@ -21845,6 +21903,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (message.payload.registrationStageWaitSeconds !== undefined && typeof inputRegistrationStageWaitSeconds !== 'undefined' && inputRegistrationStageWaitSeconds) {
         inputRegistrationStageWaitSeconds.value = formatRegistrationStageWaitInputValue(message.payload.registrationStageWaitSeconds);
+      }
+      if (
+        message.payload.signupIdentityRedirectTimeoutSeconds !== undefined
+        && typeof inputSignupIdentityRedirectTimeoutSeconds !== 'undefined'
+        && inputSignupIdentityRedirectTimeoutSeconds
+      ) {
+        inputSignupIdentityRedirectTimeoutSeconds.value = formatSignupIdentityRedirectTimeoutInputValue(
+          message.payload.signupIdentityRedirectTimeoutSeconds
+        );
       }
       if (message.payload.oauthFlowTimeoutEnabled !== undefined && typeof inputOAuthFlowTimeoutEnabled !== 'undefined' && inputOAuthFlowTimeoutEnabled) {
         inputOAuthFlowTimeoutEnabled.checked = Boolean(message.payload.oauthFlowTimeoutEnabled);
