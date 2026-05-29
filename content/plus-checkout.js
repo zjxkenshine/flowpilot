@@ -35,6 +35,9 @@ const PLUS_CHECKOUT_CONFIGS = {
 const PAYPAL_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
 const HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_FALLBACK::';
 const HOSTED_CHECKOUT_CARD_DECLINED_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_DECLINED::';
+const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
+const HOSTED_SUBMIT_RETRY_MAX_RETRIES = 3;
+const HOSTED_SUBMIT_RETRY_CONFIRM_WAIT_MS = 10000;
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -175,6 +178,14 @@ async function waitForDocumentComplete() {
 function isPayPalHostedOpenAiCheckoutPage() {
   const host = String(location?.host || '').toLowerCase();
   return host.includes('pay.openai.com') || host.includes('checkout.stripe.com');
+}
+
+function isPayPalUrl(url = '') {
+  return /paypal\./i.test(String(url || ''));
+}
+
+function isHostedCheckoutSuccessUrl(url = '') {
+  return HOSTED_CHECKOUT_SUCCESS_URL_PATTERN.test(String(url || ''));
 }
 
 function isChatGptHomeUrl(url = '') {
@@ -656,10 +667,74 @@ function findHostedSubmitButton() {
     ]);
 }
 
+function normalizeHostedSubmitButtonCandidate(button) {
+  if (!button) {
+    return null;
+  }
+  const payPalButton = findHostedPayPalButton();
+  if (payPalButton && button === payPalButton) {
+    return null;
+  }
+  const structuralText = normalizeText([
+    button.getAttribute?.('data-testid'),
+    button.getAttribute?.('class'),
+    button.className,
+  ].filter(Boolean).join(' '));
+  if (/paypal[-_\s]*accordion|card[-_\s]*accordion|accordion[-_\s]*item/i.test(structuralText)) {
+    return null;
+  }
+  return button;
+}
+
+function getHostedSubmitProgressState() {
+  const currentUrl = String(location?.href || '');
+  const hostedOpenAiPage = isPayPalHostedOpenAiCheckoutPage();
+  const paypalUrl = isPayPalUrl(currentUrl);
+  const hostedCheckoutSuccessUrl = isHostedCheckoutSuccessUrl(currentUrl);
+  const hostedVerificationVisible = hasHostedOpenAiVerificationDialog();
+  const hostedAddressError = getHostedOpenAiAddressErrorState();
+  const hostedCardDeclinedError = getHostedOpenAiCardDeclinedState();
+  const hostedCardFallback = getHostedOpenAiCardFallbackState();
+  const submitButton = normalizeHostedSubmitButtonCandidate(findHostedSubmitButton());
+  const submitButtonReady = Boolean(submitButton && isEnabledControl(submitButton) && isVisibleElement(submitButton));
+  const progressed = Boolean(
+    !hostedOpenAiPage
+    || paypalUrl
+    || hostedCheckoutSuccessUrl
+    || hostedVerificationVisible
+    || hostedAddressError.hasError
+    || hostedCardDeclinedError.hasError
+    || hostedCardFallback.fallback
+    || !submitButton
+  );
+  return {
+    progressed,
+    shouldRetry: Boolean(!progressed && hostedOpenAiPage && submitButton),
+    hostedOpenAiPage,
+    paypalUrl,
+    hostedCheckoutSuccessUrl,
+    hostedVerificationVisible,
+    hostedAddressError: hostedAddressError.hasError,
+    hostedAddressErrorMessage: hostedAddressError.message,
+    hostedCardDeclinedError: hostedCardDeclinedError.hasError,
+    hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
+    hostedCardFallback: hostedCardFallback.fallback,
+    hostedCardFallbackReason: hostedCardFallback.reason,
+    submitButtonFound: Boolean(submitButton),
+    submitButtonReady,
+    submitButtonText: getActionText(submitButton),
+  };
+}
+
+async function waitForHostedSubmitProgress() {
+  await sleep(HOSTED_SUBMIT_RETRY_CONFIRM_WAIT_MS);
+  return getHostedSubmitProgressState();
+}
+
 async function clickHostedSubmitButton() {
   const button = await waitUntil(() => {
     hideHostedAddressAutocomplete();
-    const candidate = findHostedSubmitButton();
+    const candidate = normalizeHostedSubmitButtonCandidate(findHostedSubmitButton());
     return candidate && isEnabledControl(candidate) && isVisibleElement(candidate) ? candidate : null;
   }, {
     label: 'hosted checkout 提交按钮',
@@ -678,13 +753,42 @@ async function clickHostedSubmitButton() {
   } else {
     log(`Plus Checkout：已点击“${buttonTextBeforeClick}”，正在等待 PayPal 跳转。`);
   }
-  await sleep(900);
+  let hostedSubmitRetryCount = 0;
+  let hostedSubmitProgressState = await waitForHostedSubmitProgress();
+  while (
+    hostedSubmitRetryCount < HOSTED_SUBMIT_RETRY_MAX_RETRIES
+    && hostedSubmitProgressState.shouldRetry
+  ) {
+    hostedSubmitRetryCount += 1;
+    hideHostedAddressAutocomplete();
+    const retryButton = normalizeHostedSubmitButtonCandidate(findHostedSubmitButton());
+    if (!retryButton || !isVisibleElement(retryButton)) {
+      hostedSubmitProgressState = getHostedSubmitProgressState();
+      break;
+    }
+    const retryButtonText = getActionText(retryButton) || buttonTextBeforeClick || 'Subscribe';
+    log(`Plus Checkout：等待 PayPal 跳转 ${Math.floor(HOSTED_SUBMIT_RETRY_CONFIRM_WAIT_MS / 1000)} 秒后仍未推进，尝试第 ${hostedSubmitRetryCount}/${HOSTED_SUBMIT_RETRY_MAX_RETRIES} 次重试点击“${retryButtonText}”。`, 'warn');
+    simulateClick(retryButton);
+    await sleep(300);
+    hostedSubmitProgressState = await waitForHostedSubmitProgress();
+  }
+
+  const hostedSubmitRetryExhausted = Boolean(
+    hostedSubmitRetryCount >= HOSTED_SUBMIT_RETRY_MAX_RETRIES
+    && hostedSubmitProgressState.shouldRetry
+  );
+  if (hostedSubmitRetryExhausted) {
+    log(`Plus Checkout：提交按钮已重试 ${HOSTED_SUBMIT_RETRY_MAX_RETRIES} 次，仍未检测到 PayPal 跳转，交给外层等待循环继续判断。`, 'warn');
+  }
   return {
     clicked: true,
     buttonText: getActionText(button),
     buttonTextBeforeClick,
     buttonTextAfterClick,
     hostedVerificationVisible: hasHostedOpenAiVerificationDialog(),
+    hostedSubmitRetryCount,
+    hostedSubmitRetryExhausted,
+    hostedSubmitProgressState,
   };
 }
 

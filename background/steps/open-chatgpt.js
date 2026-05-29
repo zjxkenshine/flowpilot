@@ -401,7 +401,7 @@
       const exitIp = String(result?.profile?.exitIp || routing?.exitIp || latestState?.ipProxyAppliedExitIp || '').trim();
       await addLog(
         exitIp
-          ? `步骤 1：已生成并应用本轮浏览器指纹（地区 ${region}，代理 IP 仅用于诊断，不参与指纹随机种子）。`
+          ? `步骤 1：已生成并应用本轮浏览器指纹（地区 ${region}，已根据代理出口 IP 混入随机种子）。`
           : `步骤 1：已生成并应用本轮随机浏览器指纹（地区 ${region}，未绑定代理 IP）。`,
         'ok'
       );

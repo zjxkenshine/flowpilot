@@ -405,6 +405,12 @@
       return routing.applied === false || !String(routing.exitIp || '').trim() || failedReasons.has(reason);
     }
 
+    function shouldReuseExistingIpProxyForPlusCheckout(state = {}) {
+      return String(state?.plusCheckoutConversionProxySource || '').trim().toLowerCase() === 'ip_proxy'
+        && Boolean(state?.ipProxyEnabled)
+        && Boolean(String(state?.ipProxyAppliedExitIp || '').trim());
+    }
+
     async function prepareManualPlusCheckoutProxyBeforeExecute(nodeId = '', state = {}) {
       if (!shouldPrepareManualPlusCheckoutNode(nodeId, state)) {
         return {
@@ -431,6 +437,21 @@
             latestState = await getState().catch(() => latestState);
           }
         }
+      }
+
+      if (shouldReuseExistingIpProxyForPlusCheckout(latestState)) {
+        const exitIp = String(latestState.ipProxyAppliedExitIp || '').trim();
+        const exitRegion = String(latestState.ipProxyAppliedExitRegion || '').trim();
+        await addLog(
+          `手动执行：Plus Checkout 重新创建前支付转换代理选择 IP代理，已沿用当前出口 ${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}，跳过换 IP 和出口校验。`,
+          'info'
+        );
+        return {
+          prepared: true,
+          releasedPaymentProxy,
+          switchedIpProxy: false,
+          skippedReason: 'ip_proxy_existing_exit_reused',
+        };
       }
 
       if (!latestState?.ipProxyEnabled) {

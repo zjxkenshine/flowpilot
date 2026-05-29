@@ -61,7 +61,7 @@ test('browser fingerprint language normalization supports random', () => {
   assert.equal(api.normalizeBrowserFingerprintLanguage('unknown'), 'zh-CN');
 });
 
-test('browser fingerprint profile uses random seed instead of proxy ip binding', () => {
+test('browser fingerprint profile mixes proxy exit into the random seed without fixing same-ip output', () => {
   const api = loadBrowserFingerprintModule();
   const first = api.buildBrowserFingerprintProfile(
     { exitIp: '198.51.100.8', exitRegion: 'US' },
@@ -83,12 +83,47 @@ test('browser fingerprint profile uses random seed instead of proxy ip binding',
     { activeRunId: 'run-001' },
     { createdAt: 1, seed: 'same-random-seed' }
   );
+  const baseWithSameSeedAgain = api.buildBrowserFingerprintProfile(
+    { exitIp: '198.51.100.8', exitRegion: 'US' },
+    { activeRunId: 'run-001' },
+    { createdAt: 1, seed: 'same-random-seed' }
+  );
 
   assert.notEqual(second.profileId, first.profileId);
-  assert.equal(differentExitWithSameSeed.profileId, baseWithSameSeed.profileId);
+  assert.notEqual(differentExitWithSameSeed.profileId, baseWithSameSeed.profileId);
+  assert.equal(baseWithSameSeedAgain.profileId, baseWithSameSeed.profileId);
   assert.equal(first.seedKey.includes('198.51.100.8'), false);
   assert.equal(first.seedKey.includes('run-001'), false);
   assert.equal(api.isValidBrowserFingerprintProfile(first), true);
+});
+
+test('browser fingerprint profile falls back to stored proxy exit when routing has no exit ip', () => {
+  const api = loadBrowserFingerprintModule();
+  const fromStateExit = api.buildBrowserFingerprintProfile(
+    {},
+    {
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.88',
+      ipProxyAppliedExitRegion: 'SG',
+      ipProxyAppliedExitSource: 'page_context',
+    },
+    { createdAt: 1, seed: 'stored-exit-seed' }
+  );
+  const fromRoutingExit = api.buildBrowserFingerprintProfile(
+    { exitIp: '203.0.113.88', exitRegion: 'SG', exitSource: 'page_context' },
+    {
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '198.51.100.1',
+      ipProxyAppliedExitRegion: 'US',
+    },
+    { createdAt: 1, seed: 'stored-exit-seed' }
+  );
+
+  assert.equal(fromStateExit.exitIp, '203.0.113.88');
+  assert.equal(fromStateExit.exitRegion, 'SG');
+  assert.equal(fromStateExit.exitSource, 'page_context');
+  assert.equal(fromStateExit.profileId, fromRoutingExit.profileId);
+  assert.equal(fromStateExit.seedKey.includes('203.0.113.88'), false);
 });
 
 test('browser fingerprint random language chooses an allowed concrete profile consistently for a seed', () => {
@@ -297,7 +332,7 @@ test('browser fingerprint manager persists runtime-only profile fields', async (
     assert.match(executionLogs[0].message, /hardwareConcurrency=/);
     assert.match(executionLogs[0].message, /deviceMemory=/);
     assert.match(executionLogs[0].message, /webglRenderer=/);
-    assert.match(executionLogs[0].message, /代理 IP 仅用于诊断，不参与指纹随机种子/);
+    assert.match(executionLogs[0].message, /已根据代理出口 IP 混入随机种子/);
     assert.equal(executionLogs[0].message.includes(result.profile.seedKey), false);
   } finally {
     console.info = originalInfo;

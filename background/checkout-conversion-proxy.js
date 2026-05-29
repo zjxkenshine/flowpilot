@@ -822,8 +822,17 @@ function FindProxyForURL(url, host) {
       const releaseNodeKey = String(normalizedSession.releaseNodeKey || '').trim();
       const appliedStepKey = String(normalizedSession.appliedStepKey || '').trim();
       const displayName = String(normalizedSession.displayName || '').trim();
+      const source = normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual');
+      const exitIp = String(normalizedSession.exitIp || '').trim();
       const snapshot = sanitizeSnapshot(normalizedSession.snapshot);
-      if (!flowType || !releaseNodeKey || !appliedStepKey || !displayName || !snapshot?.applied) {
+      if (!flowType || !releaseNodeKey || !appliedStepKey || !displayName) {
+        return null;
+      }
+      if (source === 'ip_proxy') {
+        if (!exitIp) {
+          return null;
+        }
+      } else if (!snapshot?.applied) {
         return null;
       }
       return {
@@ -832,18 +841,51 @@ function FindProxyForURL(url, host) {
         releaseNodeKey,
         appliedStepKey,
         displayName,
-        source: normalizeCheckoutConversionProxySource(normalizedSession.source || 'manual'),
+        source,
         provider: String(normalizedSession.provider || '').trim(),
         requestedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.requestedRegion || ''),
         resolvedRegion: normalizeCheckoutConversionProxy711Region(normalizedSession.resolvedRegion || ''),
         selectedEntryDisplayName: String(normalizedSession.selectedEntryDisplayName || '').trim(),
-        exitIp: String(normalizedSession.exitIp || '').trim(),
+        exitIp,
         exitRegion: String(normalizedSession.exitRegion || '').trim(),
         exitSource: String(normalizedSession.exitSource || '').trim(),
         exitEndpoint: String(normalizedSession.exitEndpoint || '').trim(),
         diagnostics: String(normalizedSession.diagnostics || '').trim(),
         snapshot,
         appliedAt: Math.max(0, Number(normalizedSession.appliedAt) || Date.now()),
+      };
+    }
+
+    function hasReusableIpProxyCheckoutExit(state = {}, source = '') {
+      return normalizeCheckoutConversionProxySource(source || state?.plusCheckoutConversionProxySource || '') === 'ip_proxy'
+        && Boolean(state?.ipProxyEnabled)
+        && Boolean(String(state?.ipProxyAppliedExitIp || '').trim());
+    }
+
+    function buildReusableIpProxyCheckoutSession(state = {}, sessionOptions = {}) {
+      if (!hasReusableIpProxyCheckoutExit(state, 'ip_proxy')) {
+        return null;
+      }
+      const flowType = String(sessionOptions.flowType || '').trim();
+      const releaseNodeKey = String(sessionOptions.releaseNodeKey || '').trim();
+      const appliedStepKey = String(sessionOptions.appliedStepKey || '').trim();
+      if (!flowType || !releaseNodeKey || !appliedStepKey) {
+        return null;
+      }
+      return {
+        flowType,
+        releaseNodeKey,
+        appliedStepKey,
+        displayName: 'IP代理',
+        source: 'ip_proxy',
+        provider: String(state?.ipProxyService || '').trim(),
+        exitIp: String(state?.ipProxyAppliedExitIp || '').trim(),
+        exitRegion: String(state?.ipProxyAppliedExitRegion || '').trim(),
+        exitSource: String(state?.ipProxyAppliedExitSource || '').trim(),
+        exitEndpoint: String(state?.ipProxyAppliedExitEndpoint || '').trim(),
+        diagnostics: String(state?.ipProxyAppliedExitError || '').trim(),
+        snapshot: null,
+        appliedAt: Date.now(),
       };
     }
 
@@ -1117,6 +1159,11 @@ function FindProxyForURL(url, host) {
 
     async function restoreSession(session = null) {
       const normalizedSession = buildSessionPayload(session);
+      if (normalizedSession?.source === 'ip_proxy') {
+        await clearStoredSession();
+        await clearCheckoutConversionProxyExitCheck();
+        return true;
+      }
       if (!normalizedSession?.snapshot?.applied) {
         await clearStoredSession();
         await clearCheckoutConversionProxyExitCheck();
@@ -1155,15 +1202,21 @@ function FindProxyForURL(url, host) {
       ).trim();
       const requireExit = Boolean(options?.requireExit);
       const shouldLog = options?.log !== false;
+      const existingExitIp = String(normalizedSession.exitIp || '').trim();
+      const isReusableIpProxySession = normalizedSession.source === 'ip_proxy' && existingExitIp;
       if (shouldLog) {
-        await addLog('支付转换代理已切换，正在检测支付出口...', 'info').catch(() => {});
+        await addLog(
+          isReusableIpProxySession
+            ? '支付转换代理选择 IP代理，已沿用当前 IP 代理出口。'
+            : '支付转换代理已切换，正在检测支付出口...',
+          'info'
+        ).catch(() => {});
       }
-      if (options?.persistRunning !== false) {
+      if (!isReusableIpProxySession && options?.persistRunning !== false) {
         await markCheckoutConversionProxyExitCheckRunning({ displayName, context }).catch(() => {});
       }
 
       try {
-        const existingExitIp = String(normalizedSession.exitIp || '').trim();
         const result = existingExitIp
           ? {
             exitIp: existingExitIp,
@@ -1193,7 +1246,9 @@ function FindProxyForURL(url, host) {
         if (shouldLog) {
           if (persisted.exitIp) {
             await addLog(
-              `支付转换代理出口检测成功：${persisted.exitIp}${persisted.exitRegion ? ` [${persisted.exitRegion}]` : ''}`,
+              isReusableIpProxySession
+                ? `已沿用当前 IP 代理出口：${persisted.exitIp}${persisted.exitRegion ? ` [${persisted.exitRegion}]` : ''}`
+                : `支付转换代理出口检测成功：${persisted.exitIp}${persisted.exitRegion ? ` [${persisted.exitRegion}]` : ''}`,
               'ok'
             ).catch(() => {});
           } else {
@@ -1614,6 +1669,10 @@ function FindProxyForURL(url, host) {
       const proxyUrl = normalizeCheckoutConversionProxyUrl(state?.plusCheckoutConversionProxyUrl);
       const proxy711Region = getCheckoutConversionProxy711RegionFromState(state, sessionOptions);
       if (source === 'ip_proxy') {
+        const reusableSession = buildReusableIpProxyCheckoutSession(state, sessionOptions);
+        if (reusableSession) {
+          return persistSession(reusableSession);
+        }
         return null;
       }
       if (source === 'manual' && !proxyUrl) {

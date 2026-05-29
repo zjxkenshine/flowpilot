@@ -357,6 +357,7 @@ test('step 1 waits for proxy exit settle and continues without probing when exit
 test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty', async () => {
   const api = loadStep1Module();
   const events = [];
+  let exitConfirmed = false;
 
   const executor = api.createStep1Executor({
     addLog: async () => {},
@@ -368,6 +369,7 @@ test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty',
     }),
     probeIpProxyExit: async (options) => {
       events.push(['probe', options.timeoutMs, options.authRebindRetry]);
+      exitConfirmed = true;
       return {
         proxyRouting: {
           applied: true,
@@ -382,6 +384,7 @@ test('step 1 probes proxy exit when IP proxy is enabled and exit info is empty',
       events.push(['switch']);
     },
     ensureBrowserFingerprintForProxyExit: async (routing) => {
+      assert.equal(exitConfirmed, true);
       events.push(['fingerprint', routing.exitIp, routing.exitRegion]);
       return { profile: { exitRegion: routing.exitRegion } };
     },

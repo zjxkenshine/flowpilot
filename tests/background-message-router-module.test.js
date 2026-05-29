@@ -249,6 +249,41 @@ test('EXECUTE_NODE plus checkout create releases conversion proxy without switch
   ]);
 });
 
+test('EXECUTE_NODE plus checkout create reuses existing IP proxy exit without switching', async () => {
+  const events = [];
+  const harness = createExecuteNodeRouterHarness({
+    events,
+    state: {
+      plusCheckoutConversionProxySource: 'ip_proxy',
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.88',
+      ipProxyAppliedExitRegion: 'US',
+    },
+    checkoutConversionProxyManager: {
+      getStoredSession: async () => ({ active: true, displayName: 'IP代理' }),
+      restoreSession: async (session) => events.push({ type: 'restore', session }),
+    },
+    switchIpProxyUntilExitRegionMatches: async () => {
+      events.push({ type: 'switch' });
+      throw new Error('should not switch');
+    },
+  });
+
+  const response = await harness.router.handleMessage({
+    type: 'EXECUTE_NODE',
+    source: 'sidepanel',
+    payload: { nodeId: 'plus-checkout-create' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(events.some((event) => event.type === 'switch'), false);
+  assert.equal(events.some((event) => event.type === 'execute'), true);
+  assert.equal(
+    events.some((event) => event.type === 'log' && /沿用当前出口 203\.0\.113\.88/.test(event.message)),
+    true
+  );
+});
+
 test('EXECUTE_NODE plus checkout create stops before execute when switched IP has no exit', async () => {
   const harness = createExecuteNodeRouterHarness({
     switchIpProxyUntilExitRegionMatches: async (switchOptions = {}) => {

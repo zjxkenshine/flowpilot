@@ -239,6 +239,52 @@
     return `${prefix}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
   }
 
+  function resolveBrowserFingerprintExitContext(proxyRouting = {}, state = {}) {
+    const routingExitIp = String(proxyRouting?.exitIp || proxyRouting?.ipProxyAppliedExitIp || '').trim();
+    const routingExitRegion = String(
+      proxyRouting?.exitRegion
+      || proxyRouting?.region
+      || proxyRouting?.ipProxyAppliedExitRegion
+      || ''
+    ).trim();
+
+    if (routingExitIp) {
+      return {
+        exitIp: routingExitIp,
+        rawExitRegion: routingExitRegion,
+        exitSource: String(proxyRouting?.exitSource || '').trim().toLowerCase(),
+      };
+    }
+
+    if (state?.ipProxyEnabled) {
+      const stateExitIp = String(state?.ipProxyAppliedExitIp || '').trim();
+      if (stateExitIp) {
+        return {
+          exitIp: stateExitIp,
+          rawExitRegion: String(state?.ipProxyAppliedExitRegion || '').trim(),
+          exitSource: String(state?.ipProxyAppliedExitSource || '').trim().toLowerCase(),
+        };
+      }
+    }
+
+    return {
+      exitIp: '',
+      rawExitRegion: routingExitRegion,
+      exitSource: String(proxyRouting?.exitSource || '').trim().toLowerCase(),
+    };
+  }
+
+  function buildBrowserFingerprintSeed(options = {}, exitContext = {}) {
+    const baseSeed = createRandomFingerprintSeed(options);
+    const exitIp = String(exitContext?.exitIp || '').trim();
+    if (!exitIp) {
+      return baseSeed;
+    }
+    const normalizedRegion = normalizeRegionCode(exitContext?.rawExitRegion || '') || 'unknown';
+    const exitHash = hashString(`exit|${exitIp}|${normalizedRegion}`).toString(16);
+    return `${baseSeed}|exit:${exitHash}`;
+  }
+
   function pickFrom(list = [], random = Math.random) {
     if (!Array.isArray(list) || !list.length) {
       return null;
@@ -359,7 +405,7 @@
     const region = summary.exitRegion || 'US';
     const regionText = summary.fallbackRegion ? `${region}（默认）` : region;
     const ipBindingText = String(profile.exitIp || '').trim()
-      ? '代理 IP 仅用于诊断，不参与指纹随机种子'
+      ? '已根据代理出口 IP 混入随机种子'
       : '未绑定代理 IP，使用随机指纹';
     return '步骤 1：浏览器指纹已生成：'
       + `profile=${summary.profileId || 'unknown'}，`
@@ -387,15 +433,16 @@
   }
 
   function buildBrowserFingerprintProfile(proxyRouting = {}, state = {}, options = {}) {
-    const exitIp = String(proxyRouting?.exitIp || proxyRouting?.ipProxyAppliedExitIp || '').trim();
-    const rawRegion = String(proxyRouting?.exitRegion || proxyRouting?.region || proxyRouting?.ipProxyAppliedExitRegion || '').trim();
+    const exitContext = resolveBrowserFingerprintExitContext(proxyRouting, state);
+    const exitIp = exitContext.exitIp;
+    const rawRegion = exitContext.rawExitRegion;
     const normalizedRegion = normalizeRegionCode(rawRegion);
     const regionCode = normalizedRegion || 'US';
     const regionDefaults = REGION_DEFAULTS[regionCode] || REGION_DEFAULTS.US;
     const browserFingerprintLanguageSetting = normalizeBrowserFingerprintLanguage(
       options?.language ?? options?.browserFingerprintLanguage ?? getBrowserFingerprintLanguageFromState(state)
     );
-    const seedKey = createRandomFingerprintSeed(options);
+    const seedKey = buildBrowserFingerprintSeed(options, exitContext);
     const random = createSeededRandom(seedKey);
     const languageRandom = createSeededRandom(`${seedKey}|language`);
     const browserFingerprintLanguage = resolveBrowserFingerprintLanguage(browserFingerprintLanguageSetting, languageRandom);
@@ -429,7 +476,7 @@
       exitIp,
       exitRegion: regionCode,
       rawExitRegion: rawRegion,
-      exitSource: String(proxyRouting?.exitSource || '').trim().toLowerCase(),
+      exitSource: exitContext.exitSource,
       fallbackRegion: !normalizedRegion,
       language: browserFingerprintLanguage,
       locale: languageProfile.locale,

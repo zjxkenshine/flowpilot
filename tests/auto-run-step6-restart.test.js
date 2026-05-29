@@ -1109,6 +1109,61 @@ test('auto-run Plus retry releases checkout conversion proxy without switching I
   assert.deepStrictEqual(events.order, ['restore', 'invalidate']);
 });
 
+test('auto-run Plus retry reuses existing IP proxy exit without switching IP', async () => {
+  const plusHostedSteps = {
+    6: { key: 'plus-checkout-create' },
+    7: { key: 'paypal-hosted-email' },
+    8: { key: 'paypal-hosted-card' },
+    9: { key: 'paypal-hosted-create-account' },
+    10: { key: 'paypal-hosted-review' },
+    11: { key: 'oauth-login' },
+  };
+  const harness = createHarness({
+    startStep: 7,
+    failureStep: 7,
+    failureBudget: 1,
+    failureMessage: '步骤 7：PayPal hosted email 页面加载失败，请重新创建 Plus Checkout。',
+    stepDefinitions: plusHostedSteps,
+    stepIds: [6, 7, 8, 9, 10, 11],
+    lastStepId: 11,
+    finalOAuthChainStartStep: 11,
+    customState: {
+      stepStatuses: { 3: 'completed', 6: 'completed' },
+      plusModeEnabled: true,
+      plusPaymentMethod: 'paypal-hosted',
+      plusCheckoutSource: 'paypal-hosted',
+      plusCheckoutConversionProxySource: 'ip_proxy',
+      ipProxyEnabled: true,
+      ipProxyAppliedExitIp: '203.0.113.88',
+      ipProxyAppliedExitRegion: 'US',
+      plusCheckoutConversionProxySession: {
+        active: true,
+        flowType: 'paypal-hosted',
+        displayName: 'IP代理',
+        source: 'ip_proxy',
+        exitIp: '203.0.113.88',
+        appliedAt: 1,
+      },
+    },
+    switchIpProxyImpl: async () => {
+      throw new Error('should not switch');
+    },
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.proxyRestores, [
+    { flowType: 'paypal-hosted', displayName: 'IP代理' },
+  ]);
+  assert.equal(events.proxySwitches.length, 0);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.deepStrictEqual(events.order, ['restore', 'invalidate']);
+  assert.equal(
+    events.logs.some(({ message }) => /沿用当前出口 203\.0\.113\.88/.test(message)),
+    true
+  );
+});
+
 test('auto-run Plus retry stops when IP proxy switch fails', async () => {
   const plusPaypalSteps = {
     6: { key: 'plus-checkout-create' },

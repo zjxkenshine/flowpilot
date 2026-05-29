@@ -16388,6 +16388,24 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       }
     }
 
+    if (
+      String(latestState?.plusCheckoutConversionProxySource || '').trim().toLowerCase() === 'ip_proxy'
+      && latestState?.ipProxyEnabled
+      && String(latestState?.ipProxyAppliedExitIp || '').trim()
+    ) {
+      const exitIp = String(latestState.ipProxyAppliedExitIp || '').trim();
+      const exitRegion = String(latestState.ipProxyAppliedExitRegion || '').trim();
+      await addLog(
+        `自动运行：Plus Checkout 重试前支付转换代理选择 IP代理，已沿用当前出口 ${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}，跳过换 IP 和出口校验。`,
+        'info'
+      );
+      return {
+        releasedPaymentProxy,
+        switchedIpProxy: false,
+        skippedReason: 'ip_proxy_existing_exit_reused',
+      };
+    }
+
     if (!latestState?.ipProxyEnabled) {
       await addLog('自动运行：Plus Checkout 重试前未启用 IP 代理，跳过换 IP，继续重建 checkout。', 'info');
       return {
