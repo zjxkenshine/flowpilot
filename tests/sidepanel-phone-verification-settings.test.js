@@ -1315,6 +1315,7 @@ function getCloudflareTempEmailDomainsFromState() { return { domains: [], active
 function normalizeCloudflareTempEmailDomainValue(value) { return String(value || '').trim(); }
 function getSelectedLocalCpaStep9Mode() { return 'submit'; }
 function getSelectedPlusPaymentMethod() { return 'paypal'; }
+function getSelectedPlusCheckAllowedRegions() { return []; }
 function getSelectedMail2925Mode() { return 'provide'; }
 function getSelectedHotmailServiceMode() { return 'local'; }
 function buildManagedAliasBaseEmailPayload() { return { gmailBaseEmail: '', mail2925BaseEmail: '', emailPrefix: '' }; }

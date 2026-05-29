@@ -321,6 +321,44 @@ return normalizePlusCheckoutVerificationFailureStrategy;
   assert.match(dataUpdatedSnippet, /selectPlusCheckoutVerificationFailureStrategy\.value\s*=\s*normalizePlusCheckoutVerificationFailureStrategy/);
 });
 
+test('sidepanel Plus Check allowed regions render and sync through settings', () => {
+  assert.match(sidepanelHtml, /id="row-plus-check-allowed-regions"/);
+  assert.match(sidepanelHtml, /PlusCheck 地区/);
+  assert.match(sidepanelHtml, /不选=全部地区/);
+  ['KZ', 'BR', 'JP', 'NP', 'IQ', 'US'].forEach((region) => {
+    assert.match(sidepanelHtml, new RegExp(`data-plus-check-region="${region}"`));
+  });
+
+  const normalizeSource = [
+    extractFunction('normalizePlusCheckAllowedRegionCodeValue'),
+    extractFunction('normalizePlusCheckAllowedRegionsValue'),
+  ].join('\n');
+  const normalize = new Function(`
+const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+${normalizeSource}
+return normalizePlusCheckAllowedRegionsValue;
+`)();
+  assert.deepEqual(normalize(['jp', 'XX', 'u-s', 'Brazil [BR]', 'JP']), ['BR', 'JP', 'US']);
+  assert.deepEqual(normalize('us, np; bad | iq'), ['NP', 'IQ', 'US']);
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /plusCheckAllowedRegions:/);
+  assert.match(collectSource, /getSelectedPlusCheckAllowedRegions\(\)/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(applySource, /syncPlusCheckAllowedRegionsControl\(state\?\.plusCheckAllowedRegions/);
+
+  const updateModeSource = extractFunction('updatePlusModeUI');
+  assert.match(updateModeSource, /rowPlusCheckAllowedRegions/);
+  assert.match(updateModeSource, /effectivePhonePlusModeEnabled/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 16000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckAllowedRegions !== undefined/);
+  assert.match(dataUpdatedSnippet, /syncPlusCheckAllowedRegionsControl\(message\.payload\.plusCheckAllowedRegions\)/);
+});
+
 test('sidepanel PayPal hosted sms pool max uses renders and syncs through settings', () => {
   const inputMatch = sidepanelHtml.match(
     /<input[^>]+id="input-hosted-checkout-sms-pool-max-uses"[^>]*>/i

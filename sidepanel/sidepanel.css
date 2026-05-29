@@ -923,6 +923,48 @@ header {
   min-width: 0;
 }
 
+.plus-check-region-picker {
+  flex-wrap: wrap;
+}
+
+.plus-check-region-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-base) 96%, var(--blue-soft));
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+
+.plus-check-region-chip input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.plus-check-region-chip:has(input:checked) {
+  border-color: color-mix(in srgb, var(--blue) 58%, var(--border));
+  background: color-mix(in srgb, var(--blue-soft) 70%, var(--bg-base));
+  color: var(--blue);
+}
+
+.plus-check-region-chip:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--blue) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .inline-help-tooltip {
   position: relative;
   flex: 0 0 auto;

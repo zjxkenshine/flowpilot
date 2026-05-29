@@ -41,6 +41,7 @@ test('flow registry exposes canonical flow and target metadata', () => {
       'row-plus-account-access-strategy',
       'row-plus-payment-method',
       'row-plus-verification-failure-strategy',
+      'row-plus-check-allowed-regions',
       'row-plus-checkout-create-pre-wait',
       'row-plus-checkout-open-stable-wait',
       'row-plus-hosted-checkout-card-pre-wait',
@@ -325,6 +326,37 @@ test('settings schema normalizes Plus checkout verification failure strategy', (
     plusCheckoutVerificationFailureStrategy: 'fail',
   });
   assert.equal(invalid.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
+});
+
+test('settings schema normalizes Plus Check allowed regions in canonical state and read view', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+
+  const defaults = schema.normalizeSettingsState({});
+  const defaultView = schema.buildSettingsView(defaults);
+  assert.deepEqual(defaults.flows.openai.plus.plusCheckAllowedRegions, []);
+  assert.deepEqual(defaultView.plusCheckAllowedRegions, []);
+
+  const flat = schema.normalizeSettingsState({
+    plusCheckAllowedRegions: ['jp', 'XX', 'u-s', 'Brazil [BR]', 'JP'],
+  });
+  const flatView = schema.buildSettingsView(flat);
+  assert.deepEqual(flat.flows.openai.plus.plusCheckAllowedRegions, ['BR', 'JP', 'US']);
+  assert.deepEqual(flatView.plusCheckAllowedRegions, ['BR', 'JP', 'US']);
+  assert.deepEqual(flatView.settingsState.flows.openai.plus.plusCheckAllowedRegions, ['BR', 'JP', 'US']);
+
+  const nested = schema.normalizeSettingsState({
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            plusCheckAllowedRegions: 'us, np; bad | iq',
+          },
+        },
+      },
+    },
+  });
+  assert.deepEqual(nested.flows.openai.plus.plusCheckAllowedRegions, ['NP', 'IQ', 'US']);
 });
 
 test('settings schema preserves hosted checkout security challenge switch in canonical state and read view', () => {

@@ -267,6 +267,8 @@ const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
 const rowPlusCheckoutVerificationFailureStrategy = document.getElementById('row-plus-verification-failure-strategy');
 const selectPlusCheckoutVerificationFailureStrategy = document.getElementById('select-plus-checkout-verification-failure-strategy');
+const rowPlusCheckAllowedRegions = document.getElementById('row-plus-check-allowed-regions');
+const plusCheckAllowedRegionInputs = Array.from(document.querySelectorAll('[data-plus-check-region]'));
 const rowPlusCheckoutCreatePreWait = document.getElementById('row-plus-checkout-create-pre-wait');
 const inputPlusCheckoutCreatePreWaitSeconds = document.getElementById('input-plus-checkout-create-pre-wait-seconds');
 const rowPlusCheckoutOpenStableWait = document.getElementById('row-plus-checkout-open-stable-wait');
@@ -737,6 +739,7 @@ const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
+const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
 const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
 const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
@@ -3724,6 +3727,77 @@ function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
     : DEFAULT_PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY;
 }
 
+function normalizePlusCheckAllowedRegionCodeValue(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  const allowedSet = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS);
+  const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+  if (bracketMatch) {
+    const code = bracketMatch[1].toUpperCase();
+    return allowedSet.has(code) ? code : '';
+  }
+  const separatedLetters = raw.match(/\b([A-Za-z])\s*[-_]\s*([A-Za-z])\b/);
+  if (separatedLetters) {
+    const code = `${separatedLetters[1]}${separatedLetters[2]}`.toUpperCase();
+    if (allowedSet.has(code)) {
+      return code;
+    }
+  }
+  const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (/^[A-Z]{2}$/.test(compact) && allowedSet.has(compact)) {
+    return compact;
+  }
+  const lower = raw.toLowerCase();
+  if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) return 'KZ';
+  if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+  if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+  if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) return 'NP';
+  if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) return 'IQ';
+  if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+  return '';
+}
+
+function normalizePlusCheckAllowedRegionsValue(value = []) {
+  const tokens = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\s,;|/]+/);
+  const selected = new Set();
+  tokens.forEach((entry) => {
+    const code = normalizePlusCheckAllowedRegionCodeValue(entry);
+    if (code) {
+      selected.add(code);
+    }
+  });
+  return PLUS_CHECK_ALLOWED_REGION_OPTIONS.filter((code) => selected.has(code));
+}
+
+function getSelectedPlusCheckAllowedRegions() {
+  if (typeof plusCheckAllowedRegionInputs === 'undefined' || !Array.isArray(plusCheckAllowedRegionInputs)) {
+    return normalizePlusCheckAllowedRegionsValue(latestState?.plusCheckAllowedRegions || []);
+  }
+  return normalizePlusCheckAllowedRegionsValue(
+    plusCheckAllowedRegionInputs
+      .filter((input) => input?.checked)
+      .map((input) => input.dataset.plusCheckRegion)
+  );
+}
+
+function syncPlusCheckAllowedRegionsControl(value = []) {
+  const selectedRegions = new Set(normalizePlusCheckAllowedRegionsValue(value));
+  if (typeof plusCheckAllowedRegionInputs === 'undefined' || !Array.isArray(plusCheckAllowedRegionInputs)) {
+    return;
+  }
+  plusCheckAllowedRegionInputs.forEach((input) => {
+    if (!input) {
+      return;
+    }
+    const code = normalizePlusCheckAllowedRegionCodeValue(input.dataset.plusCheckRegion);
+    input.checked = selectedRegions.has(code);
+  });
+}
+
 function normalizeBrowserFingerprintLevel(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'basic' || normalized === 'enhanced') {
@@ -6315,6 +6389,14 @@ function collectSettingsPayload() {
       return typeof selectPlusCheckoutVerificationFailureStrategy !== 'undefined' && selectPlusCheckoutVerificationFailureStrategy
         ? normalizeVerificationFailureStrategy(selectPlusCheckoutVerificationFailureStrategy.value)
         : normalizeVerificationFailureStrategy(latestState?.plusCheckoutVerificationFailureStrategy);
+    })(),
+    plusCheckAllowedRegions: (() => {
+      const normalizeRegions = typeof normalizePlusCheckAllowedRegionsValue === 'function'
+        ? normalizePlusCheckAllowedRegionsValue
+        : ((value = []) => (Array.isArray(value) ? value : []).map((entry) => String(entry || '').trim().toUpperCase()).filter(Boolean));
+      return typeof getSelectedPlusCheckAllowedRegions === 'function'
+        ? getSelectedPlusCheckAllowedRegions()
+        : normalizeRegions(latestState?.plusCheckAllowedRegions || []);
     })(),
     plusCheckoutCreatePreWaitSeconds: typeof inputPlusCheckoutCreatePreWaitSeconds !== 'undefined' && inputPlusCheckoutCreatePreWaitSeconds
       ? normalizePlusCheckoutCreatePreWaitSeconds(inputPlusCheckoutCreatePreWaitSeconds.value)
@@ -11941,6 +12023,9 @@ function updatePlusModeUI() {
       latestState?.plusCheckoutVerificationFailureStrategy
     );
   }
+  if (typeof rowPlusCheckAllowedRegions !== 'undefined' && rowPlusCheckAllowedRegions) {
+    rowPlusCheckAllowedRegions.style.display = enabled && effectivePhonePlusModeEnabled ? '' : 'none';
+  }
   if (typeof updatePlusCheckoutConversionModeUi === 'function') {
     updatePlusCheckoutConversionModeUi();
   }
@@ -13283,6 +13368,9 @@ function applySettingsState(state) {
       state?.plusCheckoutVerificationFailureStrategy
     );
   }
+  if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
+    syncPlusCheckAllowedRegionsControl(state?.plusCheckAllowedRegions || []);
+  }
   if (typeof inputGpcHelperApi !== 'undefined' && inputGpcHelperApi) {
     const defaultGpcHelperApiUrl = typeof DEFAULT_GPC_HELPER_API_URL !== 'undefined'
       ? DEFAULT_GPC_HELPER_API_URL
@@ -13459,6 +13547,9 @@ function applySettingsState(state) {
   }
   if (typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
     inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(state?.plusCheckoutRegionalCheckoutEnabled);
+  }
+  if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
+    syncPlusCheckAllowedRegionsControl(state?.plusCheckAllowedRegions || []);
   }
   if (typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl) {
     inputPlusCheckoutCloudConversionApiUrl.value = normalizePlusCheckoutCloudConversionApiUrlValue(state?.plusCheckoutCloudConversionApiUrl || '');
@@ -19216,6 +19307,14 @@ inputPlusCheckoutRegionalCheckoutEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+plusCheckAllowedRegionInputs.forEach((input) => {
+  input?.addEventListener('change', () => {
+    syncLatestState({ plusCheckAllowedRegions: getSelectedPlusCheckAllowedRegions() });
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 inputPlusCheckoutCloudConversionApiUrl?.addEventListener('input', () => {
   validatePlusCheckoutCloudConversionConfig();
   markSettingsDirty(true);
@@ -22177,6 +22276,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.plusCheckoutVerificationFailureStrategy
         );
       }
+      if (message.payload.plusCheckAllowedRegions !== undefined && typeof syncPlusCheckAllowedRegionsControl === 'function') {
+        syncPlusCheckAllowedRegionsControl(message.payload.plusCheckAllowedRegions);
+      }
       if (message.payload.hostedCheckoutVerificationUrl !== undefined && inputHostedCheckoutVerificationUrl) {
         inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(message.payload.hostedCheckoutVerificationUrl);
         setHostedCheckoutManualCodeDisplay('未获取');
@@ -22511,6 +22613,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.plusCheckoutVerificationFailureStrategy
         );
       }
+      if (message.payload.plusCheckAllowedRegions !== undefined && typeof syncPlusCheckAllowedRegionsControl === 'function') {
+        syncPlusCheckAllowedRegionsControl(message.payload.plusCheckAllowedRegions);
+      }
       if (message.payload.plusCheckoutConversionProxyUrl !== undefined && inputPlusCheckoutConversionProxy) {
         inputPlusCheckoutConversionProxy.value = normalizePlusCheckoutConversionProxyUrlValue(message.payload.plusCheckoutConversionProxyUrl);
         setPlusCheckoutConversionProxyTestResult('未测试');
@@ -22563,6 +22668,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.plusPaymentMethod !== undefined
         || message.payload.plusAccountAccessStrategy !== undefined
         || message.payload.plusCheckoutVerificationFailureStrategy !== undefined
+        || message.payload.plusCheckAllowedRegions !== undefined
         || message.payload.plusCheckoutCreatePreWaitSeconds !== undefined
         || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined
         || message.payload.plusHostedCheckoutCardPreWaitSeconds !== undefined

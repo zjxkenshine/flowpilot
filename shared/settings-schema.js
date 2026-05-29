@@ -190,6 +190,51 @@
     const normalizePlusCheckoutVerificationFailureStrategy = (value = '') => (
       String(value || '').trim().toLowerCase() === 'retry' ? 'retry' : 'continue'
     );
+    const plusCheckAllowedRegionOptions = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+    const plusCheckAllowedRegionSet = new Set(plusCheckAllowedRegionOptions);
+    const normalizePlusCheckAllowedRegionCode = (value = '') => {
+      const raw = String(value || '').trim();
+      if (!raw) {
+        return '';
+      }
+      const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+      if (bracketMatch) {
+        const code = bracketMatch[1].toUpperCase();
+        return plusCheckAllowedRegionSet.has(code) ? code : '';
+      }
+      const separatedLetters = raw.match(/\b([A-Za-z])\s*[-_]\s*([A-Za-z])\b/);
+      if (separatedLetters) {
+        const code = `${separatedLetters[1]}${separatedLetters[2]}`.toUpperCase();
+        if (plusCheckAllowedRegionSet.has(code)) {
+          return code;
+        }
+      }
+      const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      if (/^[A-Z]{2}$/.test(compact) && plusCheckAllowedRegionSet.has(compact)) {
+        return compact;
+      }
+      const lower = raw.toLowerCase();
+      if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) return 'KZ';
+      if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+      if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+      if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) return 'NP';
+      if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) return 'IQ';
+      if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+      return '';
+    };
+    const normalizePlusCheckAllowedRegions = (value = []) => {
+      const tokens = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\s,;|/]+/);
+      const selected = new Set();
+      tokens.forEach((entry) => {
+        const code = normalizePlusCheckAllowedRegionCode(entry);
+        if (code) {
+          selected.add(code);
+        }
+      });
+      return plusCheckAllowedRegionOptions.filter((code) => selected.has(code));
+    };
     const normalizePayPalProfileCountryCode = (value, fallback = 'US') => {
       if (value === undefined || value === null) {
         return normalizePayPalProfileCountryCode(fallback, 'US') || 'US';
@@ -455,6 +500,7 @@
               plusHostedCheckoutIsFinalStep: true,
               plusAccountAccessStrategy: 'oauth',
               plusCheckoutVerificationFailureStrategy: 'continue',
+              plusCheckAllowedRegions: [],
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
               plusHostedCheckoutCardPreWaitSeconds: 10,
@@ -812,6 +858,11 @@
                 input?.plusCheckoutVerificationFailureStrategy
                 ?? nested?.flows?.openai?.plus?.plusCheckoutVerificationFailureStrategy
                 ?? defaults.flows.openai.plus.plusCheckoutVerificationFailureStrategy
+              ),
+              plusCheckAllowedRegions: normalizePlusCheckAllowedRegions(
+                input?.plusCheckAllowedRegions
+                ?? nested?.flows?.openai?.plus?.plusCheckAllowedRegions
+                ?? defaults.flows.openai.plus.plusCheckAllowedRegions
               ),
               plusCheckoutCreatePreWaitSeconds: (() => {
                 const numeric = Number(
@@ -1237,6 +1288,7 @@
       next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
       next.plusCheckoutVerificationFailureStrategy = openaiState.plus.plusCheckoutVerificationFailureStrategy;
+      next.plusCheckAllowedRegions = cloneValue(openaiState.plus.plusCheckAllowedRegions);
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
       next.plusHostedCheckoutCardPreWaitSeconds = openaiState.plus.plusHostedCheckoutCardPreWaitSeconds;

@@ -1556,6 +1556,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusHostedCheckoutIsFinalStep: true,
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutVerificationFailureStrategy: PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE,
+  plusCheckAllowedRegions: [],
   plusCheckoutCreatePreWaitSeconds: DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS,
   plusCheckoutOpenStableWaitSeconds: DEFAULT_PLUS_CHECKOUT_OPEN_STABLE_WAIT_SECONDS,
   plusHostedCheckoutCardPreWaitSeconds: DEFAULT_PLUS_HOSTED_CHECKOUT_CARD_PRE_WAIT_SECONDS,
@@ -1832,6 +1833,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusHostedCheckoutIsFinalStep',
   'plusAccountAccessStrategy',
   'plusCheckoutVerificationFailureStrategy',
+  'plusCheckAllowedRegions',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
@@ -2959,6 +2961,80 @@ function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
   return String(value || '').trim().toLowerCase() === PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
     ? PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY
     : PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE;
+}
+
+const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+const PLUS_CHECK_ALLOWED_REGION_SET = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS);
+
+function normalizePlusCheckAllowedRegionCode(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
+  if (bracketMatch) {
+    const code = bracketMatch[1].toUpperCase();
+    return PLUS_CHECK_ALLOWED_REGION_SET.has(code) ? code : '';
+  }
+  const separatedLetters = raw.match(/\b([A-Za-z])\s*[-_]\s*([A-Za-z])\b/);
+  if (separatedLetters) {
+    const code = `${separatedLetters[1]}${separatedLetters[2]}`.toUpperCase();
+    if (PLUS_CHECK_ALLOWED_REGION_SET.has(code)) {
+      return code;
+    }
+  }
+  const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (/^[A-Z]{2}$/.test(compact) && PLUS_CHECK_ALLOWED_REGION_SET.has(compact)) {
+    return compact;
+  }
+  const lower = raw.toLowerCase();
+  if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) return 'KZ';
+  if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+  if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
+  if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) return 'NP';
+  if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) return 'IQ';
+  if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
+  return '';
+}
+
+function normalizePlusCheckAllowedRegions(value = []) {
+  const tokens = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\s,;|/]+/);
+  const selected = new Set();
+  tokens.forEach((entry) => {
+    const code = normalizePlusCheckAllowedRegionCode(entry);
+    if (code) {
+      selected.add(code);
+    }
+  });
+  return PLUS_CHECK_ALLOWED_REGION_OPTIONS.filter((code) => selected.has(code));
+}
+
+function normalizePhonePlusRegistrationExitRegion(value = '') {
+  return normalizePlusCheckAllowedRegionCode(value);
+}
+
+function getPhonePlusRegistrationRegionGateResult(state = {}) {
+  const allowedRegions = normalizePlusCheckAllowedRegions(state?.plusCheckAllowedRegions);
+  const rawExitRegion = String(state?.ipProxyAppliedExitRegion || '').trim();
+  const exitRegion = normalizePhonePlusRegistrationExitRegion(rawExitRegion);
+  if (!allowedRegions.length) {
+    return {
+      enabled: false,
+      allowedRegions,
+      rawExitRegion,
+      exitRegion,
+      matched: true,
+    };
+  }
+  return {
+    enabled: true,
+    allowedRegions,
+    rawExitRegion,
+    exitRegion,
+    matched: Boolean(exitRegion && allowedRegions.includes(exitRegion)),
+  };
 }
 
 function normalizePlusCheckoutConversionProxySource(value = '') {
@@ -4529,6 +4605,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizePlusAccountAccessStrategy(value);
     case 'plusCheckoutVerificationFailureStrategy':
       return normalizePlusCheckoutVerificationFailureStrategy(value);
+    case 'plusCheckAllowedRegions':
+      return normalizePlusCheckAllowedRegions(value);
     case 'plusCheckoutCreatePreWaitSeconds': {
       const numeric = Number(value);
       return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS)));
@@ -5795,6 +5873,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusHostedCheckoutIsFinalStep', ['flows', 'openai', 'plus', 'plusHostedCheckoutIsFinalStep']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
   assignIfUpdated('plusCheckoutVerificationFailureStrategy', ['flows', 'openai', 'plus', 'plusCheckoutVerificationFailureStrategy']);
+  assignIfUpdated('plusCheckAllowedRegions', ['flows', 'openai', 'plus', 'plusCheckAllowedRegions']);
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutCardPreWaitSeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutCardPreWaitSeconds']);
@@ -12102,6 +12181,8 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     fallbackMessage = `Phone Plus：PayPal Checkout 返回 genericError，已跳过 Plus 支付段，继续后续 OAuth 流程。${detailSuffix}`;
   } else if (fallbackReason === 'phone-plus-check-retry-exhausted') {
     fallbackMessage = `Phone Plus：Plus Check 已连续 3 次未确认 Plus 生效，已跳过 Plus 支付段，继续 OAuth 流程。${detailSuffix}`;
+  } else if (fallbackReason === 'phone-plus-registration-region-mismatch') {
+    fallbackMessage = `Phone Plus：第 6 步账号类型是 free，但注册出口地区不在 Plus Check 允许地区内${fallbackDetail ? `（${fallbackDetail}）` : ''}，已跳过 Plus 支付段，继续 OAuth 流程。`;
   } else {
     fallbackMessage = `Phone Plus：检测到 Plus Checkout 今日应付金额非 0${amountSuffix}，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。`;
   }
@@ -13883,6 +13964,26 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
     });
     if (fallbackResult?.handled) {
       postCompletionState = await getState();
+    }
+  }
+  if (
+    nodeId === 'wait-registration-success'
+    && postCompletionState?.phonePlusModeEnabled
+    && registrationFreeStatus === 'free'
+    && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+  ) {
+    const regionGate = getPhonePlusRegistrationRegionGateResult(postCompletionState);
+    if (regionGate.enabled && !regionGate.matched) {
+      const allowedLabel = regionGate.allowedRegions.join(',');
+      const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || '未检测到地区';
+      const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
+        reason: 'phone-plus-registration-region-mismatch',
+        detail: `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`,
+        nodeId,
+      });
+      if (fallbackResult?.handled) {
+        postCompletionState = await getState();
+      }
     }
   }
   const workflowNodeIds = typeof getNodeIdsForState === 'function'

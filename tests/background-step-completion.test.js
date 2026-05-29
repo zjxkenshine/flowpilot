@@ -117,6 +117,12 @@ async function handlePhonePlusNonFreeTrialFallback(state, context) {
   events.push({ type: 'fallback', state, context });
   return { handled: true, nextNodeId: 'oauth-login', skippedNodeIds: ['plus-checkout-create'] };
 }
+const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+const PLUS_CHECK_ALLOWED_REGION_SET = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS);
+${extractFunction('normalizePlusCheckAllowedRegionCode')}
+${extractFunction('normalizePlusCheckAllowedRegions')}
+${extractFunction('normalizePhonePlusRegistrationExitRegion')}
+${extractFunction('getPhonePlusRegistrationRegionGateResult')}
 ${extractFunction('runCompletedNodeSideEffects')}
 ${extractFunction('reportCompletedNodeSideEffectError')}
 ${extractFunction('completeNodeFromBackground')}
@@ -384,6 +390,120 @@ test('completeNodeFromBackground keeps Phone Plus payment after free registratio
 
   assert.ok(events.some((event) => event.type === 'account-book' && event.state.freeStatus === 'free'));
   assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+test('completeNodeFromBackground keeps Phone Plus payment when no Plus Check regions are configured', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      plusCheckAllowedRegions: [],
+      currentNodeId: 'wait-registration-success',
+      ipProxyAppliedExitRegion: 'JP',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
+
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+test('completeNodeFromBackground keeps Phone Plus payment when exit region is allowed', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      plusCheckAllowedRegions: ['BR', 'JP'],
+      currentNodeId: 'wait-registration-success',
+      ipProxyAppliedExitRegion: 'Brazil [BR]',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
+
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+test('completeNodeFromBackground skips Phone Plus payment when exit region is not allowed', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      plusCheckAllowedRegions: ['US'],
+      currentNodeId: 'wait-registration-success',
+      ipProxyAppliedExitRegion: 'JP',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
+
+  const fallbackEvent = events.find((event) => event.type === 'fallback');
+  assert.equal(fallbackEvent?.context.reason, 'phone-plus-registration-region-mismatch');
+  assert.match(fallbackEvent?.context.detail, /freeStatus=free/);
+  assert.match(fallbackEvent?.context.detail, /exitRegion=JP/);
+  assert.match(fallbackEvent?.context.detail, /allowedRegions=US/);
+});
+
+test('completeNodeFromBackground skips Phone Plus payment when allowed regions are set but exit region is missing', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      phonePlusModeEnabled: true,
+      plusCheckAllowedRegions: ['US'],
+      currentNodeId: 'wait-registration-success',
+      ipProxyAppliedExitRegion: '',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    freeStatusDetection: { freeStatus: 'free', reason: 'free_trial_action_visible' },
+  });
+
+  const fallbackEvent = events.find((event) => event.type === 'fallback');
+  assert.equal(fallbackEvent?.context.reason, 'phone-plus-registration-region-mismatch');
+  assert.match(fallbackEvent?.context.detail, /未检测到地区/);
 });
 
 test('completeNodeFromBackground writes flow-completed account book entry for final node', async () => {

@@ -333,6 +333,60 @@ test('Phone Plus registration non-free fallback skips payment segment with dedic
   assert.equal(api.events.logs.some((entry) => /今日|today due|Checkout/.test(entry.message)), false);
 });
 
+test('Phone Plus registration region mismatch fallback skips payment segment with dedicated log', async () => {
+  const api = createApi({
+    activeFlowId: 'openai',
+    panelMode: 'cpa',
+    phonePlusModeEnabled: true,
+    nodeStatuses: {
+      'open-chatgpt': 'completed',
+      'submit-signup-email': 'completed',
+      'fill-password': 'completed',
+      'fetch-signup-code': 'completed',
+      'fill-profile': 'completed',
+      'wait-registration-success': 'completed',
+      'plus-checkout-create': 'pending',
+      'plus-checkout-billing': 'pending',
+      'paypal-approve': 'pending',
+      'plus-checkout-return': 'pending',
+      'plus-check': 'pending',
+      'oauth-login': 'pending',
+    },
+    currentNodeId: 'wait-registration-success',
+    freeStatus: 'free',
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+15550101',
+    signupPhoneNumber: '+15550101',
+    password: 'secret',
+  });
+
+  const result = await api.handlePhonePlusNonFreeTrialFallback(api.getState(), {
+    reason: 'phone-plus-registration-region-mismatch',
+    detail: 'freeStatus=free; exitRegion=JP; allowedRegions=US',
+    nodeId: 'wait-registration-success',
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.nextNodeId, 'oauth-login');
+  assert.deepStrictEqual(result.skippedNodeIds, [
+    'plus-checkout-create',
+    'plus-checkout-billing',
+    'paypal-approve',
+    'plus-checkout-return',
+    'plus-check',
+  ]);
+  const nextState = api.getState();
+  assert.equal(nextState.phonePlusFallbackReason, 'phone-plus-registration-region-mismatch');
+  assert.equal(nextState.phonePlusFallbackDetail, 'freeStatus=free; exitRegion=JP; allowedRegions=US');
+  assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-check'], 'skipped');
+  assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
+  assert.equal(api.events.logs.some((entry) => /账号类型是 free/.test(entry.message)), true);
+  assert.equal(api.events.logs.some((entry) => /注册出口地区不在 Plus Check 允许地区内/.test(entry.message)), true);
+  assert.equal(api.events.logs.some((entry) => /已跳过 Plus 支付段/.test(entry.message)), true);
+});
+
 test('Phone Plus proxy failure fallback stores reason detail and logs proxy message', async () => {
   const api = createApi({
     activeFlowId: 'openai',

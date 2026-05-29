@@ -93,6 +93,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
   'plusCheckoutVerificationFailureStrategy',
+  'plusCheckAllowedRegions',
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
@@ -175,6 +176,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutVerificationFailureStrategy: 'continue',
+  plusCheckAllowedRegions: [],
   plusCheckoutCreatePreWaitSeconds: 10,
   plusCheckoutOpenStableWaitSeconds: 20,
   plusHostedCheckoutCardPreWaitSeconds: 10,
@@ -264,6 +266,8 @@ const PLUS_ACCOUNT_ACCESS_STRATEGY_CPA_CODEX_SESSION = 'cpa_codex_session';
 const DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
 const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_CONTINUE = 'continue';
 const PLUS_CHECKOUT_VERIFICATION_FAILURE_STRATEGY_RETRY = 'retry';
+const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+const PLUS_CHECK_ALLOWED_REGION_SET = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS);
 const SIGNUP_METHOD_EMAIL = 'email';
 const SIGNUP_METHOD_PHONE = 'phone';
 function isPlainObjectValue(value) {
@@ -307,6 +311,8 @@ function normalizeBrowserFingerprintLevel(value = '') {
 }
 ${extractFunction('normalizePlusAccountAccessStrategy')}
 ${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}
+${extractFunction('normalizePlusCheckAllowedRegionCode')}
+${extractFunction('normalizePlusCheckAllowedRegions')}
 ${extractFunction('normalizePlusCheckoutConversionProxySource')}
 ${extractFunction('normalizePlusCheckoutConversionProxy711Region')}
 function normalizeSub2ApiGroupNames(value) {
@@ -920,6 +926,35 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   }, { fillDefaults: true });
   assert.equal(invalid.plusCheckoutVerificationFailureStrategy, 'continue');
   assert.equal(invalid.settingsState.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
+});
+
+test('buildPersistentSettingsPayload normalizes Plus Check allowed regions into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.deepEqual(defaults.plusCheckAllowedRegions, []);
+  assert.deepEqual(defaults.settingsState.flows.openai.plus.plusCheckAllowedRegions, []);
+
+  const flat = api.buildPersistentSettingsPayload({
+    plusCheckAllowedRegions: ['jp', 'XX', 'u-s', 'Brazil [BR]', 'JP'],
+  }, { fillDefaults: true });
+  assert.deepEqual(flat.plusCheckAllowedRegions, ['BR', 'JP', 'US']);
+  assert.deepEqual(flat.settingsState.flows.openai.plus.plusCheckAllowedRegions, ['BR', 'JP', 'US']);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            plusCheckAllowedRegions: 'us, np; bad | iq',
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.deepEqual(nested.plusCheckAllowedRegions, ['NP', 'IQ', 'US']);
+  assert.deepEqual(nested.settingsState.flows.openai.plus.plusCheckAllowedRegions, ['NP', 'IQ', 'US']);
 });
 
 test('buildPersistentSettingsPayload persists OAuth open-after-refresh wait into settings schema', () => {
