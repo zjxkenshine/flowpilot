@@ -29,6 +29,19 @@
     };
   }
 
+  function normalizeRegistrationStageWaitSeconds(value, fallback = 30) {
+    const fallbackNumber = Math.min(600, Math.max(0, Math.floor(Number(fallback) || 30)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(600, Math.max(0, Math.floor(numeric)));
+  }
+
   function createSettingsSchema(deps = {}) {
     const rootScope = typeof self !== 'undefined' ? self : globalThis;
     const flowRegistry = deps.flowRegistry || rootScope.MultiPageFlowRegistry || {};
@@ -319,6 +332,7 @@
             autoRun: {
               autoRunRetryPaypalCallback: false,
               autoRunPreserveIssueLogsOnRestart: false,
+              registrationStageWaitSeconds: 30,
               stepExecutionRange: {
                 enabled: false,
                 fromStep: 1,
@@ -793,6 +807,12 @@
                 ?? nested?.flows?.openai?.autoRun?.autoRunPreserveIssueLogsOnRestart
                 ?? defaults.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart
               ),
+              registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
+                input?.registrationStageWaitSeconds
+                ?? nested?.flows?.openai?.autoRun?.registrationStageWaitSeconds
+                ?? defaults.flows.openai.autoRun.registrationStageWaitSeconds,
+                defaults.flows.openai.autoRun.registrationStageWaitSeconds
+              ),
               stepExecutionRange: normalizeStepExecutionRangeEntry(
                 stepExecutionRangeByFlow.openai
                   ?? nested?.flows?.openai?.autoRun?.stepExecutionRange
@@ -977,6 +997,7 @@
       next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
+      next.registrationStageWaitSeconds = openaiState.autoRun.registrationStageWaitSeconds;
       next.mailProvider = normalizedState.services.email.provider;
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;

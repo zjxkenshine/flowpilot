@@ -735,6 +735,7 @@ const AUTO_RUN_RETRY_DELAY_MS = 3000;
 const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
 const AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS = 0;
 const AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS = 600;
+const DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS = 30;
 const VERIFICATION_RESEND_COUNT_MIN = 0;
 const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
@@ -1616,6 +1617,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   operationDelayEnabled: true,
   autoRunDelayMinutes: 30,
   autoStepDelaySeconds: null,
+  registrationStageWaitSeconds: DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS,
   step6CookieCleanupEnabled: false,
   stepExecutionRangeByFlow: {},
   phoneVerificationEnabled: false,
@@ -1813,6 +1815,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
+  'registrationStageWaitSeconds',
   'mailProvider',
   'ipProxyEnabled',
   'ipProxyService',
@@ -1972,6 +1975,27 @@ function normalizeAutoStepDelaySeconds(value, fallback = null) {
   const numeric = Number(rawValue);
   if (!Number.isFinite(numeric)) {
     return fallback;
+  }
+
+  return Math.min(
+    AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS,
+    Math.max(AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS, Math.floor(numeric))
+  );
+}
+
+function normalizeRegistrationStageWaitSeconds(value, fallback = DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS) {
+  const fallbackNumber = Math.min(
+    AUTO_STEP_DELAY_MAX_ALLOWED_SECONDS,
+    Math.max(AUTO_STEP_DELAY_MIN_ALLOWED_SECONDS, Math.floor(Number(fallback) || DEFAULT_REGISTRATION_STAGE_WAIT_SECONDS))
+  );
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
   }
 
   return Math.min(
@@ -4355,6 +4379,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeAutoRunDelayMinutes(value);
     case 'autoStepDelaySeconds':
       return normalizeAutoStepDelaySeconds(value, PERSISTED_SETTING_DEFAULTS.autoStepDelaySeconds);
+    case 'registrationStageWaitSeconds':
+      return normalizeRegistrationStageWaitSeconds(value, PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds);
     case 'verificationResendCount':
       return normalizeVerificationResendCount(value, DEFAULT_VERIFICATION_RESEND_COUNT);
     case 'phoneVerificationReplacementLimit':
@@ -5240,6 +5266,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
+  assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
   assignIfUpdated('mailProvider', ['services', 'email', 'provider']);
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
@@ -5389,6 +5416,10 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         integrationTargetId: prevState?.openaiIntegrationTargetId || prevState?.panelMode,
         autoRun: {
           autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
+          registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
+            prevState?.registrationStageWaitSeconds,
+            PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds
+          ),
           ...(normalizedStepExecutionRangeByFlow.openai
             ? { stepExecutionRange: normalizedStepExecutionRangeByFlow.openai }
             : {}),
@@ -12804,6 +12835,14 @@ const STEP_COMPLETION_SIGNAL_TIMEOUTS_BY_STEP_KEY = new Map([
 const AUTO_RUN_PRE_EXECUTION_DELAYS_BY_STEP_KEY = new Map([
   ['plus-checkout-create', DEFAULT_PLUS_CHECKOUT_CREATE_PRE_WAIT_SECONDS * 1000],
 ]);
+const OPENAI_REGISTRATION_STAGE_NODE_IDS = new Set([
+  'open-chatgpt',
+  'submit-signup-email',
+  'fill-password',
+  'fetch-signup-code',
+  'fill-profile',
+  'wait-registration-success',
+]);
 
 function waitForNodeComplete(nodeId, timeoutMs = 120000) {
   throwIfStopped();
@@ -12935,6 +12974,23 @@ function getNodeCompletionSignalTimeoutMs(nodeId, state = {}) {
 
 function getStepCompletionSignalTimeoutMs(step, state = {}) {
   return getNodeCompletionSignalTimeoutMs(getNodeIdByStepForState(step, state), state);
+}
+
+function isOpenAiRegistrationStageWaitNode(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (!OPENAI_REGISTRATION_STAGE_NODE_IDS.has(normalizedNodeId)) {
+    return false;
+  }
+  const activeFlowId = String(state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase()
+    || DEFAULT_ACTIVE_FLOW_ID;
+  return activeFlowId === DEFAULT_ACTIVE_FLOW_ID;
+}
+
+function getRegistrationStageWaitSecondsForState(state = {}) {
+  return normalizeRegistrationStageWaitSeconds(
+    state?.registrationStageWaitSeconds,
+    PERSISTED_SETTING_DEFAULTS.registrationStageWaitSeconds
+  );
 }
 
 function notifyNodeComplete(nodeId, payload) {
@@ -14063,6 +14119,19 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
   // Extra delay for page transitions / DOM updates
   if (delayAfter > 0) {
     await sleepWithStop(delayAfter + Math.floor(Math.random() * 1200));
+  }
+
+  const postExecutionState = await getState();
+  const registrationStageWaitSeconds = getRegistrationStageWaitSecondsForState(postExecutionState);
+  if (
+    registrationStageWaitSeconds > 0
+    && isOpenAiRegistrationStageWaitNode(normalizedNodeId, postExecutionState)
+  ) {
+    await addLog(
+      `自动运行：注册阶段节点 ${normalizedNodeId} 完成后额外等待 ${registrationStageWaitSeconds} 秒。`,
+      'info'
+    );
+    await sleepWithStop(registrationStageWaitSeconds * 1000);
   }
 }
 

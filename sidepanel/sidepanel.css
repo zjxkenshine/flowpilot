@@ -2565,6 +2565,17 @@ header {
   margin-left: auto !important;
 }
 
+.auto-step-delay-setting,
+.registration-stage-wait-setting {
+  min-width: 0;
+  gap: 8px;
+}
+
+.auto-step-delay-setting .setting-caption,
+.registration-stage-wait-setting .setting-caption {
+  min-width: 0;
+}
+
 .oauth-flow-timeout-setting {
   gap: 8px;
   min-width: 0;

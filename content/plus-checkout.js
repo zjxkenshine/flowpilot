@@ -30,7 +30,7 @@ const PLUS_CHECKOUT_CONFIGS = {
     },
     checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_llc/',
     paymentLabel: 'GoPay',
-  },
+  }
 };
 const PAYPAL_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
 const HOSTED_CHECKOUT_CARD_FALLBACK_ERROR_PREFIX = 'HOSTED_CHECKOUT_CARD_FALLBACK::';

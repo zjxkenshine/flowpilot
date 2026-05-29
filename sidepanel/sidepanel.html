@@ -1004,6 +1004,14 @@
               <span class="data-unit">秒</span>
             </div>
           </div>
+          <div class="setting-group setting-group-secondary registration-stage-wait-setting">
+            <span class="setting-caption">注册阶段等待</span>
+            <div class="setting-controls">
+              <input type="number" id="input-registration-stage-wait-seconds" class="data-input auto-delay-input"
+                value="30" min="0" max="600" step="1" title="步骤 1 到 6 注册阶段成功后额外等待秒数，0 则不等待" />
+              <span class="data-unit">秒</span>
+            </div>
+          </div>
           <div class="setting-group setting-group-secondary">
             <span class="setting-caption">PAYPAL回调自动重试</span>
             <label class="toggle-switch" for="input-auto-run-retry-paypal-callback"
