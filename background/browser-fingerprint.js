@@ -30,6 +30,7 @@
     BROWSER_FINGERPRINT_LANGUAGE_EN_US,
   ]);
   let randomFingerprintSeedCounter = 0;
+  const newDocumentScriptIdsByTab = new Map();
 
   const REGION_DEFAULTS = Object.freeze({
     US: Object.freeze({
@@ -539,6 +540,8 @@
       userAgent: profile.userAgent,
       language: profile.languages?.[0] || profile.locale,
       languages: Array.isArray(profile.languages) ? profile.languages : [profile.locale || 'en-US'],
+      locale: profile.locale,
+      acceptLanguage: profile.acceptLanguage,
       platform: profile.platform,
       hardwareConcurrency: profile.hardwareConcurrency,
       deviceMemory: profile.deviceMemory,
@@ -555,6 +558,160 @@
         ? `fp_noise_${hashString(`enhanced|${profile.profileId || ''}`).toString(16)}`
         : '',
     };
+  }
+
+  function applyEarlyNavigatorLanguagePatch(payload = {}) {
+    const defineGetter = (targetObject, name, value) => {
+      try {
+        Object.defineProperty(targetObject, name, {
+          configurable: true,
+          get: () => value,
+        });
+      } catch {
+        // ignore read-only descriptor failures
+      }
+    };
+
+    try {
+      const navigatorProto = Navigator.prototype;
+      if (payload.userAgent) {
+        defineGetter(navigatorProto, 'userAgent', payload.userAgent);
+      }
+      if (payload.language) {
+        defineGetter(navigatorProto, 'language', payload.language);
+      }
+      if (Array.isArray(payload.languages) && payload.languages.length) {
+        defineGetter(navigatorProto, 'languages', Object.freeze([...(payload.languages || [])]));
+      }
+      if (payload.userAgentData) {
+        const userAgentData = {
+          ...payload.userAgentData,
+          brands: Object.freeze([...(payload.userAgentData.brands || [])]),
+          mobile: Boolean(payload.userAgentData.mobile),
+          getHighEntropyValues: async (hints = []) => {
+            const result = {};
+            for (const hint of hints || []) {
+              if (Object.prototype.hasOwnProperty.call(payload.userAgentData, hint)) {
+                result[hint] = payload.userAgentData[hint];
+              }
+            }
+            if (!Object.prototype.hasOwnProperty.call(result, 'brands')) {
+              result.brands = payload.userAgentData.brands || [];
+            }
+            if (!Object.prototype.hasOwnProperty.call(result, 'mobile')) {
+              result.mobile = Boolean(payload.userAgentData.mobile);
+            }
+            return result;
+          },
+          toJSON: () => ({
+            brands: payload.userAgentData.brands || [],
+            mobile: Boolean(payload.userAgentData.mobile),
+            platform: payload.userAgentData.platform || '',
+          }),
+        };
+        defineGetter(navigatorProto, 'userAgentData', userAgentData);
+      }
+    } catch {
+      // Early-page language patching must never block page load.
+    }
+
+    try {
+      if (payload.language && document?.documentElement) {
+        document.documentElement.setAttribute('lang', payload.language);
+      }
+    } catch {
+      // ignore documentElement access failures
+    }
+
+    try {
+      window.__FLOWPILOT_BROWSER_FINGERPRINT__ = Object.freeze({
+        profileAppliedAt: Date.now(),
+        level: payload.level,
+        language: payload.language,
+        locale: payload.locale,
+        acceptLanguage: payload.acceptLanguage,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+    } catch {
+      // ignore marker failures
+    }
+  }
+
+  function buildNewDocumentPatchSource(payload = {}) {
+    return `;(${applyEarlyNavigatorLanguagePatch.toString()})(${JSON.stringify(payload || {})});`;
+  }
+
+  async function applyBrowserFingerprintToNewDocument(tabId, profile = {}, options = {}) {
+    const chromeApi = options?.chrome || globalThis.chrome;
+    const normalizedTabId = Number(tabId);
+    if (!Number.isInteger(normalizedTabId)) {
+      throw new Error('browser fingerprint apply failed: missing valid tab id');
+    }
+    if (!isValidBrowserFingerprintProfile(profile)) {
+      return { skipped: true, reason: 'missing_profile' };
+    }
+    if (options?.state && !isBrowserFingerprintEnabled(options.state)) {
+      return { skipped: true, reason: 'disabled' };
+    }
+    if (!chromeApi?.debugger?.attach || !chromeApi?.debugger?.sendCommand) {
+      return { skipped: true, reason: 'debugger_unavailable' };
+    }
+
+    const level = normalizeBrowserFingerprintLevel(
+      options?.level
+      ?? options?.browserFingerprintLevel
+      ?? getBrowserFingerprintLevelFromState(options?.state, profile.level)
+    );
+    const target = { tabId: normalizedTabId };
+    const payload = buildNavigatorPatchPayload(profile, { level });
+    let attached = false;
+    let scriptIdentifier = '';
+    try {
+      try {
+        await chromeApi.debugger.attach(target, '1.3');
+        attached = true;
+      } catch (error) {
+        if (!/already attached|another debugger/i.test(String(error?.message || error || ''))) {
+          throw error;
+        }
+      }
+
+      await chromeApi.debugger.sendCommand(target, 'Network.enable').catch(() => {});
+      await chromeApi.debugger.sendCommand(target, 'Page.enable').catch(() => {});
+      await chromeApi.debugger.sendCommand(target, 'Network.setUserAgentOverride', {
+        userAgent: profile.userAgent,
+        acceptLanguage: profile.acceptLanguage,
+        platform: profile.platform,
+        userAgentMetadata: profile.userAgentMetadata,
+      });
+      if (level !== BROWSER_FINGERPRINT_LEVEL_BASIC) {
+        await chromeApi.debugger.sendCommand(target, 'Emulation.setLocaleOverride', {
+          locale: profile.locale,
+        });
+      }
+
+      const previousScriptIdentifier = newDocumentScriptIdsByTab.get(normalizedTabId);
+      if (previousScriptIdentifier) {
+        await chromeApi.debugger.sendCommand(target, 'Page.removeScriptToEvaluateOnNewDocument', {
+          identifier: previousScriptIdentifier,
+        }).catch(() => {});
+        newDocumentScriptIdsByTab.delete(normalizedTabId);
+      }
+
+      const addScriptResult = await chromeApi.debugger.sendCommand(target, 'Page.addScriptToEvaluateOnNewDocument', {
+        source: buildNewDocumentPatchSource(payload),
+      });
+      scriptIdentifier = String(addScriptResult?.identifier || '').trim();
+      if (scriptIdentifier) {
+        newDocumentScriptIdsByTab.set(normalizedTabId, scriptIdentifier);
+      }
+    } finally {
+      if (attached && chromeApi.debugger?.detach) {
+        await chromeApi.debugger.detach(target).catch(() => {});
+      }
+    }
+
+    return { applied: true, tabId: normalizedTabId, profileId: profile.profileId, level, scriptIdentifier };
   }
 
   async function applyBrowserFingerprintToTab(tabId, profile = {}, options = {}) {
@@ -738,6 +895,14 @@
             patchWebGl('WebGL2RenderingContext');
           }
 
+          try {
+            if (payload.language && document?.documentElement) {
+              document.documentElement.setAttribute('lang', payload.language);
+            }
+          } catch {
+            // ignore documentElement access failures
+          }
+
           if (isEnhanced) {
             let canvasNoiseInternalRead = false;
             const hashText = (text) => {
@@ -874,6 +1039,8 @@
             profileAppliedAt: Date.now(),
             level: payload.level,
             language: payload.language,
+            locale: payload.locale,
+            acceptLanguage: payload.acceptLanguage,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           });
         },
@@ -934,6 +1101,17 @@
       return applyBrowserFingerprintToTab(tabId, resolvedProfile, { ...options, chrome: chromeApi, state });
     }
 
+    async function applyProfileToNewDocument(tabId, profile = null, options = {}) {
+      const state = options?.state || (typeof getState === 'function' ? await getState() : {});
+      if (!isBrowserFingerprintEnabled(state)) {
+        return { skipped: true, reason: 'disabled' };
+      }
+      const resolvedProfile = profile || options?.profile || (typeof getState === 'function'
+        ? state?.browserFingerprintProfile
+        : null);
+      return applyBrowserFingerprintToNewDocument(tabId, resolvedProfile, { ...options, chrome: chromeApi, state });
+    }
+
     async function clearBrowserFingerprint(options = {}) {
       const updates = buildClearedBrowserFingerprintState();
       await clearBrowserFingerprintHeaderRules(chromeApi);
@@ -952,6 +1130,7 @@
     return {
       applyBrowserFingerprintHeaderRules: (profile) => applyBrowserFingerprintHeaderRules(chromeApi, profile),
       applyBrowserFingerprintToTab: applyProfileToTab,
+      applyBrowserFingerprintToNewDocument: applyProfileToNewDocument,
       buildBrowserFingerprintProfile,
       clearBrowserFingerprint,
       ensureBrowserFingerprintForProxyExit,
@@ -973,6 +1152,7 @@
     BROWSER_FINGERPRINT_LANGUAGE_RANDOM,
     BROWSER_FINGERPRINT_LANGUAGE_ZH_CN,
     applyBrowserFingerprintHeaderRules,
+    applyBrowserFingerprintToNewDocument,
     applyBrowserFingerprintToTab,
     buildClearedBrowserFingerprintState,
     buildBrowserFingerprintProfile,

@@ -755,8 +755,11 @@ test('tab runtime applies browser fingerprint before and after reuse navigation 
   const runtime = api.createTabRuntime({
     LOG_PREFIX: '[test]',
     addLog: async () => {},
+    applyBrowserFingerprintToNewDocument: async (_tabId, _profile, options) => {
+      applied.push(`${options.phase}:next`);
+    },
     applyBrowserFingerprintToTab: async (_tabId, _profile, options) => {
-      applied.push(options.phase);
+      applied.push(`${options.phase}:current`);
     },
     chrome: {
       tabs: {
@@ -792,12 +795,162 @@ test('tab runtime applies browser fingerprint before and after reuse navigation 
   });
 
   assert.deepEqual(applied, [
-    'reuse-before-navigate',
-    'reuse-after-navigate',
-    'reuse-before-activate',
-    'reuse-before-reload',
-    'reuse-after-reload',
+    'reuse-before-navigate:next',
+    'reuse-after-navigate:current',
+    'reuse-before-activate:current',
+    'reuse-before-reload:next',
+    'reuse-after-reload:current',
   ]);
+});
+
+test('tab runtime applies fingerprint around static auth tab creation paths', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+  const applied = [];
+  const events = [];
+  let nextTabId = 30;
+
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToNewDocument: async (tabId, profile, options) => {
+      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, mode: 'next', url: options.url });
+    },
+    applyBrowserFingerprintToTab: async (tabId, profile, options) => {
+      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, mode: 'current', url: options.url });
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'create', payload });
+          nextTabId += 1;
+          return { id: nextTabId, windowId: payload.windowId, url: payload.url, status: 'complete', active: true };
+        },
+        get: async (tabId) => ({ id: tabId, windowId: 100, url: 'https://auth.openai.com/authorize', status: 'complete', active: true }),
+        query: async () => [],
+        update: async (tabId, payload) => {
+          events.push({ type: 'update', tabId, payload });
+          return { id: tabId, windowId: 100, url: payload.url || 'https://auth.openai.com/authorize', status: 'complete', active: true };
+        },
+        onUpdated: {
+          addListener: (listener) => {
+            setTimeout(() => listener(nextTabId, { status: 'complete' }), 0);
+          },
+          removeListener: () => {},
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      browserFingerprintProfile: { profileId: 'fp-auth', userAgent: 'ua' },
+      tabRegistry: {},
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: (sourceName, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(sourceName, candidateUrl, referenceUrl)
+    ),
+    setState: async () => {},
+    shouldApplyBrowserFingerprintToSource: (_sourceName, options) => ['openai-auth', 'signup-page'].includes(options.canonicalSource),
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/authorize', {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+  });
+  await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/authorize', {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+    forceNew: true,
+  });
+
+  assert.deepEqual(events.map((entry) => [entry.type, entry.payload?.url || entry.payload?.url === '' ? entry.payload.url : entry.payload?.url, entry.payload?.active]), [
+    ['create', 'about:blank', true],
+    ['update', 'https://auth.openai.com/authorize', true],
+    ['create', 'about:blank', true],
+    ['update', 'https://auth.openai.com/authorize', true],
+  ]);
+  assert.deepEqual(
+    applied.map((entry) => [entry.phase, entry.mode, entry.url]),
+    [
+      ['before-create-navigation', 'next', 'https://auth.openai.com/authorize'],
+      ['created', 'current', 'https://auth.openai.com/authorize'],
+      ['new-after-load', 'current', 'https://auth.openai.com/authorize'],
+      ['before-create-navigation', 'next', 'https://auth.openai.com/authorize'],
+      ['created', 'current', 'https://auth.openai.com/authorize'],
+      ['force-new-after-load', 'current', 'https://auth.openai.com/authorize'],
+    ]
+  );
+});
+
+test('tab runtime reapplies fingerprint when a registered auth tab completes navigation', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+  const applied = [];
+
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    applyBrowserFingerprintToTab: async (tabId, profile, options) => {
+      applied.push({ tabId, profileId: profile.profileId, phase: options.phase, source: options.source, url: options.url });
+    },
+    chrome: {
+      tabs: {
+        get: async () => ({ id: 91, windowId: 100, url: 'https://auth.openai.com/log-in', status: 'complete' }),
+        query: async () => [],
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      browserFingerprintProfile: { profileId: 'fp-auth-nav', userAgent: 'ua' },
+      tabRegistry: {
+        'openai-auth': { tabId: 91, ready: true, windowId: 100 },
+      },
+      sourceLastUrls: {},
+    }),
+    matchesSourceUrlFamily: (sourceName, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(sourceName, candidateUrl, referenceUrl)
+    ),
+    setState: async () => {},
+    shouldApplyBrowserFingerprintToSource: (_sourceName, options) => options.canonicalSource === 'openai-auth',
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.maybeApplyBrowserFingerprintForCompletedAuthNavigation(
+    91,
+    { status: 'complete' },
+    { url: 'https://auth.openai.com/log-in' }
+  );
+  await runtime.maybeApplyBrowserFingerprintForCompletedAuthNavigation(
+    92,
+    { status: 'complete' },
+    { url: 'https://auth.openai.com/log-in' }
+  );
+  await runtime.maybeApplyBrowserFingerprintForCompletedAuthNavigation(
+    91,
+    { status: 'loading' },
+    { url: 'https://auth.openai.com/log-in' }
+  );
+
+  assert.deepEqual(applied, [{
+    tabId: 91,
+    profileId: 'fp-auth-nav',
+    phase: 'auth-navigation-complete',
+    source: 'signup-page',
+    url: 'https://auth.openai.com/log-in',
+  }]);
 });
 
 test('tab runtime does not apply browser fingerprint to mail provider tabs', async () => {

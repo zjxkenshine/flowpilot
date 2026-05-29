@@ -430,8 +430,68 @@ test('enhanced browser fingerprint patch payload is stable and does not include 
   assert.equal(first.level, 'enhanced');
   assert.equal(first.noiseSeed, second.noiseSeed);
   assert.match(first.noiseSeed, /^fp_noise_/);
+  assert.equal(first.language, profile.languages[0]);
+  assert.deepEqual(first.languages, profile.languages);
+  assert.equal(first.locale, profile.locale);
+  assert.equal(first.acceptLanguage, profile.acceptLanguage);
   assert.equal(JSON.stringify(first).includes('198.51.100.77'), false);
   assert.equal(JSON.stringify(first).includes(profile.seedKey), false);
+});
+
+test('browser fingerprint can register an early new-document language patch', async () => {
+  const api = loadBrowserFingerprintModule();
+  const profile = api.buildBrowserFingerprintProfile(
+    {},
+    { browserFingerprintLanguage: 'en-US' },
+    { createdAt: 1, seed: 'new-document-language-seed' }
+  );
+  const commands = [];
+  let attachCount = 0;
+  let detachCount = 0;
+
+  const result = await api.applyBrowserFingerprintToNewDocument(42, profile, {
+    browserFingerprintLevel: 'standard',
+    chrome: {
+      debugger: {
+        attach: async (target, version) => {
+          attachCount += 1;
+          assert.deepEqual(target, { tabId: 42 });
+          assert.equal(version, '1.3');
+        },
+        detach: async (target) => {
+          detachCount += 1;
+          assert.deepEqual(target, { tabId: 42 });
+        },
+        sendCommand: async (_target, method, params) => {
+          commands.push({ method, params });
+          if (method === 'Page.addScriptToEvaluateOnNewDocument') {
+            return { identifier: 'script-42' };
+          }
+          return {};
+        },
+      },
+    },
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.scriptIdentifier, 'script-42');
+  assert.equal(attachCount, 1);
+  assert.equal(detachCount, 1);
+  assert.deepEqual(
+    commands.map((entry) => entry.method),
+    [
+      'Network.enable',
+      'Page.enable',
+      'Network.setUserAgentOverride',
+      'Emulation.setLocaleOverride',
+      'Page.addScriptToEvaluateOnNewDocument',
+    ]
+  );
+  assert.equal(commands[2].params.acceptLanguage, 'en-US,en;q=0.9');
+  assert.equal(commands[3].params.locale, 'en-US');
+  assert.match(commands[4].params.source, /navigatorProto/);
+  assert.match(commands[4].params.source, /"language":"en-US"/);
+  assert.match(commands[4].params.source, /"acceptLanguage":"en-US,en;q=0\.9"/);
 });
 
 test('browser fingerprint manager logs generated profile summary without exit ip', async () => {

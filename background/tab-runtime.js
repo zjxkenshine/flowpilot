@@ -4,6 +4,7 @@
   function createTabRuntime(deps = {}) {
     const {
       addLog,
+      applyBrowserFingerprintToNewDocument = null,
       applyBrowserFingerprintToTab = null,
       chrome,
       getSourceLabel,
@@ -71,6 +72,11 @@
       if (resolveCanonicalSource(source) !== 'openai-auth') {
         return false;
       }
+      const parsed = parseUrlSafely(rawUrl);
+      return Boolean(parsed && isSignupPageHost(parsed.hostname));
+    }
+
+    function isAuthPageUrl(rawUrl = '') {
       const parsed = parseUrlSafely(rawUrl);
       return Boolean(parsed && isSignupPageHost(parsed.hostname));
     }
@@ -176,10 +182,35 @@
       };
 
       try {
-        const tab = await chrome.tabs.create(properties);
-        await applyBrowserFingerprintForSource(options.fingerprintSource || options.source || '', tab?.id, {
+        const creationProperties = { ...properties };
+        const initialUrl = creationProperties.url || '';
+        const fingerprintSource = options.fingerprintSource || options.source || '';
+        const shouldCreateBlankForAuthFingerprint = Boolean(initialUrl
+          && isAuthPageUrl(initialUrl)
+          && typeof chrome?.tabs?.update === 'function'
+          && typeof applyBrowserFingerprintToNewDocument === 'function'
+          && await hasReadyBrowserFingerprintForSource(fingerprintSource, {
+            phase: 'before-create',
+            url: initialUrl,
+            allowGenericSource: Boolean(options.applyBrowserFingerprint),
+          })
+        );
+        if (shouldCreateBlankForAuthFingerprint) {
+          creationProperties.url = 'about:blank';
+        }
+        const tab = await chrome.tabs.create(creationProperties);
+        if (initialUrl && creationProperties.url === 'about:blank') {
+          await applyBrowserFingerprintForSource(fingerprintSource, tab?.id, {
+            phase: 'before-create-navigation',
+            url: initialUrl,
+            allowGenericSource: Boolean(options.applyBrowserFingerprint),
+            nextDocument: true,
+          });
+          await chrome.tabs.update(tab.id, { url: initialUrl, active: creationProperties.active !== false });
+        }
+        await applyBrowserFingerprintForSource(fingerprintSource, tab?.id, {
           phase: 'created',
-          url: properties.url || tab?.url || '',
+          url: initialUrl || properties.url || tab?.url || '',
           allowGenericSource: Boolean(options.applyBrowserFingerprint),
         });
         return tab;
@@ -243,8 +274,22 @@
       return 'standard';
     }
 
+    async function hasReadyBrowserFingerprintForSource(source = '', options = {}) {
+      if (!shouldApplyFingerprintForSource(source, options)) {
+        return false;
+      }
+      const state = await getState();
+      if (!isBrowserFingerprintEnabledForState(state)) {
+        return false;
+      }
+      return hasBrowserFingerprintProfile(options.profile || state?.browserFingerprintProfile);
+    }
+
     async function applyBrowserFingerprintForSource(source, tabId, options = {}) {
-      if (typeof applyBrowserFingerprintToTab !== 'function') {
+      const applyFn = options.nextDocument && typeof applyBrowserFingerprintToNewDocument === 'function'
+        ? applyBrowserFingerprintToNewDocument
+        : applyBrowserFingerprintToTab;
+      if (typeof applyFn !== 'function') {
         return null;
       }
       if (!Number.isInteger(tabId)) {
@@ -262,7 +307,7 @@
         return null;
       }
       try {
-        return await applyBrowserFingerprintToTab(tabId, profile, {
+        return await applyFn(tabId, profile, {
           source,
           phase: options.phase || '',
           state,
@@ -276,6 +321,27 @@
         }
         throw new Error(`浏览器指纹应用失败，已停止打开${getSourceLabel(source)}：${message}`);
       }
+    }
+
+    async function maybeApplyBrowserFingerprintForCompletedAuthNavigation(tabId, changeInfo = {}, tab = {}) {
+      if (!Number.isInteger(Number(tabId)) || changeInfo?.status !== 'complete') {
+        return null;
+      }
+      const rawUrl = String(tab?.url || changeInfo?.url || '').trim();
+      const parsed = parseUrlSafely(rawUrl);
+      if (!parsed || !isSignupPageHost(parsed.hostname)) {
+        return null;
+      }
+      const state = await getState();
+      const registry = state?.tabRegistry || {};
+      const sourceEntry = getSourceMapValue(registry, 'signup-page') || getSourceMapValue(registry, 'openai-auth');
+      if (!sourceEntry || Number(sourceEntry.tabId) !== Number(tabId)) {
+        return null;
+      }
+      return applyBrowserFingerprintForSource('signup-page', Number(tabId), {
+        phase: 'auth-navigation-complete',
+        url: rawUrl,
+      });
     }
 
     async function isTabInAutomationWindow(tabOrId, options = {}) {
@@ -310,6 +376,12 @@
     }
 
     function waitForTabUpdateComplete(tabId, timeoutMs = 30000) {
+      if (!chrome?.tabs?.onUpdated?.addListener || !chrome?.tabs?.onUpdated?.removeListener) {
+        return waitForTabComplete(tabId, {
+          timeoutMs,
+          retryDelayMs: 250,
+        }).then(() => undefined);
+      }
       return new Promise((resolve, reject) => {
         let settled = false;
         let stopTimer = null;
@@ -858,6 +930,21 @@
       });
     }
 
+    async function applyBrowserFingerprintAfterAuthStaticLoad(source, tabId, url, phase) {
+      const result = await applyBrowserFingerprintForSource(source, tabId, {
+        phase,
+        url,
+      });
+      if (!result) {
+        return result;
+      }
+      await waitForTabUpdateComplete(tabId);
+      return applyBrowserFingerprintForSource(source, tabId, {
+        phase,
+        url,
+      });
+    }
+
     function flushCommand(source, tabId) {
       const pending = pendingCommands.get(getSourceCommandKey(source));
       if (pending) {
@@ -917,6 +1004,9 @@
             url,
           });
         }
+        if (!shouldInjectContentScriptForUrl(source, url, options.inject) && isAuthPageUrl(url)) {
+          await applyBrowserFingerprintAfterAuthStaticLoad(source, tab.id, url, 'force-new-after-load');
+        }
 
         await rememberSourceLastUrl(source, url);
         return tab.id;
@@ -952,6 +1042,7 @@
             await applyBrowserFingerprintForSource(source, tabId, {
               phase: 'reuse-before-reload',
               url,
+              nextDocument: true,
             });
             await chrome.tabs.reload(tabId);
             await waitForTabUpdateComplete(tabId);
@@ -1003,6 +1094,7 @@
         await applyBrowserFingerprintForSource(source, tabId, {
           phase: 'reuse-before-navigate',
           url,
+          nextDocument: true,
         });
         await chrome.tabs.update(tabId, { url, active: true });
 
@@ -1069,6 +1161,9 @@
           phase: 'new-after-inject',
           url,
         });
+      }
+      if (!shouldInjectContentScriptForUrl(source, url, options.inject) && isAuthPageUrl(url)) {
+        await applyBrowserFingerprintAfterAuthStaticLoad(source, tab.id, url, 'new-after-load');
       }
 
       await rememberSourceLastUrl(source, url);
@@ -1255,6 +1350,7 @@
       isLocalhostOAuthCallbackTabMatch,
       isTabAlive,
       isTabInAutomationWindow,
+      maybeApplyBrowserFingerprintForCompletedAuthNavigation,
       pingContentScriptOnTab,
       queueCommand,
       queryTabsInAutomationWindow,

@@ -10928,6 +10928,7 @@ const browserFingerprintManager = self.MultiPageBackgroundBrowserFingerprint?.cr
 
 const tabRuntime = self.MultiPageBackgroundTabRuntime?.createTabRuntime({
   addLog,
+  applyBrowserFingerprintToNewDocument: (...args) => browserFingerprintManager?.applyBrowserFingerprintToNewDocument?.(...args),
   applyBrowserFingerprintToTab: (...args) => browserFingerprintManager?.applyBrowserFingerprintToTab?.(...args),
   chrome,
   getSourceLabel,
@@ -19240,6 +19241,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   plusSuccessSessionUploadManager?.handleTabUpdated(tabId, changeInfo, tab).catch((err) => {
     console.error(LOG_PREFIX, 'Failed to process Hosted PayPal payments success continuation:', err);
+  });
+  tabRuntime?.maybeApplyBrowserFingerprintForCompletedAuthNavigation?.(tabId, changeInfo, tab).catch((err) => {
+    console.error(LOG_PREFIX, 'Failed to apply browser fingerprint after auth navigation:', err);
   });
 });
 
