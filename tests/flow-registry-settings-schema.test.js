@@ -161,6 +161,21 @@ test('settings schema preserves CPA session strategy in canonical state and read
   assert.equal(view.plusAccountAccessStrategy, 'cpa_codex_session');
 });
 
+test('settings schema preserves signup phone before-input proxy activation step', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+  const specialStep = 'signup_phone_before_input_clear_cookie';
+
+  const normalized = schema.normalizeSettingsState({
+    ipProxyActivationStep: specialStep,
+  });
+  const view = schema.buildSettingsView(normalized);
+
+  assert.equal(normalized.services.proxy.activationStep, specialStep);
+  assert.equal(view.ipProxyActivationStep, specialStep);
+  assert.equal(view.settingsState.services.proxy.activationStep, specialStep);
+});
+
 test('settings schema preserves SUB2API relogin pool fields in canonical state and read view', () => {
   const { settingsSchema } = loadApis();
   const schema = settingsSchema.createSettingsSchema();

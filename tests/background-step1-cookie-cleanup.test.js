@@ -476,6 +476,84 @@ test('step 1 delayed IP proxy activation temporarily applies, caches, and releas
   ]);
 });
 
+test('step 1 special phone-before-input proxy activation caches and releases for phone signup only', async () => {
+  const api = loadStep1Module();
+  const specialStep = 'signup_phone_before_input_clear_cookie';
+
+  async function runCase(signupMethod) {
+    const events = [];
+    let state = {
+      ipProxyEnabled: true,
+      ipProxyActivationStep: specialStep,
+      signupMethod,
+      phoneVerificationEnabled: signupMethod === 'phone',
+      ipProxyAppliedExitIp: '',
+      ipProxyAppliedExitDetecting: false,
+    };
+
+    const executor = api.createStep1Executor({
+      addLog: async () => {},
+      chrome: createNoopChromeApi(),
+      getState: async () => ({ ...state }),
+      getIpProxyActivationStepForState: () => specialStep,
+      resolveSignupMethod: () => signupMethod,
+      applyIpProxySettingsFromState: async (_nextState, options) => {
+        events.push(['apply', options.skipExitProbe, options.suppressAuthRebind]);
+        state = {
+          ...state,
+          appliedByStep1: true,
+        };
+        return { applied: true, reason: 'applied' };
+      },
+      probeIpProxyExit: async () => {
+        events.push(['probe', state.appliedByStep1 === true]);
+        return {
+          proxyRouting: {
+            applied: true,
+            reason: 'applied',
+            exitIp: '198.51.100.8',
+            exitRegion: 'US',
+          },
+        };
+      },
+      switchIpProxy: async () => {
+        events.push(['switch']);
+      },
+      ensureBrowserFingerprintForProxyExit: async (routing) => {
+        events.push(['fingerprint', routing.exitIp || '', routing.exitRegion || '']);
+        return { profile: { exitRegion: routing.exitRegion || 'US' } };
+      },
+      cacheAndReleaseIpProxyForDelayedActivation: async (routing) => {
+        events.push(['cache', routing.exitIp, routing.exitRegion]);
+      },
+      openSignupEntryTab: async (step) => {
+        events.push(['open', step]);
+      },
+      completeNodeFromBackground: async (nodeId) => {
+        events.push(['complete', nodeId]);
+      },
+    });
+
+    await executor.executeStep1();
+    return events;
+  }
+
+  assert.deepStrictEqual(await runCase('phone'), [
+    ['apply', true, true],
+    ['probe', true],
+    ['fingerprint', '198.51.100.8', 'US'],
+    ['cache', '198.51.100.8', 'US'],
+    ['open', 1],
+    ['complete', 'open-chatgpt'],
+  ]);
+  assert.deepStrictEqual(await runCase('email'), [
+    ['probe', false],
+    ['fingerprint', '198.51.100.8', 'US'],
+    ['open', 1],
+    ['complete', 'open-chatgpt'],
+  ]);
+});
+
 test('step 1 stops before opening ChatGPT when browser fingerprint apply fails', async () => {
   const api = loadStep1Module();
   const events = [];

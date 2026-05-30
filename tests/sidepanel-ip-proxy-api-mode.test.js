@@ -117,7 +117,9 @@ test('sidepanel exposes IP proxy activation step selector backed by workflow nod
   assert.match(source, /const selectIpProxyActivationStep = document\.getElementById\('select-ip-proxy-activation-step'\);/);
   assert.match(source, /function syncIpProxyActivationStepOptions\(state = latestState\)/);
   assert.match(source, /workflowNodes/);
-  assert.match(source, /ipProxyActivationStep: normalizeIpProxyActivationStepValue/);
+  assert.match(source, /signup_phone_before_input_clear_cookie/);
+  assert.match(source, /手机号填写前\(清除cookie\)/);
+  assert.match(source, /ipProxyActivationStep:[\s\S]*normalizeIpProxyActivationStepValue/);
   assert.match(source, /selectIpProxyActivationStep\?\.addEventListener\('change'/);
   assert.match(source, /saveSettings\(\{ silent: true \}\)/);
   assert.match(source, /syncStepDefinitionsForMode[\s\S]*syncIpProxyActivationStepOptions\(latestState\);/);

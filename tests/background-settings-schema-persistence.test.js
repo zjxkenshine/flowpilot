@@ -521,6 +521,13 @@ test('buildPersistentSettingsPayload normalizes IP proxy activation step from fl
   }, { requireKnownKeys: true });
   assert.equal(nested.ipProxyActivationStep, 5);
   assert.equal(nested.settingsState.services.proxy.activationStep, 5);
+
+  const specialStep = 'signup_phone_before_input_clear_cookie';
+  const special = api.buildPersistentSettingsPayload({
+    ipProxyActivationStep: specialStep,
+  }, { fillDefaults: true });
+  assert.equal(special.ipProxyActivationStep, specialStep);
+  assert.equal(special.settingsState.services.proxy.activationStep, specialStep);
 });
 
 test('buildPersistentSettingsPayload persists auto-run issue log preservation into settings schema', () => {

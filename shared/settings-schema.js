@@ -29,11 +29,16 @@
     };
   }
 
+  const IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE = 'signup_phone_before_input_clear_cookie';
+
   function normalizeIpProxyActivationStep(value, fallback = 1) {
     const fallbackNumber = Math.max(1, Math.floor(Number(fallback) || 1));
     const rawValue = String(value ?? '').trim();
     if (!rawValue) {
       return fallbackNumber;
+    }
+    if (rawValue === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE) {
+      return IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
     }
     const numeric = Number(rawValue);
     if (!Number.isFinite(numeric)) {

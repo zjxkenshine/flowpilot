@@ -681,6 +681,7 @@ const IP_PROXY_API_ROUTE_MODE_VALUES = ['direct', 'local_proxy', 'provider_proxy
 const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
 const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
 const DEFAULT_IP_PROXY_ACTIVATION_STEP = 1;
+const IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE = 'signup_phone_before_input_clear_cookie';
 const IP_PROXY_FETCH_TIMEOUT_MS = 20000;
 const IP_PROXY_SETTINGS_SCOPE = 'regular';
 const IP_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
@@ -1902,6 +1903,12 @@ function normalizeIpProxyActivationStep(value, fallback = DEFAULT_IP_PROXY_ACTIV
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
     return fallbackNumber;
+  }
+  const specialSignupPhoneBeforeInputStep = typeof IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE !== 'undefined'
+    ? IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE
+    : 'signup_phone_before_input_clear_cookie';
+  if (rawValue === specialSignupPhoneBeforeInputStep) {
+    return specialSignupPhoneBeforeInputStep;
   }
   const numeric = Number(rawValue);
   if (!Number.isFinite(numeric)) {
@@ -14809,6 +14816,9 @@ function getIpProxyActivationStepForState(state = {}) {
     state?.ipProxyActivationStep,
     DEFAULT_IP_PROXY_ACTIVATION_STEP
   );
+  if (configuredStep === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE) {
+    return configuredStep;
+  }
   if (configuredStep <= 1) {
     return DEFAULT_IP_PROXY_ACTIVATION_STEP;
   }
@@ -14821,8 +14831,28 @@ function getIpProxyActivationStepForState(state = {}) {
   return configuredStep;
 }
 
+function isSignupPhoneBeforeInputIpProxyActivationStep(state = {}) {
+  return normalizeIpProxyActivationStep(
+    state?.ipProxyActivationStep,
+    DEFAULT_IP_PROXY_ACTIVATION_STEP
+  ) === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
+}
+
+function isSignupPhoneBeforeInputIpProxyActivationEnabledForState(state = {}) {
+  return Boolean(state?.ipProxyEnabled)
+    && isSignupPhoneBeforeInputIpProxyActivationStep(state)
+    && typeof resolveSignupMethod === 'function'
+    && resolveSignupMethod(state) === SIGNUP_METHOD_PHONE;
+}
+
 function isIpProxyDelayedActivationEnabledForState(state = {}) {
-  return Boolean(state?.ipProxyEnabled) && getIpProxyActivationStepForState(state) > 1;
+  if (!state?.ipProxyEnabled) {
+    return false;
+  }
+  if (isSignupPhoneBeforeInputIpProxyActivationStep(state)) {
+    return isSignupPhoneBeforeInputIpProxyActivationEnabledForState(state);
+  }
+  return getIpProxyActivationStepForState(state) > 1;
 }
 
 function buildIpProxyDelayedActivationCache(state = {}, routing = {}) {
@@ -14918,6 +14948,9 @@ async function ensureIpProxyActivatedBeforeNode(nodeId, state = {}) {
     return state;
   }
   const activationStep = getIpProxyActivationStepForState(state);
+  if (activationStep === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE) {
+    return state;
+  }
   const currentStep = Number(getStepIdByNodeIdForState(nodeId, state)) || 0;
   if (!Number.isInteger(currentStep) || currentStep < activationStep) {
     return state;
@@ -15009,6 +15042,120 @@ async function ensureIpProxyActivatedBeforeNode(nodeId, state = {}) {
     { nodeId }
   );
   return typeof getState === 'function' ? getState() : restoreState;
+}
+
+function getDelayedIpProxyCacheForState(state = {}) {
+  return state?.ipProxyDelayedActivationCache && typeof state.ipProxyDelayedActivationCache === 'object'
+    ? state.ipProxyDelayedActivationCache
+    : null;
+}
+
+async function restoreIpProxyForSignupPhoneBeforeInput(state = {}) {
+  const latestState = typeof getState === 'function' ? await getState() : state;
+  if (!isSignupPhoneBeforeInputIpProxyActivationEnabledForState(latestState)) {
+    return { skipped: true, reason: 'not_signup_phone_before_input' };
+  }
+  if (latestState?.ipProxyDelayedActivationRestored && latestState?.ipProxyApplied) {
+    return {
+      skipped: true,
+      reason: 'already_restored',
+      routing: {
+        exitIp: String(latestState?.ipProxyAppliedExitIp || '').trim(),
+        exitRegion: String(latestState?.ipProxyAppliedExitRegion || '').trim(),
+        exitSource: String(latestState?.ipProxyAppliedExitSource || '').trim(),
+        applied: true,
+      },
+      state: latestState,
+    };
+  }
+  if (typeof applyIpProxySettingsFromState !== 'function') {
+    throw new Error('IP 代理应用能力不可用。');
+  }
+
+  const cache = getDelayedIpProxyCacheForState(latestState);
+  const mode = typeof normalizeIpProxyMode === 'function'
+    ? normalizeIpProxyMode(cache?.mode || latestState?.ipProxyMode)
+    : String(cache?.mode || latestState?.ipProxyMode || DEFAULT_IP_PROXY_MODE).trim().toLowerCase() || DEFAULT_IP_PROXY_MODE;
+  const provider = typeof normalizeIpProxyProviderValue === 'function'
+    ? normalizeIpProxyProviderValue(cache?.provider || latestState?.ipProxyService)
+    : String(cache?.provider || latestState?.ipProxyService || DEFAULT_IP_PROXY_SERVICE).trim().toLowerCase() || DEFAULT_IP_PROXY_SERVICE;
+  let restorePatch = {
+    ipProxyEnabled: true,
+    ipProxyDelayedActivationRestored: true,
+    ipProxyDelayedActivationRestoredAt: Date.now(),
+  };
+  if (cache) {
+    restorePatch.ipProxyService = provider;
+    restorePatch.ipProxyMode = mode;
+    if (typeof buildIpProxyRuntimeStatePatch === 'function') {
+      restorePatch = {
+        ...restorePatch,
+        ...buildIpProxyRuntimeStatePatch(mode, {
+          pool: Array.isArray(cache.pool) ? cache.pool : [],
+          index: cache.index,
+          current: cache.current || null,
+        }, provider),
+      };
+    }
+  }
+
+  await setState(restorePatch);
+  const restoreState = {
+    ...latestState,
+    ...restorePatch,
+  };
+  await addLog(
+    '步骤 2：手机号填写前正在恢复第 1 步缓存的插件 IP 代理。',
+    'info',
+    { nodeId: 'submit-signup-email' }
+  );
+  let appliedStatus = await applyIpProxySettingsFromState(restoreState, {
+    skipExitProbe: Boolean(cache),
+    resetNetworkState: false,
+    suppressAuthRebind: Boolean(cache),
+  });
+  if (cache && appliedStatus?.applied === false) {
+    const detail = String(appliedStatus?.exitError || appliedStatus?.error || appliedStatus?.reason || '代理应用失败').trim();
+    throw new Error(`IP 代理延后开启失败：手机号填写前无法恢复缓存代理。${detail}`);
+  }
+  if (!cache && !isReadyDelayedIpProxyRouting(appliedStatus) && typeof probeIpProxyExit === 'function') {
+    const probeResult = await probeIpProxyExit({
+      state: {
+        ...restoreState,
+        ...appliedStatus,
+        ipProxyEnabled: true,
+      },
+      timeoutMs: 12000,
+      authRebindRetry: true,
+    });
+    appliedStatus = probeResult?.proxyRouting || appliedStatus;
+  }
+  if (!cache && !isReadyDelayedIpProxyRouting(appliedStatus)) {
+    const detail = String(appliedStatus?.exitError || appliedStatus?.error || appliedStatus?.reason || '未检测到可用出口').trim();
+    throw new Error(`IP 代理延后开启失败：手机号填写前无法检测到可用出口。${detail}`);
+  }
+  const routing = cache?.routing
+    ? {
+      ...cache.routing,
+      enabled: true,
+      applied: appliedStatus?.applied !== false,
+      reason: String(appliedStatus?.reason || cache.routing.reason || 'applied').trim().toLowerCase(),
+      exitDetecting: false,
+    }
+    : appliedStatus;
+  if (cache?.routing && typeof updateIpProxyRuntimeStatus === 'function') {
+    await updateIpProxyRuntimeStatus(routing);
+  }
+  await addLog(
+    '步骤 2：手机号填写前已恢复插件 IP 代理。',
+    'ok',
+    { nodeId: 'submit-signup-email' }
+  );
+  return {
+    skipped: false,
+    routing,
+    state: typeof getState === 'function' ? await getState() : restoreState,
+  };
 }
 
 function isBusinessTerminalErrorForSpecialDomainFallback(error) {
@@ -16612,7 +16759,12 @@ async function restoreSignupPhoneCodePrefetchRuntimeAfterAutoRun(options = {}) {
     ...(await getState()),
     ...restorePatch,
   };
-  if (restoredIpProxyEnabled && restoredIpProxyActivationStep > 1) {
+  const shouldReleaseRestoredIpProxyForDelayedActivation = restoredIpProxyEnabled
+    && (
+      restoredIpProxyActivationStep === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE
+      || restoredIpProxyActivationStep > 1
+    );
+  if (shouldReleaseRestoredIpProxyForDelayedActivation) {
     if (typeof releaseIpProxyForDelayedActivation === 'function') {
       await releaseIpProxyForDelayedActivation({ resetNetworkState: false });
     } else if (typeof applyIpProxySettingsFromState === 'function') {
@@ -18289,22 +18441,32 @@ const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   getIpProxyActivationStepForState,
   openSignupEntryTab,
   probeIpProxyExit,
+  resolveSignupMethod,
   switchIpProxy,
 });
 const step2Executor = self.MultiPageBackgroundStep2?.createStep2Executor({
   addLog,
   chrome,
   completeNodeFromBackground,
+  clearOpenAiCookiesForContext: (options = {}) => self.MultiPageBackgroundStep1?.clearOpenAiCookiesForContext?.({
+    addLog,
+    chrome,
+    clearSignupVerifiedPhoneCache,
+    ...options,
+  }),
+  ensureBrowserFingerprintForProxyExit: browserFingerprintManager?.ensureBrowserFingerprintForProxyExit,
   ensureContentScriptReadyOnTab,
   ensureSignupAuthEntryPageReady,
   ensureSignupEntryPageReady,
   ensureSignupPostEmailPageReadyInTab,
   ensureSignupPostIdentityPageReadyInTab: signupFlowHelpers.ensureSignupPostIdentityPageReadyInTab,
   getTabId,
+  getState,
   isTabAlive,
   phoneVerificationHelpers,
   resolveSignupMethod,
   resolveSignupEmailForFlow,
+  restoreIpProxyForSignupPhoneBeforeInput,
   isRetryableContentScriptTransportError,
   sendToContentScriptResilient,
   setState,

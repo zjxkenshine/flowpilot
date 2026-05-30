@@ -283,6 +283,187 @@ test('step 2 uses phone activation when resolved signup method is phone', async 
   ]);
 });
 
+test('step 2 special phone-before-input node clears cookies, regenerates fingerprint, restores proxy, then submits phone', async () => {
+  const sequence = [];
+  const sentPayloads = [];
+  const activation = {
+    activationId: 'signup-special-activation',
+    phoneNumber: '+15550101010',
+    provider: 'hero-sms',
+    countryId: 187,
+    countryLabel: 'United States',
+  };
+  const state = {
+    signupMethod: 'phone',
+    ipProxyEnabled: true,
+    ipProxyActivationStep: 'signup_phone_before_input_clear_cookie',
+    ipProxyDelayedActivationCache: {
+      routing: {
+        exitIp: '198.51.100.44',
+        exitRegion: 'US',
+        exitSource: 'page_context',
+      },
+    },
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    clearOpenAiCookiesForContext: async () => {
+      sequence.push('clearCookies');
+    },
+    completeNodeFromBackground: async () => {
+      sequence.push('complete');
+    },
+    ensureBrowserFingerprintForProxyExit: async (routing) => {
+      sequence.push(`fingerprint:${routing.exitIp}:${routing.exitRegion}`);
+      return { profile: { exitIp: routing.exitIp, exitRegion: routing.exitRegion } };
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 14 }),
+    ensureSignupPostIdentityPageReadyInTab: async () => ({
+      state: 'phone_verification_page',
+      url: 'https://auth.openai.com/phone-verification',
+    }),
+    getState: async () => state,
+    getTabId: async () => 14,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      prepareSignupPhoneActivation: async () => {
+        sequence.push('prepareSignupPhoneActivation');
+        return activation;
+      },
+      cancelSignupPhoneActivation: async () => {
+        throw new Error('activation should not be cancelled on success');
+      },
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    restoreIpProxyForSignupPhoneBeforeInput: async () => {
+      sequence.push('restoreProxy');
+      return {
+        routing: {
+          exitIp: '198.51.100.44',
+          exitRegion: 'US',
+        },
+      };
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        sequence.push('ensureSignupPhoneEntryReady');
+        return { ready: true, state: 'phone_entry' };
+      }
+      sequence.push('submitSignupPhone');
+      sentPayloads.push(message.payload);
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await executor.executeStep2(state);
+
+  assert.deepStrictEqual(sequence, [
+    'ensureSignupPhoneEntryReady',
+    'prepareSignupPhoneActivation',
+    'clearCookies',
+    'fingerprint:198.51.100.44:US',
+    'restoreProxy',
+    'ensureSignupPhoneEntryReady',
+    'submitSignupPhone',
+    'complete',
+  ]);
+  assert.deepStrictEqual(sentPayloads, [
+    {
+      signupMethod: 'phone',
+      phoneNumber: '+15550101010',
+      countryId: 187,
+      countryLabel: 'United States',
+    },
+  ]);
+});
+
+test('step 2 cancels fetched signup phone activation when special before-input preparation fails', async () => {
+  const sequence = [];
+  const activation = {
+    activationId: 'signup-special-fail',
+    phoneNumber: '+15550202020',
+    provider: 'hero-sms',
+    countryId: 187,
+    countryLabel: 'United States',
+  };
+
+  const executor = step2Api.createStep2Executor({
+    addLog: async () => {},
+    chrome: { tabs: { update: async () => {} } },
+    clearOpenAiCookiesForContext: async () => {
+      sequence.push('clearCookies');
+    },
+    completeNodeFromBackground: async () => {
+      throw new Error('step should not complete');
+    },
+    ensureBrowserFingerprintForProxyExit: async () => {
+      sequence.push('fingerprint');
+      throw new Error('fingerprint failed');
+    },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureSignupEntryPageReady: async () => ({ tabId: 14 }),
+    ensureSignupPostIdentityPageReadyInTab: async () => {
+      throw new Error('landing helper should not run');
+    },
+    getState: async () => ({
+      signupMethod: 'phone',
+      ipProxyActivationStep: 'signup_phone_before_input_clear_cookie',
+      ipProxyDelayedActivationCache: {
+        routing: { exitIp: '198.51.100.45', exitRegion: 'US' },
+      },
+    }),
+    getTabId: async () => 14,
+    isTabAlive: async () => true,
+    phoneVerificationHelpers: {
+      prepareSignupPhoneActivation: async () => {
+        sequence.push('prepareSignupPhoneActivation');
+        return activation;
+      },
+      cancelSignupPhoneActivation: async (_state, cancelledActivation) => {
+        sequence.push(`cancel:${cancelledActivation.activationId}`);
+      },
+    },
+    resolveSignupMethod: () => 'phone',
+    resolveSignupEmailForFlow: async () => {
+      throw new Error('email resolver should not run for phone signup');
+    },
+    restoreIpProxyForSignupPhoneBeforeInput: async () => {
+      sequence.push('restoreProxy');
+    },
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY') {
+        sequence.push('ensureSignupPhoneEntryReady');
+        return { ready: true, state: 'phone_entry' };
+      }
+      sequence.push('submitSignupPhone');
+      return { submitted: true };
+    },
+    SIGNUP_PAGE_INJECT_FILES: [],
+  });
+
+  await assert.rejects(
+    () => executor.executeStep2({
+      signupMethod: 'phone',
+      ipProxyActivationStep: 'signup_phone_before_input_clear_cookie',
+    }),
+    /fingerprint failed/
+  );
+  assert.deepStrictEqual(sequence, [
+    'ensureSignupPhoneEntryReady',
+    'prepareSignupPhoneActivation',
+    'clearCookies',
+    'fingerprint',
+    'cancel:signup-special-fail',
+  ]);
+});
+
 test('step 2 passes configured signup identity redirect timeout to phone final landing wait', async () => {
   const landingOptions = [];
   const activation = {

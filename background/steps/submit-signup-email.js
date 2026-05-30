@@ -11,11 +11,15 @@
       ensureSignupEntryPageReady,
       ensureSignupPostEmailPageReadyInTab,
       ensureSignupPostIdentityPageReadyInTab = ensureSignupPostEmailPageReadyInTab,
+      clearOpenAiCookiesForContext = null,
+      ensureBrowserFingerprintForProxyExit = null,
       getTabId,
+      getState = null,
       isTabAlive,
       phoneVerificationHelpers = null,
       resolveSignupMethod = () => 'email',
       resolveSignupEmailForFlow,
+      restoreIpProxyForSignupPhoneBeforeInput = null,
       isRetryableContentScriptTransportError = null,
       sendToContentScriptResilient,
       setState = null,
@@ -25,6 +29,10 @@
 
     function getErrorMessage(error) {
       return String(typeof error === 'string' ? error : error?.message || '');
+    }
+
+    function isSignupPhoneBeforeInputClearCookieActivationStep(state = {}) {
+      return String(state?.ipProxyActivationStep || '').trim() === 'signup_phone_before_input_clear_cookie';
     }
 
     function isSignupEntryUnavailableErrorMessage(errorLike) {
@@ -235,6 +243,104 @@
         logMessage: '步骤 2：官网注册入口正在切换，等待手机号注册入口恢复...',
         ...options,
       });
+    }
+
+    function getSignupPhoneBeforeInputRoutingSnapshot(state = {}) {
+      const cache = state?.ipProxyDelayedActivationCache && typeof state.ipProxyDelayedActivationCache === 'object'
+        ? state.ipProxyDelayedActivationCache
+        : null;
+      const cachedRouting = cache?.routing && typeof cache.routing === 'object' ? cache.routing : {};
+      return {
+        ...cachedRouting,
+        exitIp: String(
+          cachedRouting?.exitIp
+          || state?.ipProxyAppliedExitIp
+          || state?.ipProxyExitIp
+          || ''
+        ).trim(),
+        exitRegion: String(
+          cachedRouting?.exitRegion
+          || state?.ipProxyAppliedExitRegion
+          || state?.ipProxyExitRegion
+          || state?.ipProxyRegion
+          || ''
+        ).trim(),
+        exitSource: String(
+          cachedRouting?.exitSource
+          || state?.ipProxyAppliedExitSource
+          || state?.ipProxyExitSource
+          || ''
+        ).trim(),
+      };
+    }
+
+    function isBrowserFingerprintEnabledForStep2(state = {}) {
+      if (state?.settingsState?.flows?.openai?.browserFingerprint?.enabled === false) {
+        return false;
+      }
+      return state?.browserFingerprintEnabled !== false;
+    }
+
+    async function prepareSignupPhoneBeforeInputIfNeeded(state, signupTabId, activation) {
+      if (!isSignupPhoneBeforeInputClearCookieActivationStep(state)) {
+        return signupTabId;
+      }
+      if (resolveSignupMethod(state) !== 'phone') {
+        return signupTabId;
+      }
+
+      await addLog('步骤 2：已获取手机号，正在执行“手机号填写前(清除cookie)”准备阶段...', 'info');
+      const latestStateBeforeCleanup = typeof getState === 'function' ? await getState() : state;
+      if (typeof clearOpenAiCookiesForContext === 'function') {
+        await clearOpenAiCookiesForContext({
+          stepLabel: '步骤 2',
+          actionLabel: '手机号填写前',
+        });
+      } else {
+        await addLog('步骤 2：cookie 清理能力不可用，已跳过手机号填写前 cookie 清理。', 'warn');
+      }
+
+      const latestStateBeforeFingerprint = typeof getState === 'function' ? await getState() : latestStateBeforeCleanup;
+      const routingSnapshot = getSignupPhoneBeforeInputRoutingSnapshot(latestStateBeforeFingerprint);
+      if (!isBrowserFingerprintEnabledForStep2(latestStateBeforeFingerprint)) {
+        await addLog('步骤 2：浏览器指纹已关闭，跳过手机号填写前指纹生成。', 'info');
+      } else if (typeof ensureBrowserFingerprintForProxyExit === 'function') {
+        const result = await ensureBrowserFingerprintForProxyExit(routingSnapshot, {
+          state: latestStateBeforeFingerprint,
+        });
+        if (!result?.skipped) {
+          const region = String(result?.profile?.exitRegion || routingSnapshot.exitRegion || '').trim() || 'US';
+          const exitIp = String(result?.profile?.exitIp || routingSnapshot.exitIp || '').trim();
+          await addLog(
+            exitIp
+              ? `步骤 2：手机号填写前已重新生成浏览器指纹（地区 ${region}，已根据缓存代理出口 IP 混入随机种子）。`
+              : `步骤 2：手机号填写前已重新生成浏览器指纹（地区 ${region}，未绑定代理 IP）。`,
+            'ok'
+          );
+        }
+      } else {
+        throw new Error('浏览器指纹更新能力不可用。');
+      }
+
+      if (typeof restoreIpProxyForSignupPhoneBeforeInput !== 'function') {
+        throw new Error('手机号填写前 IP 代理恢复能力不可用。');
+      }
+      const restoreResult = await restoreIpProxyForSignupPhoneBeforeInput(
+        typeof getState === 'function' ? await getState() : latestStateBeforeFingerprint
+      );
+      const restoredRouting = restoreResult?.routing || {};
+      const restoredExitIp = String(restoredRouting?.exitIp || '').trim();
+      const restoredExitRegion = String(restoredRouting?.exitRegion || '').trim();
+      await addLog(
+        restoredExitIp
+          ? `步骤 2：手机号填写前代理已恢复，当前出口 ${restoredExitIp}${restoredExitRegion ? ` [${restoredExitRegion}]` : ''}。`
+          : '步骤 2：手机号填写前代理已恢复。',
+        'ok'
+      );
+
+      const currentSignupTabId = await getTabId('signup-page') || signupTabId;
+      await ensureSignupPhoneEntryReady(currentSignupTabId);
+      return currentSignupTabId;
     }
 
     function isStep2PhoneLandingWaitError(errorLike) {
@@ -531,6 +637,17 @@
 
       const signupPhone = await resolveSignupPhoneForStep2(state);
       const { phoneNumber, activation } = signupPhone;
+      try {
+        signupTabId = await prepareSignupPhoneBeforeInputIfNeeded(state, signupTabId, activation);
+      } catch (prepareError) {
+        if (activation && typeof phoneVerificationHelpers?.cancelSignupPhoneActivation === 'function') {
+          await phoneVerificationHelpers.cancelSignupPhoneActivation(state, activation).catch(() => {});
+        }
+        if (isSignupPhonePrefetchFormalState(state, activation)) {
+          throw buildSignupPhonePrefetchRetryError(getErrorMessage(prepareError));
+        }
+        throw prepareError;
+      }
       let step2Result = await submitSignupPhone(phoneNumber, activation, {
         timeoutMs: 45000,
         retryDelayMs: 700,

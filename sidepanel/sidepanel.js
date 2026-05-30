@@ -1500,14 +1500,14 @@ function syncIpProxyActivationStepOptions(state = latestState) {
     .sort((left, right) => left.step - right.step);
   const configuredStep = normalizeIpProxyActivationStepValue(state?.ipProxyActivationStep, 1);
   const hasConfiguredStep = stepOptions.some((item) => item.step === configuredStep);
-  const selectedStep = hasConfiguredStep ? configuredStep : 1;
-  selectIpProxyActivationStep.innerHTML = stepOptions.map((item) => {
+  const isSignupPhoneBeforeInputStep = configuredStep === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
+  const selectedStep = isSignupPhoneBeforeInputStep || hasConfiguredStep ? configuredStep : 1;
+  const regularOptionsHtml = stepOptions.map((item) => {
     const title = item.title ? ` - ${escapeHtml(item.title)}` : '';
     return `<option value="${item.step}">${item.step}${title}</option>`;
   }).join('');
-  if (!stepOptions.length) {
-    selectIpProxyActivationStep.innerHTML = '<option value="1">1</option>';
-  }
+  const specialOptionHtml = `<option value="${IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE}">手机号填写前(清除cookie)</option>`;
+  selectIpProxyActivationStep.innerHTML = [regularOptionsHtml || '<option value="1">1</option>', specialOptionHtml].join('');
   selectIpProxyActivationStep.value = String(selectedStep);
 }
 
@@ -1680,12 +1680,17 @@ const DEFAULT_IP_PROXY_PROTOCOL = 'http';
 const SUPPORTED_IP_PROXY_PROTOCOLS = ['http', 'https', 'socks4', 'socks5'];
 const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
 const SUPPORTED_IP_PROXY_API_ROUTE_MODES = ['direct', 'local_proxy', 'provider_proxy'];
+const IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE = 'signup_phone_before_input_clear_cookie';
 const IP_PROXY_API_MODE_ENABLED = true;
 const IP_PROXY_ACCOUNT_LIST_ENABLED = false;
 
 function normalizeIpProxyActivationStepValue(value, fallback = 1) {
+  const rawValue = String(value ?? '').trim();
+  if (rawValue === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE) {
+    return IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
+  }
   const fallbackNumber = Math.max(1, Math.floor(Number(fallback) || 1));
-  const numeric = Number(String(value ?? '').trim());
+  const numeric = Number(rawValue);
   if (!Number.isFinite(numeric)) {
     return fallbackNumber;
   }

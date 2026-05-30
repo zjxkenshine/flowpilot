@@ -1,6 +1,7 @@
 (function attachBackgroundStep1(root, factory) {
   root.MultiPageBackgroundStep1 = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createBackgroundStep1Module() {
+  const IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE = 'signup_phone_before_input_clear_cookie';
   const STEP1_COOKIE_CLEAR_DOMAINS = [
     'chatgpt.com',
     'chat.openai.com',
@@ -139,6 +140,60 @@
     }
   }
 
+  function isSignupPhoneBeforeInputClearCookieActivationStep(value) {
+    return String(value ?? '').trim() === IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
+  }
+
+  function formatIpProxyActivationStepLabel(value) {
+    return isSignupPhoneBeforeInputClearCookieActivationStep(value)
+      ? '手机号填写前(清除cookie)'
+      : String(value || '1').trim();
+  }
+
+  async function clearOpenAiCookiesForContext(options = {}) {
+    const {
+      addLog = async () => {},
+      chrome: chromeApi = globalThis.chrome,
+      clearSignupVerifiedPhoneCache = null,
+      stepLabel = '步骤 1',
+      actionLabel = '打开 ChatGPT 官网前',
+    } = options;
+
+    if (typeof clearSignupVerifiedPhoneCache === 'function') {
+      await clearSignupVerifiedPhoneCache();
+    }
+
+    if (!chromeApi?.cookies?.getAll || !chromeApi.cookies?.remove) {
+      await addLog(`${stepLabel}：当前浏览器不支持 cookies API，跳过${actionLabel} cookie 清理。`, 'warn');
+      return { skipped: true, reason: 'cookies_api_unavailable', removedCount: 0 };
+    }
+
+    const startedAt = Date.now();
+    await addLog(`${stepLabel}：${actionLabel}清理 ChatGPT / OpenAI cookies...`, 'info');
+    const cookies = await collectStep1Cookies(chromeApi);
+    let removedCount = 0;
+    for (const cookie of cookies) {
+      if (await removeStep1Cookie(chromeApi, cookie)) {
+        removedCount += 1;
+      }
+    }
+
+    if (chromeApi.browsingData?.removeCookies) {
+      try {
+        await chromeApi.browsingData.removeCookies({
+          since: 0,
+          origins: STEP1_COOKIE_CLEAR_ORIGINS,
+        });
+      } catch (error) {
+        await addLog(`${stepLabel}：browsingData 补扫 cookies 失败：${getStep1ErrorMessage(error)}`, 'warn');
+      }
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    await addLog(`${stepLabel}：已清理 ${removedCount} 个 ChatGPT / OpenAI cookies（耗时 ${elapsedMs}ms）。`, 'ok');
+    return { skipped: false, removedCount, elapsedMs };
+  }
+
   function createStep1Executor(deps = {}) {
     const {
       addLog,
@@ -152,6 +207,7 @@
       getIpProxyActivationStepForState,
       openSignupEntryTab,
       probeIpProxyExit,
+      resolveSignupMethod = (state = {}) => String(state?.resolvedSignupMethod || state?.signupMethod || '').trim().toLowerCase(),
       switchIpProxy,
     } = deps;
 
@@ -193,6 +249,9 @@
     }
 
     function normalizeIpProxyActivationStepForStep1(state = {}) {
+      if (isSignupPhoneBeforeInputClearCookieActivationStep(state?.ipProxyActivationStep)) {
+        return IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE;
+      }
       const numeric = Number(state?.ipProxyActivationStep);
       if (!Number.isFinite(numeric) || numeric < 1) {
         return 1;
@@ -200,14 +259,26 @@
       return Math.max(1, Math.floor(numeric));
     }
 
+    function isPhoneSignupStateForStep1(state = {}) {
+      return String(resolveSignupMethod(state) || '').trim().toLowerCase() === 'phone';
+    }
+
     function isDelayedIpProxyActivationForStep1(state = {}) {
       if (!state?.ipProxyEnabled) {
         return false;
       }
       if (typeof getIpProxyActivationStepForState === 'function') {
-        return getIpProxyActivationStepForState(state) > 1;
+        const activationStep = getIpProxyActivationStepForState(state);
+        if (isSignupPhoneBeforeInputClearCookieActivationStep(activationStep)) {
+          return isPhoneSignupStateForStep1(state);
+        }
+        return activationStep > 1;
       }
-      return normalizeIpProxyActivationStepForStep1(state) > 1;
+      const activationStep = normalizeIpProxyActivationStepForStep1(state);
+      if (isSignupPhoneBeforeInputClearCookieActivationStep(activationStep)) {
+        return isPhoneSignupStateForStep1(state);
+      }
+      return activationStep > 1;
     }
 
     function formatProxyRoutingSummary(routing = {}) {
@@ -270,8 +341,9 @@
         const activationStep = typeof getIpProxyActivationStepForState === 'function'
           ? getIpProxyActivationStepForState(initialState)
           : normalizeIpProxyActivationStepForStep1(initialState);
+        const activationStepLabel = formatIpProxyActivationStepLabel(activationStep);
         await addLog(
-          `步骤 1：IP 代理配置为节点 ${activationStep} 开启，先临时启用插件代理完成出口检测，随后释放代理接管。`,
+          `步骤 1：IP 代理配置为节点 ${activationStepLabel} 开启，先临时启用插件代理完成出口检测，随后释放代理接管。`,
           'info'
         );
         await applyIpProxySettingsFromState(initialState, {
@@ -379,38 +451,13 @@
     }
 
     async function clearOpenAiCookiesBeforeStep1() {
-      if (typeof clearSignupVerifiedPhoneCache === 'function') {
-        await clearSignupVerifiedPhoneCache();
-      }
-
-      if (!chromeApi?.cookies?.getAll || !chromeApi.cookies?.remove) {
-        await addLog('步骤 1：当前浏览器不支持 cookies API，跳过打开官网前 cookie 清理。', 'warn');
-        return;
-      }
-
-      const startedAt = Date.now();
-      await addLog('步骤 1：打开 ChatGPT 官网前清理 ChatGPT / OpenAI cookies...', 'info');
-      const cookies = await collectStep1Cookies(chromeApi);
-      let removedCount = 0;
-      for (const cookie of cookies) {
-        if (await removeStep1Cookie(chromeApi, cookie)) {
-          removedCount += 1;
-        }
-      }
-
-      if (chromeApi.browsingData?.removeCookies) {
-        try {
-          await chromeApi.browsingData.removeCookies({
-            since: 0,
-            origins: STEP1_COOKIE_CLEAR_ORIGINS,
-          });
-        } catch (error) {
-          await addLog(`步骤 1：browsingData 补扫 cookies 失败：${getStep1ErrorMessage(error)}`, 'warn');
-        }
-      }
-
-      const elapsedMs = Date.now() - startedAt;
-      await addLog(`步骤 1：已清理 ${removedCount} 个 ChatGPT / OpenAI cookies（耗时 ${elapsedMs}ms）。`, 'ok');
+      return clearOpenAiCookiesForContext({
+        addLog,
+        chrome: chromeApi,
+        clearSignupVerifiedPhoneCache,
+        stepLabel: '步骤 1',
+        actionLabel: '打开 ChatGPT 官网前',
+      });
     }
 
     async function ensureBrowserFingerprintAfterProxyExit(routing = {}) {
@@ -463,9 +510,10 @@
         const activationStep = typeof getIpProxyActivationStepForState === 'function'
           ? getIpProxyActivationStepForState(latestState)
           : normalizeIpProxyActivationStepForStep1(latestState);
+        const activationStepLabel = formatIpProxyActivationStepLabel(activationStep);
         await cacheAndReleaseIpProxyForDelayedActivation(proxyRouting);
         await addLog(
-          `步骤 1：已缓存当前 IP 代理，插件代理接管已释放；将在节点 ${activationStep} 前恢复。`,
+          `步骤 1：已缓存当前 IP 代理，插件代理接管已释放；将在节点 ${activationStepLabel} 前恢复。`,
           'ok'
         );
       }
@@ -477,5 +525,9 @@
     return { executeStep1 };
   }
 
-  return { createStep1Executor };
+  return {
+    clearOpenAiCookiesForContext,
+    createStep1Executor,
+    IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE,
+  };
 });
