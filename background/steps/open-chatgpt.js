@@ -145,8 +145,11 @@
       chrome: chromeApi = globalThis.chrome,
       completeNodeFromBackground,
       clearSignupVerifiedPhoneCache = null,
+      applyIpProxySettingsFromState,
+      cacheAndReleaseIpProxyForDelayedActivation,
       ensureBrowserFingerprintForProxyExit,
       getState,
+      getIpProxyActivationStepForState,
       openSignupEntryTab,
       probeIpProxyExit,
       switchIpProxy,
@@ -187,6 +190,24 @@
 
     function hasReadyProxyExit(routing = {}) {
       return isReadyProxyRouting(routing) && !routing?.skipped;
+    }
+
+    function normalizeIpProxyActivationStepForStep1(state = {}) {
+      const numeric = Number(state?.ipProxyActivationStep);
+      if (!Number.isFinite(numeric) || numeric < 1) {
+        return 1;
+      }
+      return Math.max(1, Math.floor(numeric));
+    }
+
+    function isDelayedIpProxyActivationForStep1(state = {}) {
+      if (!state?.ipProxyEnabled) {
+        return false;
+      }
+      if (typeof getIpProxyActivationStepForState === 'function') {
+        return getIpProxyActivationStepForState(state) > 1;
+      }
+      return normalizeIpProxyActivationStepForStep1(state) > 1;
     }
 
     function formatProxyRoutingSummary(routing = {}) {
@@ -241,9 +262,24 @@
     }
 
     async function ensureIpProxyExitReadyBeforeStep1() {
-      const initialState = typeof getState === 'function' ? await getState() : {};
+      let initialState = typeof getState === 'function' ? await getState() : {};
       if (!initialState?.ipProxyEnabled) {
         return { skipped: true, reason: 'proxy_disabled' };
+      }
+      if (isDelayedIpProxyActivationForStep1(initialState) && typeof applyIpProxySettingsFromState === 'function') {
+        const activationStep = typeof getIpProxyActivationStepForState === 'function'
+          ? getIpProxyActivationStepForState(initialState)
+          : normalizeIpProxyActivationStepForStep1(initialState);
+        await addLog(
+          `步骤 1：IP 代理配置为节点 ${activationStep} 开启，先临时启用插件代理完成出口检测，随后释放代理接管。`,
+          'info'
+        );
+        await applyIpProxySettingsFromState(initialState, {
+          skipExitProbe: true,
+          resetNetworkState: false,
+          suppressAuthRebind: true,
+        });
+        initialState = typeof getState === 'function' ? await getState() : initialState;
       }
 
       const maxAttempts = 3;
@@ -421,6 +457,17 @@
       await ensureBrowserFingerprintAfterProxyExit(proxyRouting);
       if (proxyRoutingError) {
         throw proxyRoutingError;
+      }
+      const latestState = typeof getState === 'function' ? await getState() : {};
+      if (isDelayedIpProxyActivationForStep1(latestState) && typeof cacheAndReleaseIpProxyForDelayedActivation === 'function') {
+        const activationStep = typeof getIpProxyActivationStepForState === 'function'
+          ? getIpProxyActivationStepForState(latestState)
+          : normalizeIpProxyActivationStepForStep1(latestState);
+        await cacheAndReleaseIpProxyForDelayedActivation(proxyRouting);
+        await addLog(
+          `步骤 1：已缓存当前 IP 代理，插件代理接管已释放；将在节点 ${activationStep} 前恢复。`,
+          'ok'
+        );
       }
       await addLog('步骤 1：正在打开 ChatGPT 官网...');
       await openSignupEntryTab(1);

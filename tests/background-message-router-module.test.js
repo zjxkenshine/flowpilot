@@ -94,6 +94,23 @@ test('message router module exposes a factory', () => {
   assert.equal(typeof api?.createMessageRouter, 'function');
 });
 
+test('background restores delayed IP proxy before the configured executable node', () => {
+  const source = fs.readFileSync('background.js', 'utf8');
+  const hookIndex = source.indexOf('async function ensureIpProxyActivatedBeforeNode');
+  const executeIndex = source.indexOf('async function executeNode(nodeId');
+  const guardIndex = source.indexOf('assertNodeExecutionAllowedForState(normalizedNodeId, state', executeIndex);
+  const callIndex = source.indexOf('state = await ensureIpProxyActivatedBeforeNode(normalizedNodeId, state);', executeIndex);
+  const stepIndex = source.indexOf('const step = getStepIdByNodeIdForState(normalizedNodeId, state);', executeIndex);
+
+  assert.ok(hookIndex >= 0, 'expected delayed activation helper to exist');
+  assert.ok(callIndex > guardIndex, 'expected delayed activation after execution guard');
+  assert.ok(callIndex < stepIndex, 'expected delayed activation before node step execution');
+  assert.match(source, /currentStep < activationStep[\s\S]*return state/);
+  assert.match(source, /ipProxyDelayedActivationCache/);
+  assert.match(source, /cache && appliedStatus\?\.applied === false/);
+  assert.match(source, /probeIpProxyExit/);
+});
+
 test('message router resolves Plus checkout profile region through background helper', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };
@@ -631,6 +648,213 @@ test('SAVE_SETTING disables IP proxy by applying direct mode cleanup state', asy
     exitError: '',
     error: '',
   });
+});
+
+test('SAVE_SETTING applies IP proxy immediately when activation step is 1', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  let state = {
+    ipProxyEnabled: false,
+    ipProxyActivationStep: 1,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({ state: { ...nextState }, options: { ...options } });
+      return { enabled: true, applied: true, reason: 'applied', exitDetecting: false };
+    },
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    normalizeIpProxyActivationStep: (value) => Math.max(1, Math.floor(Number(value) || 1)),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      ipProxyEnabled: true,
+      ipProxyActivationStep: 1,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyEnabled, true);
+  assert.equal(state.ipProxyActivationStep, 1);
+  assert.equal(applyCalls.length, 1);
+  assert.equal(applyCalls[0].state.ipProxyEnabled, true);
+  assert.deepEqual(applyCalls[0].options, {
+    skipExitProbe: true,
+    resetNetworkState: false,
+    forceAuthRebind: false,
+    suppressAuthRebind: false,
+  });
+});
+
+test('SAVE_SETTING releases plugin proxy takeover when enabled with delayed activation step', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  const releaseCalls = [];
+  let state = {
+    ipProxyEnabled: false,
+    ipProxyActivationStep: 1,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({ state: { ...nextState }, options: { ...options } });
+      return { enabled: false, applied: false, reason: 'fallback_release', exitDetecting: false };
+    },
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    normalizeIpProxyActivationStep: (value) => Math.max(1, Math.floor(Number(value) || 1)),
+    releaseIpProxyForDelayedActivation: async (options = {}) => {
+      releaseCalls.push({ ...options });
+      return { enabled: true, applied: false, reason: 'delayed_activation', exitDetecting: false };
+    },
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      ipProxyEnabled: true,
+      ipProxyActivationStep: 3,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyEnabled, true);
+  assert.equal(state.ipProxyActivationStep, 3);
+  assert.equal(applyCalls.length, 0);
+  assert.deepEqual(releaseCalls, [{
+    resetNetworkState: false,
+  }]);
+  assert.deepEqual(response.proxyRouting, {
+    enabled: true,
+    applied: false,
+    reason: 'delayed_activation',
+    exitDetecting: false,
+  });
+});
+
+test('SAVE_SETTING still cleans up plugin proxy when disabling delayed activation', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyActivationStep: 3,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({ state: { ...nextState }, options: { ...options } });
+      return { enabled: false, applied: false, reason: 'disabled', exitDetecting: false };
+    },
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    normalizeIpProxyActivationStep: (value) => Math.max(1, Math.floor(Number(value) || 1)),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      ipProxyEnabled: false,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyEnabled, false);
+  assert.equal(state.ipProxyActivationStep, 3);
+  assert.equal(applyCalls.length, 1);
+  assert.equal(applyCalls[0].state.ipProxyEnabled, false);
+  assert.deepEqual(applyCalls[0].options, {
+    skipExitProbe: true,
+    resetNetworkState: true,
+    forceAuthRebind: false,
+    suppressAuthRebind: true,
+  });
+});
+
+test('SAVE_SETTING preserves delayed activation step across unrelated proxy setting saves', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyActivationStep: 4,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyRegion: 'US',
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({ state: { ...nextState }, options: { ...options } });
+      return { enabled: true, applied: false, reason: 'delayed_release', exitDetecting: false };
+    },
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    normalizeIpProxyActivationStep: (value) => Math.max(1, Math.floor(Number(value) || 1)),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      ipProxyRegion: 'JP',
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyRegion, 'JP');
+  assert.equal(state.ipProxyActivationStep, 4);
+  assert.equal(applyCalls.length, 0);
 });
 
 test('handleStepData stores step 6 free status for account book capture', async () => {

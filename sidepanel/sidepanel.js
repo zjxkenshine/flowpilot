@@ -152,6 +152,8 @@ const rowIpProxyApiRouteMode = document.getElementById('row-ip-proxy-api-route-m
 const selectIpProxyApiRouteMode = document.getElementById('select-ip-proxy-api-route-mode');
 const rowIpProxySpecialDomainRouteMode = document.getElementById('row-ip-proxy-special-domain-route-mode');
 const selectIpProxySpecialDomainRouteMode = document.getElementById('select-ip-proxy-special-domain-route-mode');
+const rowIpProxyActivationStep = document.getElementById('row-ip-proxy-activation-step');
+const selectIpProxyActivationStep = document.getElementById('select-ip-proxy-activation-step');
 const rowIpProxyLayout = document.getElementById('row-ip-proxy-layout');
 const ipProxyLayout = document.getElementById('ip-proxy-layout');
 const ipProxyApiPanel = document.getElementById('ip-proxy-api-panel');
@@ -1483,6 +1485,31 @@ function getStepIdByNodeIdForCurrentMode(nodeId = '') {
   return getStepIdByKeyForCurrentMode(normalizedNodeId);
 }
 
+function syncIpProxyActivationStepOptions(state = latestState) {
+  if (!selectIpProxyActivationStep) {
+    return;
+  }
+  const nodes = Array.isArray(workflowNodes) ? workflowNodes : [];
+  const stepOptions = nodes
+    .map((node) => ({
+      step: Number(node?.displayOrder || getStepIdByNodeIdForCurrentMode(node?.nodeId)),
+      title: String(node?.title || node?.nodeId || '').trim(),
+    }))
+    .filter((item) => Number.isInteger(item.step) && item.step > 0)
+    .sort((left, right) => left.step - right.step);
+  const configuredStep = normalizeIpProxyActivationStepValue(state?.ipProxyActivationStep, 1);
+  const hasConfiguredStep = stepOptions.some((item) => item.step === configuredStep);
+  const selectedStep = hasConfiguredStep ? configuredStep : 1;
+  selectIpProxyActivationStep.innerHTML = stepOptions.map((item) => {
+    const title = item.title ? ` - ${escapeHtml(item.title)}` : '';
+    return `<option value="${item.step}">${item.step}${title}</option>`;
+  }).join('');
+  if (!stepOptions.length) {
+    selectIpProxyActivationStep.innerHTML = '<option value="1">1</option>';
+  }
+  selectIpProxyActivationStep.value = String(selectedStep);
+}
+
 function buildStepDefinitionSignature(options = {}) {
   const defaultFlowId = typeof DEFAULT_ACTIVE_FLOW_ID !== 'undefined' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
   const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : 'paypal';
@@ -1654,6 +1681,15 @@ const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
 const SUPPORTED_IP_PROXY_API_ROUTE_MODES = ['direct', 'local_proxy', 'provider_proxy'];
 const IP_PROXY_API_MODE_ENABLED = true;
 const IP_PROXY_ACCOUNT_LIST_ENABLED = false;
+
+function normalizeIpProxyActivationStepValue(value, fallback = 1) {
+  const fallbackNumber = Math.max(1, Math.floor(Number(fallback) || 1));
+  const numeric = Number(String(value ?? '').trim());
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+  return Math.max(1, Math.floor(numeric));
+}
 
 function getManagedAliasUtils() {
   return window.MultiPageManagedAliasUtils || null;
@@ -6333,6 +6369,12 @@ function collectSettingsPayload() {
     ipProxyEnabled: sub2apiReloginEnabled ? false : getSelectedIpProxyEnabledSafe(),
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
+    ipProxyActivationStep: normalizeIpProxyActivationStepValue(
+      typeof selectIpProxyActivationStep !== 'undefined' && selectIpProxyActivationStep
+        ? selectIpProxyActivationStep.value
+        : latestState?.ipProxyActivationStep,
+      1
+    ),
     ipProxyApiUrl: currentIpProxyServiceProfile.apiUrl,
     ipProxyApiHost: currentIpProxyStateOverride.ipProxyApiHost,
     ipProxyApiCount: currentIpProxyStateOverride.ipProxyApiCount,
@@ -13197,6 +13239,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   });
   currentStepDefinitionSignature = nextSignature;
   renderStepsList();
+  syncIpProxyActivationStepOptions(latestState);
 }
 
 function syncStepDefinitionsFromUiState(stateOverrides = {}) {
@@ -13758,6 +13801,9 @@ function applySettingsState(state) {
   }
   if (typeof selectIpProxySpecialDomainRouteMode !== 'undefined' && selectIpProxySpecialDomainRouteMode) {
     selectIpProxySpecialDomainRouteMode.value = String(activeIpProxyProfile.specialDomainRouteMode || 'local_proxy').trim().toLowerCase() || 'local_proxy';
+  }
+  if (typeof syncIpProxyActivationStepOptions === 'function') {
+    syncIpProxyActivationStepOptions(state);
   }
   if (typeof setIpProxyMode === 'function') {
     setIpProxyMode(activeIpProxyProfile.mode);
@@ -20150,6 +20196,15 @@ selectIpProxySpecialDomainRouteMode?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => {});
 });
 
+selectIpProxyActivationStep?.addEventListener('change', () => {
+  const nextStep = normalizeIpProxyActivationStepValue(selectIpProxyActivationStep.value, 1);
+  selectIpProxyActivationStep.value = String(nextStep);
+  syncLatestState({ ipProxyActivationStep: nextStep });
+  updateIpProxyUI(latestState);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
 btnIpProxyRefresh?.addEventListener('click', async () => {
   try {
     const result = typeof runIpProxyActionWithLock === 'function'
@@ -22323,6 +22378,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       if (
         message.payload.ipProxyEnabled !== undefined
+        || message.payload.ipProxyActivationStep !== undefined
         || message.payload.ipProxyService !== undefined
         || message.payload.ipProxyServiceProfiles !== undefined
         || message.payload.ipProxyMode !== undefined
@@ -22379,6 +22435,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const hasIpProxyConfigPayload = (
           message.payload.ipProxyService !== undefined
           || message.payload.ipProxyServiceProfiles !== undefined
+          || message.payload.ipProxyActivationStep !== undefined
           || message.payload.ipProxyMode !== undefined
           || message.payload.ipProxyApiUrl !== undefined
           || message.payload.ipProxyApiCount !== undefined
@@ -22432,6 +22489,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         if (message.payload.ipProxyEnabled !== undefined) {
           setIpProxyEnabled(Boolean(message.payload.ipProxyEnabled));
+        }
+        if (message.payload.ipProxyActivationStep !== undefined && typeof syncIpProxyActivationStepOptions === 'function') {
+          syncIpProxyActivationStepOptions(mergedProxyState);
         }
         if (message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined && inputIpProxyAutoRefreshPoolOnExhausted) {
           inputIpProxyAutoRefreshPoolOnExhausted.checked = Boolean(message.payload.ipProxyAutoRefreshPoolOnExhausted);

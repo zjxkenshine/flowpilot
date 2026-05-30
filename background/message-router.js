@@ -12,6 +12,7 @@
       broadcastDataUpdate,
       chrome = null,
       applyIpProxySettingsFromState,
+      releaseIpProxyForDelayedActivation,
       cancelScheduledAutoRun,
       checkIcloudSession,
       clearAccountRunHistory,
@@ -158,6 +159,7 @@
       markCurrentCustomEmailPoolEntryUsed,
       markCurrentRegistrationAccountUsed,
       normalizeHotmailAccounts,
+      normalizeIpProxyActivationStep,
       normalizeMail2925Accounts,
       normalizePayPalAccounts,
       normalizeRunCount,
@@ -2051,11 +2053,28 @@
           const nextIpProxyEnabled = hasIpProxyEnabledUpdate
             ? Boolean(updates.ipProxyEnabled)
             : previousIpProxyEnabled;
+          const normalizeActivationStep = typeof normalizeIpProxyActivationStep === 'function'
+            ? normalizeIpProxyActivationStep
+            : ((value) => Math.max(1, Math.floor(Number(value) || 1)));
+          const previousActivationStep = normalizeActivationStep(currentState?.ipProxyActivationStep);
+          const nextActivationStep = normalizeActivationStep(mergedState?.ipProxyActivationStep);
+          const hasIpProxyActivationStepUpdate = Object.prototype.hasOwnProperty.call(updates, 'ipProxyActivationStep');
           // 仅在“手动开关代理”时自动应用。
           // 其他字段改动（host/账号/地区/session 等）需由“同步/下一条/检测出口/Change”显式触发。
+          const activationStepUsesImmediateProxy = nextActivationStep <= 1 || !nextIpProxyEnabled;
           const shouldApplyIpProxyOnSave = hasIpProxyUpdates
-            && hasIpProxyEnabledUpdate
-            && previousIpProxyEnabled !== nextIpProxyEnabled;
+            && (
+              (hasIpProxyEnabledUpdate && previousIpProxyEnabled !== nextIpProxyEnabled)
+              || (hasIpProxyActivationStepUpdate && nextIpProxyEnabled && previousActivationStep !== nextActivationStep)
+            )
+            && activationStepUsesImmediateProxy;
+          const shouldReleaseIpProxyOnDelayedActivationSave = hasIpProxyUpdates
+            && nextIpProxyEnabled
+            && nextActivationStep > 1
+            && (
+              (hasIpProxyEnabledUpdate && previousIpProxyEnabled !== nextIpProxyEnabled)
+              || (hasIpProxyActivationStepUpdate && previousActivationStep !== nextActivationStep)
+            );
           let proxyRouting = null;
           if (shouldApplyIpProxyOnSave && typeof applyIpProxySettingsFromState === 'function') {
             const isEnablingProxy = !previousIpProxyEnabled && nextIpProxyEnabled;
@@ -2070,6 +2089,28 @@
               applied: false,
               reason: 'apply_failed',
               error: error?.message || String(error || '代理应用失败'),
+            }));
+          } else if (shouldReleaseIpProxyOnDelayedActivationSave && typeof releaseIpProxyForDelayedActivation === 'function') {
+            proxyRouting = await releaseIpProxyForDelayedActivation({
+              resetNetworkState: false,
+            }).catch((error) => ({
+              applied: false,
+              reason: 'delayed_release_failed',
+              error: error?.message || String(error || '代理释放失败'),
+            }));
+          } else if (shouldReleaseIpProxyOnDelayedActivationSave && typeof applyIpProxySettingsFromState === 'function') {
+            proxyRouting = await applyIpProxySettingsFromState({
+              ...mergedState,
+              ipProxyEnabled: false,
+            }, {
+              skipExitProbe: true,
+              resetNetworkState: false,
+              forceAuthRebind: false,
+              suppressAuthRebind: true,
+            }).catch((error) => ({
+              applied: false,
+              reason: 'delayed_release_failed',
+              error: error?.message || String(error || '代理释放失败'),
             }));
           }
           if (Boolean(currentState?.accountContributionEnabled) && typeof setAccountContributionMode === 'function') {

@@ -680,6 +680,7 @@ const DEFAULT_IP_PROXY_API_ROUTE_MODE = 'direct';
 const IP_PROXY_API_ROUTE_MODE_VALUES = ['direct', 'local_proxy', 'provider_proxy'];
 const DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE = 'local_proxy';
 const IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE_VALUES = ['local_proxy', 'direct', 'provider_proxy'];
+const DEFAULT_IP_PROXY_ACTIVATION_STEP = 1;
 const IP_PROXY_FETCH_TIMEOUT_MS = 20000;
 const IP_PROXY_SETTINGS_SCOPE = 'regular';
 const IP_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
@@ -1544,6 +1545,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyRegion: '',
   ipProxyApiRouteMode: DEFAULT_IP_PROXY_API_ROUTE_MODE,
   ipProxySpecialDomainRouteMode: DEFAULT_IP_PROXY_SPECIAL_DOMAIN_ROUTE_MODE,
+  ipProxyActivationStep: DEFAULT_IP_PROXY_ACTIVATION_STEP,
   codex2apiUrl: DEFAULT_CODEX2API_URL,
   codex2apiAdminKey: '',
   customPassword: '',
@@ -1876,6 +1878,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'ipProxyEnabled',
   'ipProxyService',
   'ipProxyMode',
+  'ipProxyActivationStep',
   'kiroRsUrl',
   'kiroRsKey',
   'stepExecutionRangeByFlow',
@@ -1890,6 +1893,19 @@ const ACCOUNT_BOOK_FREE_STATUS_VALUES = new Set(['free', 'paid', 'plus', ACCOUNT
 function normalizeAccountBookFreeStatus(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return ACCOUNT_BOOK_FREE_STATUS_VALUES.has(normalized) ? normalized : ACCOUNT_BOOK_FREE_STATUS_UNKNOWN;
+}
+
+function normalizeIpProxyActivationStep(value, fallback = DEFAULT_IP_PROXY_ACTIVATION_STEP) {
+  const fallbackNumber = Math.max(1, Math.floor(Number(fallback) || DEFAULT_IP_PROXY_ACTIVATION_STEP));
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallbackNumber;
+  }
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return fallbackNumber;
+  }
+  return Math.max(1, Math.floor(numeric));
 }
 
 const DEFAULT_STATE = {
@@ -4545,6 +4561,8 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeIpProxyApiRouteMode(value);
     case 'ipProxySpecialDomainRouteMode':
       return normalizeIpProxySpecialDomainRouteMode(value);
+    case 'ipProxyActivationStep':
+      return normalizeIpProxyActivationStep(value);
     case 'ipProxyApiPool':
       return normalizeProxyPoolEntries(
         value,
@@ -5717,6 +5735,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       activeProfile?.specialDomainRouteMode || payload.ipProxySpecialDomainRouteMode
     );
   }
+  if (Object.prototype.hasOwnProperty.call(payload, 'ipProxyActivationStep')) {
+    payload.ipProxyActivationStep = normalizeIpProxyActivationStep(payload.ipProxyActivationStep);
+  }
 
   const hasExplicitSettingsSchema = hasExplicitSettingsState
     || Object.prototype.hasOwnProperty.call(normalizedInput, 'settingsSchemaVersion');
@@ -5917,6 +5938,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('ipProxyEnabled', ['services', 'proxy', 'enabled']);
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
   assignIfUpdated('ipProxyMode', ['services', 'proxy', 'mode']);
+  assignIfUpdated('ipProxyActivationStep', ['services', 'proxy', 'activationStep']);
   assignIfUpdated('kiroRsUrl', ['flows', 'kiro', 'targets', 'kiro-rs', 'baseUrl']);
   assignIfUpdated('kiroRsKey', ['flows', 'kiro', 'targets', 'kiro-rs', 'apiKey']);
 
@@ -6148,6 +6170,7 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         enabled: prevState?.ipProxyEnabled,
         provider: prevState?.ipProxyService,
         mode: prevState?.ipProxyMode,
+        activationStep: prevState?.ipProxyActivationStep,
       },
     },
     flows: {
@@ -14749,6 +14772,213 @@ function isSpecialDomainDirectFallbackEnabledForNode(nodeId, state = {}) {
   return routeMode === 'provider_proxy';
 }
 
+function getIpProxyActivationStepForState(state = {}) {
+  const configuredStep = normalizeIpProxyActivationStep(
+    state?.ipProxyActivationStep,
+    DEFAULT_IP_PROXY_ACTIVATION_STEP
+  );
+  if (configuredStep <= 1) {
+    return DEFAULT_IP_PROXY_ACTIVATION_STEP;
+  }
+  const stepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state).map((stepId) => Number(stepId)).filter((stepId) => Number.isInteger(stepId) && stepId > 0)
+    : [];
+  if (stepIds.length && !stepIds.includes(configuredStep)) {
+    return DEFAULT_IP_PROXY_ACTIVATION_STEP;
+  }
+  return configuredStep;
+}
+
+function isIpProxyDelayedActivationEnabledForState(state = {}) {
+  return Boolean(state?.ipProxyEnabled) && getIpProxyActivationStepForState(state) > 1;
+}
+
+function buildIpProxyDelayedActivationCache(state = {}, routing = {}) {
+  const mode = typeof normalizeIpProxyMode === 'function'
+    ? normalizeIpProxyMode(state?.ipProxyMode)
+    : String(state?.ipProxyMode || DEFAULT_IP_PROXY_MODE).trim().toLowerCase() || DEFAULT_IP_PROXY_MODE;
+  const provider = typeof normalizeIpProxyProviderValue === 'function'
+    ? normalizeIpProxyProviderValue(state?.ipProxyService)
+    : String(state?.ipProxyService || DEFAULT_IP_PROXY_SERVICE).trim().toLowerCase() || DEFAULT_IP_PROXY_SERVICE;
+  const runtime = typeof getIpProxyRuntimeSnapshot === 'function'
+    ? getIpProxyRuntimeSnapshot(state, mode, provider)
+    : { pool: [], index: 0, current: null };
+  const entry = typeof getIpProxyCurrentEntryFromState === 'function'
+    ? getIpProxyCurrentEntryFromState(state)
+    : null;
+  return {
+    mode,
+    provider,
+    pool: Array.isArray(runtime?.pool) ? runtime.pool : [],
+    index: Number(runtime?.index) || 0,
+    current: runtime?.current || entry || null,
+    routing: routing && typeof routing === 'object' ? { ...routing } : {},
+    cachedAt: Date.now(),
+    activationStep: getIpProxyActivationStepForState(state),
+  };
+}
+
+async function releaseIpProxyForDelayedActivation(options = {}) {
+  if (typeof applyIpProxySettingsFromState !== 'function') {
+    return null;
+  }
+  const latestState = typeof getState === 'function' ? await getState() : {};
+  const releaseState = {
+    ...latestState,
+    ipProxyEnabled: false,
+  };
+  const status = await applyIpProxySettingsFromState(releaseState, {
+    skipExitProbe: true,
+    resetNetworkState: options.resetNetworkState === true,
+    suppressAuthRebind: true,
+  });
+  if (typeof clearIpProxySettings === 'function') {
+    await clearIpProxySettings({
+      resetLastAppliedAuthSnapshot: true,
+    }).catch(() => {});
+  }
+  const delayedStatus = {
+    ...status,
+    enabled: true,
+    applied: false,
+    reason: 'delayed_activation',
+    exitDetecting: false,
+  };
+  if (typeof updateIpProxyRuntimeStatus === 'function') {
+    await updateIpProxyRuntimeStatus(delayedStatus);
+  }
+  return status;
+}
+
+async function cacheAndReleaseIpProxyForDelayedActivation(routing = {}) {
+  const latestState = typeof getState === 'function' ? await getState() : {};
+  if (!isIpProxyDelayedActivationEnabledForState(latestState)) {
+    return { skipped: true, reason: 'not_delayed' };
+  }
+  const cache = buildIpProxyDelayedActivationCache(latestState, routing);
+  await setState({
+    ipProxyDelayedActivationCache: cache,
+    ipProxyDelayedActivationRestored: false,
+    ipProxyDelayedActivationReleasedAt: Date.now(),
+  });
+  await releaseIpProxyForDelayedActivation({ resetNetworkState: false });
+  return { skipped: false, cache };
+}
+
+function isReadyDelayedIpProxyRouting(routing = {}) {
+  const exitIp = String(routing?.exitIp || '').trim();
+  const reason = String(routing?.reason || '').trim().toLowerCase();
+  if (!exitIp || routing?.applied === false) {
+    return false;
+  }
+  return ![
+    'connectivity_failed',
+    'apply_failed',
+    'missing_proxy_entry',
+    'proxy_api_unavailable',
+    'disabled',
+    'disabled_probe_only',
+  ].includes(reason);
+}
+
+async function ensureIpProxyActivatedBeforeNode(nodeId, state = {}) {
+  if (!isIpProxyDelayedActivationEnabledForState(state)) {
+    return state;
+  }
+  const activationStep = getIpProxyActivationStepForState(state);
+  const currentStep = Number(getStepIdByNodeIdForState(nodeId, state)) || 0;
+  if (!Number.isInteger(currentStep) || currentStep < activationStep) {
+    return state;
+  }
+  if (state?.ipProxyDelayedActivationRestored && state?.ipProxyApplied) {
+    return state;
+  }
+  if (typeof applyIpProxySettingsFromState !== 'function') {
+    throw new Error('IP 代理应用能力不可用。');
+  }
+
+  const cache = state?.ipProxyDelayedActivationCache && typeof state.ipProxyDelayedActivationCache === 'object'
+    ? state.ipProxyDelayedActivationCache
+    : null;
+  const mode = typeof normalizeIpProxyMode === 'function'
+    ? normalizeIpProxyMode(cache?.mode || state?.ipProxyMode)
+    : String(cache?.mode || state?.ipProxyMode || DEFAULT_IP_PROXY_MODE).trim().toLowerCase() || DEFAULT_IP_PROXY_MODE;
+  const provider = typeof normalizeIpProxyProviderValue === 'function'
+    ? normalizeIpProxyProviderValue(cache?.provider || state?.ipProxyService)
+    : String(cache?.provider || state?.ipProxyService || DEFAULT_IP_PROXY_SERVICE).trim().toLowerCase() || DEFAULT_IP_PROXY_SERVICE;
+  let restorePatch = {
+    ipProxyEnabled: true,
+    ipProxyDelayedActivationRestored: true,
+    ipProxyDelayedActivationRestoredAt: Date.now(),
+  };
+  if (cache) {
+    restorePatch.ipProxyService = provider;
+    restorePatch.ipProxyMode = mode;
+    if (typeof buildIpProxyRuntimeStatePatch === 'function') {
+      restorePatch = {
+        ...restorePatch,
+        ...buildIpProxyRuntimeStatePatch(mode, {
+          pool: Array.isArray(cache.pool) ? cache.pool : [],
+          index: cache.index,
+          current: cache.current || null,
+        }, provider),
+      };
+    }
+  }
+
+  await setState(restorePatch);
+  const restoreState = {
+    ...state,
+    ...restorePatch,
+  };
+  await addLog(
+    `IP 代理延后开启：到达节点 ${currentStep}，正在恢复第 1 步缓存的插件 IP 代理。`,
+    'info',
+    { nodeId }
+  );
+  let appliedStatus = await applyIpProxySettingsFromState(restoreState, {
+    skipExitProbe: Boolean(cache),
+    resetNetworkState: false,
+    suppressAuthRebind: Boolean(cache),
+  });
+  if (cache && appliedStatus?.applied === false) {
+    const detail = String(appliedStatus?.exitError || appliedStatus?.error || appliedStatus?.reason || '代理应用失败').trim();
+    throw new Error(`IP 代理延后开启失败：到达节点 ${currentStep} 前无法恢复缓存代理。${detail}`);
+  }
+  if (!cache && !isReadyDelayedIpProxyRouting(appliedStatus) && typeof probeIpProxyExit === 'function') {
+    const probeResult = await probeIpProxyExit({
+      state: {
+        ...restoreState,
+        ...appliedStatus,
+        ipProxyEnabled: true,
+      },
+      timeoutMs: 12000,
+      authRebindRetry: true,
+    });
+    appliedStatus = probeResult?.proxyRouting || appliedStatus;
+  }
+  if (!cache && !isReadyDelayedIpProxyRouting(appliedStatus)) {
+    const detail = String(appliedStatus?.exitError || appliedStatus?.error || appliedStatus?.reason || '未检测到可用出口').trim();
+    throw new Error(`IP 代理延后开启失败：到达节点 ${currentStep} 前无法检测到可用出口。${detail}`);
+  }
+  if (cache?.routing && typeof updateIpProxyRuntimeStatus === 'function') {
+    const routing = {
+      ...cache.routing,
+      enabled: true,
+      applied: appliedStatus?.applied !== false,
+      reason: String(appliedStatus?.reason || cache.routing.reason || 'applied').trim().toLowerCase(),
+      exitDetecting: false,
+    };
+    await updateIpProxyRuntimeStatus(routing);
+  }
+  await addLog(
+    `IP 代理延后开启：已在节点 ${currentStep} 前恢复插件 IP 代理。`,
+    'ok',
+    { nodeId }
+  );
+  return typeof getState === 'function' ? getState() : restoreState;
+}
+
 function isBusinessTerminalErrorForSpecialDomainFallback(error) {
   const checks = [
     typeof isStopError === 'function' && isStopError(error),
@@ -14980,6 +15210,7 @@ async function executeNode(nodeId, options = {}) {
   if (typeof assertNodeExecutionAllowedForState === 'function') {
     assertNodeExecutionAllowedForState(normalizedNodeId, state, '执行节点');
   }
+  state = await ensureIpProxyActivatedBeforeNode(normalizedNodeId, state);
   const step = getStepIdByNodeIdForState(normalizedNodeId, state);
   const authChainClaim = await acquireTopLevelAuthChainExecutionForNode(normalizedNodeId, state);
   if (authChainClaim.joined) {
@@ -17690,10 +17921,13 @@ const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.crea
 });
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
+  applyIpProxySettingsFromState,
+  cacheAndReleaseIpProxyForDelayedActivation,
   clearSignupVerifiedPhoneCache,
   completeNodeFromBackground,
   ensureBrowserFingerprintForProxyExit: browserFingerprintManager?.ensureBrowserFingerprintForProxyExit,
   getState,
+  getIpProxyActivationStepForState,
   openSignupEntryTab,
   probeIpProxyExit,
   switchIpProxy,
@@ -18323,6 +18557,8 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   getStepDefinitionForState,
   getStepIdsForState,
   getLastStepIdForState,
+  normalizeIpProxyActivationStep,
+  releaseIpProxyForDelayedActivation,
   normalizeSignupMethod,
   canUsePhoneSignup,
   resolveSignupMethod,

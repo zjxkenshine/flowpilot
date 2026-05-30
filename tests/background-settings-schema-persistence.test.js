@@ -56,6 +56,7 @@ const self = {};
 ${flowRegistrySource}
 ${settingsSchemaSource}
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const DEFAULT_IP_PROXY_ACTIVATION_STEP = 1;
 const DEFAULT_SUB2API_GROUP_NAMES = ['codex', 'openai-plus'];
 const DEFAULT_SUB2API_ACCOUNT_PRIORITY = 1;
 const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
@@ -131,6 +132,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'ipProxyEnabled',
   'ipProxyService',
   'ipProxyMode',
+  'ipProxyActivationStep',
   'kiroRsUrl',
   'kiroRsKey',
   'stepExecutionRangeByFlow',
@@ -245,6 +247,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyEnabled: false,
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
+  ipProxyActivationStep: 1,
   ipProxyServiceProfiles: {},
   ipProxyPoolTargetCount: '20',
   ipProxySwitchIpRoundCount: '1',
@@ -330,6 +333,7 @@ function normalizeMailProvider(value = '') { return String(value || '163').trim(
 function normalizeStepExecutionRangeByFlow(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function normalizeIpProxyProviderValue(value) { return String(value || '711proxy').trim() || '711proxy'; }
 function normalizeIpProxyMode(value) { return String(value || 'account').trim() || 'account'; }
+${extractFunction('normalizeIpProxyActivationStep')}
 function normalizeIpProxySpecialDomainRouteMode(value) {
   const normalized = String(value || 'local_proxy').trim().toLowerCase();
   return ['local_proxy', 'direct', 'provider_proxy'].includes(normalized) ? normalized : 'local_proxy';
@@ -468,14 +472,53 @@ test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh
     ipProxyEnabled: true,
     ipProxyService: '711proxy',
     ipProxyMode: 'api',
+    ipProxyActivationStep: '3',
     ipProxyPoolTargetCount: '25',
     ipProxySwitchIpRoundCount: '3',
     ipProxyAutoRefreshPoolOnExhausted: true,
   }, { fillDefaults: true });
 
+  assert.equal(payload.ipProxyActivationStep, 3);
+  assert.equal(payload.settingsState.services.proxy.activationStep, 3);
   assert.equal(payload.ipProxyPoolTargetCount, '25');
   assert.equal(payload.ipProxySwitchIpRoundCount, '3');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload normalizes IP proxy activation step from flat and schema input', () => {
+  const api = buildHarness();
+
+  const partial = api.buildPersistentSettingsPayload({
+    ipProxyEnabled: true,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(partial, 'ipProxyActivationStep'), false);
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.ipProxyActivationStep, 1);
+  assert.equal(defaults.settingsState.services.proxy.activationStep, 1);
+
+  const flat = api.buildPersistentSettingsPayload({
+    ipProxyActivationStep: '4.9',
+  }, { fillDefaults: true });
+  assert.equal(flat.ipProxyActivationStep, 4);
+  assert.equal(flat.settingsState.services.proxy.activationStep, 4);
+
+  const invalid = api.buildPersistentSettingsPayload({
+    ipProxyActivationStep: 'abc',
+  }, { fillDefaults: true });
+  assert.equal(invalid.ipProxyActivationStep, 1);
+  assert.equal(invalid.settingsState.services.proxy.activationStep, 1);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      services: {
+        proxy: { activationStep: '5' },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.ipProxyActivationStep, 5);
+  assert.equal(nested.settingsState.services.proxy.activationStep, 5);
 });
 
 test('buildPersistentSettingsPayload persists auto-run issue log preservation into settings schema', () => {
@@ -1142,7 +1185,7 @@ test('buildPersistentSettingsPayload accepts schema-only input when requireKnown
       services: {
         account: { customPassword: '' },
         email: { provider: '163' },
-        proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+        proxy: { enabled: false, provider: '711proxy', mode: 'account', activationStep: 6 },
       },
       flows: {
         openai: {
@@ -1201,8 +1244,10 @@ test('buildPersistentSettingsPayload accepts schema-only input when requireKnown
   assert.equal(payload.kiroTargetId, 'kiro-rs');
   assert.equal(payload.kiroRsUrl, 'https://kiro.example.com/admin');
   assert.equal(payload.kiroRsKey, 'schema-only-key');
+  assert.equal(payload.ipProxyActivationStep, 6);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, 'kiroRegion'), false);
   assert.equal(payload.settingsSchemaVersion, 4);
+  assert.equal(payload.settingsState.services.proxy.activationStep, 6);
   assert.equal(payload.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
 });
 
@@ -1289,6 +1334,7 @@ test('buildPersistentSettingsPayload forces SUB2API relogin runtime settings and
   assert.equal(payload.plusAccountAccessStrategy, 'oauth');
   assert.equal(payload.sub2apiDefaultProxyName, '');
   assert.equal(payload.ipProxyEnabled, false);
+  assert.equal(payload.ipProxyActivationStep, 1);
   assert.equal(payload.settingsState.activeFlowId, 'openai');
   assert.equal(payload.settingsState.flows.openai.integrationTargetId, 'sub2api');
   assert.equal(payload.settingsState.flows.openai.signup.signupMethod, 'phone');
@@ -1296,6 +1342,7 @@ test('buildPersistentSettingsPayload forces SUB2API relogin runtime settings and
   assert.equal(payload.settingsState.flows.openai.plus.plusModeEnabled, false);
   assert.equal(payload.settingsState.flows.openai.plus.phonePlusModeEnabled, false);
   assert.equal(payload.settingsState.services.proxy.enabled, false);
+  assert.equal(payload.settingsState.services.proxy.activationStep, 1);
   assert.equal(payload.settingsState.flows.openai.integrationTargets.sub2api.sub2apiDefaultProxyName, '');
   assert.equal(payload.settingsState.flows.openai.integrationTargets.sub2api.sub2apiReloginEnabled, true);
   assert.equal(
@@ -1314,7 +1361,7 @@ test('buildPersistentSettingsPayload projects nested Phone Plus settings into fl
       services: {
         account: { customPassword: '' },
         email: { provider: '163' },
-        proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+        proxy: { enabled: false, provider: '711proxy', mode: 'account', activationStep: 6 },
       },
       flows: {
         openai: {
@@ -1409,7 +1456,7 @@ const chrome = {
             services: {
               account: { customPassword: '' },
               email: { provider: 'hotmail' },
-              proxy: { enabled: true, provider: '711proxy', mode: 'account' },
+              proxy: { enabled: true, provider: '711proxy', mode: 'account', activationStep: 4 },
             },
             flows: {
               openai: {
@@ -1475,6 +1522,7 @@ const chrome = {
   assert.equal(state.panelMode, 'sub2api');
   assert.equal(state.mailProvider, 'hotmail');
   assert.equal(state.ipProxyEnabled, true);
+  assert.equal(state.ipProxyActivationStep, 4);
   assert.equal(state.kiroRsUrl, 'https://kiro.example.com/admin');
   assert.equal(state.kiroRsKey, 'stored-key');
   assert.equal(state.plusAccountAccessStrategy, 'sub2api_codex_session');
@@ -2009,6 +2057,7 @@ function getRemovedKeys() {
     mailProvider: 'cloudflare-temp-email',
     ipProxyEnabled: true,
     ipProxyMode: 'api',
+    ipProxyActivationStep: 3,
     ipProxySpecialDomainRouteMode: 'provider_proxy',
     stepExecutionRangeByFlow: {
       openai: { enabled: true, fromStep: 2, toStep: 4 },
@@ -2020,6 +2069,7 @@ function getRemovedKeys() {
   assert.equal(persisted.mailProvider, 'cloudflare-temp-email');
   assert.equal(persisted.ipProxyEnabled, true);
   assert.equal(persisted.ipProxyMode, 'api');
+  assert.equal(persisted.ipProxyActivationStep, 3);
   assert.equal(persisted.ipProxySpecialDomainRouteMode, 'provider_proxy');
   assert.deepEqual(persisted.stepExecutionRangeByFlow.openai, {
     enabled: true,
@@ -2030,6 +2080,7 @@ function getRemovedKeys() {
   assert.equal(write.settingsState.services.email.provider, 'cloudflare-temp-email');
   assert.equal(write.settingsState.services.proxy.enabled, true);
   assert.equal(write.settingsState.services.proxy.mode, 'api');
+  assert.equal(write.settingsState.services.proxy.activationStep, 3);
   assert.deepEqual(write.settingsState.flows.openai.autoRun.stepExecutionRange, {
     enabled: true,
     fromStep: 2,
@@ -2041,4 +2092,5 @@ function getRemovedKeys() {
   assert.equal(Object.prototype.hasOwnProperty.call(write, 'mailProvider'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(write, 'panelMode'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(write, 'ipProxyMode'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(write, 'ipProxyActivationStep'), false);
 });

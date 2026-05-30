@@ -106,6 +106,24 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(panelSource, /apiSessType/);
 });
 
+test('sidepanel exposes IP proxy activation step selector backed by workflow nodes', () => {
+  const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');
+  const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  assert.match(html, /id="row-ip-proxy-activation-step"/);
+  assert.match(html, /id="select-ip-proxy-activation-step"/);
+  assert.match(html, /开启节点/);
+  assert.match(source, /const selectIpProxyActivationStep = document\.getElementById\('select-ip-proxy-activation-step'\);/);
+  assert.match(source, /function syncIpProxyActivationStepOptions\(state = latestState\)/);
+  assert.match(source, /workflowNodes/);
+  assert.match(source, /ipProxyActivationStep: normalizeIpProxyActivationStepValue/);
+  assert.match(source, /selectIpProxyActivationStep\?\.addEventListener\('change'/);
+  assert.match(source, /saveSettings\(\{ silent: true \}\)/);
+  assert.match(source, /syncStepDefinitionsForMode[\s\S]*syncIpProxyActivationStepOptions\(latestState\);/);
+  assert.match(panelSource, /rowIpProxyActivationStep\.style\.display = showSettings \? '' : 'none';/);
+});
+
 test('sidepanel shows success-rotation controls only for 711 API mode', () => {
   const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
   const html = fs.readFileSync('sidepanel/sidepanel.html', 'utf8');

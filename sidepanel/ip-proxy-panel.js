@@ -1704,6 +1704,9 @@ function updateIpProxyUI(state = latestState) {
   if (typeof rowIpProxySpecialDomainRouteMode !== 'undefined' && rowIpProxySpecialDomainRouteMode) {
     rowIpProxySpecialDomainRouteMode.style.display = showSettings ? '' : 'none';
   }
+  if (typeof rowIpProxyActivationStep !== 'undefined' && rowIpProxyActivationStep) {
+    rowIpProxyActivationStep.style.display = showSettings ? '' : 'none';
+  }
   if (rowIpProxyLayout) {
     rowIpProxyLayout.style.display = showSettings ? '' : 'none';
   }

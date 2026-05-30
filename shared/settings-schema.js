@@ -29,6 +29,19 @@
     };
   }
 
+  function normalizeIpProxyActivationStep(value, fallback = 1) {
+    const fallbackNumber = Math.max(1, Math.floor(Number(fallback) || 1));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.max(1, Math.floor(numeric));
+  }
+
   function normalizeRegistrationStageWaitSeconds(value, fallback = 30) {
     const fallbackNumber = Math.min(600, Math.max(0, Math.floor(Number(fallback) || 30)));
     const rawValue = String(value ?? '').trim();
@@ -450,6 +463,7 @@
             enabled: false,
             provider: '711proxy',
             mode: 'account',
+            activationStep: 1,
           },
         },
         flows: {
@@ -667,6 +681,12 @@
               ?? input?.ipProxyMode
               ?? defaults.services.proxy.mode
             ).trim() || defaults.services.proxy.mode,
+            activationStep: normalizeIpProxyActivationStep(
+              nested?.services?.proxy?.activationStep
+              ?? input?.ipProxyActivationStep
+              ?? defaults.services.proxy.activationStep,
+              defaults.services.proxy.activationStep
+            ),
           },
           account: {
             customPassword: String(
@@ -1331,6 +1351,7 @@
       next.ipProxyEnabled = normalizedState.services.proxy.enabled;
       next.ipProxyService = normalizedState.services.proxy.provider;
       next.ipProxyMode = normalizedState.services.proxy.mode;
+      next.ipProxyActivationStep = normalizedState.services.proxy.activationStep;
       next.kiroRsUrl = kiroState.targets['kiro-rs'].baseUrl;
       next.kiroRsKey = kiroState.targets['kiro-rs'].apiKey;
       next.stepExecutionRangeByFlow = buildStepExecutionRangeByFlow(normalizedState);
