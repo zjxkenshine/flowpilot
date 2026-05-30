@@ -1244,7 +1244,7 @@ return {
   assert.equal(events.logs.some(({ message }) => /已清空本轮注册手机号与接码订单/.test(message)), true);
 });
 
-test('auto-run clears manual signup phone state when step 3 detects phone/password mismatch', async () => {
+test('auto-run restarts from step 2 when step 3 phone/password error returned to phone entry', async () => {
   const api = new Function(`
 const AUTO_STEP_DELAYS = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 };
 const LAST_STEP_ID = 10;
@@ -1325,7 +1325,7 @@ async function executeStepAndWait(step) {
   events.steps.push(step);
   if (step === 3 && remainingFailures > 0) {
     remainingFailures -= 1;
-    throw new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::步骤 3：检测到注册手机号或密码不正确，需要重新开始当前轮。页面提示：Incorrect phone number or password');
+    throw new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::步骤 3：已返回手机号输入页，需要从步骤 2 重新获取手机号。页面提示：Incorrect phone number or password');
   }
 }
 
@@ -1382,12 +1382,12 @@ return {
 
   const { events, currentState } = await api.run();
 
-  assert.deepStrictEqual(events.steps, [1, 2, 3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.deepStrictEqual(events.steps, [1, 2, 3, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.deepStrictEqual(events.invalidations, [
     {
-      step: 1,
+      step: 2,
       options: {
-        logLabel: '节点 fill-password 检测到手机号/密码不匹配后准备回到 open-chatgpt 重新获取手机号重试（第 1 次重开）',
+        logLabel: '节点 fill-password 检测到创建帐户失败后已返回手机号输入页，准备从 submit-signup-email 重新获取手机号重试（第 1 次重开）',
       },
     },
   ]);
@@ -1397,7 +1397,7 @@ return {
   assert.equal(currentState.accountIdentifierType, null);
   assert.equal(currentState.accountIdentifier, '');
   assert.equal(currentState.password, 'Secret123!');
-  assert.equal(events.logs.some(({ message }) => /节点 fill-password：检测到手机号\/密码不匹配/.test(message)), true);
+  assert.equal(events.logs.some(({ message }) => /节点 fill-password：检测到创建帐户失败且已返回手机号输入页/.test(message)), true);
   assert.equal(events.logs.some(({ message }) => /节点 fill-password：已清空本轮注册手机号与接码订单/.test(message)), true);
 });
 

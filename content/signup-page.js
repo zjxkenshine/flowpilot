@@ -3186,7 +3186,8 @@ async function tryReturnToSignupPhoneEntryForRetry(requiredState, options = {}) 
   }
 
   const visibleStep = Number(options?.visibleStep) || 3;
-  log(`步骤 ${visibleStep}：检测到创建帐户失败，正在点击手机号编辑按钮返回手机号输入页...`, 'warn');
+  const reasonLabel = String(options?.reasonLabel || '').trim() || '创建帐户失败';
+  log(`步骤 ${visibleStep}：检测到${reasonLabel}，正在点击手机号编辑按钮返回手机号输入页...`, 'warn');
   await humanPause(350, 900);
   simulateClick(editButton);
 
@@ -5444,8 +5445,17 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = null) {
 
     if (snapshot.state === 'password') {
       if (snapshot.passwordErrorText) {
-        log(`${prepareLogLabel}：检测到密码页报错“${snapshot.passwordErrorText}”，当前轮将回到步骤 1 重新开始。`, 'warn');
-        throw createSignupPhonePasswordMismatchError(snapshot.passwordErrorText);
+        log(`${prepareLogLabel}：检测到密码页报错“${snapshot.passwordErrorText}”，正在尝试返回手机号输入页并从步骤 2 重新获取号码。`, 'warn');
+        const phoneEntryResult = await tryReturnToSignupPhoneEntryForRetry({
+          detailText: snapshot.passwordErrorText,
+        }, {
+          visibleStep: prepareSource === 'step4_execute' ? 4 : 3,
+          reasonLabel: '手机号/密码业务异常',
+        });
+        if (phoneEntryResult?.state === 'phone_entry') {
+          throw createSignupPhoneRetryFromStep2Error(snapshot.passwordErrorText);
+        }
+        throw new Error(`检测到密码页手机号/密码业务异常，但未能通过编辑按钮返回手机号输入页，已停止当前节点以避免整轮重开。页面提示：${snapshot.passwordErrorText}`);
       }
       if (!passwordPageDiagnosticsLogged) {
         passwordPageDiagnosticsLogged = true;

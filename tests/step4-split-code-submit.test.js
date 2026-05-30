@@ -954,7 +954,229 @@ return {
   );
 });
 
-test('prepareSignupVerificationFlow stops immediately when password page shows phone/password mismatch', async () => {
+test('prepareSignupVerificationFlow returns to phone entry when password page shows phone/password mismatch', async () => {
+  const api = new Function(`
+const logs = [];
+const clicks = [];
+let now = 0;
+
+Date.now = () => now;
+
+const editButton = {
+  textContent: 'Edit',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return 'Incorrect phone number or password'; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return { value: 'Secret123!' }; }
+function getSignupPasswordSubmitButton() { return { textContent: 'Continue' }; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return 'Incorrect phone number or password'; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
+
+const location = {
+  href: 'https://auth.openai.com/log-in/password',
+  pathname: '/log-in/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: 'Incorrect phone number or password',
+    innerText: 'Incorrect phone number or password',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
+    return [];
+  },
+};
+
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+      }, 10000);
+      return { threw: false, logs, clicks };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.match(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::Incorrect phone number or password/);
+  assert.deepStrictEqual(result.clicks, ['Edit']);
+  assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
+  assert.equal(result.logs.some(({ message }) => /手机号\/密码业务异常/.test(message)), true);
+  assert.equal(result.logs.some(({ message }) => /已返回手机号输入页/.test(message)), true);
+});
+
+test('prepareSignupVerificationFlow returns to phone entry when password page shows phone already exists error', async () => {
+  const api = new Function(`
+const logs = [];
+const clicks = [];
+let now = 0;
+
+Date.now = () => now;
+
+const editButton = {
+  textContent: '编辑',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
+function throwIfStopped() {}
+function log(message, level = 'info') { logs.push({ message, level }); }
+async function sleep(ms = 0) { now += ms || 200; }
+function isVisibleElement() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
+function getActionText(el) { return el?.textContent || ''; }
+function getCurrentAuthRetryPageState() { return null; }
+function isPhoneVerificationPageReady() { return false; }
+function findResendVerificationCodeTrigger() { return null; }
+function isEmailVerificationPage() { return false; }
+function getPageTextSnapshot() { return '与此电话号码相关联的帐户已存在'; }
+function getVerificationCodeTarget() { return null; }
+function is405MethodNotAllowedPage() { return false; }
+async function recoverCurrentAuthRetryPage() {}
+function createSignupUserAlreadyExistsError() { return new Error('user already exists'); }
+function getSignupPasswordInput() { return { value: 'Secret123!' }; }
+function getSignupPasswordSubmitButton() { return { textContent: 'Continue' }; }
+function isSignupEmailAlreadyExistsPage() { return false; }
+function isSignupPasswordErrorPage() { return false; }
+function getSignupPasswordTimeoutErrorPageState() { return null; }
+function isStep5Ready() { return false; }
+function getSignupPasswordFieldErrorText() { return '与此电话号码相关联的帐户已存在'; }
+function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
+async function humanPause() {}
+function fillInput() {}
+function logSignupPasswordDiagnostics() {}
+function createSignupPhonePasswordMismatchError(detailText = '') {
+  return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
+
+const location = {
+  href: 'https://auth.openai.com/log-in/password',
+  pathname: '/log-in/password',
+};
+const document = {
+  readyState: 'complete',
+  title: '',
+  body: {
+    textContent: '与此电话号码相关联的帐户已存在',
+    innerText: '与此电话号码相关联的帐户已存在',
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
+    return [];
+  },
+};
+
+${extractFunction('isSignupVerificationPageInteractiveReady')}
+${extractFunction('isVerificationPageStillVisible')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('findSignupPhoneRetryEditButton')}
+${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
+${extractFunction('inspectSignupVerificationState')}
+${extractFunction('waitForSignupVerificationTransition')}
+${extractFunction('prepareSignupVerificationFlow')}
+
+return {
+  async run() {
+    try {
+      await prepareSignupVerificationFlow({
+        password: 'Secret123!',
+        prepareLogLabel: '步骤 3 收尾',
+      }, 10000);
+      return { threw: false, logs, clicks };
+    } catch (error) {
+      return { threw: true, error: error.message, logs, clicks };
+    }
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.equal(result.threw, true);
+  assert.match(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::与此电话号码相关联的帐户已存在/);
+  assert.deepStrictEqual(result.clicks, ['编辑']);
+  assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
+  assert.equal(result.logs.some(({ message }) => /手机号\/密码业务异常/.test(message)), true);
+  assert.equal(result.logs.some(({ message }) => /已返回手机号输入页/.test(message)), true);
+});
+
+test('prepareSignupVerificationFlow stops without mismatch prefix when password error lacks edit button', async () => {
   const api = new Function(`
 const logs = [];
 const clicks = [];
@@ -991,6 +1213,12 @@ function logSignupPasswordDiagnostics() {}
 function createSignupPhonePasswordMismatchError(detailText = '') {
   return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
 }
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  return { state: 'phone_entry', url: 'https://auth.openai.com/u/signup/phone' };
+}
 
 const location = {
   href: 'https://auth.openai.com/log-in/password',
@@ -1018,6 +1246,7 @@ ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
 ${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('findSignupPhoneRetryEditButton')}
 ${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
 ${extractFunction('inspectSignupVerificationState')}
 ${extractFunction('waitForSignupVerificationTransition')}
 ${extractFunction('prepareSignupVerificationFlow')}
@@ -1040,12 +1269,13 @@ return {
   const result = await api.run();
 
   assert.equal(result.threw, true);
-  assert.match(result.error, /SIGNUP_PHONE_PASSWORD_MISMATCH::Incorrect phone number or password/);
-  assert.equal(result.clicks.length, 0);
-  assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
+  assert.match(result.error, /未能通过编辑按钮返回手机号输入页/);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_PASSWORD_MISMATCH::/);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+  assert.deepStrictEqual(result.clicks, []);
 });
 
-test('prepareSignupVerificationFlow stops immediately when password page shows phone already exists error', async () => {
+test('prepareSignupVerificationFlow stops without mismatch prefix when password error edit cannot return', async () => {
   const api = new Function(`
 const logs = [];
 const clicks = [];
@@ -1053,17 +1283,25 @@ let now = 0;
 
 Date.now = () => now;
 
+const editButton = {
+  textContent: 'Edit',
+  disabled: false,
+  getAttribute(name) {
+    if (name === 'aria-disabled') return 'false';
+    return '';
+  },
+};
 function throwIfStopped() {}
 function log(message, level = 'info') { logs.push({ message, level }); }
 async function sleep(ms = 0) { now += ms || 200; }
 function isVisibleElement() { return true; }
-function isActionEnabled() { return true; }
+function isActionEnabled(el) { return Boolean(el) && !el.disabled; }
 function getActionText(el) { return el?.textContent || ''; }
 function getCurrentAuthRetryPageState() { return null; }
 function isPhoneVerificationPageReady() { return false; }
 function findResendVerificationCodeTrigger() { return null; }
 function isEmailVerificationPage() { return false; }
-function getPageTextSnapshot() { return '与此电话号码相关联的帐户已存在'; }
+function getPageTextSnapshot() { return 'Incorrect phone number or password Edit'; }
 function getVerificationCodeTarget() { return null; }
 function is405MethodNotAllowedPage() { return false; }
 async function recoverCurrentAuthRetryPage() {}
@@ -1074,13 +1312,19 @@ function isSignupEmailAlreadyExistsPage() { return false; }
 function isSignupPasswordErrorPage() { return false; }
 function getSignupPasswordTimeoutErrorPageState() { return null; }
 function isStep5Ready() { return false; }
-function getSignupPasswordFieldErrorText() { return '与此电话号码相关联的帐户已存在'; }
+function getSignupPasswordFieldErrorText() { return 'Incorrect phone number or password'; }
 function simulateClick(target) { clicks.push(target?.textContent || 'clicked'); }
 async function humanPause() {}
 function fillInput() {}
 function logSignupPasswordDiagnostics() {}
 function createSignupPhonePasswordMismatchError(detailText = '') {
   return new Error('SIGNUP_PHONE_PASSWORD_MISMATCH::' + detailText);
+}
+function createSignupPhoneRetryFromStep2Error(detailText = '') {
+  return new Error('SIGNUP_PHONE_RETRY_FROM_STEP2::' + detailText);
+}
+async function ensureSignupPhoneEntryReady() {
+  throw new Error('still on password page');
 }
 
 const location = {
@@ -1091,13 +1335,16 @@ const document = {
   readyState: 'complete',
   title: '',
   body: {
-    textContent: '与此电话号码相关联的帐户已存在',
-    innerText: '与此电话号码相关联的帐户已存在',
+    textContent: 'Incorrect phone number or password Edit',
+    innerText: 'Incorrect phone number or password Edit',
   },
   querySelector() {
     return null;
   },
-  querySelectorAll() {
+  querySelectorAll(selector) {
+    if (selector === 'button, a, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [editButton];
+    }
     return [];
   },
 };
@@ -1109,6 +1356,7 @@ ${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
 ${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('findSignupPhoneRetryEditButton')}
 ${extractFunction('getSignupPhoneRetryRequiredState')}
+${extractFunction('tryReturnToSignupPhoneEntryForRetry')}
 ${extractFunction('inspectSignupVerificationState')}
 ${extractFunction('waitForSignupVerificationTransition')}
 ${extractFunction('prepareSignupVerificationFlow')}
@@ -1131,9 +1379,10 @@ return {
   const result = await api.run();
 
   assert.equal(result.threw, true);
-  assert.match(result.error, /SIGNUP_PHONE_PASSWORD_MISMATCH::与此电话号码相关联的帐户已存在/);
-  assert.equal(result.clicks.length, 0);
-  assert.equal(result.logs.some(({ message }) => /检测到密码页报错/.test(message)), true);
+  assert.match(result.error, /未能通过编辑按钮返回手机号输入页/);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_PASSWORD_MISMATCH::/);
+  assert.doesNotMatch(result.error, /SIGNUP_PHONE_RETRY_FROM_STEP2::/);
+  assert.deepStrictEqual(result.clicks, ['Edit']);
 });
 
 test('prepareSignupVerificationFlow waits instead of retrying while matched password submit is pending', async () => {
