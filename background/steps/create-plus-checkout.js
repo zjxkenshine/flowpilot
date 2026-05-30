@@ -6484,6 +6484,44 @@
       };
     }
 
+    async function fallbackPhonePlusCheckNotPlus(state = {}, options = {}) {
+      const attemptCount = Math.max(1, Math.floor(Number(options.attemptCount) || 1));
+      const reason = normalizeString(options.reason || 'Plus Check 未确认 Plus 状态');
+      const checkedAt = Date.now();
+      await setState({
+        phonePlusCheckAttemptCount: attemptCount,
+        phonePlusCheckLastCheckedAt: checkedAt,
+        phonePlusCheckLastFailureReason: reason,
+        phonePlusCheckVerifiedAt: 0,
+        plusHostedCheckoutVerified: false,
+        plusHostedCheckoutVerificationFailed: true,
+        plusHostedCheckoutVerificationFailureStrategy: 'skip_phone_plus',
+        plusHostedCheckoutVerificationFailureReason: reason,
+        plusHostedCheckoutVerificationFailureAt: checkedAt,
+        plusCheckoutVerificationRetryRequested: false,
+        plusCheckoutVerificationRetryReason: '',
+        plusCheckoutVerificationRetryAt: 0,
+        plusCheckoutVerificationRetryNodeId: '',
+        plusCheckoutRetryCleanupRequested: false,
+        plusCheckoutRetryCleanupReason: '',
+      });
+      if (typeof deps.handlePhonePlusNonFreeTrialFallback !== 'function') {
+        throw new Error(`Plus Check 确认当前不是 Plus，但 Phone Plus fallback 能力不可用。原因：${reason}`);
+      }
+      const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+        reason: 'phone-plus-check-not-plus',
+        detail: reason,
+        nodeId: 'plus-check',
+      });
+      if (!fallbackResult?.handled) {
+        throw new Error(`Plus Check 确认当前不是 Plus，但跳过 Phone Plus 支付段失败：${fallbackResult?.reason || 'unknown'}。原因：${reason}`);
+      }
+      return {
+        phonePlusFallbackToFreeAuth: true,
+        fallbackResult,
+      };
+    }
+
     async function executePhonePlusCheck(state = {}) {
       if (!isPhonePlusModeState(state)) {
         await addLog('Plus Check：当前不是 Phone Plus 模式，直接跳过检查。', 'info', { nodeId: 'plus-check' });
@@ -6546,20 +6584,12 @@
       }
 
       const reason = buildPhonePlusCheckFailureReason(inspection, failureReason);
-      if (attemptCount >= PHONE_PLUS_CHECK_MAX_ATTEMPTS) {
-        await addLog(
-          `Plus Check：已连续 ${PHONE_PLUS_CHECK_MAX_ATTEMPTS} 次未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth。原因：${reason}`,
-          'warn',
-          { nodeId: 'plus-check' }
-        );
-        await fallbackPhonePlusCheckRetryExhausted(state, {
-          attemptCount,
-          reason,
-        });
-        return;
-      }
-
-      await requestPhonePlusCheckRetry(state, {
+      await addLog(
+        `Plus Check：未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth/free 流程。原因：${reason}`,
+        'warn',
+        { nodeId: 'plus-check' }
+      );
+      await fallbackPhonePlusCheckNotPlus(state, {
         attemptCount,
         reason,
       });

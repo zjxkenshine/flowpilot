@@ -8265,7 +8265,7 @@ test('Phone Plus plus-check completes when refreshed session confirms Plus', asy
 });
 
 for (const initialAttemptCount of [0, 1]) {
-  test(`Phone Plus plus-check failed attempt ${initialAttemptCount + 1} requests checkout recreation`, async () => {
+  test(`Phone Plus plus-check failed attempt ${initialAttemptCount + 1} immediately falls back to OAuth/free`, async () => {
     const { events, executor, getState } = createPhonePlusCheckHarness({
       initialAttemptCount,
       planType: 'free',
@@ -8274,21 +8274,23 @@ for (const initialAttemptCount of [0, 1]) {
     await executor.executePhonePlusCheck(getState());
 
     const complete = events.find((event) => event.type === 'complete' && event.step === 'plus-check');
-    assert.ok(complete);
-    assert.equal(complete.payload.phonePlusCheckAttemptCount, initialAttemptCount + 1);
-    assert.equal(complete.payload.plusHostedCheckoutVerified, false);
-    assert.equal(complete.payload.plusHostedCheckoutVerificationFailed, true);
-    assert.equal(complete.payload.plusCheckoutVerificationRetryRequested, true);
-    assert.equal(complete.payload.plusCheckoutVerificationRetryNodeId, 'plus-check');
-    assert.match(complete.payload.plusCheckoutVerificationRetryReason, /planType=free/);
-    assert.equal(getState().plusCheckoutVerificationRetryRequested, true);
-    assert.equal(getState().plusCheckoutRetryCleanupRequested, true);
+    assert.equal(complete, undefined);
+    const fallback = events.find((event) => event.type === 'fallback');
+    assert.ok(fallback);
+    assert.equal(fallback.context.reason, 'phone-plus-check-not-plus');
+    assert.equal(fallback.context.nodeId, 'plus-check');
+    assert.match(fallback.context.detail, /planType=free/);
+    assert.equal(getState().phonePlusCheckAttemptCount, initialAttemptCount + 1);
+    assert.equal(getState().plusCheckoutVerificationRetryRequested, false);
+    assert.equal(getState().plusCheckoutVerificationRetryNodeId, '');
+    assert.equal(getState().plusCheckoutRetryCleanupRequested, false);
     assert.equal(getState().phonePlusCheckVerifiedAt, 0);
-    assert.equal(events.some((event) => event.type === 'fallback'), false);
+    assert.equal(getState().plusHostedCheckoutVerified, false);
+    assert.equal(getState().plusHostedCheckoutVerificationFailed, true);
   });
 }
 
-test('Phone Plus plus-check third failed attempt falls back to OAuth without checkout recreation', async () => {
+test('Phone Plus plus-check with existing attempts still falls back to OAuth/free without checkout recreation', async () => {
   const { events, executor, getState } = createPhonePlusCheckHarness({
     initialAttemptCount: 2,
     planType: 'free',
@@ -8298,15 +8300,16 @@ test('Phone Plus plus-check third failed attempt falls back to OAuth without che
 
   const fallback = events.find((event) => event.type === 'fallback');
   assert.ok(fallback);
-  assert.equal(fallback.context.reason, 'phone-plus-check-retry-exhausted');
+  assert.equal(fallback.context.reason, 'phone-plus-check-not-plus');
   assert.equal(fallback.context.nodeId, 'plus-check');
   assert.match(fallback.context.detail, /planType=free/);
   assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-check'), false);
   assert.equal(getState().phonePlusCheckAttemptCount, 3);
   assert.equal(getState().plusCheckoutVerificationRetryRequested, false);
+  assert.equal(getState().plusCheckoutVerificationRetryNodeId, '');
   assert.equal(getState().plusHostedCheckoutVerificationFailed, true);
   assert.equal(
-    events.some((event) => event.type === 'log' && /已连续 3 次未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth/.test(event.message)),
+    events.some((event) => event.type === 'log' && /未确认 Plus 生效，跳过 Phone Plus 支付段，继续 OAuth\/free 流程/.test(event.message)),
     true
   );
 });

@@ -12179,6 +12179,8 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     fallbackMessage = `Phone Plus：PayPal 无卡直绑资料页 phone 输入框多次重填后仍为空，已跳过 Plus 支付段，继续按当前来源的 free auth 流程登录。${detailSuffix}`;
   } else if (fallbackReason === 'hosted-checkout-generic-error') {
     fallbackMessage = `Phone Plus：PayPal Checkout 返回 genericError，已跳过 Plus 支付段，继续后续 OAuth 流程。${detailSuffix}`;
+  } else if (fallbackReason === 'phone-plus-check-not-plus') {
+    fallbackMessage = `Phone Plus：Plus Check 确认当前不是 Plus，已跳过 Plus 支付段，继续 OAuth/free 流程。${detailSuffix}`;
   } else if (fallbackReason === 'phone-plus-check-retry-exhausted') {
     fallbackMessage = `Phone Plus：Plus Check 已连续 3 次未确认 Plus 生效，已跳过 Plus 支付段，继续 OAuth 流程。${detailSuffix}`;
   } else if (fallbackReason === 'phone-plus-registration-region-mismatch') {
