@@ -267,6 +267,8 @@ const selectBrowserFingerprintLanguage = document.getElementById('select-browser
 const browserFingerprintCaption = document.getElementById('browser-fingerprint-caption');
 const rowBrowserStateCleanup = document.getElementById('row-browser-state-cleanup');
 const inputBrowserStateCleanupEnabled = document.getElementById('input-browser-state-cleanup-enabled');
+const rowWebRtcLeakProtection = document.getElementById('row-webrtc-leak-protection');
+const inputWebRtcLeakProtectionEnabled = document.getElementById('input-webrtc-leak-protection-enabled');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
 const rowPlusCheckoutVerificationFailureStrategy = document.getElementById('row-plus-verification-failure-strategy');
@@ -6458,6 +6460,9 @@ function collectSettingsPayload() {
     browserStateCleanupEnabled: typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled
       ? Boolean(inputBrowserStateCleanupEnabled.checked)
       : Boolean(latestState?.browserStateCleanupEnabled),
+    webRtcLeakProtectionEnabled: typeof inputWebRtcLeakProtectionEnabled !== 'undefined' && inputWebRtcLeakProtectionEnabled
+      ? Boolean(inputWebRtcLeakProtectionEnabled.checked)
+      : Boolean(latestState?.webRtcLeakProtectionEnabled),
     plusModeEnabled: payloadPlusModeEnabled,
     phonePlusModeEnabled: payloadPhonePlusModeEnabled,
     plusPaymentMethod,
@@ -13449,6 +13454,9 @@ function applySettingsState(state) {
   if (typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled) {
     inputBrowserStateCleanupEnabled.checked = Boolean(state?.browserStateCleanupEnabled);
   }
+  if (typeof inputWebRtcLeakProtectionEnabled !== 'undefined' && inputWebRtcLeakProtectionEnabled) {
+    inputWebRtcLeakProtectionEnabled.checked = Boolean(state?.webRtcLeakProtectionEnabled);
+  }
   if (typeof updateBrowserFingerprintUI === 'function') {
     updateBrowserFingerprintUI(state);
   }
@@ -16219,11 +16227,17 @@ function updateBrowserFingerprintUI(state = latestState) {
   if (typeof rowBrowserStateCleanup !== 'undefined' && rowBrowserStateCleanup) {
     rowBrowserStateCleanup.style.display = visible ? '' : 'none';
   }
+  if (typeof rowWebRtcLeakProtection !== 'undefined' && rowWebRtcLeakProtection) {
+    rowWebRtcLeakProtection.style.display = visible ? '' : 'none';
+  }
   if (typeof inputBrowserFingerprintEnabled !== 'undefined' && inputBrowserFingerprintEnabled) {
     inputBrowserFingerprintEnabled.checked = enabled;
   }
   if (typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled) {
     inputBrowserStateCleanupEnabled.checked = Boolean(state?.browserStateCleanupEnabled);
+  }
+  if (typeof inputWebRtcLeakProtectionEnabled !== 'undefined' && inputWebRtcLeakProtectionEnabled) {
+    inputWebRtcLeakProtectionEnabled.checked = Boolean(state?.webRtcLeakProtectionEnabled);
   }
   if (typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel) {
     selectBrowserFingerprintLevel.value = level;
@@ -19587,6 +19601,11 @@ inputBrowserStateCleanupEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputWebRtcLeakProtectionEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 btnGpcHelperConvertApiKey?.addEventListener('click', () => {
   openExternalUrl(GPC_HELPER_PORTAL_URL);
 });
@@ -22737,11 +22756,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.browserStateCleanupEnabled !== undefined && inputBrowserStateCleanupEnabled) {
         inputBrowserStateCleanupEnabled.checked = Boolean(message.payload.browserStateCleanupEnabled);
       }
+      if (message.payload.webRtcLeakProtectionEnabled !== undefined && inputWebRtcLeakProtectionEnabled) {
+        inputWebRtcLeakProtectionEnabled.checked = Boolean(message.payload.webRtcLeakProtectionEnabled);
+      }
       if (
         message.payload.browserFingerprintEnabled !== undefined
         || message.payload.browserFingerprintLevel !== undefined
         || message.payload.browserFingerprintLanguage !== undefined
         || message.payload.browserStateCleanupEnabled !== undefined
+        || message.payload.webRtcLeakProtectionEnabled !== undefined
       ) {
         updateBrowserFingerprintUI(latestState);
       }

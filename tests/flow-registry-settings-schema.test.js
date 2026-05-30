@@ -229,10 +229,14 @@ test('settings schema preserves browser fingerprint defaults and nested override
   assert.deepEqual(defaults.flows.openai.browserStateCleanup, {
     enabled: false,
   });
+  assert.deepEqual(defaults.flows.openai.webRtcLeakProtection, {
+    enabled: false,
+  });
   assert.equal(defaultView.browserFingerprintEnabled, true);
   assert.equal(defaultView.browserFingerprintLevel, 'standard');
   assert.equal(defaultView.browserFingerprintLanguage, 'zh-CN');
   assert.equal(defaultView.browserStateCleanupEnabled, false);
+  assert.equal(defaultView.webRtcLeakProtectionEnabled, false);
 
   const normalized = schema.normalizeSettingsState({
     settingsState: {
@@ -246,6 +250,9 @@ test('settings schema preserves browser fingerprint defaults and nested override
           browserStateCleanup: {
             enabled: true,
           },
+          webRtcLeakProtection: {
+            enabled: true,
+          },
         },
       },
     },
@@ -256,10 +263,12 @@ test('settings schema preserves browser fingerprint defaults and nested override
   assert.equal(normalized.flows.openai.browserFingerprint.level, 'enhanced');
   assert.equal(normalized.flows.openai.browserFingerprint.language, 'en-US');
   assert.equal(normalized.flows.openai.browserStateCleanup.enabled, true);
+  assert.equal(normalized.flows.openai.webRtcLeakProtection.enabled, true);
   assert.equal(view.browserFingerprintEnabled, false);
   assert.equal(view.browserFingerprintLevel, 'enhanced');
   assert.equal(view.browserFingerprintLanguage, 'en-US');
   assert.equal(view.browserStateCleanupEnabled, true);
+  assert.equal(view.webRtcLeakProtectionEnabled, true);
 
   const random = schema.normalizeSettingsState({
     settingsState: {

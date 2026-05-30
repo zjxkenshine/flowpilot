@@ -91,6 +91,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'browserFingerprintLevel',
   'browserFingerprintLanguage',
   'browserStateCleanupEnabled',
+  'webRtcLeakProtectionEnabled',
   'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
@@ -179,6 +180,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   browserFingerprintLevel: 'standard',
   browserFingerprintLanguage: 'zh-CN',
   browserStateCleanupEnabled: false,
+  webRtcLeakProtectionEnabled: false,
   oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
@@ -939,6 +941,35 @@ test('buildPersistentSettingsPayload persists browser state cleanup switch into 
   }, { requireKnownKeys: true });
   assert.equal(nested.browserStateCleanupEnabled, true);
   assert.equal(nested.settingsState.flows.openai.browserStateCleanup.enabled, true);
+});
+
+test('buildPersistentSettingsPayload persists WebRTC leak protection switch into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.webRtcLeakProtectionEnabled, false);
+  assert.equal(defaults.settingsState.flows.openai.webRtcLeakProtection.enabled, false);
+
+  const flat = api.buildPersistentSettingsPayload({
+    webRtcLeakProtectionEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.webRtcLeakProtectionEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.webRtcLeakProtection.enabled, true);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          webRtcLeakProtection: {
+            enabled: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.webRtcLeakProtectionEnabled, true);
+  assert.equal(nested.settingsState.flows.openai.webRtcLeakProtection.enabled, true);
 });
 
 test('buildPersistentSettingsPayload persists phone signup phone-prefixed email switch into settings schema', () => {

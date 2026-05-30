@@ -570,6 +570,59 @@ test('SAVE_SETTING broadcasts free phone reuse setting updates for realtime side
   );
 });
 
+test('SAVE_SETTING syncs WebRTC leak protection after persistence', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const syncCalls = [];
+  let state = {
+    webRtcLeakProtectionEnabled: false,
+    plusModeEnabled: false,
+    plusPaymentMethod: 'paypal',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: (input = {}) => (
+      Object.prototype.hasOwnProperty.call(input, 'webRtcLeakProtectionEnabled')
+        ? { webRtcLeakProtectionEnabled: Boolean(input.webRtcLeakProtectionEnabled) }
+        : {}
+    ),
+    broadcastDataUpdate: () => {},
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+    syncWebRtcLeakProtectionFromState: async (nextState) => {
+      syncCalls.push({ ...nextState });
+      return {
+        enabled: true,
+        applied: true,
+        reason: 'applied',
+      };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'SAVE_SETTING',
+    payload: {
+      webRtcLeakProtectionEnabled: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.webRtcLeakProtectionEnabled, true);
+  assert.equal(syncCalls.length, 1);
+  assert.equal(syncCalls[0].webRtcLeakProtectionEnabled, true);
+  assert.deepEqual(response.webRtcLeakProtection, {
+    enabled: true,
+    applied: true,
+    reason: 'applied',
+  });
+});
+
 test('SAVE_SETTING disables IP proxy by applying direct mode cleanup state', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

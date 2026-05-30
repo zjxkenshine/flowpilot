@@ -12,6 +12,7 @@
       broadcastDataUpdate,
       chrome = null,
       applyIpProxySettingsFromState,
+      syncWebRtcLeakProtectionFromState,
       releaseIpProxyForDelayedActivation,
       cancelScheduledAutoRun,
       checkIcloudSession,
@@ -2048,6 +2049,18 @@
           }
           await setState(stateUpdates);
           const mergedState = await getState();
+          let webRtcLeakProtection = null;
+          if (
+            Object.prototype.hasOwnProperty.call(updates, 'webRtcLeakProtectionEnabled')
+            && typeof syncWebRtcLeakProtectionFromState === 'function'
+          ) {
+            webRtcLeakProtection = await syncWebRtcLeakProtectionFromState(mergedState).catch((error) => ({
+              enabled: Boolean(mergedState?.webRtcLeakProtectionEnabled),
+              applied: false,
+              reason: 'sync_failed',
+              error: error?.message || String(error || ''),
+            }));
+          }
           const hasIpProxyAutoSyncSettingChanged = (
             Object.prototype.hasOwnProperty.call(updates, 'ipProxyAutoSyncEnabled')
             || Object.prototype.hasOwnProperty.call(updates, 'ipProxyAutoSyncIntervalMinutes')
@@ -2174,6 +2187,7 @@
             ok: true,
             modeValidation,
             proxyRouting,
+            webRtcLeakProtection,
             state: await getState(),
           };
         }

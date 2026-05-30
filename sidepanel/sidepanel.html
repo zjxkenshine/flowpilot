@@ -412,6 +412,21 @@
           <span class="setting-caption">清理目标站点旧会话状态；可能登出相关站点</span>
         </div>
       </div>
+      <div class="data-row" id="row-webrtc-leak-protection">
+        <span class="data-label">WebRTC 防泄露</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-webrtc-leak-protection-enabled"
+              title="开启后限制 WebRTC 使用非代理 UDP；默认关闭">
+              <input type="checkbox" id="input-webrtc-leak-protection-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <span class="setting-caption">限制 WebRTC 非代理 UDP；可能影响音视频通话</span>
+        </div>
+      </div>
       <div class="data-row" id="row-plus-account-access-strategy" style="display:none;">
         <span class="data-label">账号接入策略</span>
         <div class="data-inline">

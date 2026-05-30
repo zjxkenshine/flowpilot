@@ -538,6 +538,9 @@
             browserStateCleanup: {
               enabled: false,
             },
+            webRtcLeakProtection: {
+              enabled: false,
+            },
             oauth: {
               oauthOpenAfterRefreshWaitSeconds: 5,
             },
@@ -877,6 +880,13 @@
                 input?.browserStateCleanupEnabled
                 ?? nested?.flows?.openai?.browserStateCleanup?.enabled
                 ?? defaults.flows.openai.browserStateCleanup.enabled
+              ),
+            },
+            webRtcLeakProtection: {
+              enabled: Boolean(
+                input?.webRtcLeakProtectionEnabled
+                ?? nested?.flows?.openai?.webRtcLeakProtection?.enabled
+                ?? defaults.flows.openai.webRtcLeakProtection.enabled
               ),
             },
             oauth: {
@@ -1355,6 +1365,7 @@
       next.browserFingerprintLevel = openaiState.browserFingerprint.level;
       next.browserFingerprintLanguage = openaiState.browserFingerprint.language;
       next.browserStateCleanupEnabled = openaiState.browserStateCleanup.enabled;
+      next.webRtcLeakProtectionEnabled = openaiState.webRtcLeakProtection.enabled;
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;

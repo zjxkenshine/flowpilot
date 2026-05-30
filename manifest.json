@@ -12,6 +12,7 @@
     "webRequest",
     "webRequestAuthProvider",
     "proxy",
+    "privacy",
     "declarativeNetRequest",
     "debugger",
     "browsingData",

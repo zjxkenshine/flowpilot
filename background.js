@@ -28,6 +28,7 @@ importScripts(
   'background/paypal-account-store.js',
   'background/ip-proxy-provider-711proxy.js',
   'background/ip-proxy-core.js',
+  'background/webrtc-leak-protection.js',
   'background/browser-fingerprint.js',
   'background/sub2api-api.js',
   'background/cpa-api.js',
@@ -1555,6 +1556,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   browserFingerprintLevel: 'standard',
   browserFingerprintLanguage: 'zh-CN',
   browserStateCleanupEnabled: false,
+  webRtcLeakProtectionEnabled: false,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
@@ -1835,6 +1837,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'browserFingerprintLevel',
   'browserFingerprintLanguage',
   'browserStateCleanupEnabled',
+  'webRtcLeakProtectionEnabled',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -4666,6 +4669,8 @@ function normalizePersistentSettingValue(key, value) {
         })();
     case 'browserStateCleanupEnabled':
       return Boolean(value);
+    case 'webRtcLeakProtectionEnabled':
+      return Boolean(value);
     case 'plusPaymentMethod':
       return normalizePlusPaymentMethod(value);
     case 'plusHostedCheckoutIsFinalStep':
@@ -5958,6 +5963,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('browserFingerprintLevel', ['flows', 'openai', 'browserFingerprint', 'level']);
   assignIfUpdated('browserFingerprintLanguage', ['flows', 'openai', 'browserFingerprint', 'language']);
   assignIfUpdated('browserStateCleanupEnabled', ['flows', 'openai', 'browserStateCleanup', 'enabled']);
+  assignIfUpdated('webRtcLeakProtectionEnabled', ['flows', 'openai', 'webRtcLeakProtection', 'enabled']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
@@ -11742,6 +11748,26 @@ const browserFingerprintManager = self.MultiPageBackgroundBrowserFingerprint?.cr
   getState,
   setState,
 }) || null;
+
+const webRtcLeakProtectionManager = self.MultiPageBackgroundWebRtcLeakProtection?.createWebRtcLeakProtectionManager?.({
+  chrome,
+  warn: (message) => console.warn(LOG_PREFIX, message),
+}) || null;
+
+async function syncWebRtcLeakProtectionFromState(state = {}) {
+  if (!webRtcLeakProtectionManager?.syncWebRtcLeakProtectionFromState) {
+    return {
+      enabled: Boolean(state?.webRtcLeakProtectionEnabled),
+      applied: false,
+      reason: 'manager_unavailable',
+    };
+  }
+  return webRtcLeakProtectionManager.syncWebRtcLeakProtectionFromState(state);
+}
+
+async function syncWebRtcLeakProtectionFromCurrentState() {
+  return syncWebRtcLeakProtectionFromState(await getState());
+}
 
 const tabRuntime = self.MultiPageBackgroundTabRuntime?.createTabRuntime({
   addLog,
@@ -19055,6 +19081,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   buildPersistentSettingsPayload,
   broadcastDataUpdate,
   applyIpProxySettingsFromState,
+  syncWebRtcLeakProtectionFromState,
   cancelScheduledAutoRun,
   checkIcloudSession,
   clearAccountBook: (...args) => clearAndBroadcastAccountBookEntries(...args),
@@ -21119,6 +21146,9 @@ chrome.runtime.onStartup.addListener(() => {
   ensureIpProxyAutoSyncAlarm().catch((err) => {
     console.error(LOG_PREFIX, 'Failed to restore IP proxy auto sync alarm on startup:', err);
   });
+  syncWebRtcLeakProtectionFromCurrentState().catch((err) => {
+    console.warn(LOG_PREFIX, 'Failed to restore WebRTC leak protection on startup:', err);
+  });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -21139,6 +21169,9 @@ chrome.runtime.onInstalled.addListener(() => {
   ensureIpProxyAutoSyncAlarm().catch((err) => {
     console.error(LOG_PREFIX, 'Failed to restore IP proxy auto sync alarm on install/update:', err);
   });
+  syncWebRtcLeakProtectionFromCurrentState().catch((err) => {
+    console.warn(LOG_PREFIX, 'Failed to restore WebRTC leak protection on install/update:', err);
+  });
 });
 
 migrateLegacyAccountContributionState().catch((err) => {
@@ -21157,4 +21190,7 @@ if (IP_PROXY_INIT_AUTO_APPLY) {
 }
 ensureIpProxyAutoSyncAlarm().catch((err) => {
   console.error(LOG_PREFIX, 'Failed to restore IP proxy auto sync alarm:', err);
+});
+syncWebRtcLeakProtectionFromCurrentState().catch((err) => {
+  console.warn(LOG_PREFIX, 'Failed to restore WebRTC leak protection:', err);
 });
