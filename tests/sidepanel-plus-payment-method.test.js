@@ -422,20 +422,26 @@ return normalizeHostedCheckoutSmsSourceValue;
   assert.match(dataUpdatedSnippet, /selectHostedCheckoutSmsSource\.value\s*=\s*normalizeHostedCheckoutSmsSourceValue/);
 });
 
-test('sidepanel regional checkout switch renders and syncs through settings', () => {
+test('sidepanel checkout region dropdown renders and syncs through settings', () => {
   assert.match(sidepanelHtml, /id="row-plus-checkout-regional-checkout"/);
-  assert.match(sidepanelHtml, /id="input-plus-checkout-regional-checkout-enabled"/);
+  assert.match(sidepanelHtml, /id="select-plus-checkout-region-code"/);
+  assert.match(sidepanelHtml, /<option value="auto">跟随支付出口<\/option>/);
+  assert.match(sidepanelHtml, /<option value="KZ">KZ \/ KZT<\/option>/);
+  assert.match(sidepanelHtml, /<option value="NP">NP \/ NPR<\/option>/);
+  assert.match(sidepanelHtml, /<option value="IQ">IQ \/ IQD<\/option>/);
 
   const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /plusCheckoutRegionCode:/);
   assert.match(collectSource, /plusCheckoutRegionalCheckoutEnabled:/);
-  assert.match(collectSource, /inputPlusCheckoutRegionalCheckoutEnabled\.checked/);
+  assert.match(collectSource, /selectPlusCheckoutRegionCode\.value/);
 
   const applySource = extractFunction('applySettingsState');
-  assert.match(applySource, /inputPlusCheckoutRegionalCheckoutEnabled\.checked\s*=\s*Boolean/);
+  assert.match(applySource, /selectPlusCheckoutRegionCode\.value\s*=\s*normalizePlusCheckoutRegionCodeValue/);
 
   const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
   assert.notEqual(dataUpdatedStart, -1);
   const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 16000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckoutRegionCode !== undefined/);
   assert.match(dataUpdatedSnippet, /message\.payload\.plusCheckoutRegionalCheckoutEnabled !== undefined/);
 });
 

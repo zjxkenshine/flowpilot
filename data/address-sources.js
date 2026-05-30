@@ -7,8 +7,11 @@
     DE: ['de', 'deu', 'germany', 'deutschland', '德国'],
     FR: ['fr', 'fra', 'france', '法国'],
     ID: ['id', 'indonesia', '印度尼西亚', '印尼'],
+    IQ: ['iq', 'iraq', '伊拉克'],
     JP: ['jp', 'jpn', 'japan', '日本', '日本国'],
     KR: ['kr', 'kor', 'korea', 'south korea', '韩国', '대한민국'],
+    KZ: ['kz', 'kazakhstan', '哈萨克斯坦', '哈萨克'],
+    NP: ['np', 'nepal', '尼泊尔'],
     US: ['us', 'usa', 'united states', 'united states of america', 'america', '美国'],
   };
 
@@ -123,6 +126,28 @@
         },
       },
     ],
+    IQ: [
+      {
+        query: 'Baghdad Iraq',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Al Kindi Street',
+          city: 'Baghdad',
+          region: 'Baghdad',
+          postalCode: '10001',
+        },
+      },
+      {
+        query: 'Erbil Iraq',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Gulan Street',
+          city: 'Erbil',
+          region: 'Erbil',
+          postalCode: '44001',
+        },
+      },
+    ],
     JP: [
       {
         query: 'Tokyo Marunouchi',
@@ -164,6 +189,50 @@
           city: 'Gangnam-gu',
           region: 'Seoul',
           postalCode: '06236',
+        },
+      },
+    ],
+    KZ: [
+      {
+        query: 'Almaty Kazakhstan',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Dostyk Avenue 52',
+          city: 'Almaty',
+          region: 'Almaty',
+          postalCode: '050010',
+        },
+      },
+      {
+        query: 'Astana Kazakhstan',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Dostyq Street 16',
+          city: 'Astana',
+          region: 'Astana',
+          postalCode: '010000',
+        },
+      },
+    ],
+    NP: [
+      {
+        query: 'Kathmandu Nepal',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Durbar Marg',
+          city: 'Kathmandu',
+          region: 'Bagmati',
+          postalCode: '44600',
+        },
+      },
+      {
+        query: 'Lalitpur Nepal',
+        suggestionIndex: 1,
+        fallback: {
+          address1: 'Pulchowk Road',
+          city: 'Lalitpur',
+          region: 'Bagmati',
+          postalCode: '44700',
         },
       },
     ],

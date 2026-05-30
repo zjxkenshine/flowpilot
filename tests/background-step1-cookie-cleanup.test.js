@@ -72,6 +72,9 @@ test('step 1 cookie cleanup queries target domains and runs browsingData sweep',
       removeCookies: async (details) => {
         events.browsingDataCalls.push(details);
       },
+      remove: async () => {
+        throw new Error('deep cleanup should be disabled by default');
+      },
     },
   };
 
@@ -175,6 +178,127 @@ test('step 1 cookie cleanup still runs browsingData sweep when no direct cookie 
   assert.equal(events.browsingDataCalls.length, 1);
   assert.ok(events.browsingDataCalls[0].origins.includes('https://paypal.com'));
   assert.equal(events.fingerprintCalls, 1);
+});
+
+test('step 1 maximum target site cleanup runs only when enabled', async () => {
+  const api = loadStep1Module();
+  const events = {
+    browsingDataRemoveCalls: [],
+    removedTabs: [],
+    logs: [],
+  };
+
+  const chromeApi = {
+    cookies: {
+      getAllCookieStores: async () => [],
+      getAll: async () => [],
+      remove: async () => null,
+    },
+    browsingData: {
+      removeCookies: async () => {},
+      remove: async (options, dataTypes) => {
+        events.browsingDataRemoveCalls.push({ options, dataTypes });
+      },
+    },
+    tabs: {
+      query: async () => [
+        { id: 1, url: 'https://chatgpt.com/' },
+        { id: 2, url: 'https://example.com/' },
+        { id: 3, url: 'https://checkout.stripe.com/pay/cs_test' },
+      ],
+      remove: async (ids) => {
+        events.removedTabs.push(...(Array.isArray(ids) ? ids : [ids]));
+      },
+    },
+  };
+
+  const executor = api.createStep1Executor({
+    addLog: async (message, level) => {
+      events.logs.push({ message, level });
+    },
+    chrome: chromeApi,
+    getState: async () => ({
+      ipProxyEnabled: false,
+      browserStateCleanupEnabled: true,
+    }),
+    ensureBrowserFingerprintForProxyExit: async () => ({ profile: { exitRegion: 'US' } }),
+    openSignupEntryTab: async () => {},
+    completeNodeFromBackground: async () => {},
+  });
+
+  await executor.executeStep1();
+
+  assert.equal(events.browsingDataRemoveCalls.length, 1);
+  assert.deepStrictEqual(events.browsingDataRemoveCalls[0].dataTypes, {
+    cache: true,
+    cacheStorage: true,
+    cookies: true,
+    fileSystems: true,
+    indexedDB: true,
+    localStorage: true,
+    serviceWorkers: true,
+    webSQL: true,
+  });
+  assert.equal(events.browsingDataRemoveCalls[0].options.since, 0);
+  assert.deepStrictEqual(events.browsingDataRemoveCalls[0].options.originTypes, {
+    unprotectedWeb: true,
+  });
+  assert.ok(events.browsingDataRemoveCalls[0].options.origins.includes('https://chatgpt.com'));
+  assert.ok(events.browsingDataRemoveCalls[0].options.origins.includes('https://pay.openai.com'));
+  assert.ok(events.browsingDataRemoveCalls[0].options.origins.includes('https://checkout.stripe.com'));
+  assert.ok(events.browsingDataRemoveCalls[0].options.origins.includes('https://www.paypal.com'));
+  assert.deepStrictEqual(events.removedTabs.sort((a, b) => a - b), [1, 3]);
+});
+
+test('step 1 maximum target site cleanup failure logs warning and continues', async () => {
+  const api = loadStep1Module();
+  const events = {
+    logs: [],
+    opened: 0,
+    completed: 0,
+  };
+
+  const chromeApi = {
+    cookies: {
+      getAllCookieStores: async () => [],
+      getAll: async () => [],
+      remove: async () => null,
+    },
+    browsingData: {
+      removeCookies: async () => {},
+      remove: async () => {
+        throw new Error('cleanup unavailable');
+      },
+    },
+    tabs: {
+      query: async () => [],
+      remove: async () => {},
+    },
+  };
+
+  const executor = api.createStep1Executor({
+    addLog: async (message, level) => {
+      events.logs.push({ message, level });
+    },
+    chrome: chromeApi,
+    getState: async () => ({
+      ipProxyEnabled: false,
+      browserStateCleanupEnabled: true,
+    }),
+    ensureBrowserFingerprintForProxyExit: async () => ({ profile: { exitRegion: 'US' } }),
+    openSignupEntryTab: async () => {
+      events.opened += 1;
+    },
+    completeNodeFromBackground: async () => {
+      events.completed += 1;
+    },
+  });
+
+  await executor.executeStep1();
+
+  assert.equal(events.opened, 1);
+  assert.equal(events.completed, 1);
+  assert.equal(events.logs.some((entry) => entry.level === 'warn' && /cleanup unavailable|目标站点状态清理失败/.test(entry.message)), true);
 });
 
 test('step 1 generates browser fingerprint and skips proxy probe when IP proxy is disabled', async () => {
@@ -602,18 +726,17 @@ test('step 1 stops before opening ChatGPT when browser fingerprint apply fails',
 test('step 1 switches to next proxy and reprobes before opening ChatGPT', async () => {
   const api = loadStep1Module();
   const events = [];
-  let stateCallCount = 0;
   let probeCallCount = 0;
+  let proxyStateIndex = 0;
 
   const executor = api.createStep1Executor({
     addLog: async () => {},
     chrome: createNoopChromeApi(),
-    getState: async () => {
-      stateCallCount += 1;
-      return { ipProxyEnabled: true, marker: `state-${stateCallCount}` };
-    },
+    getState: async () => ({ ipProxyEnabled: true }),
     probeIpProxyExit: async (options) => {
       probeCallCount += 1;
+      proxyStateIndex += 1;
+      options.state.marker = `state-${proxyStateIndex}`;
       events.push(['probe', options.state.marker]);
       if (probeCallCount === 1) {
         return {

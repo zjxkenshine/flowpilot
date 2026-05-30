@@ -397,6 +397,21 @@
           </select>
         </div>
       </div>
+      <div class="data-row" id="row-browser-state-cleanup">
+        <span class="data-label">新轮清理</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-browser-state-cleanup-enabled"
+              title="开启后新一轮前清理 ChatGPT/OpenAI/支付相关站点数据；默认关闭">
+              <input type="checkbox" id="input-browser-state-cleanup-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <span class="setting-caption">清理目标站点旧会话状态；可能登出相关站点</span>
+        </div>
+      </div>
       <div class="data-row" id="row-plus-account-access-strategy" style="display:none;">
         <span class="data-label">账号接入策略</span>
         <div class="data-inline">
@@ -533,17 +548,17 @@
       </div>
       <div class="data-row" id="row-plus-checkout-regional-checkout" style="display:none;">
         <span class="data-label">Checkout 地区</span>
-        <div class="data-inline setting-pair">
-          <div class="setting-group setting-group-primary">
-            <label class="toggle-switch" for="input-plus-checkout-regional-checkout-enabled"
-              title="开启后创建 checkout 时国家/币种跟随支付出口；默认关闭">
-              <input type="checkbox" id="input-plus-checkout-regional-checkout-enabled" />
-              <span class="toggle-switch-track" aria-hidden="true">
-                <span class="toggle-switch-thumb"></span>
-              </span>
-            </label>
-          </div>
-          <span class="setting-caption">国家/币种跟随支付出口；默认关闭</span>
+        <div class="data-inline">
+          <select id="select-plus-checkout-region-code" class="data-select">
+            <option value="US" selected>US / USD</option>
+            <option value="auto">跟随支付出口</option>
+            <option value="JP">JP / JPY</option>
+            <option value="BR">BR / BRL</option>
+            <option value="KZ">KZ / KZT</option>
+            <option value="NP">NP / NPR</option>
+            <option value="IQ">IQ / IQD</option>
+          </select>
+          <span class="setting-caption">固定地区优先；选择跟随时按支付出口生成国家/币种。</span>
         </div>
       </div>
       <div class="data-row" id="row-plus-checkout-cloud-conversion-api-url" style="display:none;">
@@ -2702,6 +2717,7 @@
   <script src="../yyds-mail-utils.js"></script>
   <script src="../shared/flow-registry.js"></script>
   <script src="../shared/contribution-registry.js"></script>
+  <script src="../shared/plus-checkout-regions.js"></script>
   <script src="../shared/settings-schema.js"></script>
   <script src="../shared/flow-capabilities.js"></script>
   <script src="../data/names.js"></script>

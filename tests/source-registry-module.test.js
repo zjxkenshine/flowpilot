@@ -61,6 +61,7 @@ test('manifest statically injects payment page content bundles', () => {
   assert.deepEqual(plusCheckoutBundle.js, [
     'content/activation-utils.js',
     'shared/source-registry.js',
+    'shared/plus-checkout-regions.js',
     'content/utils.js',
     'content/operation-delay.js',
     'content/plus-checkout.js',
@@ -73,6 +74,7 @@ test('manifest statically injects payment page content bundles', () => {
     'content/paypal-flow.js',
   ]);
   assertOrdered(plusCheckoutBundle.js, 'shared/source-registry.js', 'content/utils.js');
+  assertOrdered(plusCheckoutBundle.js, 'shared/plus-checkout-regions.js', 'content/plus-checkout.js');
   assertOrdered(plusCheckoutBundle.js, 'content/operation-delay.js', 'content/plus-checkout.js');
   assertOrdered(paypalBundle.js, 'shared/source-registry.js', 'content/utils.js');
   assertOrdered(paypalBundle.js, 'content/operation-delay.js', 'content/paypal-flow.js');

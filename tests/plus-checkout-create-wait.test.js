@@ -8,8 +8,9 @@ const checkoutConversionProxySource = fs.readFileSync('background/checkout-conve
 const plusCheckoutSource = fs.readFileSync('content/plus-checkout.js', 'utf8');
 const gopayUtilsSource = fs.readFileSync('gopay-utils.js', 'utf8');
 const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
+const checkoutRegionsSource = fs.readFileSync('shared/plus-checkout-regions.js', 'utf8');
 const globalScope = {};
-new Function('self', `${gopayUtilsSource}; ${brazilSource};`)(globalScope);
+new Function('self', `${gopayUtilsSource}; ${brazilSource}; ${checkoutRegionsSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 const PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
@@ -715,6 +716,7 @@ test('Plus checkout create waits 20 seconds after opening checkout page by defau
     {
       paymentMethod: 'paypal',
       hostedCheckoutFinalStep: false,
+      checkoutRegionCode: 'US',
       regionalCheckoutEnabled: false,
       billingDetails: { country: 'US', currency: 'USD' },
     }
@@ -855,10 +857,66 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
   assert.deepStrictEqual(events[0]?.payload, {
     paymentMethod: 'gopay',
     hostedCheckoutFinalStep: false,
+    checkoutRegionCode: 'US',
     regionalCheckoutEnabled: false,
     billingDetails: { country: 'ID', currency: 'IDR' },
   });
   assert.equal(events.some((event) => event.type === 'proxy-apply'), false);
+});
+
+test('Plus checkout create forwards selected fixed checkout region billing details', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 77 }),
+        update: async () => {},
+      },
+    },
+    completeNodeFromBackground: async () => {},
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_np',
+          country: 'NP',
+          currency: 'NPR',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: 'NPR 0',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+    plusCheckoutRegionCode: 'NP',
+  });
+
+  const payload = events.find((event) => event.message.type === 'CREATE_PLUS_CHECKOUT')?.message.payload;
+  assert.deepEqual(payload, {
+    paymentMethod: 'paypal',
+    hostedCheckoutFinalStep: false,
+    checkoutRegionCode: 'NP',
+    regionalCheckoutEnabled: true,
+    billingDetails: { country: 'NP', currency: 'NPR' },
+  });
 });
 
 test('Classic PayPal checkout create applies conversion proxy before opening checkout link', async () => {
@@ -2892,6 +2950,7 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
     {
       paymentMethod: 'paypal-hosted',
       hostedCheckoutFinalStep: true,
+      checkoutRegionCode: 'US',
       regionalCheckoutEnabled: false,
       billingDetails: { country: 'US', currency: 'USD' },
     }

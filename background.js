@@ -3,6 +3,7 @@
 importScripts(
   'shared/flow-registry.js',
   'shared/contribution-registry.js',
+  'shared/plus-checkout-regions.js',
   'shared/settings-schema.js',
   'shared/source-registry.js',
   'shared/flow-capabilities.js',
@@ -1553,6 +1554,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   browserFingerprintEnabled: true,
   browserFingerprintLevel: 'standard',
   browserFingerprintLanguage: 'zh-CN',
+  browserStateCleanupEnabled: false,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
@@ -1566,6 +1568,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutCloudConversionEnabled: false,
   plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
   plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
+  plusCheckoutRegionCode: 'US',
   plusCheckoutRegionalCheckoutEnabled: false,
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
@@ -1831,6 +1834,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
   'browserFingerprintLanguage',
+  'browserStateCleanupEnabled',
   'plusModeEnabled',
   'phonePlusModeEnabled',
   'plusPaymentMethod',
@@ -1842,6 +1846,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
   'plusCheckoutConversionProxySource',
+  'plusCheckoutRegionCode',
   'plusCheckoutRegionalCheckoutEnabled',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
@@ -3089,12 +3094,19 @@ function normalizePlusCheckoutConversionProxy711Region(value = '') {
   return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
 }
 
-const PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES = Object.freeze(['US', 'JP', 'BR']);
-const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = Object.freeze({
-  US: Object.freeze({ country: 'US', currency: 'USD' }),
-  JP: Object.freeze({ country: 'JP', currency: 'JPY' }),
-  BR: Object.freeze({ country: 'BR', currency: 'BRL' }),
-});
+const PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES = Object.freeze(
+  self.MultiPagePlusCheckoutRegions?.getSupportedRegionCodes
+    ? self.MultiPagePlusCheckoutRegions.getSupportedRegionCodes()
+    : ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ']
+);
+const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = Object.freeze(
+  Object.fromEntries(PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.map((code) => {
+    const billing = self.MultiPagePlusCheckoutRegions?.getCheckoutBillingDetailsForRegion
+      ? self.MultiPagePlusCheckoutRegions.getCheckoutBillingDetailsForRegion(code)
+      : ({ country: code, currency: ({ US: 'USD', JP: 'JPY', BR: 'BRL', KZ: 'KZT', NP: 'NPR', IQ: 'IQD' })[code] || 'USD' });
+    return [code, Object.freeze(billing)];
+  }))
+);
 
 function normalizePlusCheckoutProfileCountryCode(value = '', fallback = '') {
   const raw = String(value || '').trim();
@@ -3105,6 +3117,9 @@ function normalizePlusCheckoutProfileCountryCode(value = '', fallback = '') {
     if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) normalized = 'US';
     else if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) normalized = 'JP';
     else if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) normalized = 'BR';
+    else if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) normalized = 'KZ';
+    else if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) normalized = 'NP';
+    else if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) normalized = 'IQ';
   }
   if (!normalized) {
     const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
@@ -3268,8 +3283,20 @@ async function resolvePlusCheckoutRegionalBillingDetails(state = {}, options = {
   if (paymentMethod === gopayMethod || paymentMethod === gpcHelperMethod) {
     return null;
   }
-  if (!Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
+  const regionApi = self.MultiPagePlusCheckoutRegions || {};
+  const selectedRegionCode = regionApi.normalizeCheckoutRegionCode
+    ? regionApi.normalizeCheckoutRegionCode(
+      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+      'US'
+    )
+    : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US');
+  if (selectedRegionCode === 'US' && !Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
     return null;
+  }
+  if (selectedRegionCode && selectedRegionCode !== 'auto') {
+    return regionApi.getCheckoutBillingDetailsForRegion
+      ? regionApi.getCheckoutBillingDetailsForRegion(selectedRegionCode)
+      : (PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS[selectedRegionCode] || PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS.US);
   }
   const region = await resolvePlusCheckoutProfileRegion(state, {
     context: options?.context || 'plus-checkout-regional-checkout',
@@ -4637,6 +4664,8 @@ function normalizePersistentSettingValue(key, value) {
           if (normalized === 'en' || normalized === 'en-us') return 'en-US';
           return 'zh-CN';
         })();
+    case 'browserStateCleanupEnabled':
+      return Boolean(value);
     case 'plusPaymentMethod':
       return normalizePlusPaymentMethod(value);
     case 'plusHostedCheckoutIsFinalStep':
@@ -4675,6 +4704,14 @@ function normalizePersistentSettingValue(key, value) {
       }
     case 'plusCheckoutCloudConversionApiKey':
       return String(value || '').trim();
+    case 'plusCheckoutRegionCode':
+      return self.MultiPagePlusCheckoutRegions?.normalizeCheckoutRegionCode
+        ? self.MultiPagePlusCheckoutRegions.normalizeCheckoutRegionCode(value, 'US')
+        : (() => {
+          const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+          if (String(value || '').trim().toLowerCase() === 'auto') return 'auto';
+          return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized) ? normalized : 'US';
+        })();
     case 'plusCheckoutRegionalCheckoutEnabled':
       return Boolean(value);
     case 'plusCheckoutConversionProxySource':
@@ -5356,6 +5393,12 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
   ) {
     normalizedInput.hostedCheckoutFirstResendWaitSeconds = normalizedInput.hostedCheckoutVerificationPopupDelaySeconds;
   }
+  if (
+    normalizedInput.plusCheckoutRegionCode === undefined
+    && normalizedInput.plusCheckoutRegionalCheckoutEnabled !== undefined
+  ) {
+    normalizedInput.plusCheckoutRegionCode = normalizedInput.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US';
+  }
 
   const isPlainObjectForSettingsSchema = typeof isPlainObjectValue === 'function'
     ? isPlainObjectValue
@@ -5387,6 +5430,9 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
   }
   if (payload.hostedCheckoutFirstResendWaitSeconds !== undefined) {
     payload.hostedCheckoutVerificationPopupDelaySeconds = payload.hostedCheckoutFirstResendWaitSeconds;
+  }
+  if (payload.plusCheckoutRegionCode !== undefined) {
+    payload.plusCheckoutRegionalCheckoutEnabled = payload.plusCheckoutRegionCode !== 'US';
   }
 
   const hasPhoneSmsReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'phoneSmsReuseEnabled');
@@ -5911,6 +5957,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('browserFingerprintEnabled', ['flows', 'openai', 'browserFingerprint', 'enabled']);
   assignIfUpdated('browserFingerprintLevel', ['flows', 'openai', 'browserFingerprint', 'level']);
   assignIfUpdated('browserFingerprintLanguage', ['flows', 'openai', 'browserFingerprint', 'language']);
+  assignIfUpdated('browserStateCleanupEnabled', ['flows', 'openai', 'browserStateCleanup', 'enabled']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
@@ -5921,6 +5968,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusCheckoutCreatePreWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutCreatePreWaitSeconds']);
   assignIfUpdated('plusCheckoutOpenStableWaitSeconds', ['flows', 'openai', 'plus', 'plusCheckoutOpenStableWaitSeconds']);
   assignIfUpdated('plusHostedCheckoutCardPreWaitSeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutCardPreWaitSeconds']);
+  assignIfUpdated('plusCheckoutRegionCode', ['flows', 'openai', 'plus', 'plusCheckoutRegionCode']);
   assignIfUpdated('plusCheckoutRegionalCheckoutEnabled', ['flows', 'openai', 'plus', 'plusCheckoutRegionalCheckoutEnabled']);
   assignIfUpdated('plusCheckoutConversionProxySource', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxySource']);
   assignIfUpdated('plusCheckoutConversionProxyUrl', ['flows', 'openai', 'plus', 'plusCheckoutConversionProxyUrl']);
@@ -18441,6 +18489,7 @@ const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   getIpProxyActivationStepForState,
   openSignupEntryTab,
   probeIpProxyExit,
+  queryTabsInAutomationWindow,
   resolveSignupMethod,
   switchIpProxy,
 });

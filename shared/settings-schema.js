@@ -208,6 +208,32 @@
     const normalizePlusCheckoutVerificationFailureStrategy = (value = '') => (
       String(value || '').trim().toLowerCase() === 'retry' ? 'retry' : 'continue'
     );
+    const plusCheckoutRegions = rootScope.MultiPagePlusCheckoutRegions || {};
+    const normalizePlusCheckoutRegionCode = typeof plusCheckoutRegions.normalizeCheckoutRegionCode === 'function'
+      ? plusCheckoutRegions.normalizeCheckoutRegionCode
+      : ((value = '', fallback = 'US') => {
+        const raw = String(value ?? '').trim();
+        const lower = raw.toLowerCase();
+        if (lower === 'auto') return 'auto';
+        const compact = raw.toUpperCase().replace(/[^A-Z]/g, '');
+        return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(compact)
+          ? compact
+          : (fallback === 'auto' ? 'auto' : 'US');
+      });
+    const normalizePlusCheckoutRegionCodeWithLegacy = (input = {}, nestedPlus = {}, fallback = 'US') => {
+      if (Object.prototype.hasOwnProperty.call(input || {}, 'plusCheckoutRegionCode')) {
+        return normalizePlusCheckoutRegionCode(input.plusCheckoutRegionCode, fallback);
+      }
+      if (Object.prototype.hasOwnProperty.call(nestedPlus || {}, 'plusCheckoutRegionCode')) {
+        return normalizePlusCheckoutRegionCode(nestedPlus.plusCheckoutRegionCode, fallback);
+      }
+      const legacyEnabled = Boolean(
+        input?.plusCheckoutRegionalCheckoutEnabled
+          ?? nestedPlus?.plusCheckoutRegionalCheckoutEnabled
+          ?? false
+      );
+      return legacyEnabled ? 'auto' : normalizePlusCheckoutRegionCode(fallback, 'US');
+    };
     const plusCheckAllowedRegionOptions = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
     const plusCheckAllowedRegionSet = new Set(plusCheckAllowedRegionOptions);
     const normalizePlusCheckAllowedRegionCode = (value = '') => {
@@ -509,6 +535,9 @@
               level: 'standard',
               language: 'zh-CN',
             },
+            browserStateCleanup: {
+              enabled: false,
+            },
             oauth: {
               oauthOpenAfterRefreshWaitSeconds: 5,
             },
@@ -523,6 +552,7 @@
               plusCheckoutCreatePreWaitSeconds: 10,
               plusCheckoutOpenStableWaitSeconds: 20,
               plusHostedCheckoutCardPreWaitSeconds: 10,
+              plusCheckoutRegionCode: 'US',
               plusCheckoutRegionalCheckoutEnabled: false,
               plusCheckoutConversionProxySource: 'manual',
               plusCheckoutConversionProxyUrl: '',
@@ -842,6 +872,13 @@
                 ?? defaults.flows.openai.browserFingerprint.language
               ),
             },
+            browserStateCleanup: {
+              enabled: Boolean(
+                input?.browserStateCleanupEnabled
+                ?? nested?.flows?.openai?.browserStateCleanup?.enabled
+                ?? defaults.flows.openai.browserStateCleanup.enabled
+              ),
+            },
             oauth: {
               oauthOpenAfterRefreshWaitSeconds: normalizeBoundedInteger(
                 input?.oauthOpenAfterRefreshWaitSeconds
@@ -914,6 +951,16 @@
                 );
                 return Math.min(120, Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : defaults.flows.openai.plus.plusHostedCheckoutCardPreWaitSeconds)));
               })(),
+              plusCheckoutRegionCode: normalizePlusCheckoutRegionCodeWithLegacy(
+                input,
+                nested?.flows?.openai?.plus,
+                defaults.flows.openai.plus.plusCheckoutRegionCode
+              ),
+              plusCheckoutRegionalCheckoutEnabled: normalizePlusCheckoutRegionCodeWithLegacy(
+                input,
+                nested?.flows?.openai?.plus,
+                defaults.flows.openai.plus.plusCheckoutRegionCode
+              ) !== 'US',
               plusCheckoutConversionProxySource: (() => {
                 const normalized = String(
                   input?.plusCheckoutConversionProxySource
@@ -931,11 +978,6 @@
                 }
                 return 'manual';
               })(),
-              plusCheckoutRegionalCheckoutEnabled: Boolean(
-                input?.plusCheckoutRegionalCheckoutEnabled
-                  ?? nested?.flows?.openai?.plus?.plusCheckoutRegionalCheckoutEnabled
-                  ?? defaults.flows.openai.plus.plusCheckoutRegionalCheckoutEnabled
-              ),
               plusCheckoutConversionProxyUrl: String(
                 input?.plusCheckoutConversionProxyUrl
                 ?? nested?.flows?.openai?.plus?.plusCheckoutConversionProxyUrl
@@ -1312,6 +1354,7 @@
       next.browserFingerprintEnabled = openaiState.browserFingerprint.enabled;
       next.browserFingerprintLevel = openaiState.browserFingerprint.level;
       next.browserFingerprintLanguage = openaiState.browserFingerprint.language;
+      next.browserStateCleanupEnabled = openaiState.browserStateCleanup.enabled;
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
@@ -1323,6 +1366,7 @@
       next.plusCheckoutCreatePreWaitSeconds = openaiState.plus.plusCheckoutCreatePreWaitSeconds;
       next.plusCheckoutOpenStableWaitSeconds = openaiState.plus.plusCheckoutOpenStableWaitSeconds;
       next.plusHostedCheckoutCardPreWaitSeconds = openaiState.plus.plusHostedCheckoutCardPreWaitSeconds;
+      next.plusCheckoutRegionCode = openaiState.plus.plusCheckoutRegionCode;
       next.plusCheckoutRegionalCheckoutEnabled = openaiState.plus.plusCheckoutRegionalCheckoutEnabled;
       next.plusCheckoutConversionProxySource = openaiState.plus.plusCheckoutConversionProxySource;
       next.plusCheckoutConversionProxyUrl = openaiState.plus.plusCheckoutConversionProxyUrl;

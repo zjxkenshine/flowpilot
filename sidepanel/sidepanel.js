@@ -265,6 +265,8 @@ const inputBrowserFingerprintEnabled = document.getElementById('input-browser-fi
 const selectBrowserFingerprintLevel = document.getElementById('select-browser-fingerprint-level');
 const selectBrowserFingerprintLanguage = document.getElementById('select-browser-fingerprint-language');
 const browserFingerprintCaption = document.getElementById('browser-fingerprint-caption');
+const rowBrowserStateCleanup = document.getElementById('row-browser-state-cleanup');
+const inputBrowserStateCleanupEnabled = document.getElementById('input-browser-state-cleanup-enabled');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
 const rowPlusCheckoutVerificationFailureStrategy = document.getElementById('row-plus-verification-failure-strategy');
@@ -364,7 +366,7 @@ const inputPlusCheckoutCloudConversionEnabled = document.getElementById('input-p
 const rowPlusCheckoutConversionProxyExit = document.getElementById('row-plus-checkout-conversion-proxy-exit');
 const displayPlusCheckoutConversionProxyExitCheck = document.getElementById('display-plus-checkout-conversion-proxy-exit-check');
 const rowPlusCheckoutRegionalCheckout = document.getElementById('row-plus-checkout-regional-checkout');
-const inputPlusCheckoutRegionalCheckoutEnabled = document.getElementById('input-plus-checkout-regional-checkout-enabled');
+const selectPlusCheckoutRegionCode = document.getElementById('select-plus-checkout-region-code');
 const rowPlusCheckoutCloudConversionApiUrl = document.getElementById('row-plus-checkout-cloud-conversion-api-url');
 const inputPlusCheckoutCloudConversionApiUrl = document.getElementById('input-plus-checkout-cloud-conversion-api-url');
 const rowPlusCheckoutCloudConversionApiKey = document.getElementById('row-plus-checkout-cloud-conversion-api-key');
@@ -4036,6 +4038,21 @@ function normalizePlusCheckoutConversionProxy711RegionValue(value = '') {
   return draft.length === 2 ? draft : '';
 }
 
+function normalizePlusCheckoutRegionCodeValue(value = '', fallback = 'US') {
+  const api = window.MultiPagePlusCheckoutRegions;
+  if (api?.normalizeCheckoutRegionCode) {
+    return api.normalizeCheckoutRegionCode(value, fallback);
+  }
+  const raw = String(value || '').trim();
+  if (raw.toLowerCase() === 'auto') {
+    return 'auto';
+  }
+  const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized)
+    ? normalized
+    : (fallback === 'auto' ? 'auto' : 'US');
+}
+
 function normalizePlusCheckoutCloudConversionApiUrlValue(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
@@ -5550,6 +5567,14 @@ function collectSettingsPayload() {
       const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
       return normalized.length === 2 ? normalized : '';
     });
+  const normalizePlusCheckoutRegionCodeInput = typeof normalizePlusCheckoutRegionCodeValue === 'function'
+    ? normalizePlusCheckoutRegionCodeValue
+    : ((value = '', fallback = 'US') => {
+      const raw = String(value || '').trim();
+      if (raw.toLowerCase() === 'auto') return 'auto';
+      const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
+      return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized) ? normalized : fallback;
+    });
   const normalizeBrowserFingerprintLevelInput = typeof normalizeBrowserFingerprintLevel === 'function'
     ? normalizeBrowserFingerprintLevel
     : ((value = '') => {
@@ -6430,6 +6455,9 @@ function collectSettingsPayload() {
     browserFingerprintLanguage: typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage
       ? normalizeBrowserFingerprintLanguageInput(selectBrowserFingerprintLanguage.value)
       : normalizeBrowserFingerprintLanguageInput(latestState?.browserFingerprintLanguage),
+    browserStateCleanupEnabled: typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled
+      ? Boolean(inputBrowserStateCleanupEnabled.checked)
+      : Boolean(latestState?.browserStateCleanupEnabled),
     plusModeEnabled: payloadPlusModeEnabled,
     phonePlusModeEnabled: payloadPhonePlusModeEnabled,
     plusPaymentMethod,
@@ -6535,9 +6563,18 @@ function collectSettingsPayload() {
     plusCheckoutCloudConversionEnabled: typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled
       ? Boolean(inputPlusCheckoutCloudConversionEnabled.checked)
       : false,
-    plusCheckoutRegionalCheckoutEnabled: typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled
-      ? Boolean(inputPlusCheckoutRegionalCheckoutEnabled.checked)
-      : Boolean(latestState?.plusCheckoutRegionalCheckoutEnabled),
+    plusCheckoutRegionCode: normalizePlusCheckoutRegionCodeInput(
+      typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode
+        ? selectPlusCheckoutRegionCode.value
+        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US')),
+      'US'
+    ),
+    plusCheckoutRegionalCheckoutEnabled: normalizePlusCheckoutRegionCodeInput(
+      typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode
+        ? selectPlusCheckoutRegionCode.value
+        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US')),
+      'US'
+    ) !== 'US',
     plusCheckoutCloudConversionApiUrl: typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl
       ? normalizePlusCheckoutCloudConversionApiUrlValue(inputPlusCheckoutCloudConversionApiUrl.value)
       : builtinPlusCheckoutCloudConversionApiUrl,
@@ -13409,6 +13446,9 @@ function applySettingsState(state) {
   if (typeof selectBrowserFingerprintLanguage !== 'undefined' && selectBrowserFingerprintLanguage) {
     selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(state?.browserFingerprintLanguage);
   }
+  if (typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled) {
+    inputBrowserStateCleanupEnabled.checked = Boolean(state?.browserStateCleanupEnabled);
+  }
   if (typeof updateBrowserFingerprintUI === 'function') {
     updateBrowserFingerprintUI(state);
   }
@@ -13604,8 +13644,11 @@ function applySettingsState(state) {
   if (typeof inputPlusCheckoutCloudConversionEnabled !== 'undefined' && inputPlusCheckoutCloudConversionEnabled) {
     inputPlusCheckoutCloudConversionEnabled.checked = Boolean(state?.plusCheckoutCloudConversionEnabled);
   }
-  if (typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
-    inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(state?.plusCheckoutRegionalCheckoutEnabled);
+  if (typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode) {
+    selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
+      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+      'US'
+    );
   }
   if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
     syncPlusCheckAllowedRegionsControl(state?.plusCheckAllowedRegions || []);
@@ -16173,8 +16216,14 @@ function updateBrowserFingerprintUI(state = latestState) {
   if (typeof rowBrowserFingerprintLanguage !== 'undefined' && rowBrowserFingerprintLanguage) {
     rowBrowserFingerprintLanguage.style.display = visible ? '' : 'none';
   }
+  if (typeof rowBrowserStateCleanup !== 'undefined' && rowBrowserStateCleanup) {
+    rowBrowserStateCleanup.style.display = visible ? '' : 'none';
+  }
   if (typeof inputBrowserFingerprintEnabled !== 'undefined' && inputBrowserFingerprintEnabled) {
     inputBrowserFingerprintEnabled.checked = enabled;
+  }
+  if (typeof inputBrowserStateCleanupEnabled !== 'undefined' && inputBrowserStateCleanupEnabled) {
+    inputBrowserStateCleanupEnabled.checked = Boolean(state?.browserStateCleanupEnabled);
   }
   if (typeof selectBrowserFingerprintLevel !== 'undefined' && selectBrowserFingerprintLevel) {
     selectBrowserFingerprintLevel.value = level;
@@ -19371,7 +19420,13 @@ inputPlusCheckoutCloudConversionEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
-inputPlusCheckoutRegionalCheckoutEnabled?.addEventListener('change', () => {
+selectPlusCheckoutRegionCode?.addEventListener('change', () => {
+  const regionCode = normalizePlusCheckoutRegionCodeValue(selectPlusCheckoutRegionCode.value, 'US');
+  selectPlusCheckoutRegionCode.value = regionCode;
+  syncLatestState({
+    plusCheckoutRegionCode: regionCode,
+    plusCheckoutRegionalCheckoutEnabled: regionCode !== 'US',
+  });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -19523,6 +19578,11 @@ selectBrowserFingerprintLevel?.addEventListener('change', () => {
 selectBrowserFingerprintLanguage?.addEventListener('change', () => {
   selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(selectBrowserFingerprintLanguage.value);
   updateBrowserFingerprintUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputBrowserStateCleanupEnabled?.addEventListener('change', () => {
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -22371,8 +22431,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputHostedCheckoutPhone.value = normalizeHostedCheckoutPhoneValue(message.payload.hostedCheckoutPhoneNumber);
         validateHostedCheckoutContactConfig();
       }
-      if (message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined && typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
-        inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(message.payload.plusCheckoutRegionalCheckoutEnabled);
+      if (
+        (message.payload.plusCheckoutRegionCode !== undefined || message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined)
+        && typeof selectPlusCheckoutRegionCode !== 'undefined'
+        && selectPlusCheckoutRegionCode
+      ) {
+        selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
+          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+          'US'
+        );
       }
       if (message.payload.hostedCheckoutSmsPoolText !== undefined && inputHostedCheckoutSmsPool) {
         inputHostedCheckoutSmsPool.value = normalizeHostedCheckoutSmsPoolTextValue(message.payload.hostedCheckoutSmsPoolText);
@@ -22667,10 +22734,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.browserFingerprintLanguage !== undefined && selectBrowserFingerprintLanguage) {
         selectBrowserFingerprintLanguage.value = normalizeBrowserFingerprintLanguage(message.payload.browserFingerprintLanguage);
       }
+      if (message.payload.browserStateCleanupEnabled !== undefined && inputBrowserStateCleanupEnabled) {
+        inputBrowserStateCleanupEnabled.checked = Boolean(message.payload.browserStateCleanupEnabled);
+      }
       if (
         message.payload.browserFingerprintEnabled !== undefined
         || message.payload.browserFingerprintLevel !== undefined
         || message.payload.browserFingerprintLanguage !== undefined
+        || message.payload.browserStateCleanupEnabled !== undefined
       ) {
         updateBrowserFingerprintUI(latestState);
       }
@@ -22714,8 +22785,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.plusCheckoutConversionProxy711Region !== undefined && inputPlusCheckoutConversionProxy711Region) {
         inputPlusCheckoutConversionProxy711Region.value = normalizePlusCheckoutConversionProxy711RegionValue(message.payload.plusCheckoutConversionProxy711Region);
       }
-      if (message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined && typeof inputPlusCheckoutRegionalCheckoutEnabled !== 'undefined' && inputPlusCheckoutRegionalCheckoutEnabled) {
-        inputPlusCheckoutRegionalCheckoutEnabled.checked = Boolean(message.payload.plusCheckoutRegionalCheckoutEnabled);
+      if (
+        (message.payload.plusCheckoutRegionCode !== undefined || message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined)
+        && typeof selectPlusCheckoutRegionCode !== 'undefined'
+        && selectPlusCheckoutRegionCode
+      ) {
+        selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
+          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+          'US'
+        );
       }
       if (
         message.payload.plusCheckoutConversionProxyManualSession !== undefined
@@ -22723,6 +22801,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.plusCheckoutConversionProxySource !== undefined
         || message.payload.plusCheckoutConversionProxyUrl !== undefined
         || message.payload.plusCheckoutConversionProxy711Region !== undefined
+        || message.payload.plusCheckoutRegionCode !== undefined
         || message.payload.plusCheckoutRegionalCheckoutEnabled !== undefined
       ) {
         updatePlusCheckoutConversionModeUi();

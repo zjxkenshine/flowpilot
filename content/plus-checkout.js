@@ -80,6 +80,9 @@ const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = {
   US: { country: 'US', currency: 'USD' },
   JP: { country: 'JP', currency: 'JPY' },
   BR: { country: 'BR', currency: 'BRL' },
+  KZ: { country: 'KZ', currency: 'KZT' },
+  NP: { country: 'NP', currency: 'NPR' },
+  IQ: { country: 'IQ', currency: 'IQD' },
 };
 
 async function performOperationWithDelay(metadata, operation) {
@@ -1697,6 +1700,13 @@ function writeGoPayDiagnostics(reason, level = 'info') {
 }
 
 function normalizeRegionalCheckoutCountryCode(value = '') {
+  const regionApi = window.MultiPagePlusCheckoutRegions;
+  if (regionApi?.normalizeFixedCheckoutRegionCode) {
+    const normalizedRegion = regionApi.normalizeFixedCheckoutRegionCode(value, '');
+    if (normalizedRegion) {
+      return normalizedRegion;
+    }
+  }
   const raw = String(value || '').trim();
   const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
   if (Object.prototype.hasOwnProperty.call(PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS, normalized)) {
@@ -1706,6 +1716,9 @@ function normalizeRegionalCheckoutCountryCode(value = '') {
   if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
   if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
   if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+  if (/\b(?:kz|kazakhstan)\b|\u54c8\u8428\u514b/.test(lower)) return 'KZ';
+  if (/\b(?:np|nepal)\b|\u5c3c\u6cca\u5c14/.test(lower)) return 'NP';
+  if (/\b(?:iq|iraq)\b|\u4f0a\u62c9\u514b/.test(lower)) return 'IQ';
   return '';
 }
 
@@ -1722,6 +1735,9 @@ function resolveCheckoutBillingDetails(config = {}, options = {}) {
     && countryCode
     && config.id !== PLUS_PAYMENT_METHOD_GOPAY
   ) {
+    if (window.MultiPagePlusCheckoutRegions?.getCheckoutBillingDetailsForRegion) {
+      return window.MultiPagePlusCheckoutRegions.getCheckoutBillingDetailsForRegion(countryCode);
+    }
     return { ...PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS[countryCode] };
   }
   return defaultDetails;

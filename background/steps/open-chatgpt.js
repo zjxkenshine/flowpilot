@@ -32,6 +32,29 @@
     'https://meiguodizhi.com',
     'https://mail-api.yuecheng.shop',
   ];
+  const STEP1_MAX_CLEANUP_ORIGINS = [
+    ...STEP1_COOKIE_CLEAR_ORIGINS,
+    'https://www.openai.com',
+    'https://stripe.com',
+    'https://www.stripe.com',
+    'https://pm-redirects.stripe.com',
+    'https://hwork.pro',
+    'https://www.hwork.pro',
+    'https://gopay.com',
+    'https://www.gopay.com',
+    'https://yuecheng.shop',
+    'https://www.yuecheng.shop',
+  ];
+  const STEP1_MAX_CLEANUP_DATA_TYPES = {
+    cache: true,
+    cacheStorage: true,
+    cookies: true,
+    fileSystems: true,
+    indexedDB: true,
+    localStorage: true,
+    serviceWorkers: true,
+    webSQL: true,
+  };
 
   function normalizeCookieDomainForStep1(domain) {
     return String(domain || '').trim().replace(/^\.+/, '').toLowerCase();
@@ -64,6 +87,86 @@
 
   function getStep1ErrorMessage(error) {
     return error?.message || String(error || '未知错误');
+  }
+
+  function getStep1CleanupOrigins() {
+    return Array.from(new Set(
+      STEP1_MAX_CLEANUP_ORIGINS
+        .map((origin) => String(origin || '').trim())
+        .filter(Boolean)
+    ));
+  }
+
+  function isStep1CleanupTargetUrl(rawUrl = '') {
+    if (!rawUrl) {
+      return false;
+    }
+    let parsed = null;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return false;
+    }
+    const origin = parsed.origin;
+    if (getStep1CleanupOrigins().includes(origin)) {
+      return true;
+    }
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    return STEP1_COOKIE_CLEAR_DOMAINS.some((target) => (
+      hostname === target || hostname.endsWith(`.${target}`)
+    ));
+  }
+
+  async function closeStep1CleanupTabs(chromeApi, options = {}) {
+    if (!chromeApi?.tabs?.query || !chromeApi.tabs?.remove) {
+      return 0;
+    }
+    const queryTabs = typeof options.queryTabsInAutomationWindow === 'function'
+      ? options.queryTabsInAutomationWindow
+      : (queryInfo) => chromeApi.tabs.query(queryInfo);
+    const tabs = await queryTabs({}).catch(() => []);
+    const targetTabIds = (Array.isArray(tabs) ? tabs : [])
+      .filter((tab) => Number.isInteger(Number(tab?.id)) && isStep1CleanupTargetUrl(tab?.url || tab?.pendingUrl || ''))
+      .map((tab) => Number(tab.id));
+    if (!targetTabIds.length) {
+      return 0;
+    }
+    await chromeApi.tabs.remove(targetTabIds).catch(() => {});
+    return targetTabIds.length;
+  }
+
+  async function clearStep1TargetSiteData(chromeApi, options = {}) {
+    const {
+      addLog = async () => {},
+      stepLabel = '步骤 1',
+      queryTabsInAutomationWindow = null,
+    } = options;
+    if (!chromeApi?.browsingData?.remove) {
+      await addLog(`${stepLabel}：浏览器不支持 browsingData.remove，已跳过目标站点状态清理。`, 'warn');
+      return { skipped: true, reason: 'browsing_data_remove_unavailable', closedTabs: 0 };
+    }
+
+    let closedTabs = 0;
+    try {
+      closedTabs = await closeStep1CleanupTabs(chromeApi, { queryTabsInAutomationWindow });
+    } catch (error) {
+      await addLog(`${stepLabel}：关闭目标站点旧标签页失败，继续执行站点数据清理：${getStep1ErrorMessage(error)}`, 'warn');
+    }
+
+    const origins = getStep1CleanupOrigins();
+    const dataTypes = { ...STEP1_MAX_CLEANUP_DATA_TYPES };
+    await chromeApi.browsingData.remove(
+      {
+        since: 0,
+        origins,
+        originTypes: {
+          unprotectedWeb: true,
+        },
+      },
+      dataTypes
+    );
+    await addLog(`${stepLabel}：已执行目标站点状态清理（${origins.length} 个 origin，关闭 ${closedTabs} 个旧标签页）。`, 'ok');
+    return { skipped: false, origins, dataTypes, closedTabs };
   }
 
   async function collectStep1Cookies(chromeApi) {
@@ -157,6 +260,8 @@
       clearSignupVerifiedPhoneCache = null,
       stepLabel = '步骤 1',
       actionLabel = '打开 ChatGPT 官网前',
+      browserStateCleanupEnabled = false,
+      queryTabsInAutomationWindow = null,
     } = options;
 
     if (typeof clearSignupVerifiedPhoneCache === 'function') {
@@ -189,9 +294,23 @@
       }
     }
 
+    let siteDataCleanup = null;
+    if (browserStateCleanupEnabled) {
+      try {
+        siteDataCleanup = await clearStep1TargetSiteData(chromeApi, {
+          addLog,
+          stepLabel,
+          queryTabsInAutomationWindow,
+        });
+      } catch (error) {
+        await addLog(`${stepLabel}：目标站点状态清理失败，继续当前流程：${getStep1ErrorMessage(error)}`, 'warn');
+        siteDataCleanup = { skipped: true, reason: 'cleanup_failed', error: getStep1ErrorMessage(error) };
+      }
+    }
+
     const elapsedMs = Date.now() - startedAt;
     await addLog(`${stepLabel}：已清理 ${removedCount} 个 ChatGPT / OpenAI cookies（耗时 ${elapsedMs}ms）。`, 'ok');
-    return { skipped: false, removedCount, elapsedMs };
+    return { skipped: false, removedCount, elapsedMs, siteDataCleanup };
   }
 
   function createStep1Executor(deps = {}) {
@@ -207,6 +326,7 @@
       getIpProxyActivationStepForState,
       openSignupEntryTab,
       probeIpProxyExit,
+      queryTabsInAutomationWindow = null,
       resolveSignupMethod = (state = {}) => String(state?.resolvedSignupMethod || state?.signupMethod || '').trim().toLowerCase(),
       switchIpProxy,
     } = deps;
@@ -451,12 +571,15 @@
     }
 
     async function clearOpenAiCookiesBeforeStep1() {
+      const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
       return clearOpenAiCookiesForContext({
         addLog,
         chrome: chromeApi,
         clearSignupVerifiedPhoneCache,
         stepLabel: '步骤 1',
         actionLabel: '打开 ChatGPT 官网前',
+        browserStateCleanupEnabled: Boolean(latestState?.browserStateCleanupEnabled),
+        queryTabsInAutomationWindow,
       });
     }
 
@@ -527,7 +650,9 @@
 
   return {
     clearOpenAiCookiesForContext,
+    clearStep1TargetSiteData,
     createStep1Executor,
+    getStep1CleanupOrigins,
     IP_PROXY_ACTIVATION_STEP_SIGNUP_PHONE_BEFORE_INPUT_CLEAR_COOKIE,
   };
 });

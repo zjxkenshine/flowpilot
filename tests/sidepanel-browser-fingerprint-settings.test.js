@@ -8,9 +8,11 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
 
   assert.match(html, /id="row-browser-fingerprint"/);
   assert.match(html, /id="row-browser-fingerprint-language"/);
+  assert.match(html, /id="row-browser-state-cleanup"/);
   assert.match(html, /id="input-browser-fingerprint-enabled"/);
   assert.match(html, /id="select-browser-fingerprint-level"/);
   assert.match(html, /id="select-browser-fingerprint-language"/);
+  assert.match(html, /id="input-browser-state-cleanup-enabled"/);
   assert.match(html, /<option value="basic">/);
   assert.match(html, /<option value="standard">/);
   assert.match(html, /<option value="enhanced">/);
@@ -24,8 +26,11 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
   assert.match(source, /browserFingerprintEnabled:\s*typeof inputBrowserFingerprintEnabled/);
   assert.match(source, /browserFingerprintLevel:\s*typeof selectBrowserFingerprintLevel/);
   assert.match(source, /browserFingerprintLanguage:\s*typeof selectBrowserFingerprintLanguage/);
+  assert.match(source, /browserStateCleanupEnabled:\s*typeof inputBrowserStateCleanupEnabled/);
   assert.match(source, /inputBrowserFingerprintEnabled\?\.addEventListener\('change'/);
   assert.match(source, /selectBrowserFingerprintLevel\?\.addEventListener\('change'/);
   assert.match(source, /selectBrowserFingerprintLanguage\?\.addEventListener\('change'/);
+  assert.match(source, /inputBrowserStateCleanupEnabled\?\.addEventListener\('change'/);
+  assert.match(source, /message\.payload\.browserStateCleanupEnabled/);
   assert.match(source, /updateBrowserFingerprintUI\(state\)/);
 });

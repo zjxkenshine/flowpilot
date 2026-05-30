@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('content/plus-checkout.js', 'utf8');
+const checkoutRegionsSource = fs.readFileSync('shared/plus-checkout-regions.js', 'utf8');
 
 test('plus checkout content script can be injected repeatedly on the same page', () => {
   const attrs = new Map();
@@ -32,6 +33,7 @@ test('plus checkout content script can be injected repeatedly on the same page',
   context.window = context;
   vm.createContext(context);
 
+  vm.runInContext(checkoutRegionsSource, context);
   vm.runInContext(source, context);
   vm.runInContext(source, context);
 
@@ -92,6 +94,7 @@ function createPlusCheckoutMessageHarness({ checkoutSessionId = 'cs_test_123', c
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(checkoutRegionsSource, context);
   vm.runInContext(source, context);
   assert.equal(typeof listener, 'function');
 
@@ -209,6 +212,31 @@ test('CREATE_PLUS_CHECKOUT maps regional checkout country and currency when enab
   assert.ok(checkoutCall);
   const payload = JSON.parse(checkoutCall.options.body);
   assert.deepEqual(payload.billing_details, { country: 'JP', currency: 'JPY' });
+});
+
+test('CREATE_PLUS_CHECKOUT maps fixed checkout regions for KZ NP and IQ', async () => {
+  for (const [country, currency] of [['KZ', 'KZT'], ['NP', 'NPR'], ['IQ', 'IQD']]) {
+    const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: `cs_${country.toLowerCase()}` });
+
+    const result = await harness.send({
+      type: 'CREATE_PLUS_CHECKOUT',
+      source: 'test',
+      payload: {
+        paymentMethod: 'paypal',
+        regionalCheckoutEnabled: true,
+        billingDetails: { country, currency },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.country, country);
+    assert.equal(result.currency, currency);
+
+    const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
+    assert.ok(checkoutCall);
+    const payload = JSON.parse(checkoutCall.options.body);
+    assert.deepEqual(payload.billing_details, { country, currency });
+  }
 });
 
 test('CREATE_PLUS_CHECKOUT ignores regional billing override while switch is off', async () => {

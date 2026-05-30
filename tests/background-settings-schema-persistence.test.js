@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const flowRegistrySource = fs.readFileSync('shared/flow-registry.js', 'utf8');
+const checkoutRegionsSource = fs.readFileSync('shared/plus-checkout-regions.js', 'utf8');
 const settingsSchemaSource = fs.readFileSync('shared/settings-schema.js', 'utf8');
 const backgroundSource = fs.readFileSync('background.js', 'utf8');
 
@@ -54,6 +55,7 @@ function buildHarness(extra = '') {
   return new Function(`
 const self = {};
 ${flowRegistrySource}
+${checkoutRegionsSource}
 ${settingsSchemaSource}
 const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_IP_PROXY_ACTIVATION_STEP = 1;
@@ -88,6 +90,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'browserFingerprintEnabled',
   'browserFingerprintLevel',
   'browserFingerprintLanguage',
+  'browserStateCleanupEnabled',
   'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
@@ -98,6 +101,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusCheckoutCreatePreWaitSeconds',
   'plusCheckoutOpenStableWaitSeconds',
   'plusHostedCheckoutCardPreWaitSeconds',
+  'plusCheckoutRegionCode',
+  'plusCheckoutRegionalCheckoutEnabled',
   'plusCheckoutConversionProxySource',
   'plusCheckoutConversionProxyUrl',
   'plusCheckoutConversionProxy711Region',
@@ -173,6 +178,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   browserFingerprintEnabled: true,
   browserFingerprintLevel: 'standard',
   browserFingerprintLanguage: 'zh-CN',
+  browserStateCleanupEnabled: false,
   oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
@@ -183,6 +189,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutCreatePreWaitSeconds: 10,
   plusCheckoutOpenStableWaitSeconds: 20,
   plusHostedCheckoutCardPreWaitSeconds: 10,
+  plusCheckoutRegionCode: 'US',
+  plusCheckoutRegionalCheckoutEnabled: false,
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
@@ -904,6 +912,35 @@ test('buildPersistentSettingsPayload persists browser fingerprint switch level a
   assert.equal(random.settingsState.flows.openai.browserFingerprint.language, 'random');
 });
 
+test('buildPersistentSettingsPayload persists browser state cleanup switch into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.browserStateCleanupEnabled, false);
+  assert.equal(defaults.settingsState.flows.openai.browserStateCleanup.enabled, false);
+
+  const flat = api.buildPersistentSettingsPayload({
+    browserStateCleanupEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.browserStateCleanupEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.browserStateCleanup.enabled, true);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          browserStateCleanup: {
+            enabled: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.browserStateCleanupEnabled, true);
+  assert.equal(nested.settingsState.flows.openai.browserStateCleanup.enabled, true);
+});
+
 test('buildPersistentSettingsPayload persists phone signup phone-prefixed email switch into settings schema', () => {
   const api = buildHarness();
 
@@ -981,6 +1018,25 @@ test('buildPersistentSettingsPayload persists IP proxy Plus checkout conversion 
   assert.equal(payload.plusCheckoutConversionProxyUrl, 'socks5h://user:pass@proxy.example:1080');
   assert.equal(payload.plusCheckoutConversionProxy711Region, 'US');
   assert.equal(payload.settingsState.flows.openai.plus.plusCheckoutConversionProxySource, 'ip_proxy');
+});
+
+test('buildPersistentSettingsPayload persists checkout region code and migrates legacy regional flag', () => {
+  const api = buildHarness();
+
+  const fixedPayload = api.buildPersistentSettingsPayload({
+    plusCheckoutRegionCode: 'np',
+  }, { fillDefaults: true });
+  assert.equal(fixedPayload.plusCheckoutRegionCode, 'NP');
+  assert.equal(fixedPayload.plusCheckoutRegionalCheckoutEnabled, true);
+  assert.equal(fixedPayload.settingsState.flows.openai.plus.plusCheckoutRegionCode, 'NP');
+  assert.equal(fixedPayload.settingsState.flows.openai.plus.plusCheckoutRegionalCheckoutEnabled, true);
+
+  const legacyPayload = api.buildPersistentSettingsPayload({
+    plusCheckoutRegionalCheckoutEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(legacyPayload.plusCheckoutRegionCode, 'auto');
+  assert.equal(legacyPayload.plusCheckoutRegionalCheckoutEnabled, true);
+  assert.equal(legacyPayload.settingsState.flows.openai.plus.plusCheckoutRegionCode, 'auto');
 });
 
 test('buildPersistentSettingsPayload persists Plus checkout wait settings into settings schema', () => {

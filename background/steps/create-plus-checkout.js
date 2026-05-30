@@ -4,7 +4,7 @@
   const PLUS_CHECKOUT_SOURCE = 'plus-checkout';
   const PAYPAL_SOURCE = 'paypal-flow';
   const PLUS_CHECKOUT_ENTRY_URL = 'https://chatgpt.com/';
-  const PLUS_CHECKOUT_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/plus-checkout.js'];
+  const PLUS_CHECKOUT_INJECT_FILES = ['shared/plus-checkout-regions.js', 'content/utils.js', 'content/operation-delay.js', 'content/plus-checkout.js'];
   const PAYPAL_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/paypal-flow.js'];
   const PAYPAL_FLOW_SCRIPT_VERSION = '2026-05-28-hosted-email-diagnostics-v2';
   const PAYPAL_HOSTED_GET_STATE_MESSAGE = 'PAYPAL_HOSTED_GET_STATE_V2';
@@ -22,7 +22,11 @@
   const HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY = 'hostedCheckoutPhoneSmsRequestedRegion';
   const HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY = 'hostedCheckoutPhoneSmsResolvedRegion';
   const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
-  const SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES = Object.freeze(['US', 'JP', 'BR']);
+  const SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES = Object.freeze(
+    (typeof self !== 'undefined' && self.MultiPagePlusCheckoutRegions?.getSupportedRegionCodes)
+      ? self.MultiPagePlusCheckoutRegions.getSupportedRegionCodes()
+      : ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ']
+  );
   const HOSTED_CHECKOUT_SUCCESS_URL_PATTERN = /^https:\/\/(?:chatgpt\.com|www\.chatgpt\.com|chat\.openai\.com)\/(?:backend-api\/)?payments\/success(?:[/?#]|$)/i;
   const HOSTED_CHECKOUT_HOME_FALLBACK_URL = 'https://chatgpt.com/';
   const HOSTED_CHECKOUT_HOME_FALLBACK_ATTEMPTS = 2;
@@ -183,6 +187,60 @@
         country: 'Brazil',
       }),
     ]),
+    KZ: Object.freeze([
+      Object.freeze({
+        street: 'Dostyk Avenue 52',
+        city: 'Almaty',
+        state: 'Almaty',
+        zip: '050010',
+        countryCode: 'KZ',
+        country: 'Kazakhstan',
+      }),
+      Object.freeze({
+        street: 'Dostyq Street 16',
+        city: 'Astana',
+        state: 'Astana',
+        zip: '010000',
+        countryCode: 'KZ',
+        country: 'Kazakhstan',
+      }),
+    ]),
+    NP: Object.freeze([
+      Object.freeze({
+        street: 'Durbar Marg',
+        city: 'Kathmandu',
+        state: 'Bagmati',
+        zip: '44600',
+        countryCode: 'NP',
+        country: 'Nepal',
+      }),
+      Object.freeze({
+        street: 'Pulchowk Road',
+        city: 'Lalitpur',
+        state: 'Bagmati',
+        zip: '44700',
+        countryCode: 'NP',
+        country: 'Nepal',
+      }),
+    ]),
+    IQ: Object.freeze([
+      Object.freeze({
+        street: 'Al Kindi Street',
+        city: 'Baghdad',
+        state: 'Baghdad',
+        zip: '10001',
+        countryCode: 'IQ',
+        country: 'Iraq',
+      }),
+      Object.freeze({
+        street: 'Gulan Street',
+        city: 'Erbil',
+        state: 'Erbil',
+        zip: '44001',
+        countryCode: 'IQ',
+        country: 'Iraq',
+      }),
+    ]),
   });
   const HOSTED_CHECKOUT_REGIONAL_NAMES = Object.freeze({
     US: Object.freeze({
@@ -196,6 +254,18 @@
     BR: Object.freeze({
       firstNames: Object.freeze(['Lucas', 'Gabriel', 'Rafael', 'Pedro', 'Matheus', 'Mariana', 'Juliana', 'Camila', 'Ana', 'Beatriz']),
       lastNames: Object.freeze(['Silva', 'Santos', 'Oliveira', 'Souza', 'Pereira', 'Costa', 'Rodrigues', 'Almeida', 'Nascimento', 'Lima']),
+    }),
+    KZ: Object.freeze({
+      firstNames: Object.freeze(['Ayan', 'Dias', 'Nursultan', 'Arman', 'Timur', 'Aigerim', 'Dana', 'Amina', 'Madina', 'Aliya']),
+      lastNames: Object.freeze(['Nurbekov', 'Suleimenov', 'Akhmetov', 'Omarov', 'Karimov', 'Iskakov', 'Tulegenov', 'Sadykov', 'Yessenov', 'Abilov']),
+    }),
+    NP: Object.freeze({
+      firstNames: Object.freeze(['Aarav', 'Suman', 'Bikash', 'Ramesh', 'Prakash', 'Anita', 'Sita', 'Maya', 'Puja', 'Sabina']),
+      lastNames: Object.freeze(['Shrestha', 'Karki', 'Rai', 'Gurung', 'Tamang', 'Thapa', 'Adhikari', 'Basnet', 'Lama', 'KC']),
+    }),
+    IQ: Object.freeze({
+      firstNames: Object.freeze(['Ali', 'Omar', 'Hassan', 'Mustafa', 'Ahmed', 'Fatima', 'Zahra', 'Noor', 'Mariam', 'Sara']),
+      lastNames: Object.freeze(['Hussein', 'Abbas', 'Alwan', 'Karim', 'Saleh', 'Mahdi', 'Jassim', 'Kadhim', 'Rahman', 'Yasin']),
     }),
   });
 
@@ -691,6 +761,9 @@
         if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) normalized = 'US';
         else if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) normalized = 'JP';
         else if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) normalized = 'BR';
+        else if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) normalized = 'KZ';
+        else if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) normalized = 'NP';
+        else if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) normalized = 'IQ';
       }
       if (!normalized) {
         const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
@@ -715,6 +788,9 @@
       if (/\b(?:us|usa|united\s+states|america)\b|美国/.test(lower)) return 'US';
       if (/\b(?:jp|jpn|japan)\b|日本/.test(lower)) return 'JP';
       if (/\b(?:br|bra|brazil|brasil)\b|巴西/.test(lower)) return 'BR';
+      if (/\b(?:kz|kazakhstan)\b|哈萨克/.test(lower)) return 'KZ';
+      if (/\b(?:np|nepal)\b|尼泊尔/.test(lower)) return 'NP';
+      if (/\b(?:iq|iraq)\b|伊拉克/.test(lower)) return 'IQ';
       const bracketMatch = raw.match(/\[([A-Za-z]{2})\]/);
       const bracketCountry = bracketMatch ? bracketMatch[1].toUpperCase() : '';
       return SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES.includes(bracketCountry) ? bracketCountry : '';
@@ -726,6 +802,9 @@
         US: 'United States',
         JP: 'Japan',
         BR: 'Brazil',
+        KZ: 'Kazakhstan',
+        NP: 'Nepal',
+        IQ: 'Iraq',
       }[normalized] || normalized;
     }
 
@@ -1796,8 +1875,23 @@
       if (normalizedPaymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
         return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
       }
-      if (!Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
+      const regionApi = self.MultiPagePlusCheckoutRegions || {};
+      const selectedRegionCode = regionApi.normalizeCheckoutRegionCode
+        ? regionApi.normalizeCheckoutRegionCode(
+          state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+          'US'
+        )
+        : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US');
+      if (selectedRegionCode === 'US' && !Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
         return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
+      }
+      if (selectedRegionCode && selectedRegionCode !== 'auto') {
+        const regional = regionApi.getCheckoutBillingDetailsForRegion
+          ? regionApi.getCheckoutBillingDetailsForRegion(selectedRegionCode)
+          : null;
+        if (regional?.country && regional?.currency) {
+          return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod, regional);
+        }
       }
       if (typeof resolvePlusCheckoutRegionalBillingDetails === 'function') {
         const regional = await resolvePlusCheckoutRegionalBillingDetails(state, {
@@ -3357,7 +3451,13 @@
       const state = firstNonEmpty(source.State_Full, source.State, source.state, source.region, location.state);
       const zip = firstNonEmpty(source.Zip_Code, source.zip, source.postalCode, location.postcode)
         .replace(/[^\d-]/g, '')
-        .slice(0, normalizedCountryCode === 'BR' ? 9 : (normalizedCountryCode === 'JP' ? 8 : 5));
+        .slice(0, (() => {
+          if (normalizedCountryCode === 'BR') return 9;
+          if (normalizedCountryCode === 'JP') return 8;
+          if (normalizedCountryCode === 'KZ') return 6;
+          if (normalizedCountryCode === 'NP' || normalizedCountryCode === 'IQ') return 5;
+          return 5;
+        })());
       if (!streetLine || !city || !state || !zip) {
         return null;
       }
@@ -6845,7 +6945,9 @@
           payload: {
             paymentMethod,
             hostedCheckoutFinalStep: useHostedCheckoutFinalStep,
-            regionalCheckoutEnabled: Boolean(state?.plusCheckoutRegionalCheckoutEnabled),
+            checkoutRegionCode: state?.plusCheckoutRegionCode || (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+            regionalCheckoutEnabled: paymentMethod !== PLUS_PAYMENT_METHOD_GOPAY
+              && (checkoutBillingDetails.country !== 'US' || checkoutBillingDetails.currency !== 'USD'),
             billingDetails: checkoutBillingDetails,
           },
         });

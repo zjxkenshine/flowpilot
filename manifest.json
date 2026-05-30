@@ -125,6 +125,7 @@
       "js": [
         "content/activation-utils.js",
         "shared/source-registry.js",
+        "shared/plus-checkout-regions.js",
         "content/utils.js",
         "content/operation-delay.js",
         "content/plus-checkout.js"
