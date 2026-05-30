@@ -405,7 +405,46 @@
       ).trim();
     }
 
+    function isSignupPhonePrefetchFormalState(state = {}, activation = null) {
+      if (!state?.signupPhoneCodePrefetchEnabled || String(state?.signupPhonePrefetchPhase || '').trim() !== 'formal') {
+        return false;
+      }
+      const prefetchActivation = normalizeSignupPhoneActivationForStep2(state?.signupPhonePrefetchActivation);
+      const currentActivation = normalizeSignupPhoneActivationForStep2(activation || state?.signupPhoneActivation);
+      const prefetchNumber = String(state?.signupPhonePrefetchNumber || prefetchActivation?.phoneNumber || '').trim();
+      const currentNumber = String(currentActivation?.phoneNumber || state?.signupPhoneNumber || '').trim();
+      return Boolean(prefetchNumber && currentNumber && prefetchNumber === currentNumber);
+    }
+
+    function buildSignupPhonePrefetchRetryError(reason = '') {
+      const message = String(reason?.message || reason || '').trim() || '预取手机号在正式流程中不可用，需要重新预取。';
+      const error = new Error(`SIGNUP_PHONE_PREFETCH_RETRY::${message}`);
+      error.signupPhonePrefetchRetry = true;
+      return error;
+    }
+
     async function resolveSignupPhoneForStep2(state = {}) {
+      const prefetchActivation = normalizeSignupPhoneActivationForStep2(state?.signupPhonePrefetchActivation);
+      if (
+        state?.signupPhoneCodePrefetchEnabled
+        && String(state?.signupPhonePrefetchPhase || '').trim() === 'formal'
+        && prefetchActivation?.phoneNumber
+      ) {
+        await addLog(`步骤 2：复用验证码预取手机号 ${prefetchActivation.phoneNumber}，本轮正式流程不会重新拿号。`, 'info');
+        if (typeof setState === 'function') {
+          await setState({
+            signupPhoneNumber: prefetchActivation.phoneNumber,
+            signupPhoneActivation: prefetchActivation,
+            accountIdentifierType: 'phone',
+            accountIdentifier: prefetchActivation.phoneNumber,
+          });
+        }
+        return {
+          phoneNumber: prefetchActivation.phoneNumber,
+          activation: prefetchActivation,
+        };
+      }
+
       const existingActivation = normalizeSignupPhoneActivationForStep2(state?.signupPhoneActivation);
       if (existingActivation?.phoneNumber) {
         await addLog(`步骤 2：复用当前注册手机号 ${existingActivation.phoneNumber}，不重新获取号码。`);
@@ -528,19 +567,33 @@
         if (activation && typeof phoneVerificationHelpers?.cancelSignupPhoneActivation === 'function') {
           await phoneVerificationHelpers.cancelSignupPhoneActivation(state, activation).catch(() => {});
         }
+        if (isSignupPhonePrefetchFormalState(state, activation)) {
+          throw buildSignupPhonePrefetchRetryError(finalErrorMessage);
+        }
         throw new Error(finalErrorMessage);
       }
 
       await addLog(`步骤 2：手机号 ${phoneNumber} 已提交，正在等待页面加载并确认下一步入口...`);
-      const landingResult = await ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(
-        signupTabId,
-        phoneNumber,
-        activation,
-        step2Result,
-        {
-          timeoutMs: getSignupIdentityRedirectTimeoutMs(state),
+      let landingResult = null;
+      try {
+        landingResult = await ensureSignupPostIdentityPageReadyWithPhoneOopsRecovery(
+          signupTabId,
+          phoneNumber,
+          activation,
+          step2Result,
+          {
+            timeoutMs: getSignupIdentityRedirectTimeoutMs(state),
+          }
+        );
+      } catch (landingError) {
+        if (isSignupPhonePrefetchFormalState(state, activation)) {
+          if (activation && typeof phoneVerificationHelpers?.cancelSignupPhoneActivation === 'function') {
+            await phoneVerificationHelpers.cancelSignupPhoneActivation(state, activation).catch(() => {});
+          }
+          throw buildSignupPhonePrefetchRetryError(getErrorMessage(landingError));
         }
-      );
+        throw landingError;
+      }
 
       await completeNodeFromBackground('submit-signup-email', {
         accountIdentifierType: 'phone',

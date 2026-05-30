@@ -1132,7 +1132,7 @@
           break;
         case 4:
           await setState({
-            ...(payload.phoneVerification ? {
+            ...(payload.phoneVerification && !payload.prefetched ? {
               currentPhoneVerificationCode: '',
               signupPhoneVerificationRequestedAt: null,
               signupPhoneVerificationPurpose: '',
@@ -1728,6 +1728,12 @@
           const totalRuns = normalizeRunCount(message.payload?.totalRuns || 1);
           const autoRunSkipFailures = Boolean(message.payload?.autoRunSkipFailures);
           const autoRunRetryPaypalCallback = Boolean(message.payload?.autoRunRetryPaypalCallback);
+          const phoneVerificationCodePrefetchEnabled = Object.prototype.hasOwnProperty.call(
+            message.payload || {},
+            'phoneVerificationCodePrefetchEnabled'
+          )
+            ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
+            : Boolean(state?.phoneVerificationCodePrefetchEnabled);
           const hasAutoRunPreserveIssueLogsOnRestart = Object.prototype.hasOwnProperty.call(
             message.payload || {},
             'autoRunPreserveIssueLogsOnRestart'
@@ -1739,11 +1745,13 @@
           await setState({
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
+            phoneVerificationCodePrefetchEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
           });
           startAutoRunLoop(totalRuns, {
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
+            phoneVerificationCodePrefetchEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
             mode,
           });
@@ -1787,6 +1795,12 @@
             delayMinutes: message.payload?.delayMinutes,
             autoRunSkipFailures: Boolean(message.payload?.autoRunSkipFailures),
             autoRunRetryPaypalCallback: Boolean(message.payload?.autoRunRetryPaypalCallback),
+            phoneVerificationCodePrefetchEnabled: Object.prototype.hasOwnProperty.call(
+              message.payload || {},
+              'phoneVerificationCodePrefetchEnabled'
+            )
+              ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
+              : Boolean(state?.phoneVerificationCodePrefetchEnabled),
             autoRunPreserveIssueLogsOnRestart: Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart),
             mode: message.payload?.mode,
           });

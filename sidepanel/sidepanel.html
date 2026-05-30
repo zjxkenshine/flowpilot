@@ -1179,6 +1179,16 @@
             </label>
           </div>
           <div class="setting-group setting-group-secondary auto-retry-setting-cell">
+            <span class="setting-caption">验证码预取</span>
+            <label class="toggle-switch" for="input-phone-verification-code-prefetch-enabled"
+              title="手机号注册自动运行时，先无代理预取可接码手机号，正式流程再全程代理复用该号码">
+              <input type="checkbox" id="input-phone-verification-code-prefetch-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group setting-group-secondary auto-retry-setting-cell">
             <span class="setting-caption">线程间隔</span>
             <div class="setting-controls">
               <input type="number" id="input-auto-skip-failures-thread-interval-minutes"

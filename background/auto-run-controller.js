@@ -41,6 +41,7 @@
       onAutoRunRoundSuccess,
       persistAutoRunTimerPlan,
       resetState,
+      restorePhoneCodePrefetchRuntime,
       runAutoSequenceFromNode,
       runtime,
       setState,
@@ -84,6 +85,17 @@
       throw new Error('自动运行节点执行器未接入。');
     }
 
+    async function restorePhoneCodePrefetchRuntimeAfterAutoRun(reason = '') {
+      if (typeof restorePhoneCodePrefetchRuntime !== 'function') {
+        return;
+      }
+      try {
+        await restorePhoneCodePrefetchRuntime({ reason });
+      } catch (error) {
+        await addLog(`验证码预取：恢复自动运行前代理状态失败：${getErrorMessage(error) || '未知错误'}`, 'warn');
+      }
+    }
+
     function buildFreshStartStateSnapshot(state = {}) {
       return {
         ...(state || {}),
@@ -119,6 +131,7 @@
         plusModeEnabled: state.plusModeEnabled,
         plusPaymentMethod: state.plusPaymentMethod,
         phoneVerificationEnabled: state.phoneVerificationEnabled,
+        phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
         phoneSignupReloginAfterBindEmailEnabled: state.phoneSignupReloginAfterBindEmailEnabled,
         paypalEmail: state.paypalEmail,
         paypalPassword: state.paypalPassword,
@@ -390,6 +403,7 @@
       const {
         autoRunSkipFailures = false,
         autoRunRetryPaypalCallback = false,
+        phoneVerificationCodePrefetchEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
@@ -419,6 +433,7 @@
         autoRunSessionId: currentRuntime.autoRunSessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
@@ -426,6 +441,7 @@
       }, {
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
@@ -437,6 +453,7 @@
       const {
         autoRunSkipFailures = false,
         autoRunRetryPaypalCallback = false,
+        phoneVerificationCodePrefetchEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
@@ -460,6 +477,7 @@
         autoRunSessionId: runtime.get().autoRunSessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
@@ -467,6 +485,7 @@
       }, {
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
@@ -492,6 +511,7 @@
         autoRunTimerPlan: null,
         scheduledAutoRunPlan: null,
       });
+      await restorePhoneCodePrefetchRuntimeAfterAutoRun('crashed');
       clearStopRequest();
     }
 
@@ -529,6 +549,7 @@
 
       const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
       const autoRunRetryPaypalCallback = Boolean(options.autoRunRetryPaypalCallback);
+      const phoneVerificationCodePrefetchEnabled = Boolean(options.phoneVerificationCodePrefetchEnabled);
       const autoRunPreserveIssueLogsOnRestart = Boolean(options.autoRunPreserveIssueLogsOnRestart);
       const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
       const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
@@ -566,6 +587,7 @@
         autoRunSessionId: sessionId,
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
         ...getAutoRunStatusPayload(initialPhase, {
@@ -631,6 +653,15 @@
               }),
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               autoRunSessionId: sessionId,
+              phoneVerificationCodePrefetchEnabled,
+              signupPhoneCodePrefetchEnabled: false,
+              signupPhonePrefetchPhase: '',
+              signupPhonePrefetchActivation: null,
+              signupPhonePrefetchNumber: '',
+              signupPhonePrefetchCode: '',
+              signupPhonePrefetchCodeFetchedAt: 0,
+              signupPhonePrefetchAttempt: 0,
+              signupPhonePrefetchLastError: '',
               tabRegistry: {},
               sourceLastUrls: {},
               ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun, sessionId }),
@@ -644,7 +675,17 @@
               autoRunSessionId: sessionId,
               autoRunSkipFailures,
               autoRunRetryPaypalCallback,
+              phoneVerificationCodePrefetchEnabled,
               autoRunPreserveIssueLogsOnRestart,
+              ...(phoneVerificationCodePrefetchEnabled ? {} : {
+                signupPhoneCodePrefetchEnabled: false,
+                signupPhonePrefetchPhase: '',
+                signupPhonePrefetchActivation: null,
+                signupPhonePrefetchNumber: '',
+                signupPhonePrefetchCode: '',
+                signupPhonePrefetchCodeFetchedAt: 0,
+                signupPhonePrefetchLastError: '',
+              }),
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               ...getAutoRunStatusPayload('running', { currentRun: targetRun, totalRuns, attemptRun, sessionId }),
             });
@@ -695,6 +736,7 @@
               totalRuns,
               attemptRuns: attemptRun,
               continued: useExistingProgress,
+              phoneVerificationCodePrefetchEnabled,
             });
 
             roundSummary.status = 'success';
@@ -971,6 +1013,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  phoneVerificationCodePrefetchEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1035,6 +1078,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  phoneVerificationCodePrefetchEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1295,6 +1339,7 @@
                 const parkedForRetry = await waitBeforeAutoRunRetry(targetRun, totalRuns, attemptRun + 1, {
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
+                  phoneVerificationCodePrefetchEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1366,6 +1411,7 @@
           const parkedForNextRound = await waitBetweenAutoRunRounds(targetRun, totalRuns, roundSummary, {
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
+            phoneVerificationCodePrefetchEnabled,
             autoRunPreserveIssueLogsOnRestart,
             roundSummaries,
           });
@@ -1391,6 +1437,7 @@
 
       if (parkedByTimer) {
         runtime.set({ autoRunActive: false });
+        await restorePhoneCodePrefetchRuntimeAfterAutoRun('parked_by_timer');
         clearStopRequest();
         return;
       }
@@ -1432,6 +1479,7 @@
           sessionId: 0,
         }),
       });
+      await restorePhoneCodePrefetchRuntimeAfterAutoRun(deps.getStopRequested() || stoppedEarly ? 'stopped' : 'complete');
       clearStopRequest();
     }
 

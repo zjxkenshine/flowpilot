@@ -574,6 +574,7 @@ const inputRunCount = document.getElementById('input-run-count');
 const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures');
 const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-retry-paypal-callback');
 const inputAutoRunPreserveIssueLogsOnRestart = document.getElementById('input-auto-run-preserve-issue-logs-on-restart');
+const inputPhoneVerificationCodePrefetchEnabled = document.getElementById('input-phone-verification-code-prefetch-enabled');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
 const inputStep6CookieCleanupEnabled = document.getElementById('input-step6-cookie-cleanup-enabled');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
@@ -6369,7 +6370,12 @@ function collectSettingsPayload() {
     ipProxyEnabled: sub2apiReloginEnabled ? false : getSelectedIpProxyEnabledSafe(),
     ipProxyService: selectedIpProxyService,
     ipProxyMode: currentIpProxyServiceProfile.mode,
-    ipProxyActivationStep: normalizeIpProxyActivationStepValue(
+    ipProxyActivationStep: (typeof normalizeIpProxyActivationStepValue === 'function'
+      ? normalizeIpProxyActivationStepValue
+      : ((value, fallback = 1) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric >= 1 ? Math.floor(numeric) : fallback;
+      }))(
       typeof selectIpProxyActivationStep !== 'undefined' && selectIpProxyActivationStep
         ? selectIpProxyActivationStep.value
         : latestState?.ipProxyActivationStep,
@@ -6673,6 +6679,9 @@ function collectSettingsPayload() {
       : false,
     autoRunPreserveIssueLogsOnRestart: typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart
       ? Boolean(inputAutoRunPreserveIssueLogsOnRestart.checked)
+      : false,
+    phoneVerificationCodePrefetchEnabled: typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
+      ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
       : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
@@ -13239,7 +13248,9 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   });
   currentStepDefinitionSignature = nextSignature;
   renderStepsList();
-  syncIpProxyActivationStepOptions(latestState);
+  if (typeof syncIpProxyActivationStepOptions === 'function') {
+    syncIpProxyActivationStepOptions(latestState);
+  }
 }
 
 function syncStepDefinitionsFromUiState(stateOverrides = {}) {
@@ -13926,6 +13937,9 @@ function applySettingsState(state) {
   }
   if (typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart) {
     inputAutoRunPreserveIssueLogsOnRestart.checked = Boolean(state?.autoRunPreserveIssueLogsOnRestart);
+  }
+  if (typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled) {
+    inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(state?.phoneVerificationCodePrefetchEnabled);
   }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
@@ -18163,6 +18177,9 @@ async function startAutoRunFromCurrentSettings() {
   const autoRunPreserveIssueLogsOnRestart = typeof inputAutoRunPreserveIssueLogsOnRestart !== 'undefined' && inputAutoRunPreserveIssueLogsOnRestart
     ? Boolean(inputAutoRunPreserveIssueLogsOnRestart.checked)
     : false;
+  const phoneVerificationCodePrefetchEnabled = typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
+    ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
+    : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
   const contributionQq = String(inputContributionQq?.value || '').trim();
   const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
@@ -18222,6 +18239,7 @@ async function startAutoRunFromCurrentSettings() {
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
+      phoneVerificationCodePrefetchEnabled,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
       contributionAdapterId: latestState?.contributionAdapterId || '',
       contributionNickname,
@@ -20880,6 +20898,11 @@ inputAutoRunPreserveIssueLogsOnRestart?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPhoneVerificationCodePrefetchEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputTempEmailBaseUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -22864,6 +22887,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && inputAutoRunPreserveIssueLogsOnRestart
       ) {
         inputAutoRunPreserveIssueLogsOnRestart.checked = Boolean(message.payload.autoRunPreserveIssueLogsOnRestart);
+      }
+      if (
+        message.payload.phoneVerificationCodePrefetchEnabled !== undefined
+        && typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined'
+        && inputPhoneVerificationCodePrefetchEnabled
+      ) {
+        inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(message.payload.phoneVerificationCodePrefetchEnabled);
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

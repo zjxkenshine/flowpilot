@@ -367,8 +367,8 @@ test('message router re-syncs contribution mode before AUTO_RUN when sidepanel p
   assert.deepStrictEqual(calls, [
     { type: 'toggle', enabled: true },
     { type: 'setState', updates: { contributionNickname: '阿青', contributionQq: '123456' } },
-    { type: 'setState', updates: { autoRunSkipFailures: true, autoRunRetryPaypalCallback: false } },
-    { type: 'startAutoRunLoop', totalRuns: 2, options: { autoRunSkipFailures: true, autoRunRetryPaypalCallback: false, mode: 'restart' } },
+    { type: 'setState', updates: { autoRunSkipFailures: true, autoRunRetryPaypalCallback: false, phoneVerificationCodePrefetchEnabled: false } },
+    { type: 'startAutoRunLoop', totalRuns: 2, options: { autoRunSkipFailures: true, autoRunRetryPaypalCallback: false, phoneVerificationCodePrefetchEnabled: false, mode: 'restart' } },
   ]);
 });
 

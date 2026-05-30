@@ -119,6 +119,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
+  'phoneVerificationCodePrefetchEnabled',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
   'signupVerificationReadyTimeoutSeconds',
@@ -221,6 +222,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   },
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
+  phoneVerificationCodePrefetchEnabled: false,
   signupIdentityRedirectTimeoutSeconds: 45,
   authContentScriptRecoveryTimeoutSeconds: 30,
   signupVerificationReadyTimeoutSeconds: 60,
@@ -551,6 +553,35 @@ test('buildPersistentSettingsPayload persists auto-run issue log preservation in
   assert.equal(nested.autoRunPreserveIssueLogsOnRestart, true);
   assert.equal(nested.settingsState.flows.openai.autoRun.autoRunPreserveIssueLogsOnRestart, true);
   assert.equal(nested.settingsState.flows.kiro.autoRun.autoRunPreserveIssueLogsOnRestart, false);
+});
+
+test('buildPersistentSettingsPayload persists phone verification code prefetch into OpenAI auto-run settings', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.phoneVerificationCodePrefetchEnabled, false);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled, false);
+
+  const flat = api.buildPersistentSettingsPayload({
+    phoneVerificationCodePrefetchEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.phoneVerificationCodePrefetchEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled, true);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            phoneVerificationCodePrefetchEnabled: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.phoneVerificationCodePrefetchEnabled, true);
+  assert.equal(nested.settingsState.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled, true);
 });
 
 test('buildPersistentSettingsPayload persists signup identity redirect timeout into settings schema', () => {

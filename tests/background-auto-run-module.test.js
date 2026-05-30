@@ -47,6 +47,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   authContentScriptRecoveryTimeoutSeconds: DEFAULT_AUTH_CONTENT_SCRIPT_RECOVERY_TIMEOUT_SECONDS,
   signupVerificationReadyTimeoutSeconds: DEFAULT_SIGNUP_VERIFICATION_READY_TIMEOUT_SECONDS,
   signupVerificationReadyMaxRounds: DEFAULT_SIGNUP_VERIFICATION_READY_MAX_ROUNDS,
+  phoneVerificationCodePrefetchEnabled: false,
 };
 function isPlainObjectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -287,6 +288,185 @@ test('auto-run controller invokes success hook after a successful round', async 
     attemptRun: 1,
     sessionId: 1,
   });
+});
+
+test('auto-run controller forwards phone code prefetch option into workflow context', async () => {
+  const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAutoRunController;`)(globalScope);
+
+  let currentState = {
+    nodeStatuses: {},
+    autoRunRoundSummaries: [],
+    tabRegistry: {},
+    sourceLastUrls: {},
+  };
+  const contexts = [];
+  const runtime = {
+    state: {
+      autoRunActive: false,
+      autoRunCurrentRun: 0,
+      autoRunTotalRuns: 0,
+      autoRunAttemptRun: 0,
+      autoRunSessionId: 0,
+    },
+    get() {
+      return { ...this.state };
+    },
+    set(updates = {}) {
+      this.state = { ...this.state, ...updates };
+    },
+  };
+
+  const controller = api.createAutoRunController({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => null,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 2,
+    AUTO_RUN_RETRY_DELAY_MS: 1,
+    AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
+    AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
+    broadcastAutoRunStatus: async () => {},
+    broadcastStopToContentScripts: async () => {},
+    cancelPendingCommands: () => {},
+    clearStopRequest: () => {},
+    createAutoRunSessionId: () => 99,
+    getAutoRunStatusPayload: () => ({}),
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getFirstUnfinishedNodeId: () => 'open-chatgpt',
+    getPendingAutoRunTimerPlan: () => null,
+    getRunningNodeIds: () => [],
+    getState: async () => ({ ...currentState }),
+    hasSavedNodeProgress: () => false,
+    isAddPhoneAuthFailure: () => false,
+    isCloudCheckoutAlreadyPaidFailure: () => false,
+    isHostedCheckoutCardFallbackFailure: () => false,
+    isHostedCheckoutGenericErrorFailure: () => false,
+    isHostedCheckoutVerificationResendLimitFailure: () => false,
+    isGpcTaskEndedFailure: () => false,
+    isKiroProxyFailure: () => false,
+    isPhoneSmsPlatformRateLimitFailure: () => false,
+    isPlusCheckoutNonFreeTrialFailure: () => false,
+    isRestartCurrentAttemptError: () => false,
+    isStep4Route405RecoveryLimitFailure: () => false,
+    isSignupUserAlreadyExistsFailure: () => false,
+    isStopError: () => false,
+    getStopRequested: () => false,
+    launchAutoRunTimerPlan: async () => false,
+    normalizeAutoRunFallbackThreadIntervalMinutes: () => 0,
+    persistAutoRunTimerPlan: async () => ({}),
+    resetState: async () => {
+      currentState = { ...currentState, nodeStatuses: {}, tabRegistry: {}, sourceLastUrls: {} };
+    },
+    runAutoSequenceFromNode: async (_nodeId, context = {}) => {
+      contexts.push({ ...context });
+    },
+    runtime,
+    setState: async (updates = {}) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfAutoRunSessionStopped: () => {},
+    waitForRunningNodesToFinish: async () => currentState,
+    chrome: { runtime: { sendMessage: () => Promise.resolve() } },
+  });
+
+  await controller.autoRunLoop(1, {
+    phoneVerificationCodePrefetchEnabled: true,
+    mode: 'restart',
+  });
+
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].phoneVerificationCodePrefetchEnabled, true);
+  assert.equal(currentState.phoneVerificationCodePrefetchEnabled, true);
+});
+
+test('auto-run controller restores phone prefetch runtime after completion', async () => {
+  const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAutoRunController;`)(globalScope);
+
+  let currentState = {
+    nodeStatuses: {},
+    autoRunRoundSummaries: [],
+    tabRegistry: {},
+    sourceLastUrls: {},
+  };
+  const restoreCalls = [];
+  const runtime = {
+    state: {
+      autoRunActive: false,
+      autoRunCurrentRun: 0,
+      autoRunTotalRuns: 0,
+      autoRunAttemptRun: 0,
+      autoRunSessionId: 0,
+    },
+    get() {
+      return { ...this.state };
+    },
+    set(updates = {}) {
+      this.state = { ...this.state, ...updates };
+    },
+  };
+
+  const controller = api.createAutoRunController({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => null,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 1,
+    AUTO_RUN_RETRY_DELAY_MS: 1,
+    AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
+    AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
+    broadcastAutoRunStatus: async () => {},
+    broadcastStopToContentScripts: async () => {},
+    cancelPendingCommands: () => {},
+    clearStopRequest: () => {},
+    createAutoRunSessionId: () => 101,
+    getAutoRunStatusPayload: () => ({}),
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getFirstUnfinishedNodeId: () => 'open-chatgpt',
+    getPendingAutoRunTimerPlan: () => null,
+    getRunningNodeIds: () => [],
+    getState: async () => ({ ...currentState }),
+    getStopRequested: () => false,
+    hasSavedNodeProgress: () => false,
+    isAddPhoneAuthFailure: () => false,
+    isCloudCheckoutAlreadyPaidFailure: () => false,
+    isHostedCheckoutCardFallbackFailure: () => false,
+    isHostedCheckoutGenericErrorFailure: () => false,
+    isHostedCheckoutVerificationResendLimitFailure: () => false,
+    isGpcTaskEndedFailure: () => false,
+    isKiroProxyFailure: () => false,
+    isPhoneSmsPlatformRateLimitFailure: () => false,
+    isPlusCheckoutNonFreeTrialFailure: () => false,
+    isRestartCurrentAttemptError: () => false,
+    isStep4Route405RecoveryLimitFailure: () => false,
+    isSignupUserAlreadyExistsFailure: () => false,
+    isStopError: () => false,
+    launchAutoRunTimerPlan: async () => false,
+    normalizeAutoRunFallbackThreadIntervalMinutes: () => 0,
+    persistAutoRunTimerPlan: async () => ({}),
+    resetState: async () => {
+      currentState = { ...currentState, nodeStatuses: {}, tabRegistry: {}, sourceLastUrls: {} };
+    },
+    restorePhoneCodePrefetchRuntime: async (payload = {}) => {
+      restoreCalls.push({ ...payload });
+    },
+    runAutoSequenceFromNode: async () => {},
+    runtime,
+    setState: async (updates = {}) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfAutoRunSessionStopped: () => {},
+    waitForRunningNodesToFinish: async () => currentState,
+    chrome: { runtime: { sendMessage: () => Promise.resolve() } },
+  });
+
+  await controller.autoRunLoop(1, {
+    phoneVerificationCodePrefetchEnabled: true,
+    mode: 'restart',
+  });
+
+  assert.deepEqual(restoreCalls, [{ reason: 'complete' }]);
 });
 
 function createHostedGenericErrorAutoRunHarness(options = {}) {

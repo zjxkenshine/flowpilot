@@ -60,6 +60,7 @@ test('sidepanel html exposes phone verification toggle and multi-provider SMS ro
   assert.match(html, /id="btn-toggle-phone-verification-section"/);
   assert.match(html, /id="row-phone-verification-fold"/);
   assert.match(html, /id="input-phone-verification-enabled"/);
+  assert.match(html, /id="input-phone-verification-code-prefetch-enabled"/);
   assert.match(html, /id="row-signup-method"/);
   assert.match(html, /id="row-signup-phone"/);
   assert.match(html, /id="input-signup-phone"/);
@@ -1185,6 +1186,7 @@ const inputTempEmailCustomAuth = { value: '' };
 const inputTempEmailReceiveMailbox = { value: '' };
 const inputTempEmailUseRandomSubdomain = { checked: false };
 const inputAutoSkipFailures = { checked: false };
+const inputPhoneVerificationCodePrefetchEnabled = { checked: true };
 const inputAutoSkipFailuresThreadIntervalMinutes = { value: '0' };
 const inputAutoDelayEnabled = { checked: false };
 const inputAutoDelayMinutes = { value: '30' };
@@ -1345,6 +1347,7 @@ function normalizeSignupPhoneVerificationSubmitResultRoundWaitSeconds(value, fal
 function normalizeStep5ProfileSubmitResultMaxRounds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_MAX_ROUNDS) { return Number(value) || fallback; }
 function normalizeStep5ProfileSubmitResultRoundWaitSeconds(value, fallback = DEFAULT_STEP5_PROFILE_SUBMIT_RESULT_ROUND_WAIT_SECONDS) { return Number(value) || fallback; }
 function normalizeVerificationResendCount(value, fallback) { return Number(value) || fallback; }
+function normalizeIpProxyActivationStepValue(value, fallback = 1) { return Number(value) || fallback; }
 function normalizePlusAccountAccessStrategy(value = '') { return String(value || '').trim().toLowerCase() === PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION ? PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION : PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH; }
 ${extractFunction('normalizePlusCheckoutVerificationFailureStrategy')}
 ${extractFunction('normalizeOAuthOpenAfterRefreshWaitSeconds')}
@@ -1411,6 +1414,7 @@ return { collectSettingsPayload };
   const payload = api.collectSettingsPayload();
 
   assert.equal(payload.phoneVerificationEnabled, true);
+  assert.equal(payload.phoneVerificationCodePrefetchEnabled, true);
   assert.equal(payload.signupMethod, 'phone');
   assert.equal(payload.phoneSignupPhonePrefixedEmailEnabled, false);
   assert.equal(payload.phoneSmsProvider, 'hero-sms');

@@ -128,6 +128,7 @@
     const PHONE_RESEND_BANNED_NUMBER_ERROR_PREFIX = 'PHONE_RESEND_BANNED_NUMBER::';
     const PHONE_RESEND_SERVER_ERROR_PREFIX = 'PHONE_RESEND_SERVER_ERROR::';
     const PHONE_ROUTE_405_RECOVERY_FAILED_ERROR_PREFIX = 'PHONE_ROUTE_405_RECOVERY_FAILED::';
+    const SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX = 'SIGNUP_PHONE_PREFETCH_RETRY::';
     const SIGNUP_CONTACT_VERIFICATION_PREFLIGHT_DELAY_MS = 2000;
     const PHONE_MANUAL_FREE_REUSE_ERROR_PREFIX = 'PHONE_MANUAL_FREE_REUSE::';
     const PHONE_AUTO_FREE_REUSE_PREPARE_ERROR_PREFIX = 'PHONE_AUTO_FREE_REUSE_PREPARE::';
@@ -2083,6 +2084,37 @@
       return Boolean(leftKey && rightKey && leftKey === rightKey);
     }
 
+    function isSignupPhoneCodePrefetchMode(state = {}, options = {}) {
+      return Boolean(
+        options?.prefetchOnly
+        || (
+          state?.signupPhoneCodePrefetchEnabled
+          && String(state?.signupPhonePrefetchPhase || '').trim() === 'prefetch'
+        )
+      );
+    }
+
+    function isSignupPhonePrefetchFormalState(state = {}, activation = null) {
+      if (!state?.signupPhoneCodePrefetchEnabled || String(state?.signupPhonePrefetchPhase || '').trim() !== 'formal') {
+        return false;
+      }
+      const prefetchActivation = normalizeActivation(state?.signupPhonePrefetchActivation);
+      const currentActivation = normalizeActivation(activation || state?.signupPhoneActivation);
+      if (prefetchActivation && currentActivation && isSameActivation(prefetchActivation, currentActivation)) {
+        return true;
+      }
+      const prefetchNumber = String(state?.signupPhonePrefetchNumber || prefetchActivation?.phoneNumber || '').trim();
+      const currentNumber = String(currentActivation?.phoneNumber || state?.signupPhoneNumber || '').trim();
+      return Boolean(prefetchNumber && currentNumber && prefetchNumber === currentNumber);
+    }
+
+    function getSignupPhonePrefetchCodeForActivation(state = {}, activation = null) {
+      if (!isSignupPhonePrefetchFormalState(state, activation)) {
+        return '';
+      }
+      return String(state?.signupPhonePrefetchCode || '').trim();
+    }
+
     function rememberActivationAcquiredPrice(activation, price) {
       const key = buildActivationIdentityKey(activation);
       const normalizedPrice = normalizeHeroSmsPrice(price);
@@ -2290,6 +2322,18 @@
     function isSignupPhoneRetryFromStep2Failure(error) {
       const message = String(error?.message || error || '').trim();
       return /SIGNUP_PHONE_RETRY_FROM_STEP2::/i.test(message);
+    }
+
+    function buildSignupPhonePrefetchRetryError(reason = '') {
+      const message = String(reason?.message || reason || '').trim() || '预取手机号在正式流程中不可用，需要重新预取。';
+      const error = new Error(`${SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX}${message}`);
+      error.signupPhonePrefetchRetry = true;
+      return error;
+    }
+
+    function isSignupPhonePrefetchRetryError(error) {
+      const message = String(error?.message || error || '').trim();
+      return Boolean(error?.signupPhonePrefetchRetry || message.startsWith(SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX));
     }
 
     function isSignupPhoneInvalidCodeFailure(error) {
@@ -7591,6 +7635,9 @@
           throw new Error('步骤 4：未找到当前注册手机号激活记录，请重新执行步骤 2。');
         }
 
+        const prefetchOnly = isSignupPhoneCodePrefetchMode(state, options);
+        const formalPrefetch = isSignupPhonePrefetchFormalState(state, activation);
+
         const recoverSignupContactVerificationServerErrorOnce = async (phaseLabel, error = null) => {
           if (signupContactVerificationServerErrorRecoveryUsed) {
             const serverErrorText = await readPhoneResendServerErrorFromAuthTab(tabId);
@@ -7664,8 +7711,11 @@
           for (let attempt = 1; attempt <= DEFAULT_PHONE_SUBMIT_ATTEMPTS; attempt += 1) {
             throwIfStopped();
             state = await getState();
+            const usePrefetchCode = !prefetchOnly
+              && attempt === 1
+              && getSignupPhonePrefetchCodeForActivation(state, activation);
             await assertSignupPhoneStillApplicable('waiting for SMS code');
-            const code = await waitForSignupPhoneCode(state, activation, {
+            const code = usePrefetchCode || await waitForSignupPhoneCode(state, activation, {
               onPollStatus: async () => {
                 await assertSignupPhoneStillApplicable('while waiting for SMS code');
               },
@@ -7710,6 +7760,35 @@
               stepKey: 'fetch-signup-code',
             });
 
+            if (prefetchOnly) {
+              shouldCancelActivation = false;
+              await setPhoneRuntimeState({
+                signupPhoneCodePrefetchEnabled: true,
+                signupPhonePrefetchPhase: 'prefetch',
+                signupPhonePrefetchActivation: activation,
+                signupPhonePrefetchNumber: activation.phoneNumber,
+                signupPhonePrefetchCode: String(code || '').trim(),
+                signupPhonePrefetchCodeFetchedAt: Date.now(),
+                signupPhonePrefetchLastError: '',
+                signupPhoneNumber: activation.phoneNumber,
+                signupPhoneActivation: activation,
+                accountIdentifierType: 'phone',
+                accountIdentifier: activation.phoneNumber,
+                signupPhoneVerificationRequestedAt: Date.now(),
+                signupPhoneVerificationPurpose: 'signup_prefetch',
+              });
+              await addLog(`步骤 4：验证码预取已获取 ${activation.phoneNumber} 的短信验证码，已保存并等待正式流程复用。`, 'ok', {
+                step: 4,
+                stepKey: 'fetch-signup-code',
+              });
+              return {
+                prefetched: true,
+                code: String(code || '').trim(),
+                activation,
+                phoneNumber: activation.phoneNumber,
+              };
+            }
+
             let submitResult = null;
             submitResult = await submitSignupPhoneVerificationCode(tabId, code, {
               signupProfile: options.signupProfile || null,
@@ -7718,6 +7797,17 @@
 
             if (submitResult.invalidCode) {
               const invalidErrorText = String(submitResult.errorText || submitResult.url || '未知错误').trim();
+              if (usePrefetchCode) {
+                await setPhoneRuntimeState({
+                  signupPhonePrefetchCode: '',
+                  signupPhonePrefetchCodeFetchedAt: 0,
+                  [PHONE_VERIFICATION_CODE_STATE_KEY]: '',
+                });
+                await addLog('步骤 4：预取验证码被官网拒绝，已清空预取码并继续从 SMS 接口获取新验证码。', 'warn', {
+                  step: 4,
+                  stepKey: 'fetch-signup-code',
+                });
+              }
               if (attempt >= DEFAULT_PHONE_SUBMIT_ATTEMPTS) {
                 throw new Error(`步骤 4：手机验证码连续 ${DEFAULT_PHONE_SUBMIT_ATTEMPTS} 次被拒绝：${invalidErrorText}`);
               }
@@ -7793,7 +7883,16 @@
             signupPhoneVerificationPurpose: '',
             ...(shouldClearFailedReuseCache ? { failedSignupPhoneReuseActivation: null } : {}),
           });
-          throw sanitizePhoneCodeTimeoutError(error);
+          const sanitizedError = sanitizePhoneCodeTimeoutError(error);
+          if (formalPrefetch && shouldClearFailedReuseCache) {
+            await setPhoneRuntimeState({
+              signupPhonePrefetchCode: '',
+              signupPhonePrefetchCodeFetchedAt: 0,
+              signupPhonePrefetchLastError: sanitizedError?.message || String(error || ''),
+            });
+            throw buildSignupPhonePrefetchRetryError(sanitizedError);
+          }
+          throw sanitizedError;
         }
       });
     }
@@ -8856,6 +8955,7 @@
       completeSignupPhoneVerificationFlow,
       finalizeLoginPhoneActivationAfterSuccess,
       finalizeSignupPhoneActivationAfterSuccess,
+      isSignupPhonePrefetchRetryError,
       isPhoneResendBannedNumberError,
       normalizeActivation,
       pollPhoneActivationCode,

@@ -180,6 +180,11 @@ const bundle = [
   extractFunction('executeNodeAndWaitWithAutoRunIdleLogWatchdog'),
   extractFunction('getPostStep6AutoRestartDecision'),
   NODE_COMPAT_HELPERS,
+  "const SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX = 'SIGNUP_PHONE_PREFETCH_RETRY::';",
+  "const SIGNUP_PHONE_CODE_PREFETCH_NODE_IDS = ['open-chatgpt', 'submit-signup-email', 'fill-password', 'fetch-signup-code'];",
+  'const SIGNUP_PHONE_PREFETCH_MAX_RESTARTS = 5;',
+  extractFunction('isSignupPhonePrefetchRetryError'),
+  extractFunction('shouldUseSignupPhoneCodePrefetchForRun'),
   extractFunction('getAutoRunWorkflowNodeIds'),
   extractFunction('runAutoSequenceFromNode'),
   extractFunction('runAutoSequenceFromNodeGraph'),
@@ -916,6 +921,140 @@ return {
   assert.deepStrictEqual(events.steps, [1, 2, 6, 7, 8, 9, 10]);
   assert.equal(events.logs.some(({ message }) => /节点 fetch-signup-code 当前状态为 skipped/.test(message)), true);
   assert.equal(events.logs.some(({ message }) => /节点 fill-profile 当前状态为 skipped/.test(message)), true);
+});
+
+test('auto-run phone code prefetch runs steps 1-4 without proxy before formal step 1 with forced proxy', async () => {
+  const api = new Function(`
+const AUTO_STEP_DELAYS = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 };
+const LAST_STEP_ID = 10;
+const FINAL_OAUTH_CHAIN_START_STEP = 7;
+const SIGNUP_METHOD_PHONE = 'phone';
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const chrome = {
+  tabs: { update: async () => {} },
+  runtime: { sendMessage: async (message) => events.runtimeMessages.push(message) },
+};
+
+let currentState = {
+  activeFlowId: 'openai',
+  flowId: 'openai',
+  signupMethod: 'phone',
+  phoneVerificationCodePrefetchEnabled: true,
+  ipProxyEnabled: true,
+  ipProxyActivationStep: 6,
+  stepStatuses: { 1:'pending',2:'pending',3:'pending',4:'pending',5:'pending',6:'pending',7:'pending',8:'pending',9:'pending',10:'pending' },
+};
+const events = {
+  steps: [],
+  proxyApplications: [],
+  logs: [],
+  setStateCalls: [],
+  runtimeMessages: [],
+};
+
+async function addLog(message, level = 'info') { events.logs.push({ message, level }); }
+async function ensureAutoEmailReady() { return ''; }
+async function broadcastAutoRunStatus() {}
+async function ensureResolvedSignupMethodForRun() { return 'phone'; }
+async function getState() { return currentState; }
+async function setState(updates) {
+  currentState = {
+    ...currentState,
+    ...updates,
+    stepStatuses: updates.stepStatuses ? { ...updates.stepStatuses } : currentState.stepStatuses,
+  };
+  events.setStateCalls.push(updates);
+}
+function isStopError(error) { return (error?.message || String(error || '')) === '流程已被用户停止。'; }
+function isStepDoneStatus(status) { return status === 'completed' || status === 'manual_completed' || status === 'skipped'; }
+function getErrorMessage(error) { return error?.message || String(error || ''); }
+async function getTabId() { return 1; }
+async function invalidateDownstreamAfterStepRestart() {}
+function getLoginAuthStateLabel(state) { return state || 'unknown'; }
+async function getLoginAuthStateFromContent() { return { state: 'password_page', url: 'https://auth.openai.com/log-in' }; }
+
+async function applyIpProxySettingsFromState(state = {}) {
+  events.proxyApplications.push({
+    enabled: Boolean(state.ipProxyEnabled),
+    activationStep: Number(state.ipProxyActivationStep) || 0,
+    phase: currentState.signupPhonePrefetchPhase || '',
+  });
+  return { applied: Boolean(state.ipProxyEnabled) };
+}
+
+const phoneVerificationHelpers = {
+  normalizeActivation(activation) {
+    if (!activation || typeof activation !== 'object') return null;
+    const activationId = String(activation.activationId || activation.id || '').trim();
+    const phoneNumber = String(activation.phoneNumber || activation.number || '').trim();
+    return activationId && phoneNumber ? { ...activation, activationId, phoneNumber } : null;
+  },
+  isSignupPhonePrefetchRetryError(error) {
+    return Boolean(error?.signupPhonePrefetchRetry || String(error?.message || error || '').startsWith('SIGNUP_PHONE_PREFETCH_RETRY::'));
+  },
+};
+
+async function executeStepAndWait(step) {
+  events.steps.push({
+    step,
+    phase: currentState.signupPhonePrefetchPhase || '',
+    ipProxyEnabled: Boolean(currentState.ipProxyEnabled),
+    ipProxyActivationStep: currentState.ipProxyActivationStep,
+    phoneNumber: currentState.signupPhoneNumber || '',
+  });
+  if (currentState.signupPhonePrefetchPhase === 'prefetch' && step === 4) {
+    await setState({
+      signupPhonePrefetchActivation: { activationId: 'prefetch-act-1', phoneNumber: '+15550001111', provider: 'hero-sms' },
+      signupPhonePrefetchNumber: '+15550001111',
+      signupPhonePrefetchCode: '123456',
+      signupPhonePrefetchCodeFetchedAt: 1000,
+      signupPhoneActivation: { activationId: 'prefetch-act-1', phoneNumber: '+15550001111', provider: 'hero-sms' },
+      signupPhoneNumber: '+15550001111',
+    });
+  }
+}
+
+${bundle}
+
+return {
+  async run() {
+    await runAutoSequenceFromStep(1, {
+      targetRun: 1,
+      totalRuns: 1,
+      attemptRuns: 1,
+      continued: false,
+      phoneVerificationCodePrefetchEnabled: true,
+    });
+    return { events, currentState };
+  },
+};
+`)();
+
+  const { events, currentState } = await api.run();
+
+  assert.deepStrictEqual(events.steps.slice(0, 4).map((entry) => [entry.step, entry.phase, entry.ipProxyEnabled]), [
+    [1, 'prefetch', false],
+    [2, 'prefetch', false],
+    [3, 'prefetch', false],
+    [4, 'prefetch', false],
+  ]);
+  assert.deepStrictEqual(events.steps.slice(4, 8).map((entry) => [entry.step, entry.phase, entry.ipProxyEnabled, entry.ipProxyActivationStep]), [
+    [1, 'formal', true, 1],
+    [2, 'formal', true, 1],
+    [3, 'formal', true, 1],
+    [4, 'formal', true, 1],
+  ]);
+  assert.equal(events.steps[5].phoneNumber, '+15550001111');
+  assert.deepStrictEqual(events.proxyApplications.map((entry) => [entry.enabled, entry.activationStep, entry.phase]), [
+    [false, 1, 'prefetch'],
+    [true, 1, 'formal'],
+  ]);
+  assert.equal(currentState.signupPhonePrefetchPhase, 'formal');
+  assert.equal(currentState.signupPhonePrefetchNumber, '+15550001111');
+  assert.equal(currentState.signupPhonePrefetchCode, '123456');
+  assert.equal(currentState.ipProxyEnabled, true);
+  assert.equal(currentState.ipProxyActivationStep, 1);
+  assert.equal(events.logs.some(({ message }) => /正式流程将从节点 1 开始并全程使用代理/.test(message)), true);
 });
 
 test('auto-run clears fetched signup phone state before restarting when step 4 detects phone/password mismatch', async () => {

@@ -1556,6 +1556,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
     panelMode: 'cpa',
     plusModeEnabled: false,
     plusPaymentMethod: 'paypal',
+    phoneVerificationCodePrefetchEnabled: false,
   };
 
   const router = api.createMessageRouter({
@@ -1608,6 +1609,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       updates: {
         autoRunSkipFailures: false,
         autoRunRetryPaypalCallback: false,
+        phoneVerificationCodePrefetchEnabled: false,
         autoRunPreserveIssueLogsOnRestart: false,
       },
     },
@@ -1617,6 +1619,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
       options: {
         autoRunSkipFailures: false,
         autoRunRetryPaypalCallback: false,
+        phoneVerificationCodePrefetchEnabled: false,
         autoRunPreserveIssueLogsOnRestart: false,
         mode: 'restart',
       },

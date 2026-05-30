@@ -1646,6 +1646,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunSkipFailures: false,
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
+  phoneVerificationCodePrefetchEnabled: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
   autoRunDelayEnabled: false,
@@ -1864,6 +1865,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'paypalGeneratedProfile',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
+  'phoneVerificationCodePrefetchEnabled',
   'registrationStageWaitSeconds',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
@@ -1942,6 +1944,14 @@ const DEFAULT_STATE = {
   heroSmsLastPriceAt: 0,
   pendingPhoneActivationConfirmation: null,
   failedSignupPhoneReuseActivation: null,
+  signupPhoneCodePrefetchEnabled: false,
+  signupPhonePrefetchPhase: '',
+  signupPhonePrefetchActivation: null,
+  signupPhonePrefetchNumber: '',
+  signupPhonePrefetchCode: '',
+  signupPhonePrefetchCodeFetchedAt: 0,
+  signupPhonePrefetchAttempt: 0,
+  signupPhonePrefetchLastError: '',
   plusCheckoutRetryCleanupRequested: false,
   plusCheckoutRetryCleanupReason: '',
   phonePlusCheckAttemptCount: 0,
@@ -3570,6 +3580,7 @@ function normalizeAutoRunTimerPlan(plan) {
   const autoRunSkipFailures = Boolean(plan.autoRunSkipFailures);
   const autoRunRetryPaypalCallback = Boolean(plan.autoRunRetryPaypalCallback);
   const autoRunPreserveIssueLogsOnRestart = Boolean(plan.autoRunPreserveIssueLogsOnRestart);
+  const phoneVerificationCodePrefetchEnabled = Boolean(plan.phoneVerificationCodePrefetchEnabled);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -3589,6 +3600,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
+      phoneVerificationCodePrefetchEnabled,
       mode,
       currentRun: 0,
       attemptRun: 0,
@@ -3609,6 +3621,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunSkipFailures,
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
+      phoneVerificationCodePrefetchEnabled,
       mode: 'restart',
       currentRun: normalizedCurrentRun,
       attemptRun: normalizedAttemptRun,
@@ -3628,6 +3641,7 @@ function normalizeAutoRunTimerPlan(plan) {
     autoRunSkipFailures,
     autoRunRetryPaypalCallback,
     autoRunPreserveIssueLogsOnRestart,
+    phoneVerificationCodePrefetchEnabled,
     mode: 'restart',
     currentRun: normalizedCurrentRun,
     attemptRun: normalizedAttemptRun,
@@ -3659,6 +3673,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     totalRuns: state.scheduledAutoRunPlan?.totalRuns ?? state.autoRunTotalRuns,
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
     autoRunRetryPaypalCallback: state.scheduledAutoRunPlan?.autoRunRetryPaypalCallback ?? state.autoRunRetryPaypalCallback,
+    phoneVerificationCodePrefetchEnabled: state.scheduledAutoRunPlan?.phoneVerificationCodePrefetchEnabled ?? state.phoneVerificationCodePrefetchEnabled,
     autoRunPreserveIssueLogsOnRestart: state.scheduledAutoRunPlan?.autoRunPreserveIssueLogsOnRestart ?? state.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: state.autoRunSessionId,
     mode: state.scheduledAutoRunPlan?.mode,
@@ -4941,6 +4956,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'autoRunSkipFailures':
     case 'autoRunRetryPaypalCallback':
     case 'autoRunPreserveIssueLogsOnRestart':
+    case 'phoneVerificationCodePrefetchEnabled':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
@@ -5924,6 +5940,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
+  assignIfUpdated('phoneVerificationCodePrefetchEnabled', ['flows', 'openai', 'autoRun', 'phoneVerificationCodePrefetchEnabled']);
   assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
   assignIfUpdated('signupIdentityRedirectTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupIdentityRedirectTimeoutSeconds']);
   assignIfUpdated('authContentScriptRecoveryTimeoutSeconds', ['flows', 'openai', 'autoRun', 'authContentScriptRecoveryTimeoutSeconds']);
@@ -6178,6 +6195,7 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         integrationTargetId: prevState?.openaiIntegrationTargetId || prevState?.panelMode,
         autoRun: {
           autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
+          phoneVerificationCodePrefetchEnabled: Boolean(prevState?.phoneVerificationCodePrefetchEnabled),
           registrationStageWaitSeconds: normalizeRegistrationStageWaitSecondsForReset(
             prevState?.registrationStageWaitSeconds,
             getPersistedDefault('registrationStageWaitSeconds', 30)
@@ -12265,6 +12283,14 @@ function isStepAllowedByExecutionRangeForState(step, state = {}) {
   if (!Number.isInteger(numericStep) || numericStep <= 0) {
     return true;
   }
+  if (
+    state?.autoRunning
+    && state?.signupPhoneCodePrefetchEnabled
+    && ['prefetch', 'formal'].includes(String(state?.signupPhonePrefetchPhase || '').trim())
+    && resolveSignupMethod(state) === SIGNUP_METHOD_PHONE
+  ) {
+    return true;
+  }
   const range = getStepExecutionRangeForState(state);
   if (!range.enabled) {
     return true;
@@ -12926,6 +12952,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: normalizedPlan.mode,
       },
@@ -12945,6 +12972,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSessionId: normalizedPlan.autoRunSessionId,
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: 'restart',
         resumeCurrentRun: nextRun,
@@ -12965,6 +12993,7 @@ function getAutoRunTimerResumeOptions(plan) {
       autoRunSessionId: normalizedPlan.autoRunSessionId,
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
+      phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
       autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
       mode: 'restart',
       resumeCurrentRun: normalizedPlan.currentRun,
@@ -13061,6 +13090,7 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
       {
         autoRunSkipFailures: plan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
+        phoneVerificationCodePrefetchEnabled: plan.phoneVerificationCodePrefetchEnabled,
         autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
         autoRunTimerPlan: null,
@@ -13113,6 +13143,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     totalRuns,
     autoRunSkipFailures: options.autoRunSkipFailures,
     autoRunRetryPaypalCallback: options.autoRunRetryPaypalCallback,
+    phoneVerificationCodePrefetchEnabled: options.phoneVerificationCodePrefetchEnabled,
     autoRunPreserveIssueLogsOnRestart: options.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: sessionId,
     mode: options.mode,
@@ -13126,6 +13157,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
   await persistAutoRunTimerPlan(timerPlan, {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
     autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
+    phoneVerificationCodePrefetchEnabled: timerPlan.phoneVerificationCodePrefetchEnabled,
     autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, []),
   });
@@ -13543,7 +13575,7 @@ async function handleStepData(step, payload) {
       break;
     case 4:
       await setState({
-    ...(payload.phoneVerification ? {
+    ...(payload.phoneVerification && !payload.prefetched ? {
           currentPhoneVerificationCode: '',
           signupPhoneVerificationRequestedAt: null,
           signupPhoneVerificationPurpose: '',
@@ -16525,6 +16557,96 @@ async function refreshGpcApiKeyBalance(state = {}, options = {}) {
 
 const refreshGpcCardBalance = refreshGpcApiKeyBalance;
 
+async function restoreSignupPhoneCodePrefetchRuntimeAfterAutoRun(options = {}) {
+  const latestState = typeof getState === 'function' ? await getState() : {};
+  const hadPrefetchRuntime = Boolean(
+    latestState?.signupPhoneCodePrefetchEnabled
+    || latestState?.signupPhonePrefetchPhase
+    || latestState?.signupPhonePrefetchActivation
+    || latestState?.signupPhonePrefetchNumber
+    || latestState?.signupPhonePrefetchCode
+  );
+  if (!hadPrefetchRuntime) {
+    return { skipped: true, reason: 'no_prefetch_runtime' };
+  }
+
+  const persistedSettings = typeof getPersistedSettings === 'function'
+    ? await getPersistedSettings().catch(() => ({ ...PERSISTED_SETTING_DEFAULTS }))
+    : { ...PERSISTED_SETTING_DEFAULTS };
+  const restoredIpProxyEnabled = Boolean(persistedSettings.ipProxyEnabled);
+  const restoredIpProxyActivationStep = normalizeIpProxyActivationStep(
+    persistedSettings.ipProxyActivationStep,
+    PERSISTED_SETTING_DEFAULTS.ipProxyActivationStep || DEFAULT_IP_PROXY_ACTIVATION_STEP
+  );
+  const restoredProxySettings = {};
+  for (const key of PERSISTED_SETTING_KEYS) {
+    if (key.startsWith('ipProxy') && Object.prototype.hasOwnProperty.call(persistedSettings, key)) {
+      restoredProxySettings[key] = persistedSettings[key];
+    }
+  }
+
+  const restorePatch = {
+    ...restoredProxySettings,
+    ipProxyEnabled: restoredIpProxyEnabled,
+    ipProxyActivationStep: restoredIpProxyActivationStep,
+    phoneVerificationCodePrefetchEnabled: Boolean(persistedSettings.phoneVerificationCodePrefetchEnabled),
+    signupPhoneCodePrefetchEnabled: false,
+    signupPhonePrefetchPhase: '',
+    signupPhonePrefetchActivation: null,
+    signupPhonePrefetchNumber: '',
+    signupPhonePrefetchCode: '',
+    signupPhonePrefetchCodeFetchedAt: 0,
+    signupPhonePrefetchAttempt: 0,
+    signupPhonePrefetchLastError: '',
+    failedSignupPhoneReuseActivation: null,
+    ipProxyDelayedActivationCache: null,
+    ipProxyDelayedActivationRestored: false,
+    ipProxyDelayedActivationReleasedAt: 0,
+  };
+  await setState(restorePatch);
+  if (typeof broadcastDataUpdate === 'function') {
+    broadcastDataUpdate(restorePatch);
+  }
+
+  const restoreState = {
+    ...(await getState()),
+    ...restorePatch,
+  };
+  if (restoredIpProxyEnabled && restoredIpProxyActivationStep > 1) {
+    if (typeof releaseIpProxyForDelayedActivation === 'function') {
+      await releaseIpProxyForDelayedActivation({ resetNetworkState: false });
+    } else if (typeof applyIpProxySettingsFromState === 'function') {
+      await applyIpProxySettingsFromState({
+        ...restoreState,
+        ipProxyEnabled: false,
+      }, {
+        skipExitProbe: true,
+        resetNetworkState: false,
+        suppressAuthRebind: true,
+      });
+    }
+  } else if (typeof applyIpProxySettingsFromState === 'function') {
+    await applyIpProxySettingsFromState(restoreState, {
+      skipExitProbe: true,
+      resetNetworkState: false,
+      suppressAuthRebind: true,
+    });
+  }
+
+  const reason = String(options?.reason || '').trim();
+  await addLog(
+    reason
+      ? `验证码预取：自动运行已结束（${reason}），代理运行态已恢复为设置层配置。`
+      : '验证码预取：自动运行已结束，代理运行态已恢复为设置层配置。',
+    'info'
+  ).catch(() => {});
+  return {
+    restored: true,
+    ipProxyEnabled: restoredIpProxyEnabled,
+    ipProxyActivationStep: restoredIpProxyActivationStep,
+  };
+}
+
 const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoRunController({
   addLog,
   appendAccountRunRecord: (...args) => appendAndBroadcastAccountRunRecord(...args),
@@ -16565,6 +16687,7 @@ const autoRunController = self.MultiPageBackgroundAutoRunController?.createAutoR
   onAutoRunRoundSuccess: (payload = {}) => maybeSwitchIpProxyAfterAutoRunRoundSuccess(payload),
   persistAutoRunTimerPlan,
   resetState,
+  restorePhoneCodePrefetchRuntime: (...args) => restoreSignupPhoneCodePrefetchRuntimeAfterAutoRun(...args),
   runAutoSequenceFromNode: (...args) => runAutoSequenceFromNode(...args),
   runtime: {
     get: () => ({
@@ -16976,6 +17099,40 @@ function getAutoRunWorkflowNodeIds(state = {}) {
   return [];
 }
 
+const SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX = 'SIGNUP_PHONE_PREFETCH_RETRY::';
+const SIGNUP_PHONE_CODE_PREFETCH_NODE_IDS = [
+  'open-chatgpt',
+  'submit-signup-email',
+  'fill-password',
+  'fetch-signup-code',
+];
+const SIGNUP_PHONE_PREFETCH_MAX_RESTARTS = 5;
+
+function isSignupPhonePrefetchRetryError(error) {
+  const message = String(error?.message || error || '').trim();
+  if (error?.signupPhonePrefetchRetry || message.startsWith(SIGNUP_PHONE_PREFETCH_RETRY_ERROR_PREFIX)) {
+    return true;
+  }
+  return Boolean(
+    phoneVerificationHelpers
+    && typeof phoneVerificationHelpers.isSignupPhonePrefetchRetryError === 'function'
+    && phoneVerificationHelpers.isSignupPhonePrefetchRetryError(error)
+  );
+}
+
+function shouldUseSignupPhoneCodePrefetchForRun(state = {}, context = {}, resolvedSignupMethod = '') {
+  const activeFlowId = String(state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase() || DEFAULT_ACTIVE_FLOW_ID;
+  return Boolean(
+    activeFlowId === DEFAULT_ACTIVE_FLOW_ID
+    && resolvedSignupMethod === SIGNUP_METHOD_PHONE
+    && !context?.continued
+    && (
+      context?.phoneVerificationCodePrefetchEnabled
+      || state?.phoneVerificationCodePrefetchEnabled
+    )
+  );
+}
+
 async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   const { targetRun, totalRuns, attemptRuns, continued = false } = context;
   let postStep7RestartCount = 0;
@@ -17036,6 +17193,178 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   const setRestartNode = (nodeId) => {
     currentStartNodeId = String(nodeId || '').trim();
     continueCurrentAttempt = true;
+  };
+  const shouldUseSignupPhoneCodePrefetchForAttempt = (state = {}) => {
+    if (
+      typeof shouldUseSignupPhoneCodePrefetchForRun === 'function'
+      && typeof DEFAULT_ACTIVE_FLOW_ID === 'string'
+    ) {
+      return shouldUseSignupPhoneCodePrefetchForRun(state, context, resolvedSignupMethod);
+    }
+    const activeFlowId = String(state?.activeFlowId || state?.flowId || defaultActiveFlowId).trim().toLowerCase() || defaultActiveFlowId;
+    return Boolean(
+      activeFlowId === defaultActiveFlowId
+      && resolvedSignupMethod === SIGNUP_METHOD_PHONE
+      && !context?.continued
+      && (
+        context?.phoneVerificationCodePrefetchEnabled
+        || state?.phoneVerificationCodePrefetchEnabled
+      )
+    );
+  };
+  const isSignupPhonePrefetchEnabledForAttempt = async () => shouldUseSignupPhoneCodePrefetchForAttempt(await getState());
+  const forceProxyRuntimeForSignupPhonePrefetchFormal = async (baseState = {}) => {
+    const currentState = await getState();
+    await setState({
+      signupPhoneCodePrefetchEnabled: true,
+      signupPhonePrefetchPhase: 'formal',
+      ipProxyEnabled: true,
+      ipProxyActivationStep: 1,
+      ipProxyDelayedActivationCache: null,
+      ipProxyDelayedActivationRestored: false,
+      ipProxyDelayedActivationReleasedAt: 0,
+      browserFingerprintProfile: null,
+      browserFingerprintAppliedAt: 0,
+      browserFingerprintExitIp: '',
+      browserFingerprintExitRegion: '',
+    });
+    if (typeof applyIpProxySettingsFromState === 'function') {
+      const latestState = await getState();
+      await applyIpProxySettingsFromState({
+        ...latestState,
+        ipProxyEnabled: true,
+        ipProxyActivationStep: 1,
+      }, {
+        skipExitProbe: true,
+        resetNetworkState: false,
+        suppressAuthRebind: true,
+      }).catch((error) => addLog(`验证码预取：正式流程开启代理失败，将交由节点 1 继续处理：${getErrorMessage(error)}`, 'warn'));
+    }
+    return {
+      ...currentState,
+      ...baseState,
+      ...(await getState()),
+    };
+  };
+  const runSignupPhoneCodePrefetchBeforeFormalRun = async (reason = '') => {
+    const beforeState = await getState();
+    const attempt = Math.max(0, Math.floor(Number(beforeState.signupPhonePrefetchAttempt) || 0)) + 1;
+    await addLog(
+      reason
+        ? `验证码预取：${reason}，开始第 ${attempt} 次无代理预取。`
+        : `验证码预取：开始第 ${attempt} 次无代理预取。`,
+      'info'
+    );
+
+    await setState({
+      signupPhoneCodePrefetchEnabled: true,
+      signupPhonePrefetchPhase: 'prefetch',
+      signupPhonePrefetchAttempt: attempt,
+      signupPhonePrefetchActivation: null,
+      signupPhonePrefetchNumber: '',
+      signupPhonePrefetchCode: '',
+      signupPhonePrefetchCodeFetchedAt: 0,
+      signupPhonePrefetchLastError: '',
+      signupPhoneNumber: '',
+      signupPhoneActivation: null,
+      failedSignupPhoneReuseActivation: null,
+      currentNodeId: '',
+      nodeStatuses: {},
+      stepStatuses: {},
+      tabRegistry: {},
+      sourceLastUrls: {},
+      browserFingerprintProfile: null,
+      browserFingerprintAppliedAt: 0,
+      browserFingerprintExitIp: '',
+      browserFingerprintExitRegion: '',
+      ipProxyEnabled: false,
+      ipProxyActivationStep: 1,
+      ipProxyDelayedActivationCache: null,
+      ipProxyDelayedActivationRestored: false,
+      ipProxyDelayedActivationReleasedAt: 0,
+    });
+    if (typeof applyIpProxySettingsFromState === 'function') {
+      const latestState = await getState();
+      await applyIpProxySettingsFromState({
+        ...latestState,
+        ipProxyEnabled: false,
+      }, {
+        skipExitProbe: true,
+        resetNetworkState: true,
+        suppressAuthRebind: true,
+      }).catch((error) => addLog(`验证码预取：关闭代理失败，继续尝试预取：${getErrorMessage(error)}`, 'warn'));
+    } else if (typeof releaseIpProxyForDelayedActivation === 'function') {
+      await releaseIpProxyForDelayedActivation({ resetNetworkState: true }).catch(() => {});
+    }
+    chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => {});
+
+    for (const nodeId of SIGNUP_PHONE_CODE_PREFETCH_NODE_IDS) {
+      await executeNodeAndWaitWithAutoRunIdleLogWatchdog(nodeId, getAutoRunNodeDelayMs(nodeId));
+    }
+
+    const prefetchState = await getState();
+    const prefetchActivation = phoneVerificationHelpers?.normalizeActivation
+      ? phoneVerificationHelpers.normalizeActivation(prefetchState.signupPhonePrefetchActivation)
+      : prefetchState.signupPhonePrefetchActivation;
+    const prefetchNumber = String(prefetchState.signupPhonePrefetchNumber || prefetchActivation?.phoneNumber || '').trim();
+    const prefetchCode = String(prefetchState.signupPhonePrefetchCode || '').trim();
+    if (!prefetchActivation || !prefetchNumber || !prefetchCode) {
+      throw new Error(`验证码预取失败：未获得可复用的手机号或验证码。${prefetchState.signupPhonePrefetchLastError || ''}`);
+    }
+
+    await setState({
+      currentNodeId: '',
+      nodeStatuses: {},
+      stepStatuses: {},
+      tabRegistry: {},
+      sourceLastUrls: {},
+      signupPhoneCodePrefetchEnabled: true,
+      signupPhonePrefetchPhase: 'formal',
+      signupPhonePrefetchActivation: prefetchActivation,
+      signupPhonePrefetchNumber: prefetchNumber,
+      signupPhonePrefetchCode: prefetchCode,
+      signupPhonePrefetchCodeFetchedAt: Math.max(0, Number(prefetchState.signupPhonePrefetchCodeFetchedAt) || Date.now()),
+      signupPhonePrefetchLastError: '',
+      signupPhoneActivation: prefetchActivation,
+      signupPhoneNumber: prefetchNumber,
+      accountIdentifierType: 'phone',
+      accountIdentifier: prefetchNumber,
+      currentPhoneVerificationCode: '',
+      signupPhoneVerificationRequestedAt: null,
+      signupPhoneVerificationPurpose: '',
+      failedSignupPhoneReuseActivation: null,
+      browserFingerprintProfile: null,
+      browserFingerprintAppliedAt: 0,
+      browserFingerprintExitIp: '',
+      browserFingerprintExitRegion: '',
+    });
+    await forceProxyRuntimeForSignupPhonePrefetchFormal(await getState());
+    chrome.runtime.sendMessage({ type: 'AUTO_RUN_RESET' }).catch(() => {});
+    currentStartNodeId = 'open-chatgpt';
+    continueCurrentAttempt = false;
+    await addLog(`验证码预取：已获得手机号 ${prefetchNumber} 和验证码，正式流程将从节点 1 开始并全程使用代理。`, 'ok');
+  };
+  const restartSignupPhoneCodePrefetchAfterFormalFailure = async (nodeId, error) => {
+    const state = await getState();
+    const attempt = Math.max(0, Math.floor(Number(state.signupPhonePrefetchAttempt) || 0));
+    if (attempt >= SIGNUP_PHONE_PREFETCH_MAX_RESTARTS) {
+      await setState({ signupPhonePrefetchLastError: getErrorMessage(error) });
+      throw error;
+    }
+    await setState({
+      signupPhonePrefetchPhase: '',
+      signupPhonePrefetchActivation: null,
+      signupPhonePrefetchNumber: '',
+      signupPhonePrefetchCode: '',
+      signupPhonePrefetchCodeFetchedAt: 0,
+      signupPhonePrefetchLastError: getErrorMessage(error),
+      signupPhoneActivation: null,
+      signupPhoneNumber: '',
+      currentPhoneVerificationCode: '',
+      failedSignupPhoneReuseActivation: null,
+    });
+    await runSignupPhoneCodePrefetchBeforeFormalRun(`正式流程节点 ${nodeId} 发现预取手机号不可用`);
+    setRestartNode('open-chatgpt');
   };
   const attachFailedNode = (error, nodeId, state = {}) => {
     const failedNodeId = String(nodeId || '').trim();
@@ -17257,6 +17586,7 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     flowRegistry?.getFlowLabel?.(activeFlowId)
     || activeFlowId
   ).trim() || activeFlowId;
+  const signupPhonePrefetchEnabledForRun = shouldUseSignupPhoneCodePrefetchForAttempt(initialFlowState);
 
   if (activeFlowId !== defaultActiveFlowId) {
     await broadcastAutoRunStatus('running', {
@@ -17332,6 +17662,19 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     return;
   }
 
+  if (
+    signupPhonePrefetchEnabledForRun
+    && !continueCurrentAttempt
+    && String(initialFlowState?.signupPhonePrefetchPhase || '').trim() !== 'formal'
+  ) {
+    await runSignupPhoneCodePrefetchBeforeFormalRun();
+  } else if (
+    signupPhonePrefetchEnabledForRun
+    && String(initialFlowState?.signupPhonePrefetchPhase || '').trim() === 'formal'
+  ) {
+    await forceProxyRuntimeForSignupPhonePrefetchFormal(initialFlowState);
+  }
+
   while (true) {
 
   if (continueCurrentAttempt) {
@@ -17379,6 +17722,10 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       if (await restartCurrentNodeAfterIdle('submit-signup-email', err)) {
         continue;
       }
+      if (signupPhonePrefetchEnabledForRun && isSignupPhonePrefetchRetryError(err)) {
+        await restartSignupPhoneCodePrefetchAfterFormalFailure('submit-signup-email', err);
+        continue;
+      }
       throw err;
     }
   }
@@ -17408,6 +17755,11 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
           throw err;
         }
         if (await restartCurrentNodeAfterIdle('fill-password', err)) {
+          continue;
+        }
+        if (signupPhonePrefetchEnabledForRun && isSignupPhonePrefetchRetryError(err)) {
+          await restartSignupPhoneCodePrefetchAfterFormalFailure('fill-password', err);
+          restartFromStep1WithCurrentEmail = true;
           continue;
         }
         if (isSignupPhoneRetryFromStep2Failure(err)) {
@@ -17490,6 +17842,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
 
       if (await restartCurrentNodeAfterIdle(nodeId, err)) {
         continue;
+      }
+
+      if (signupPhonePrefetchEnabledForRun && isSignupPhonePrefetchRetryError(err)) {
+        await restartSignupPhoneCodePrefetchAfterFormalFailure(nodeId, err);
+        restartFromStep1WithCurrentEmail = true;
+        break;
       }
 
       const step = getDisplayStepForNode(nodeId, latestState);
@@ -17736,6 +18094,7 @@ async function resumeAutoRun() {
     autoRunSessionId: normalizeAutoRunSessionId(state.autoRunSessionId),
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
     autoRunRetryPaypalCallback: Boolean(state.autoRunRetryPaypalCallback),
+    phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
     autoRunPreserveIssueLogsOnRestart: Boolean(state.autoRunPreserveIssueLogsOnRestart),
     mode: 'continue',
     resumeCurrentRun: currentRun,

@@ -115,6 +115,7 @@
       const result = await phoneVerificationHelpers.completeSignupPhoneVerificationFlow(signupTabId, {
         state,
         signupProfile,
+        prefetchOnly: Boolean(state?.signupPhoneCodePrefetchEnabled && state?.signupPhonePrefetchPhase === 'prefetch'),
       });
 
       if (result?.emailVerificationRequired || result?.emailVerificationPage) {
@@ -123,6 +124,7 @@
 
       await completeNodeFromBackground('fetch-signup-code', {
         phoneVerification: true,
+        ...(result?.prefetched ? { prefetched: true, phoneNumber: result.phoneNumber || '' } : {}),
         code: result?.code || '',
         ...(result?.skipProfileStep ? { skipProfileStep: true } : {}),
         ...(result?.skipProfileStepReason ? { skipProfileStepReason: result.skipProfileStepReason } : {}),

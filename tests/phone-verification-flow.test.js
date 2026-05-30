@@ -896,6 +896,148 @@ test('signup phone helper completes signup SMS verification without touching add
   assert.ok(!setStateCalls.some((updates) => Object.prototype.hasOwnProperty.call(updates, 'currentPhoneActivation')));
 });
 
+test('signup phone helper prefetches signup SMS code without submitting it', async () => {
+  const contentMessages = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    signupPhoneCodePrefetchEnabled: true,
+    signupPhonePrefetchPhase: 'prefetch',
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-prefetch-code',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_OK:135790' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    sendToContentScriptResilient: async (_source, message) => {
+      contentMessages.push(message);
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.completeSignupPhoneVerificationFlow(77, {
+    state: currentState,
+    prefetchOnly: true,
+  });
+
+  assert.equal(result.prefetched, true);
+  assert.equal(result.code, '135790');
+  assert.equal(currentState.signupPhonePrefetchNumber, '66959916439');
+  assert.equal(currentState.signupPhonePrefetchCode, '135790');
+  assert.equal(currentState.signupPhonePrefetchPhase, 'prefetch');
+  assert.equal(currentState.signupPhoneVerificationPurpose, 'signup_prefetch');
+  assert.equal(contentMessages.some((message) => message.type === 'SUBMIT_PHONE_VERIFICATION_CODE'), false);
+});
+
+test('signup phone helper tries prefetch code first and falls back to SMS polling when rejected', async () => {
+  const submittedCodes = [];
+  let currentState = {
+    heroSmsApiKey: 'demo-key',
+    signupPhoneCodePrefetchEnabled: true,
+    signupPhonePrefetchPhase: 'formal',
+    signupPhonePrefetchCode: '111111',
+    signupPhonePrefetchCodeFetchedAt: Date.now(),
+    signupPhonePrefetchNumber: '66959916439',
+    signupPhonePrefetchActivation: {
+      activationId: 'signup-prefetch-formal',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+    signupPhoneNumber: '66959916439',
+    signupPhoneVerificationPurpose: 'signup',
+    signupPhoneActivation: {
+      activationId: 'signup-prefetch-formal',
+      phoneNumber: '66959916439',
+      provider: 'hero-sms',
+      serviceCode: 'dr',
+      countryId: 52,
+      successfulUses: 0,
+      maxUses: 3,
+    },
+  };
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      const action = parsedUrl.searchParams.get('action');
+      if (action === 'getStatus') {
+        return { ok: true, text: async () => 'STATUS_OK:222222' };
+      }
+      if (action === 'setStatus') {
+        return { ok: true, text: async () => 'ACCESS_READY' };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getOAuthFlowStepTimeoutMs: async (fallback) => fallback,
+    getState: async () => currentState,
+    sendToContentScriptResilient: async (_source, message) => {
+      if (message.type === 'STEP8_GET_STATE') {
+        return {
+          emailVerificationPage: false,
+          phoneVerificationPage: true,
+          url: 'https://auth.openai.com/phone-verification',
+        };
+      }
+      if (message.type === 'SUBMIT_PHONE_VERIFICATION_CODE') {
+        const code = message.payload?.code;
+        submittedCodes.push(code);
+        return code === '111111'
+          ? { invalidCode: true, errorText: 'invalid code' }
+          : { success: true };
+      }
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        return {};
+      }
+      throw new Error(`Unexpected content-script message: ${message.type}`);
+    },
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.completeSignupPhoneVerificationFlow(77, { state: currentState });
+
+  assert.deepEqual(submittedCodes, ['111111', '222222']);
+  assert.deepEqual(result, { success: true });
+  assert.equal(currentState.signupPhonePrefetchCode, '');
+  assert.equal(currentState.currentPhoneVerificationCode, '');
+});
+
 test('signup phone helper writes account book entry immediately after phone verification succeeds', async () => {
   const accountBookCalls = [];
   let currentState = {
