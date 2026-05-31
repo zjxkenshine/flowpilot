@@ -41,6 +41,6 @@ test('background imports node registry and wires the rebuilt Kiro executors', ()
 
 test('GoPay approve executor receives debugger click and manual OTP helpers', () => {
   const source = fs.readFileSync('background.js', 'utf8');
-  assert.match(source, /createGoPayApproveExecutor\(\{[\s\S]*clickWithDebugger[\s\S]*requestGoPayOtpInput[\s\S]*\}\)/);
+  assert.match(source, /createGoPayApproveExecutor\(\{[\s\S]*fetch: typeof fetch === 'function'[\s\S]*clickWithDebugger[\s\S]*requestGoPayOtpInput[\s\S]*\}\)/);
   assert.match(source, /REQUEST_GOPAY_OTP_INPUT/);
 });

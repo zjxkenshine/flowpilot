@@ -413,6 +413,10 @@ const rowGoPayOtp = document.getElementById('row-gopay-otp');
 const inputGoPayOtp = document.getElementById('input-gopay-otp');
 const rowGoPayPin = document.getElementById('row-gopay-pin');
 const inputGoPayPin = document.getElementById('input-gopay-pin');
+const rowAndroidAppAutomationEnabled = document.getElementById('row-android-app-automation-enabled');
+const inputAndroidAppAutomationEnabled = document.getElementById('input-android-app-automation-enabled');
+const rowAndroidAppHelperUrl = document.getElementById('row-android-app-helper-url');
+const inputAndroidAppHelperUrl = document.getElementById('input-android-app-helper-url');
 const selectMailProvider = document.getElementById('select-mail-provider');
 const btnMailLogin = document.getElementById('btn-mail-login');
 const rowCustomMailProviderPool = document.getElementById('row-custom-mail-provider-pool');
@@ -756,6 +760,7 @@ const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
 const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
 const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
 const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
+const DEFAULT_ANDROID_APP_HELPER_BASE_URL = 'http://127.0.0.1:18768';
 const GPC_HELPER_PORTAL_URL = 'https://gpc.qlhazycoder.top/';
 const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
 const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
@@ -4542,6 +4547,28 @@ function normalizeGpcLocalSmsHelperBaseUrlValue(value = '') {
   }
 }
 
+function normalizeAndroidAppHelperBaseUrlValue(value = '') {
+  const fallback = typeof DEFAULT_ANDROID_APP_HELPER_BASE_URL !== 'undefined'
+    ? DEFAULT_ANDROID_APP_HELPER_BASE_URL
+    : 'http://127.0.0.1:18768';
+  const rawValue = String(value || fallback).trim();
+  try {
+    const parsed = new URL(rawValue);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return fallback;
+    }
+    const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+    if (['/health', '/gopay/approve', '/device/snapshot'].includes(endpointPath)) {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
 function hasOwnStateValue(source, key) {
   return Object.prototype.hasOwnProperty.call(source, key);
 }
@@ -6321,6 +6348,9 @@ function collectSettingsPayload() {
       ? inputGpcHelperLocalSmsEnabled.checked
       : latestState?.gopayHelperLocalSmsHelperEnabled
   );
+  const androidAppHelperBaseUrl = typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl
+    ? inputAndroidAppHelperUrl.value
+    : (latestState?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL);
   const selectedSub2ApiGroupName = String(inputSub2ApiGroup.value || '').trim();
   const sub2apiGroupNames = [];
   const seenSub2ApiGroupNames = new Set();
@@ -6688,6 +6718,12 @@ function collectSettingsPayload() {
         ? inputGpcHelperLocalSmsUrl.value
         : (latestState?.gopayHelperLocalSmsHelperUrl || '')
     ),
+    androidAppAutomationEnabled: Boolean(
+      typeof inputAndroidAppAutomationEnabled !== 'undefined' && inputAndroidAppAutomationEnabled
+        ? inputAndroidAppAutomationEnabled.checked
+        : latestState?.androidAppAutomationEnabled
+    ),
+    androidAppHelperBaseUrl: normalizeAndroidAppHelperBaseUrlValue(androidAppHelperBaseUrl),
     ...(accountContributionEnabled ? {} : {
       customPassword: inputPassword.value,
     }),
@@ -12366,6 +12402,20 @@ function updatePlusModeUI() {
   if (typeof rowGpcHelperLocalSmsUrl !== 'undefined' && rowGpcHelperLocalSmsUrl) {
     rowGpcHelperLocalSmsUrl.style.display = localSmsControlsVisible && effectiveLocalSmsEnabled ? '' : 'none';
   }
+  if (typeof inputAndroidAppAutomationEnabled !== 'undefined' && inputAndroidAppAutomationEnabled) {
+    inputAndroidAppAutomationEnabled.checked = Boolean(latestState?.androidAppAutomationEnabled);
+  }
+  if (typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl) {
+    inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(
+      latestState?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL
+    );
+  }
+  if (typeof rowAndroidAppAutomationEnabled !== 'undefined' && rowAndroidAppAutomationEnabled) {
+    rowAndroidAppAutomationEnabled.style.display = enabled && selectedMethod === gopayValue ? '' : 'none';
+  }
+  if (typeof rowAndroidAppHelperUrl !== 'undefined' && rowAndroidAppHelperUrl) {
+    rowAndroidAppHelperUrl.style.display = enabled && selectedMethod === gopayValue && Boolean(inputAndroidAppAutomationEnabled?.checked) ? '' : 'none';
+  }
   if (typeof btnGpcCardKeyPurchase !== 'undefined' && btnGpcCardKeyPurchase) {
     btnGpcCardKeyPurchase.style.display = gpcRowsVisible ? '' : 'none';
   }
@@ -13583,6 +13633,12 @@ function applySettingsState(state) {
   }
   if (typeof inputGoPayPin !== 'undefined' && inputGoPayPin) {
     inputGoPayPin.value = state?.gopayPin || '';
+  }
+  if (typeof inputAndroidAppAutomationEnabled !== 'undefined' && inputAndroidAppAutomationEnabled) {
+    inputAndroidAppAutomationEnabled.checked = Boolean(state?.androidAppAutomationEnabled);
+  }
+  if (typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl) {
+    inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(state?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL);
   }
   if (typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl) {
     inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(state?.hostedCheckoutVerificationUrl || '');
@@ -19873,6 +19929,8 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
   inputGoPayPhone,
   inputGoPayOtp,
   inputGoPayPin,
+  inputAndroidAppAutomationEnabled,
+  inputAndroidAppHelperUrl,
   selectPlusCheckoutVerificationFailureStrategy,
   inputHostedCheckoutVerificationUrl,
   inputHostedCheckoutPhone,
@@ -19883,7 +19941,12 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
     scheduleSettingsAutoSave();
   });
   input?.addEventListener('change', () => {
-    if (input === selectGpcHelperPhoneMode || input === selectGpcHelperOtpChannel || input === inputGpcHelperLocalSmsEnabled) {
+    if (
+      input === selectGpcHelperPhoneMode
+      || input === selectGpcHelperOtpChannel
+      || input === inputGpcHelperLocalSmsEnabled
+      || input === inputAndroidAppAutomationEnabled
+    ) {
       updatePlusModeUI();
     }
     markSettingsDirty(true);
@@ -22981,6 +23044,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.gopayHelperLocalSmsHelperUrl !== undefined && inputGpcHelperLocalSmsUrl) {
         inputGpcHelperLocalSmsUrl.value = normalizeGpcLocalSmsHelperBaseUrlValue(message.payload.gopayHelperLocalSmsHelperUrl);
       }
+      if (message.payload.androidAppAutomationEnabled !== undefined && inputAndroidAppAutomationEnabled) {
+        inputAndroidAppAutomationEnabled.checked = Boolean(message.payload.androidAppAutomationEnabled);
+      }
+      if (message.payload.androidAppHelperBaseUrl !== undefined && inputAndroidAppHelperUrl) {
+        inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(message.payload.androidAppHelperBaseUrl);
+      }
       if (message.payload.gopayHelperBalance !== undefined || message.payload.gopayHelperBalanceError !== undefined) {
         if (typeof displayGpcHelperBalance !== 'undefined' && displayGpcHelperBalance) {
           const balanceText = String(message.payload.gopayHelperBalance ?? latestState?.gopayHelperBalance ?? '').trim();
@@ -23006,6 +23075,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.gopayHelperAutoModeEnabled !== undefined
         || message.payload.gopayHelperOtpChannel !== undefined
         || message.payload.gopayHelperLocalSmsHelperEnabled !== undefined
+        || message.payload.androidAppAutomationEnabled !== undefined
+        || message.payload.androidAppHelperBaseUrl !== undefined
       ) {
         const stepDefinitionState = typeof resolveStepDefinitionCapabilityState === 'function'
           ? resolveStepDefinitionCapabilityState(latestState, {

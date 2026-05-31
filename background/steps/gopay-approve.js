@@ -9,6 +9,9 @@
   const GOPAY_POLL_INTERVAL_MS = 1000;
   const GOPAY_LINKING_RETRY_WAIT_MS = 15000;
   const GOPAY_LINKING_STABLE_WAIT_MS = 60000;
+  const DEFAULT_ANDROID_APP_HELPER_BASE_URL = 'http://127.0.0.1:18768';
+  const ANDROID_APP_APPROVE_TIMEOUT_MS = 120000;
+  const ANDROID_APP_POST_APPROVE_WAIT_MS = 15000;
   const GOPAY_OTP_FRAME_URL_PATTERN = /\/linking\/otp\b|gopayapi\.com\/linking\/otp/i;
   const GOPAY_PIN_FRAME_URL_PATTERN = /pin-web-client\.gopayapi\.com\/auth\/pin|\/auth\/pin\/verify|linking-validate-pin|merchants-gws-app\.gopayapi\.com\/payment\/validate-pin|\/payment\/validate-pin/i;
   const GOPAY_PAYMENT_FRAME_URL_PATTERN = /merchants-gws-app\.gopayapi\.com\/(?:payment\/details|app\/challenge)|\/gopay-tokenization\/pay/i;
@@ -29,6 +32,7 @@
       waitForTabCompleteUntilStopped,
       clickWithDebugger = null,
       requestGoPayOtpInput = null,
+      fetch: fetchImpl = null,
       throwIfStopped = null,
     } = deps;
 
@@ -1098,6 +1102,105 @@
       };
     }
 
+    function normalizeAndroidAppHelperBaseUrl(value = '') {
+      const rawValue = String(value || DEFAULT_ANDROID_APP_HELPER_BASE_URL).trim();
+      try {
+        const parsed = new URL(rawValue);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          return DEFAULT_ANDROID_APP_HELPER_BASE_URL;
+        }
+        const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+        if (['/health', '/gopay/approve', '/device/snapshot'].includes(endpointPath)) {
+          parsed.pathname = '';
+          parsed.search = '';
+          parsed.hash = '';
+        }
+        return parsed.toString().replace(/\/$/, '');
+      } catch {
+        return DEFAULT_ANDROID_APP_HELPER_BASE_URL;
+      }
+    }
+
+    function isAndroidAppAutomationEnabled(state = {}) {
+      return Boolean(state?.androidAppAutomationEnabled);
+    }
+
+    function buildAndroidAppHelperEndpoint(baseUrl = '', path = '') {
+      const normalizedBaseUrl = normalizeAndroidAppHelperBaseUrl(baseUrl);
+      return `${normalizedBaseUrl}${String(path || '').startsWith('/') ? path : `/${path}`}`;
+    }
+
+    async function fetchJsonWithTimeout(url, options = {}, timeoutMs = ANDROID_APP_APPROVE_TIMEOUT_MS) {
+      const fetcher = typeof fetchImpl === 'function'
+        ? fetchImpl
+        : (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
+      if (typeof fetcher !== 'function') {
+        throw new Error('当前运行环境不支持 fetch，无法调用 Android App helper。');
+      }
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller
+        ? setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || ANDROID_APP_APPROVE_TIMEOUT_MS))
+        : null;
+      try {
+        const response = await fetcher(url, {
+          ...options,
+          signal: controller?.signal,
+        });
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (_) {
+          payload = {};
+        }
+        return {
+          ok: Boolean(response.ok),
+          status: response.status,
+          payload,
+        };
+      } finally {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
+    }
+
+    async function requestAndroidGoPayApprove(state = {}, credentials = {}) {
+      const helperBaseUrl = normalizeAndroidAppHelperBaseUrl(state?.androidAppHelperBaseUrl);
+      const helperUrl = buildAndroidAppHelperEndpoint(helperBaseUrl, '/gopay/approve');
+      await addLog(`步骤 8：检测到网页 GoPay 等待手机 App 确认，正在调用 Android helper：${helperBaseUrl}`, 'info');
+      const response = await fetchJsonWithTimeout(helperUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: credentials.pin,
+          timeoutSeconds: Math.floor(ANDROID_APP_APPROVE_TIMEOUT_MS / 1000),
+        }),
+      }, ANDROID_APP_APPROVE_TIMEOUT_MS + 10000);
+      const payload = response.payload || {};
+      if (response.ok && payload.ok) {
+        await addLog(`步骤 8：Android GoPay App 已完成确认，设备=${payload.deviceId || 'unknown'}，页面=${payload.packageName || ''}/${payload.activity || ''}。`, 'ok');
+        return payload;
+      }
+      const detail = normalizeText(payload.message || payload.error || `HTTP ${response.status}`);
+      const snapshotPath = normalizeText(payload.snapshotPath || '');
+      const suffix = snapshotPath ? ` snapshot=${snapshotPath}` : '';
+      if (payload.retryable === false) {
+        throw new Error(`步骤 8：Android GoPay App 自动确认失败：${detail || 'terminal error'}${suffix}`);
+      }
+      throw new Error(`步骤 8：Android GoPay App 自动确认暂未完成：${detail || 'unknown error'}${suffix}`);
+    }
+
+    async function waitForReturnOrCompletedAfterAndroidApprove(tabId) {
+      const decision = await waitForGoPayState(tabId, (nextState) => (
+        nextState.hasTerminalError
+        || nextState.completed
+        || nextState.hasPayNowButton
+        || nextState.hasContinueButton
+      ), { timeoutMs: ANDROID_APP_POST_APPROVE_WAIT_MS });
+      await handleGoPayTerminalError(decision.pageState, tabId);
+      return decision;
+    }
+
     async function requestManualGoPayOtp(existingCode = '') {
       if (typeof requestGoPayOtpInput !== 'function') {
         throw new Error('步骤 8：未配置 GoPay 验证码，也无法打开侧边栏输入弹窗。');
@@ -1147,6 +1250,7 @@
       let lastContinueClickSignature = '';
       let payNowClickAttempts = 0;
       let lastPayNowClickSignature = '';
+      let androidAppApproveAttempted = false;
       const stableStateTracker = createGoPayStableStateTracker();
 
       while (true) {
@@ -1390,6 +1494,22 @@
               loggedWaiting = false;
               continue;
             }
+            if (isAndroidAppAutomationEnabled(state) && !androidAppApproveAttempted) {
+              androidAppApproveAttempted = true;
+              const appResult = await requestAndroidGoPayApprove(state, credentials);
+              await sleepWithStop(2500);
+              const appDecision = await waitForReturnOrCompletedAfterAndroidApprove(tabId);
+              if (appDecision.returned || appDecision.pageState?.completed) {
+                await addLog('步骤 8：Android GoPay App 确认后网页已完成或回跳，准备进入回跳确认。', 'ok');
+                break;
+              }
+              await addLog(`步骤 8：Android helper 已返回 ${appResult.status || 'approved'}，继续等待 GoPay 网页回跳。`, 'info');
+              continueClickAttempts = 0;
+              lastContinueClickSignature = '';
+              stableStateTracker.reset();
+              loggedWaiting = false;
+              continue;
+            }
             throw new Error('步骤 8：GoPay linking 页面长时间无变化，请手动点击 Hubungkan/确认按钮后重新执行或继续当前步骤。');
           }
           await addLog(`步骤 8：检测到 GoPay 继续/确认按钮，正在点击${continueClickAttempts > 1 ? `（第 ${continueClickAttempts} 次）` : ''}...`, 'info');
@@ -1428,6 +1548,19 @@
           break;
         }
         if (decision.timeout) {
+          if (isAndroidAppAutomationEnabled(state) && !androidAppApproveAttempted) {
+            androidAppApproveAttempted = true;
+            const appResult = await requestAndroidGoPayApprove(state, credentials);
+            await sleepWithStop(2500);
+            const appDecision = await waitForReturnOrCompletedAfterAndroidApprove(tabId);
+            if (appDecision.returned || appDecision.pageState?.completed) {
+              await addLog('步骤 8：Android GoPay App 确认后网页已完成或回跳，准备进入回跳确认。', 'ok');
+              break;
+            }
+            await addLog(`步骤 8：Android helper 已返回 ${appResult.status || 'approved'}，继续等待 GoPay 网页回跳。`, 'info');
+            loggedWaiting = false;
+            continue;
+          }
           await sleepWithStop(GOPAY_POLL_INTERVAL_MS);
         }
       }

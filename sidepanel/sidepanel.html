@@ -929,6 +929,21 @@
             title="显示 GoPay PIN"></button>
         </div>
       </div>
+      <div class="data-row" id="row-android-app-automation-enabled" style="display:none;">
+        <span class="data-label">手机 App</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="input-android-app-automation-enabled" />
+          <span class="toggle-switch-track" aria-hidden="true">
+            <span class="toggle-switch-thumb"></span>
+          </span>
+        </label>
+        <span class="setting-caption">GoPay 网页流程需要手机确认时，调用本机 Android helper 自动处理</span>
+      </div>
+      <div class="data-row" id="row-android-app-helper-url" style="display:none;">
+        <span class="data-label">App Helper</span>
+        <input type="text" id="input-android-app-helper-url" class="data-input"
+          placeholder="http://127.0.0.1:18768" autocomplete="off" />
+      </div>
       <div class="data-row module-divider-start" id="row-mail-provider">
         <span class="data-label">邮箱服务</span>
         <div class="data-inline">

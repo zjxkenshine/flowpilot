@@ -95,6 +95,7 @@ const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL = DEFAULT_HOTMAIL_LOCAL_BASE_URL;
 const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
 const DEFAULT_CODEX2API_URL = 'http://localhost:8080/admin/accounts';
+const DEFAULT_ANDROID_APP_HELPER_BASE_URL = 'http://127.0.0.1:18768';
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const PHONE_REPLACEMENT_LIMIT_MIN = 1;
 const PHONE_REPLACEMENT_LIMIT_MAX = 20;
@@ -209,6 +210,7 @@ const self = {
 };
 const PERSISTED_SETTING_DEFAULTS = {
   autoStepDelaySeconds: null,
+  androidAppHelperBaseUrl: DEFAULT_ANDROID_APP_HELPER_BASE_URL,
   gopayHelperApiUrl: 'https://gpc.qlhazycoder.top',
   mailProvider: '163',
   phoneActivationRetryRounds: 2,
@@ -298,6 +300,15 @@ return {
   );
   assert.equal(api.normalizePersistentSettingValue('gopayHelperLocalSmsTimeoutSeconds', '999'), 300);
   assert.equal(api.normalizePersistentSettingValue('gopayHelperLocalSmsPollIntervalSeconds', '0'), 1);
+  assert.equal(api.normalizePersistentSettingValue('androidAppAutomationEnabled', 1), true);
+  assert.equal(
+    api.normalizePersistentSettingValue('androidAppHelperBaseUrl', 'http://127.0.0.1:18768/gopay/approve?x=1'),
+    'http://127.0.0.1:18768'
+  );
+  assert.equal(
+    api.normalizePersistentSettingValue('androidAppHelperBaseUrl', 'ftp://127.0.0.1:18768'),
+    'http://127.0.0.1:18768'
+  );
   assert.equal(api.normalizePersistentSettingValue('verificationResendCount', '7'), 7);
   assert.equal(api.normalizePersistentSettingValue('verificationResendCount', '-1'), 0);
   assert.equal(api.normalizePersistentSettingValue('phoneVerificationReplacementLimit', '9'), 9);

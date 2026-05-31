@@ -815,6 +815,7 @@ const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const DEFAULT_HOTMAIL_REMOTE_BASE_URL = '';
 const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL = DEFAULT_HOTMAIL_LOCAL_BASE_URL;
+const DEFAULT_ANDROID_APP_HELPER_BASE_URL = 'http://127.0.0.1:18768';
 const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
 const DEFAULT_LUCKMAIL_PROJECT_CODE = 'openai';
 const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
@@ -1658,6 +1659,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   gopayHelperRemainingUses: 0,
   gopayHelperAutoModeEnabled: false,
   gopayHelperApiKeyStatus: '',
+  androidAppAutomationEnabled: false,
+  androidAppHelperBaseUrl: DEFAULT_ANDROID_APP_HELPER_BASE_URL,
   autoRunSkipFailures: false,
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
@@ -1885,6 +1888,8 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'plusHostedCheckoutOauthDelaySeconds',
   'paypalProfileCountryCode',
   'paypalGeneratedProfile',
+  'androidAppAutomationEnabled',
+  'androidAppHelperBaseUrl',
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
   'phoneVerificationCodePrefetchEnabled',
@@ -2673,7 +2678,7 @@ function normalizeLocalHttpBaseUrl(value = '', fallback = 'http://127.0.0.1:1876
       return fallback;
     }
     const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
-    if (['/otp', '/latest-otp', '/health'].includes(endpointPath)) {
+    if (['/otp', '/latest-otp', '/health', '/gopay/approve', '/device/snapshot'].includes(endpointPath)) {
       parsed.pathname = '';
       parsed.search = '';
       parsed.hash = '';
@@ -4983,6 +4988,11 @@ function normalizePersistentSettingValue(key, value) {
         value,
         PERSISTED_SETTING_DEFAULTS.gopayHelperLocalSmsHelperUrl || 'http://127.0.0.1:18767'
       );
+    case 'androidAppHelperBaseUrl':
+      return normalizeLocalHttpBaseUrl(
+        value,
+        PERSISTED_SETTING_DEFAULTS.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL
+      );
     case 'gopayHelperLocalSmsTimeoutSeconds':
       return normalizeBoundedIntegerSetting(
         value,
@@ -5055,6 +5065,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
+    case 'androidAppAutomationEnabled':
     case 'autoRunDelayEnabled':
       return Boolean(value);
     case 'operationDelayEnabled':
@@ -6054,6 +6065,8 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('plusHostedCheckoutOauthDelaySeconds', ['flows', 'openai', 'plus', 'plusHostedCheckoutOauthDelaySeconds']);
   assignIfUpdated('paypalProfileCountryCode', ['flows', 'openai', 'plus', 'paypalProfileCountryCode']);
   assignIfUpdated('paypalGeneratedProfile', ['flows', 'openai', 'plus', 'paypalGeneratedProfile']);
+  assignIfUpdated('androidAppAutomationEnabled', ['flows', 'openai', 'plus', 'androidAppAutomationEnabled']);
+  assignIfUpdated('androidAppHelperBaseUrl', ['flows', 'openai', 'plus', 'androidAppHelperBaseUrl']);
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
   assignIfUpdated('phoneVerificationCodePrefetchEnabled', ['flows', 'openai', 'autoRun', 'phoneVerificationCodePrefetchEnabled']);
@@ -19222,6 +19235,7 @@ const goPayApproveExecutor = self.MultiPageBackgroundGoPayApprove?.createGoPayAp
   chrome,
   completeNodeFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
+  fetch: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
   getTabId,
   isTabAlive,
   queryTabsInAutomationWindow,

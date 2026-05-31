@@ -136,3 +136,12 @@ test('GoPay approve gives PIN precedence over OTP on ambiguous second PIN pages'
   assert.ok(source.indexOf('pageState.hasPinInput && !pinSubmitted') < source.indexOf('pageState.hasOtpInput && !pageState.hasPinInput && !otpSubmitted'));
   assert.doesNotMatch(source, /otp\|one\[-\\s\]\*time\|kode\|verification\|whatsapp\|code\|pin-input-field/);
 });
+
+test('GoPay approve can call Android app helper after web flow stalls', () => {
+  assert.match(source, /DEFAULT_ANDROID_APP_HELPER_BASE_URL/);
+  assert.match(source, /androidAppAutomationEnabled/);
+  assert.match(source, /requestAndroidGoPayApprove/);
+  assert.match(source, /\/gopay\/approve/);
+  assert.match(source, /waitForReturnOrCompletedAfterAndroidApprove/);
+  assert.match(source, /Android GoPay App 确认后网页已完成或回跳/);
+});

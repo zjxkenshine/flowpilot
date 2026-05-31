@@ -579,6 +579,8 @@
               plusHostedCheckoutOauthDelaySeconds: 3,
               paypalProfileCountryCode: 'US',
               paypalGeneratedProfile: normalizePayPalGeneratedProfile(),
+              androidAppAutomationEnabled: false,
+              androidAppHelperBaseUrl: 'http://127.0.0.1:18768',
             },
             autoRun: {
               autoRunRetryPaypalCallback: false,
@@ -1147,6 +1149,16 @@
                 ?? nested?.flows?.openai?.plus?.paypalGeneratedProfile
                 ?? defaults.flows.openai.plus.paypalGeneratedProfile
               ),
+              androidAppAutomationEnabled: Boolean(
+                input?.androidAppAutomationEnabled
+                  ?? nested?.flows?.openai?.plus?.androidAppAutomationEnabled
+                  ?? defaults.flows.openai.plus.androidAppAutomationEnabled
+              ),
+              androidAppHelperBaseUrl: String(
+                input?.androidAppHelperBaseUrl
+                ?? nested?.flows?.openai?.plus?.androidAppHelperBaseUrl
+                ?? defaults.flows.openai.plus.androidAppHelperBaseUrl
+              ).trim().replace(/\/+$/g, '') || defaults.flows.openai.plus.androidAppHelperBaseUrl,
             },
             autoRun: {
               autoRunRetryPaypalCallback: Boolean(
@@ -1407,6 +1419,8 @@
       next.plusHostedCheckoutOauthDelaySeconds = openaiState.plus.plusHostedCheckoutOauthDelaySeconds;
       next.paypalProfileCountryCode = openaiState.plus.paypalProfileCountryCode;
       next.paypalGeneratedProfile = cloneValue(openaiState.plus.paypalGeneratedProfile);
+      next.androidAppAutomationEnabled = openaiState.plus.androidAppAutomationEnabled;
+      next.androidAppHelperBaseUrl = openaiState.plus.androidAppHelperBaseUrl;
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
       next.phoneVerificationCodePrefetchEnabled = openaiState.autoRun.phoneVerificationCodePrefetchEnabled;
