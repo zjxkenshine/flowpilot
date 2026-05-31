@@ -1103,6 +1103,7 @@ test('Phone Plus classic checkout falls back before opening checkout link when c
 
   await executor.executePlusCheckoutCreate({
     phonePlusModeEnabled: true,
+    freeStatus: 'free',
     plusPaymentMethod: 'paypal',
     plusHostedCheckoutIsFinalStep: false,
     plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
@@ -1174,6 +1175,135 @@ test('Non Phone Plus classic checkout still stops when conversion proxy exit che
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
 
+test('Plus checkout create allows free accounts from matching PlusCheck region', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        create: async () => ({ id: 321 }),
+        update: async (tabId, payload) => {
+          events.push({ type: 'tab-update', tabId, payload });
+          return { id: tabId, url: payload.url, status: 'complete' };
+        },
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'CREATE_PLUS_CHECKOUT') {
+        return {
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          country: 'US',
+          currency: 'USD',
+        };
+      }
+      if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
+        return {
+          checkoutAmountSummary: {
+            hasTodayDue: true,
+            amount: 0,
+            isZero: true,
+            rawAmount: '$0.00',
+          },
+        };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusModeEnabled: true,
+    freeStatus: 'free',
+    ipProxyAppliedExitRegion: 'US',
+    plusCheckAllowedRegions: ['US', 'JP'],
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+    plusCheckoutOpenStableWaitSeconds: 0,
+  });
+
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'CREATE_PLUS_CHECKOUT'), true);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'plus-checkout-create'), true);
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+test('Plus checkout create skips payment segment for non-free registration statuses', async () => {
+  for (const freeStatus of ['paid', 'plus', 'unknown']) {
+    const events = [];
+    const executor = api.createPlusCheckoutCreateExecutor({
+      addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+      chrome: {
+        tabs: {
+          create: async () => {
+            throw new Error('checkout tab should not be opened');
+          },
+        },
+      },
+      handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+        events.push({ type: 'fallback', state, context });
+        return {
+          handled: true,
+          nextNodeId: 'oauth-login',
+          skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+        };
+      },
+      setState: async (payload) => events.push({ type: 'set-state', payload }),
+    });
+
+    await executor.executePlusCheckoutCreate({
+      plusModeEnabled: true,
+      freeStatus,
+      plusPaymentMethod: 'paypal',
+    });
+
+    const fallback = events.find((event) => event.type === 'fallback');
+    assert.equal(fallback?.context?.reason, 'plus-registration-non-free');
+    assert.equal(fallback?.context?.detail, `freeStatus=${freeStatus}`);
+    assert.equal(events.some((event) => event.type === 'tab-create'), false);
+  }
+});
+
+test('Plus checkout create skips payment segment when free registration region misses PlusCheck', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        create: async () => {
+          throw new Error('checkout tab should not be opened');
+        },
+      },
+    },
+    handlePhonePlusNonFreeTrialFallback: async (state, context) => {
+      events.push({ type: 'fallback', state, context });
+      return {
+        handled: true,
+        nextNodeId: 'oauth-login',
+        skippedNodeIds: ['plus-checkout-create', 'paypal-hosted-email', 'paypal-hosted-card', 'paypal-hosted-create-account', 'paypal-hosted-review'],
+      };
+    },
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+  });
+
+  await executor.executePlusCheckoutCreate({
+    plusModeEnabled: true,
+    freeStatus: 'free',
+    ipProxyAppliedExitRegion: 'BR',
+    plusCheckAllowedRegions: ['US', 'JP'],
+    plusPaymentMethod: 'paypal',
+  });
+
+  const fallback = events.find((event) => event.type === 'fallback');
+  assert.equal(fallback?.context?.reason, 'plus-registration-region-mismatch');
+  assert.match(fallback?.context?.detail || '', /exitRegion=BR/);
+  assert.match(fallback?.context?.detail || '', /allowedRegions=JP,US|allowedRegions=US,JP/);
+});
+
 test('Phone Plus classic checkout falls back when conversion proxy apply fails', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -1223,6 +1353,7 @@ test('Phone Plus classic checkout falls back when conversion proxy apply fails',
 
   await executor.executePlusCheckoutCreate({
     phonePlusModeEnabled: true,
+    freeStatus: 'free',
     plusPaymentMethod: 'paypal',
     plusHostedCheckoutIsFinalStep: false,
     plusCheckoutConversionProxyUrl: 'http://proxy.example:8080',
@@ -1395,6 +1526,7 @@ test('Phone Plus hosted checkout falls back when conversion proxy exit check fai
     },
     getState: async () => ({
       phonePlusModeEnabled: true,
+      freeStatus: 'free',
       hostedCheckoutPhoneNumber: '4155551234',
       hostedCheckoutVerificationUrl: 'http://example.test/api/sms',
       plusPaymentEmailState: {
@@ -1453,6 +1585,7 @@ test('Phone Plus hosted checkout falls back when conversion proxy exit check fai
 
   await executor.executePlusCheckoutCreate({
     phonePlusModeEnabled: true,
+    freeStatus: 'free',
     plusPaymentMethod: 'paypal-hosted',
     plusCheckoutConversionProxyUrl: 'socks5h://user:pass@proxy.example:1080',
     plusPaymentEmailState: {
@@ -3045,6 +3178,7 @@ test('Phone Plus classic checkout falls back at step 6 when checkout amount is n
 
   await executor.executePlusCheckoutCreate({
     phonePlusModeEnabled: true,
+    freeStatus: 'free',
     plusPaymentMethod: 'paypal',
     plusHostedCheckoutIsFinalStep: false,
   });
@@ -3125,6 +3259,7 @@ test('Phone Plus hosted checkout falls back at step 6 before submitting OpenAI h
 
   await executor.executePlusCheckoutCreate({
     phonePlusModeEnabled: true,
+    freeStatus: 'free',
     plusPaymentMethod: 'paypal-hosted',
     plusHostedCheckoutOauthDelaySeconds: 0,
   });

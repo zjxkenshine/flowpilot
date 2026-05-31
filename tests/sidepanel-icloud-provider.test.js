@@ -296,12 +296,15 @@ const autoHintText = { textContent: '' };
 const rowHotmailServiceMode = createRow();
 const rowHotmailRemoteBaseUrl = createRow();
 const rowHotmailLocalBaseUrl = createRow();
+const rowHotmailAliasEnabled = createRow();
+const rowOutlookAliasMax = createRow();
 const inputMail2925UseAccountPool = { checked: false };
 const selectMailProvider = { value: 'icloud' };
 const selectEmailGenerator = { value: 'duck', disabled: false, options: [] };
 const selectIcloudTargetMailboxType = { value: 'icloud-inbox' };
 const selectIcloudForwardMailProvider = { value: 'gmail' };
 const selectIcloudHostPreference = { value: 'icloud.com.cn' };
+const inputHotmailAliasEnabled = { checked: false };
 const inputTempEmailUseRandomSubdomain = { checked: false };
 const inputRunCount = { disabled: false };
 const currentAutoRun = { autoRunning: false };
@@ -402,6 +405,8 @@ const inputCustomMailProviderPool = { value: '' };
 const inputCustomEmailPool = { value: '' };
 const inputHotmailRemoteBaseUrl = { value: '' };
 const inputHotmailLocalBaseUrl = { value: '' };
+const inputHotmailAliasEnabled = { checked: false };
+const inputOutlookAliasMaxPerAccount = { value: '' };
 const inputLuckmailApiKey = { value: '' };
 const inputLuckmailBaseUrl = { value: '' };
 const selectLuckmailEmailType = { value: 'ms_graph' };
@@ -479,6 +484,11 @@ function normalizeCustomEmailPoolEntries(value) { return Array.isArray(value) ? 
 function setHotmailServiceMode() {}
 function normalizeLuckmailBaseUrl(value) { return String(value || '').trim(); }
 function normalizeLuckmailEmailType(value) { return String(value || '').trim() || 'ms_graph'; }
+function normalizeHotmailAliasEnabledValue(value) { return Boolean(value); }
+function normalizeOutlookAliasMaxPerAccount(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.min(50, Math.max(1, Math.floor(numeric))) : 5;
+}
 function applyCloudflareTempEmailSettingsState() {}
 function renderCloudflareDomainOptions() {}
 function setCloudflareDomainEditMode() {}

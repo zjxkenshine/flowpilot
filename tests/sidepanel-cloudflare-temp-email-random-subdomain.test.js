@@ -433,9 +433,12 @@ const autoHintText = { textContent: '' };
 const rowHotmailServiceMode = ${JSON.stringify(createRow('none'))};
 const rowHotmailRemoteBaseUrl = ${JSON.stringify(createRow('none'))};
 const rowHotmailLocalBaseUrl = ${JSON.stringify(createRow('none'))};
+const rowHotmailAliasEnabled = ${JSON.stringify(createRow('none'))};
+const rowOutlookAliasMax = ${JSON.stringify(createRow('none'))};
 const inputMail2925UseAccountPool = { checked: false };
 const selectMailProvider = { value: '163' };
 const selectEmailGenerator = { value: 'cloudflare-temp-email', disabled: false };
+const inputHotmailAliasEnabled = { checked: false };
 const inputTempEmailUseRandomSubdomain = { checked: false };
 const calls = {
   tempDomainEditMode: [],

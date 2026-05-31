@@ -45,6 +45,24 @@ const PHONE_PLUS_PAYPAL_HOSTED_NODES = [
   'platform-verify',
 ];
 
+const PLUS_PAYPAL_NODES = [
+  'open-chatgpt',
+  'submit-signup-email',
+  'fill-password',
+  'fetch-signup-code',
+  'fill-profile',
+  'wait-registration-success',
+  'plus-checkout-create',
+  'plus-checkout-billing',
+  'paypal-approve',
+  'plus-checkout-return',
+  'oauth-login',
+  'fetch-login-code',
+  'post-login-phone-verification',
+  'confirm-oauth',
+  'platform-verify',
+];
+
 function extractFunction(name) {
   const markers = [`async function ${name}(`, `function ${name}(`];
   const start = markers
@@ -215,23 +233,37 @@ test('Phone Plus non-free fallback skips the Plus segment and keeps current pane
   assert.equal(api.events.logs.some((entry) => /free auth/.test(entry.message)), true);
 });
 
-test('non Phone Plus state is not handled by the fallback', async () => {
+test('Plus state reuses fallback to skip the payment segment', async () => {
   const api = createApi({
     activeFlowId: 'openai',
     panelMode: 'sub2api',
     phonePlusModeEnabled: false,
     plusModeEnabled: true,
-    nodeStatuses: {},
-  });
+    plusPaymentMethod: 'paypal',
+    plusHostedCheckoutIsFinalStep: false,
+    nodeStatuses: {
+      'wait-registration-success': 'completed',
+      'plus-checkout-create': 'pending',
+      'plus-checkout-billing': 'pending',
+      'paypal-approve': 'pending',
+      'plus-checkout-return': 'pending',
+      'oauth-login': 'pending',
+    },
+  }, PLUS_PAYPAL_NODES);
 
   const result = await api.handlePhonePlusNonFreeTrialFallback(api.getState(), {
     amountLabel: '€19.33',
     nodeId: 'plus-checkout-billing',
   });
 
-  assert.deepStrictEqual(result, { handled: false, reason: 'not-phone-plus' });
-  assert.equal(api.events.stateUpdates.length, 0);
-  assert.equal(api.events.messages.length, 0);
+  assert.equal(result.handled, true);
+  const nextState = api.getState();
+  assert.equal(nextState.nodeStatuses['plus-checkout-create'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-checkout-billing'], 'skipped');
+  assert.equal(nextState.nodeStatuses['paypal-approve'], 'skipped');
+  assert.equal(nextState.nodeStatuses['plus-checkout-return'], 'skipped');
+  assert.equal(nextState.nodeStatuses['oauth-login'], 'pending');
+  assert.equal(api.events.messages.filter((message) => message.type === 'NODE_STATUS_CHANGED').length, 4);
 });
 
 test('Phone Plus hosted fallback skips the full hosted payment segment', async () => {

@@ -59,6 +59,12 @@ test('extractVerificationCodeFromMessages 支持显式过滤条件并跳过排�
       body: {
         content: '',
       },
+      recipients: {
+        to: [],
+        cc: [],
+        bcc: [],
+        all: [],
+      },
       id: 'matched',
     },
   });
@@ -124,6 +130,7 @@ test('fetchMicrosoftMailboxMessages 会回退到可用的 token 策略并保留�
     }
 
     assert.match(String(url), /graph\.microsoft\.com\/v1\.0\/me\/mailFolders\/junkemail\/messages/);
+    assert.match(String(url), /toRecipients,ccRecipients,bccRecipients/);
     return {
       ok: true,
       json: async () => ({
@@ -133,6 +140,7 @@ test('fetchMicrosoftMailboxMessages 会回退到可用的 token 策略并保留�
             subject: 'OpenAI verification',
             bodyPreview: 'Use 445566 to continue',
             receivedDateTime: '2026-04-14T10:06:00.000Z',
+            toRecipients: [{ emailAddress: { address: 'base+paypal1@outlook.com' } }],
             id: 'mail-1',
           },
         ],
@@ -155,6 +163,7 @@ test('fetchMicrosoftMailboxMessages 会回退到可用的 token 策略并保留�
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].id, 'mail-1');
   assert.equal(result.messages[0].mailbox, 'Junk');
+  assert.deepEqual(result.messages[0].recipients.all, ['base+paypal1@outlook.com']);
 });
 
 test('fetchMicrosoftVerificationCode 会按邮箱夹轮询并在 Junk 中命中最新验证码', async () => {

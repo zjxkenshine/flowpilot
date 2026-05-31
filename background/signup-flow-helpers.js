@@ -455,12 +455,14 @@
       let resolvedEmail = state.email;
       let generatedEmailAlreadyPersisted = false;
       if (isHotmailProvider(state)) {
+        const preserveAccountIdentity = Boolean(options?.preserveAccountIdentity);
         const account = await ensureHotmailAccountForFlow({
           allowAllocate: true,
-          markUsed: true,
+          allowUsedCurrent: preserveAccountIdentity,
+          markUsed: !preserveAccountIdentity,
           preferredAccountId: state.currentHotmailAccountId || null,
         });
-        resolvedEmail = account.email;
+        resolvedEmail = account.registrationAliasEmail || account.email;
       } else if (isLuckmailProvider(state)) {
         const purchase = await ensureLuckmailPurchaseForFlow({ allowReuse: true });
         resolvedEmail = purchase.email_address;

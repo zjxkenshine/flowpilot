@@ -190,7 +190,7 @@ test('ensureHotmailAccountForFlow forwards payment state target without changing
     accountId: 'primary',
     options: {
       markUsed: false,
-      syncEmail: true,
+      syncEmail: false,
       stateTarget: 'payment',
     },
   }]);

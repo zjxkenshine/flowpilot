@@ -8,6 +8,9 @@
 })(typeof self !== 'undefined' ? self : globalThis, function createHotmailUtils() {
   const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
   const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
+  const OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT = 5;
+  const OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT = 50;
+  const OUTLOOK_SUBSCRIPTION_USED_KEYWORD = 'plus';
 
   function normalizeText(value) {
     return String(value || '')
@@ -288,6 +291,50 @@
     return '';
   }
 
+  function normalizeMessageRecipientList(rawValue) {
+    const source = Array.isArray(rawValue)
+      ? rawValue
+      : (rawValue ? [rawValue] : []);
+    const results = [];
+    const seen = new Set();
+    for (const item of source) {
+      const address = normalizeMailAddress(item);
+      const key = address.toLowerCase();
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      results.push(address);
+    }
+    return results;
+  }
+
+  function normalizeMessageRecipients(message = {}) {
+    const existing = message?.recipients && typeof message.recipients === 'object'
+      ? message.recipients
+      : {};
+    const to = normalizeMessageRecipientList([
+      ...(Array.isArray(existing.to) ? existing.to : []),
+      ...(Array.isArray(message.toRecipients) ? message.toRecipients : []),
+      ...(Array.isArray(message.ToRecipients) ? message.ToRecipients : []),
+      ...(Array.isArray(message.to) ? message.to : (message.to ? [message.to] : [])),
+    ]);
+    const cc = normalizeMessageRecipientList([
+      ...(Array.isArray(existing.cc) ? existing.cc : []),
+      ...(Array.isArray(message.ccRecipients) ? message.ccRecipients : []),
+      ...(Array.isArray(message.CcRecipients) ? message.CcRecipients : []),
+      ...(Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : [])),
+    ]);
+    const bcc = normalizeMessageRecipientList([
+      ...(Array.isArray(existing.bcc) ? existing.bcc : []),
+      ...(Array.isArray(message.bccRecipients) ? message.bccRecipients : []),
+      ...(Array.isArray(message.BccRecipients) ? message.BccRecipients : []),
+      ...(Array.isArray(message.bcc) ? message.bcc : (message.bcc ? [message.bcc] : [])),
+    ]);
+    const all = normalizeMessageRecipientList([...to, ...cc, ...bcc, ...(Array.isArray(existing.all) ? existing.all : [])]);
+    return { to, cc, bcc, all };
+  }
+
   function stripHtmlTags(text) {
     return String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   }
@@ -323,6 +370,7 @@
         message.created_at,
         message.time,
       ]),
+      recipients: normalizeMessageRecipients(message),
     };
   }
 
@@ -331,6 +379,129 @@
       ? messages
       : (messages ? [messages] : []);
     return list.map((message) => normalizeHotmailMailApiMessage(message));
+  }
+
+  function normalizeOutlookAliasMaxPerAccount(value, fallback = OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT) {
+    const fallbackNumber = Number(fallback);
+    const normalizedFallback = Number.isFinite(fallbackNumber)
+      ? Math.min(OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT, Math.max(1, Math.floor(fallbackNumber)))
+      : OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT;
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return normalizedFallback;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return normalizedFallback;
+    }
+    return Math.min(OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT, Math.max(1, Math.floor(numeric)));
+  }
+
+  function parseEmailAddressParts(email = '') {
+    const normalized = String(email || '').trim();
+    const atIndex = normalized.lastIndexOf('@');
+    if (atIndex <= 0 || atIndex >= normalized.length - 1) {
+      return null;
+    }
+    return {
+      local: normalized.slice(0, atIndex),
+      domain: normalized.slice(atIndex + 1),
+    };
+  }
+
+  function buildOutlookPlusAliasEmail(baseEmail = '', tag = '') {
+    const parts = parseEmailAddressParts(baseEmail);
+    if (!parts) {
+      return '';
+    }
+    const cleanedTag = String(tag || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '')
+      .replace(/^[._-]+|[._-]+$/g, '');
+    return cleanedTag ? `${parts.local}+${cleanedTag}@${parts.domain}` : '';
+  }
+
+  function normalizeHotmailAliasUsage(value = {}) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+    const normalized = {};
+    for (const [accountKey, rawBucket] of Object.entries(value)) {
+      const key = String(accountKey || '').trim();
+      if (!key) {
+        continue;
+      }
+      const aliasesSource = rawBucket?.aliases && typeof rawBucket.aliases === 'object' && !Array.isArray(rawBucket.aliases)
+        ? rawBucket.aliases
+        : rawBucket;
+      const aliases = {};
+      for (const [aliasKey, rawEntry] of Object.entries(aliasesSource || {})) {
+        const email = String(rawEntry?.email || aliasKey || '').trim();
+        if (!email) {
+          continue;
+        }
+        aliases[email.toLowerCase()] = {
+          email,
+          used: Boolean(rawEntry?.used),
+          lastCheckedAt: Number.isFinite(Number(rawEntry?.lastCheckedAt)) ? Number(rawEntry.lastCheckedAt) : 0,
+          reason: String(rawEntry?.reason || '').trim(),
+        };
+      }
+      normalized[key] = {
+        aliases,
+        updatedAt: Number.isFinite(Number(rawBucket?.updatedAt)) ? Number(rawBucket.updatedAt) : 0,
+      };
+    }
+    return normalized;
+  }
+
+  function getHotmailAliasUsageKey(account = {}) {
+    return String(account?.id || account?.email || '').trim();
+  }
+
+  function getHotmailAliasEntriesForAccount(usage = {}, account = {}) {
+    const key = getHotmailAliasUsageKey(account);
+    return key ? Object.values(normalizeHotmailAliasUsage(usage)[key]?.aliases || {}) : [];
+  }
+
+  function isHotmailAliasCapacityExhausted(account = {}, usage = {}, maxAliases = OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT) {
+    const normalizedMax = normalizeOutlookAliasMaxPerAccount(maxAliases);
+    const usedCount = getHotmailAliasEntriesForAccount(usage, account).filter((entry) => entry?.used).length;
+    return usedCount >= normalizedMax;
+  }
+
+  function messageContainsSubscriptionKeyword(message = {}, keyword = OUTLOOK_SUBSCRIPTION_USED_KEYWORD) {
+    const needle = String(keyword || '').trim().toLowerCase();
+    if (!needle) {
+      return false;
+    }
+    const body = typeof message?.body === 'string' ? message.body : (message?.body?.content || '');
+    return [message?.subject, message?.bodyPreview, message?.preview, message?.text, body]
+      .map((item) => String(item || '').toLowerCase())
+      .join(' ')
+      .includes(needle);
+  }
+
+  function findSubscriptionMessageForAlias(messages = [], aliasEmail = '') {
+    const aliasKey = String(aliasEmail || '').trim().toLowerCase();
+    let missingRecipients = false;
+    for (const message of Array.isArray(messages) ? messages : []) {
+      if (!messageContainsSubscriptionKeyword(message)) {
+        continue;
+      }
+      const recipients = normalizeMessageRecipients(message).all
+        .map((item) => String(item || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (!recipients.length) {
+        missingRecipients = true;
+        continue;
+      }
+      if (recipients.includes(aliasKey)) {
+        return { matched: true, missingRecipients: false, message };
+      }
+    }
+    return { matched: false, missingRecipients, message: null };
   }
 
   function buildHotmailMailApiLatestUrl(options = {}) {
@@ -418,6 +589,7 @@
 
   return {
     buildHotmailMailApiLatestUrl,
+    buildOutlookPlusAliasEmail,
     extractVerificationCodeFromMessage,
     filterHotmailAccountsByUsage,
     extractVerificationCode,
@@ -427,9 +599,15 @@
     getHotmailMailApiRequestConfig,
     getHotmailVerificationPollConfig,
     getHotmailVerificationRequestTimestamp,
+    getHotmailAliasEntriesForAccount,
+    getHotmailAliasUsageKey,
     isAuthorizedHotmailAccount,
+    isHotmailAliasCapacityExhausted,
+    findSubscriptionMessageForAlias,
+    normalizeHotmailAliasUsage,
     normalizeHotmailServiceMode,
     normalizeHotmailMailApiMessages,
+    normalizeOutlookAliasMaxPerAccount,
     normalizeTimestamp,
     parseHotmailImportText,
     pickHotmailAccountForRun,

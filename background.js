@@ -374,6 +374,13 @@ const {
   getHotmailMailApiRequestConfig,
   getHotmailVerificationPollConfig,
   getHotmailVerificationRequestTimestamp,
+  getHotmailAliasEntriesForAccount,
+  getHotmailAliasUsageKey,
+  buildOutlookPlusAliasEmail,
+  findSubscriptionMessageForAlias,
+  isHotmailAliasCapacityExhausted,
+  normalizeHotmailAliasUsage,
+  normalizeOutlookAliasMaxPerAccount,
   normalizeHotmailServiceMode,
   normalizeHotmailMailApiMessages,
   pickHotmailAccountForRun,
@@ -643,6 +650,8 @@ const CLOUD_MAIL_GENERATOR = 'cloudmail';
 const YYDS_MAIL_GENERATOR = YYDS_MAIL_PROVIDER;
 const CUSTOM_EMAIL_POOL_GENERATOR = 'custom-pool';
 const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
+const OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT = 5;
+const OUTLOOK_ALIAS_MAX_PER_ACCOUNT_LIMIT = 50;
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 const CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX = 'CF_SECURITY_BLOCKED::';
 const CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE = '您已触发Cloudflare 安全防护系统，已完全停止流程，请不要短时间内多次进行重新发送验证码，连续刷新、反复点击重试会加重风控；请先关闭页面等待 15-30 分钟，让系统的临时限制自动解除。或者更换浏览器';
@@ -1711,6 +1720,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   hotmailServiceMode: HOTMAIL_SERVICE_MODE_LOCAL,
   hotmailRemoteBaseUrl: DEFAULT_HOTMAIL_REMOTE_BASE_URL,
   hotmailLocalBaseUrl: DEFAULT_HOTMAIL_LOCAL_BASE_URL,
+  hotmailAliasEnabled: false,
+  outlookAliasMaxPerAccount: OUTLOOK_ALIAS_DEFAULT_MAX_PER_ACCOUNT,
+  hotmailAliasUsage: {},
   plusCheckoutAlreadyPaid: false,
   plusCheckoutAlreadyPaidAt: 0,
   plusCheckoutAlreadyPaidDetail: '',
@@ -3054,6 +3066,32 @@ function normalizePlusCheckAllowedRegions(value = []) {
 
 function normalizePhonePlusRegistrationExitRegion(value = '') {
   return normalizePlusCheckAllowedRegionCode(value);
+}
+
+function normalizePlusRegistrationExitRegion(value = '') {
+  return normalizePlusCheckAllowedRegionCode(value);
+}
+
+function getPlusRegistrationRegionGateResult(state = {}) {
+  const allowedRegions = normalizePlusCheckAllowedRegions(state?.plusCheckAllowedRegions);
+  const rawExitRegion = String(state?.ipProxyAppliedExitRegion || '').trim();
+  const exitRegion = normalizePlusRegistrationExitRegion(rawExitRegion);
+  if (!allowedRegions.length) {
+    return {
+      enabled: false,
+      allowedRegions,
+      rawExitRegion,
+      exitRegion,
+      matched: true,
+    };
+  }
+  return {
+    enabled: true,
+    allowedRegions,
+    rawExitRegion,
+    exitRegion,
+    matched: Boolean(exitRegion && allowedRegions.includes(exitRegion)),
+  };
 }
 
 function getPhonePlusRegistrationRegionGateResult(state = {}) {
@@ -5141,6 +5179,15 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHotmailRemoteBaseUrl(value);
     case 'hotmailLocalBaseUrl':
       return normalizeHotmailLocalBaseUrl(value);
+    case 'hotmailAliasEnabled':
+      return Boolean(value);
+    case 'outlookAliasMaxPerAccount':
+      return normalizeOutlookAliasMaxPerAccount(
+        value,
+        PERSISTED_SETTING_DEFAULTS.outlookAliasMaxPerAccount
+      );
+    case 'hotmailAliasUsage':
+      return normalizeHotmailAliasUsage(value);
     case 'luckmailApiKey':
       return String(value || '');
     case 'luckmailBaseUrl':
@@ -7554,6 +7601,69 @@ function findHotmailAccount(accounts, accountId) {
   return normalizeHotmailAccounts(accounts).find((account) => account.id === accountId) || null;
 }
 
+function normalizeEmailAddressForMatch(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function parseEmailAddressParts(email = '') {
+  const normalized = String(email || '').trim();
+  const atIndex = normalized.lastIndexOf('@');
+  if (atIndex <= 0 || atIndex >= normalized.length - 1) {
+    return null;
+  }
+  return {
+    local: normalized.slice(0, atIndex),
+    domain: normalized.slice(atIndex + 1),
+  };
+}
+
+function isOutlookPlusAliasForAccount(aliasEmail = '', account = {}) {
+  const aliasParts = parseEmailAddressParts(aliasEmail);
+  const baseParts = parseEmailAddressParts(account?.email);
+  if (!aliasParts || !baseParts) {
+    return false;
+  }
+  const aliasLocal = aliasParts.local.toLowerCase();
+  const baseLocal = baseParts.local.toLowerCase();
+  return aliasParts.domain.toLowerCase() === baseParts.domain.toLowerCase()
+    && aliasLocal.startsWith(`${baseLocal}+`)
+    && aliasLocal.length > baseLocal.length + 1;
+}
+
+function buildOutlookPayPalAliasEmail(baseEmail = '', index = 1) {
+  return buildOutlookPlusAliasEmail(baseEmail, `PayPal${Math.max(1, Math.floor(Number(index) || 1))}`);
+}
+
+function getOutlookPayPalAliasIndex(aliasEmail = '', account = {}) {
+  const aliasParts = parseEmailAddressParts(aliasEmail);
+  const baseParts = parseEmailAddressParts(account?.email);
+  if (!aliasParts || !baseParts || aliasParts.domain.toLowerCase() !== baseParts.domain.toLowerCase()) {
+    return null;
+  }
+  const prefix = `${baseParts.local}+paypal`.toLowerCase();
+  const local = aliasParts.local.toLowerCase();
+  if (!local.startsWith(prefix)) {
+    return null;
+  }
+  const numeric = Number(local.slice(prefix.length));
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function isHotmailAliasUsed(usage = {}, account = {}, aliasEmail = '') {
+  const key = getHotmailAliasUsageKey(account);
+  const emailKey = normalizeEmailAddressForMatch(aliasEmail);
+  if (!key || !emailKey) {
+    return false;
+  }
+  const normalized = normalizeHotmailAliasUsage(usage);
+  return Boolean(normalized[key]?.aliases?.[emailKey]?.used);
+}
+
+function countHotmailUsedAliases(usage = {}, account = {}) {
+  return getHotmailAliasEntriesForAccount(usage, account)
+    .filter((entry) => Boolean(entry?.used)).length;
+}
+
 function isHotmailProvider(stateOrProvider) {
   const provider = typeof stateOrProvider === 'string'
     ? stateOrProvider
@@ -7590,6 +7700,41 @@ function getMail2925Mode(stateOrMode) {
     return normalizeMail2925Mode(stateOrMode);
   }
   return normalizeMail2925Mode(stateOrMode?.mail2925Mode);
+}
+
+async function setHotmailAliasUsageEntry(account = {}, aliasEmail = '', updates = {}) {
+  const accountKey = getHotmailAliasUsageKey(account);
+  const aliasKey = normalizeEmailAddressForMatch(aliasEmail);
+  if (!accountKey || !aliasKey) {
+    return null;
+  }
+  const state = await getState();
+  const usage = normalizeHotmailAliasUsage(state.hotmailAliasUsage);
+  const bucket = usage[accountKey] || { aliases: {}, updatedAt: 0 };
+  const previous = bucket.aliases[aliasKey] || {};
+  const nextEntry = {
+    ...previous,
+    email: String(aliasEmail || previous.email || '').trim(),
+    used: Boolean(updates.used ?? previous.used),
+    lastCheckedAt: Number.isFinite(Number(updates.lastCheckedAt ?? previous.lastCheckedAt))
+      ? Number(updates.lastCheckedAt ?? previous.lastCheckedAt)
+      : 0,
+    reason: String(updates.reason ?? previous.reason ?? '').trim(),
+  };
+  const nextUsage = {
+    ...usage,
+    [accountKey]: {
+      aliases: {
+        ...(bucket.aliases || {}),
+        [aliasKey]: nextEntry,
+      },
+      updatedAt: Date.now(),
+    },
+  };
+  await setPersistentSettings({ hotmailAliasUsage: nextUsage });
+  await setState({ hotmailAliasUsage: nextUsage });
+  broadcastDataUpdate({ hotmailAliasUsage: nextUsage });
+  return nextEntry;
 }
 
 async function syncHotmailAccounts(accounts) {
@@ -7670,7 +7815,7 @@ async function deleteHotmailAccounts(mode = 'all') {
   };
 }
 
-async function patchHotmailAccount(accountId, updates = {}) {
+async function patchHotmailAccount(accountId, updates = {}, options = {}) {
   const state = await getState();
   const accounts = normalizeHotmailAccounts(state.hotmailAccounts);
   const account = findHotmailAccount(accounts, accountId);
@@ -7686,7 +7831,7 @@ async function patchHotmailAccount(accountId, updates = {}) {
 
   await syncHotmailAccounts(accounts.map((item) => (item.id === account.id ? nextAccount : item)));
 
-  if (state.currentHotmailAccountId === account.id && shouldClearHotmailCurrentSelection(nextAccount)) {
+  if (!options?.preserveCurrentSelection && state.currentHotmailAccountId === account.id && shouldClearHotmailCurrentSelection(nextAccount)) {
     await setState({ currentHotmailAccountId: null });
     broadcastDataUpdate({ currentHotmailAccountId: null });
     if (isHotmailProvider(state)) {
@@ -7770,12 +7915,33 @@ async function ensureHotmailAccountForFlow(options = {}) {
     markUsed = false,
     preferredAccountId = null,
     excludeIds = [],
+    allowUsedCurrent = false,
     stateTarget = 'registration',
   } = options;
   const state = await getState();
   const accounts = normalizeHotmailAccounts(state.hotmailAccounts);
   const excludedAccountIds = new Set((excludeIds || []).filter(Boolean));
-  const availableAccounts = accounts.filter((candidate) => isAuthorizedHotmailRunAccount(candidate) && !excludedAccountIds.has(candidate.id));
+  const hotmailAliasEnabled = Boolean(state?.hotmailAliasEnabled);
+  const normalizeAliasMax = typeof normalizeOutlookAliasMaxPerAccount === 'function'
+    ? normalizeOutlookAliasMaxPerAccount
+    : ((value) => Math.min(50, Math.max(1, Math.floor(Number(value) || 5))));
+  const isAliasCapacityExhaustedHelper = typeof isHotmailAliasCapacityExhausted === 'function'
+    ? isHotmailAliasCapacityExhausted
+    : (() => false);
+  const isAliasCapacityExhausted = (candidate, sourceState = state) => (
+    hotmailAliasEnabled
+      ? isAliasCapacityExhaustedHelper(
+        candidate,
+        sourceState?.hotmailAliasUsage,
+        normalizeAliasMax(sourceState?.outlookAliasMaxPerAccount)
+      )
+      : false
+  );
+  const availableAccounts = accounts.filter((candidate) => (
+    isAuthorizedHotmailRunAccount(candidate)
+    && !excludedAccountIds.has(candidate.id)
+    && (allowUsedCurrent || !isAliasCapacityExhausted(candidate, state))
+  ));
 
   let account = null;
   if (preferredAccountId && !excludedAccountIds.has(preferredAccountId)) {
@@ -7784,6 +7950,9 @@ async function ensureHotmailAccountForFlow(options = {}) {
   if ((!account || !isAuthorizedHotmailRunAccount(account)) && state.currentHotmailAccountId && !excludedAccountIds.has(state.currentHotmailAccountId)) {
     account = findHotmailAccount(accounts, state.currentHotmailAccountId);
   }
+  if (account && !allowUsedCurrent && isAliasCapacityExhausted(account, state)) {
+    account = null;
+  }
   if ((!account || !isAuthorizedHotmailRunAccount(account)) && allowAllocate) {
     account = availableAccounts.length ? pickHotmailAccountForRun(availableAccounts, {}) : null;
   }
@@ -7791,11 +7960,32 @@ async function ensureHotmailAccountForFlow(options = {}) {
   if (!account) {
     throw new Error('没有可用的 Hotmail 账号。请先在侧边栏添加至少一个带刷新令牌（refresh token）的账号。');
   }
-  if (!isAuthorizedHotmailRunAccount(account)) {
+  if (!isAuthorizedHotmailRunAccount(account) && !(allowUsedCurrent && account?.status === 'authorized' && account?.refreshToken)) {
     throw new Error(`Hotmail 账号 ${account.email || account.id} 尚未就绪，无法读取邮件。`);
   }
 
-  return setCurrentHotmailAccount(account.id, { markUsed, syncEmail: true, stateTarget });
+  if (!allowUsedCurrent && isAliasCapacityExhausted(account, state)) {
+    await patchHotmailAccount(account.id, {
+      used: true,
+      lastUsedAt: Date.now(),
+    }, {
+      preserveCurrentSelection: true,
+    });
+    throw new Error(`Hotmail/Outlook account ${account.email || account.id} has no remaining aliases.`);
+  }
+
+  const selectedAccount = await setCurrentHotmailAccount(account.id, {
+    markUsed,
+    syncEmail: false,
+    stateTarget,
+  });
+  const aliasEmail = typeof ensureOutlookAliasForHotmailAccount === 'function'
+    ? await ensureOutlookAliasForHotmailAccount(selectedAccount, options)
+    : selectedAccount.email;
+  return {
+    ...selectedAccount,
+    registrationAliasEmail: hotmailAliasEnabled ? aliasEmail : selectedAccount.email,
+  };
 }
 
 function buildHotmailLocalEndpoint(baseUrl, path) {
@@ -8115,6 +8305,93 @@ async function fetchHotmailMailboxMessages(account, mailboxes = HOTMAIL_MAILBOXE
     return requestHotmailLocalMessages(account, mailboxes);
   }
   return fetchHotmailMailboxMessagesFromRemoteService(account, mailboxes);
+}
+
+async function checkOutlookAliasSubscriptionUsage(account = {}, aliasEmail = '') {
+  try {
+    const result = await fetchHotmailMailboxMessages(account, HOTMAIL_MAILBOXES);
+    const messages = Array.isArray(result?.messages) ? result.messages : [];
+    const match = findSubscriptionMessageForAlias(messages, aliasEmail);
+    if (match.matched) {
+      await setHotmailAliasUsageEntry(account, aliasEmail, {
+        used: true,
+        lastCheckedAt: Date.now(),
+        reason: 'subscription_keyword',
+      });
+      await addLog(`Hotmail/Outlook: alias ${aliasEmail} already has a Plus subscription mail and was marked used.`, 'warn');
+      return { used: true, checked: true, missingRecipients: false };
+    }
+    if (match.missingRecipients) {
+      await addLog(`Hotmail/Outlook: found Plus subscription mail without recipient fields; alias ${aliasEmail} was not marked used.`, 'warn');
+    }
+    return { used: false, checked: true, missingRecipients: Boolean(match.missingRecipients) };
+  } catch (error) {
+    await addLog(`Hotmail/Outlook: precheck for alias ${aliasEmail} failed: ${error?.message || error}; continuing with this alias.`, 'warn');
+    return { used: false, checked: false, error };
+  }
+}
+
+async function ensureOutlookAliasForHotmailAccount(account = {}, options = {}) {
+  const state = await getState();
+  if (!Boolean(state?.hotmailAliasEnabled)) {
+    const baseEmail = String(account?.email || '').trim();
+    await setEmailState(baseEmail || null, { stateTarget: options?.stateTarget });
+    return baseEmail;
+  }
+  const currentEmail = String(state.email || '').trim();
+  if (
+    currentEmail
+    && isOutlookPlusAliasForAccount(currentEmail, account)
+    && (options?.allowUsedCurrent || !isHotmailAliasUsed(state.hotmailAliasUsage, account, currentEmail))
+  ) {
+    return currentEmail;
+  }
+
+  const maxAliases = normalizeOutlookAliasMaxPerAccount(state.outlookAliasMaxPerAccount);
+  const latestUsage = normalizeHotmailAliasUsage(state.hotmailAliasUsage);
+  const reusableAliases = getHotmailAliasEntriesForAccount(latestUsage, account)
+    .filter((entry) => !entry.used)
+    .map((entry) => entry.email)
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftIndex = getOutlookPayPalAliasIndex(left, account);
+      const rightIndex = getOutlookPayPalAliasIndex(right, account);
+      if (leftIndex !== null || rightIndex !== null) {
+        return (leftIndex ?? Number.MAX_SAFE_INTEGER) - (rightIndex ?? Number.MAX_SAFE_INTEGER);
+      }
+      return String(left || '').localeCompare(String(right || ''));
+    });
+  const generatedCandidates = [];
+  const existingAliasSet = new Set(getHotmailAliasEntriesForAccount(latestUsage, account)
+    .map((entry) => normalizeEmailAddressForMatch(entry.email))
+    .filter(Boolean));
+  for (let index = 1; index <= maxAliases; index += 1) {
+    if (existingAliasSet.size + generatedCandidates.length >= maxAliases) {
+      break;
+    }
+    const candidate = buildOutlookPayPalAliasEmail(account.email, index);
+    const candidateKey = normalizeEmailAddressForMatch(candidate);
+    if (!candidate || existingAliasSet.has(candidateKey) || generatedCandidates.some((item) => normalizeEmailAddressForMatch(item) === candidateKey)) {
+      continue;
+    }
+    generatedCandidates.push(candidate);
+  }
+
+  for (const aliasEmail of [...reusableAliases, ...generatedCandidates]) {
+    const precheck = await checkOutlookAliasSubscriptionUsage(account, aliasEmail);
+    if (precheck.used) {
+      continue;
+    }
+    await setHotmailAliasUsageEntry(account, aliasEmail, {
+      used: false,
+      lastCheckedAt: Date.now(),
+      reason: precheck.checked ? 'allocated' : 'allocated_precheck_failed',
+    });
+    await setEmailState(aliasEmail, { stateTarget: options?.stateTarget, source: 'generated:outlook-alias' });
+    return aliasEmail;
+  }
+
+  throw new Error(`Hotmail/Outlook account ${account.email || account.id} has no remaining aliases.`);
 }
 
 async function verifyHotmailAccount(accountId) {
@@ -12131,6 +12408,31 @@ function isPlusCheckoutRestartRequiredFailure(error) {
     && !isCloudCheckoutAlreadyPaidFailure(error);
 }
 
+function isPlusPaymentSegmentFallbackState(state = {}) {
+  return Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
+}
+
+function getPlusPaymentSegmentNodeIds(state = {}) {
+  if (!isPlusPaymentSegmentFallbackState(state)) {
+    return [];
+  }
+
+  const nodeIds = typeof getNodeIdsForState === 'function'
+    ? getNodeIdsForState(state).map((nodeId) => String(nodeId || '').trim()).filter(Boolean)
+    : [];
+  if (!nodeIds.length) {
+    return [];
+  }
+
+  const registrationEndIndex = nodeIds.indexOf('wait-registration-success');
+  const authStartIndex = nodeIds.indexOf('oauth-login');
+  if (registrationEndIndex < 0 || authStartIndex < 0 || authStartIndex <= registrationEndIndex) {
+    return [];
+  }
+
+  return nodeIds.slice(registrationEndIndex + 1, authStartIndex);
+}
+
 function getPhonePlusPaymentSegmentNodeIds(state = {}) {
   if (!isPhonePlusModeState(state)) {
     return [];
@@ -12251,11 +12553,25 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
     ...(latestState && typeof latestState === 'object' && !Array.isArray(latestState) ? latestState : {}),
   };
 
-  if (!isPhonePlusModeState(currentState)) {
+  if (!Boolean(currentState?.plusModeEnabled || currentState?.phonePlusModeEnabled)) {
     return { handled: false, reason: 'not-phone-plus' };
   }
 
-  const paymentSegmentNodeIds = getPhonePlusPaymentSegmentNodeIds(currentState);
+  let paymentSegmentNodeIds = [];
+  if (!currentState?.plusModeEnabled && currentState?.phonePlusModeEnabled) {
+    paymentSegmentNodeIds = getPhonePlusPaymentSegmentNodeIds(currentState);
+  } else if (typeof getPlusPaymentSegmentNodeIds === 'function') {
+    paymentSegmentNodeIds = getPlusPaymentSegmentNodeIds(currentState);
+  } else {
+    const nodeIds = typeof getNodeIdsForState === 'function'
+      ? getNodeIdsForState(currentState).map((nodeId) => String(nodeId || '').trim()).filter(Boolean)
+      : [];
+    const registrationEndIndex = nodeIds.indexOf('wait-registration-success');
+    const authStartIndex = nodeIds.indexOf('oauth-login');
+    paymentSegmentNodeIds = registrationEndIndex >= 0 && authStartIndex > registrationEndIndex
+      ? nodeIds.slice(registrationEndIndex + 1, authStartIndex)
+      : [];
+  }
   if (!paymentSegmentNodeIds.length) {
     return { handled: false, reason: 'missing-payment-segment' };
   }
@@ -12264,6 +12580,7 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
   const fallbackReason = String(context?.reason || 'plus-checkout-non-free-trial').trim()
     || 'plus-checkout-non-free-trial';
   const fallbackDetail = String(context?.detail || '').trim();
+  const flowLabel = isPhonePlusModeState(currentState) ? 'Phone Plus' : 'Plus';
   const currentNodeId = String(context?.nodeId || currentState.currentNodeId || 'plus-checkout-billing').trim();
   const nodeStatuses = { ...(currentState.nodeStatuses || {}) };
   for (const nodeId of paymentSegmentNodeIds) {
@@ -12312,6 +12629,12 @@ async function handlePhonePlusNonFreeTrialFallback(state = {}, context = {}) {
   }
   if (fallbackReason === 'phone-plus-registration-non-free') {
     fallbackMessage = `Phone Plus：第 6 步账号类型不是 free${fallbackDetail ? `（${fallbackDetail}）` : ''}，已跳过 Plus 支付段，继续 OAuth 流程。`;
+  }
+  if (fallbackReason === 'plus-registration-region-mismatch') {
+    fallbackMessage = `${flowLabel}: registration account is free, but the registration exit region is outside PlusCheck allowed regions${fallbackDetail ? ` (${fallbackDetail})` : ''}; skipped Plus payment segment and will continue OAuth.`;
+  }
+  if (fallbackReason === 'plus-registration-non-free') {
+    fallbackMessage = `${flowLabel}: registration account is not free${fallbackDetail ? ` (${fallbackDetail})` : ''}; skipped Plus payment segment and will continue OAuth.`;
   }
   await addLog(
     fallbackMessage,
@@ -14143,14 +14466,18 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
   await handleNodeData(nodeId, payload);
   let postCompletionState = await getState();
   const registrationFreeStatus = String(postCompletionState?.freeStatus || 'unknown').trim().toLowerCase() || 'unknown';
-  if (
+  const isPlusRegistrationGateState = Boolean(
     nodeId === 'wait-registration-success'
-    && postCompletionState?.phonePlusModeEnabled
-    && registrationFreeStatus !== 'free'
+    && (postCompletionState?.plusModeEnabled || postCompletionState?.phonePlusModeEnabled)
     && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+  );
+  if (
+    isPlusRegistrationGateState
+    && registrationFreeStatus !== 'free'
   ) {
+    const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
     const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
-      reason: 'phone-plus-registration-non-free',
+      reason: isPhonePlusGate ? 'phone-plus-registration-non-free' : 'plus-registration-non-free',
       detail: `freeStatus=${registrationFreeStatus}`,
       nodeId,
     });
@@ -14159,17 +14486,18 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
     }
   }
   if (
-    nodeId === 'wait-registration-success'
-    && postCompletionState?.phonePlusModeEnabled
+    isPlusRegistrationGateState
     && registrationFreeStatus === 'free'
-    && typeof handlePhonePlusNonFreeTrialFallback === 'function'
   ) {
-    const regionGate = getPhonePlusRegistrationRegionGateResult(postCompletionState);
+    const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
+    const regionGate = typeof getPlusRegistrationRegionGateResult === 'function'
+      ? getPlusRegistrationRegionGateResult(postCompletionState)
+      : getPhonePlusRegistrationRegionGateResult(postCompletionState);
     if (regionGate.enabled && !regionGate.matched) {
       const allowedLabel = regionGate.allowedRegions.join(',');
       const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || '未检测到地区';
       const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
-        reason: 'phone-plus-registration-region-mismatch',
+        reason: isPhonePlusGate ? 'phone-plus-registration-region-mismatch' : 'plus-registration-region-mismatch',
         detail: `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`,
         nodeId,
       });
@@ -17057,7 +17385,7 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
       preferredAccountId: null,
     });
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：已分配 Hotmail 账号 ${account.email}（第 ${attemptRuns} 次尝试）===`, 'ok');
-    return account.email;
+    return account.registrationAliasEmail || account.email;
   }
 
   if (isLuckmailProvider(currentState)) {
@@ -17194,7 +17522,7 @@ async function ensureAutoEmailReady(targetRun, totalRuns, attemptRuns) {
       preferredAccountId: null,
     });
     await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：已分配 Hotmail 账号 ${account.email}（第 ${attemptRuns} 次尝试）===`, 'ok');
-    return account.email;
+    return account.registrationAliasEmail || account.email;
   }
 
   if (isLuckmailProvider(currentState)) {

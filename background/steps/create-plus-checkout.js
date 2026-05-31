@@ -727,6 +727,59 @@
       return Boolean(state?.phonePlusModeEnabled || state?.phonePlusMode);
     }
 
+    function isPlusModeState(state = {}) {
+      return Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled || state?.phonePlusMode);
+    }
+
+    const PLUS_CHECK_ALLOWED_REGION_OPTIONS = Object.freeze(['KZ', 'BR', 'JP', 'NP', 'IQ', 'US']);
+    const PLUS_CHECK_ALLOWED_REGION_SET = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS);
+
+    function normalizePlusCheckAllowedRegionCode(value = '') {
+      const compact = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      if (PLUS_CHECK_ALLOWED_REGION_SET.has(compact)) return compact;
+      const lower = String(value || '').trim().toLowerCase();
+      if (/\b(?:kz|kazakhstan)\b/.test(lower)) return 'KZ';
+      if (/\b(?:br|bra|brazil|brasil)\b/.test(lower)) return 'BR';
+      if (/\b(?:jp|jpn|japan)\b/.test(lower)) return 'JP';
+      if (/\b(?:np|nepal)\b/.test(lower)) return 'NP';
+      if (/\b(?:iq|iraq)\b/.test(lower)) return 'IQ';
+      if (/\b(?:us|usa|united\s+states|america)\b/.test(lower)) return 'US';
+      return '';
+    }
+
+    function normalizePlusCheckAllowedRegions(value = []) {
+      const tokens = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\s,;|/]+/);
+      const selected = new Set();
+      tokens.forEach((entry) => {
+        const code = normalizePlusCheckAllowedRegionCode(entry);
+        if (code) selected.add(code);
+      });
+      return PLUS_CHECK_ALLOWED_REGION_OPTIONS.filter((code) => selected.has(code));
+    }
+
+    function getPlusRegistrationRegionGateResult(state = {}) {
+      const allowedRegions = normalizePlusCheckAllowedRegions(state?.plusCheckAllowedRegions);
+      const rawExitRegion = String(state?.ipProxyAppliedExitRegion || '').trim();
+      const exitRegion = normalizePlusCheckAllowedRegionCode(rawExitRegion);
+      if (!allowedRegions.length) {
+        return { enabled: false, allowedRegions, rawExitRegion, exitRegion, matched: true };
+      }
+      return {
+        enabled: true,
+        allowedRegions,
+        rawExitRegion,
+        exitRegion,
+        matched: Boolean(exitRegion && allowedRegions.includes(exitRegion)),
+      };
+    }
+
+    function normalizePlusRegistrationFreeStatus(value = '') {
+      const normalized = String(value || '').trim().toLowerCase();
+      return ['free', 'paid', 'plus'].includes(normalized) ? normalized : 'unknown';
+    }
+
     function isPhoneSignupPhonePrefixedEmailEnabled(state = {}) {
       return state?.phoneSignupPhonePrefixedEmailEnabled !== false;
     }
@@ -1280,7 +1333,7 @@
           stateTarget: 'payment',
         });
         return {
-          email: String(account?.email || '').trim().toLowerCase(),
+          email: String(account?.registrationAliasEmail || account?.email || '').trim().toLowerCase(),
           source: 'generated:hotmail',
           reused: false,
         };
@@ -6905,10 +6958,60 @@
       });
     }
 
+    async function enforcePlusRegistrationGateBeforeCheckout(state = {}) {
+      if (!isPlusModeState(state)) {
+        return null;
+      }
+      const freeStatus = normalizePlusRegistrationFreeStatus(state?.freeStatus);
+      const isPhonePlus = isPhonePlusModeState(state);
+      if (freeStatus !== 'free') {
+        const reason = isPhonePlus ? 'phone-plus-registration-non-free' : 'plus-registration-non-free';
+        const detail = `freeStatus=${freeStatus}`;
+        await addLog(`Plus checkout skipped before create: ${detail}.`, 'warn');
+        if (typeof deps.handlePhonePlusNonFreeTrialFallback === 'function') {
+          const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+            reason,
+            detail,
+            nodeId: 'wait-registration-success',
+          });
+          if (fallbackResult?.handled) {
+            return { phonePlusFallbackToFreeAuth: true, fallbackResult };
+          }
+        }
+        throw new Error(`PLUS_CHECKOUT_NON_FREE_TRIAL::${detail}`);
+      }
+
+      const regionGate = getPlusRegistrationRegionGateResult(state);
+      if (regionGate.enabled && !regionGate.matched) {
+        const reason = isPhonePlus ? 'phone-plus-registration-region-mismatch' : 'plus-registration-region-mismatch';
+        const allowedLabel = regionGate.allowedRegions.join(',');
+        const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || 'unknown';
+        const detail = `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`;
+        await addLog(`Plus checkout skipped before create: ${detail}.`, 'warn');
+        if (typeof deps.handlePhonePlusNonFreeTrialFallback === 'function') {
+          const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {
+            reason,
+            detail,
+            nodeId: 'wait-registration-success',
+          });
+          if (fallbackResult?.handled) {
+            return { phonePlusFallbackToFreeAuth: true, fallbackResult };
+          }
+        }
+        throw new Error(`PLUS_CHECKOUT_REGION_MISMATCH::${detail}`);
+      }
+
+      return null;
+    }
+
     async function executePlusCheckoutCreate(state = {}, options = {}) {
       const paymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
       const useHostedCheckoutFinalStep = isHostedCheckoutFinalStepEnabled(state);
       await cleanupBeforePlusCheckoutRetryCreate(state, options);
+      const registrationGate = await enforcePlusRegistrationGateBeforeCheckout(state);
+      if (registrationGate?.phonePlusFallbackToFreeAuth) {
+        return;
+      }
       if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
         await executeGpcCheckoutCreate(state);
         return;

@@ -3,9 +3,13 @@ const assert = require('node:assert/strict');
 
 const {
   buildHotmailMailApiLatestUrl,
+  buildOutlookPlusAliasEmail,
   extractVerificationCodeFromMessage,
   filterHotmailAccountsByUsage,
   extractVerificationCode,
+  findSubscriptionMessageForAlias,
+  getHotmailAliasEntriesForAccount,
+  isHotmailAliasCapacityExhausted,
   getLatestHotmailMessage,
   getHotmailBulkActionLabel,
   getHotmailListToggleLabel,
@@ -14,6 +18,8 @@ const {
   getHotmailVerificationRequestTimestamp,
   normalizeHotmailServiceMode,
   normalizeHotmailMailApiMessages,
+  normalizeHotmailAliasUsage,
+  normalizeOutlookAliasMaxPerAccount,
   parseHotmailImportText,
   pickHotmailAccountForRun,
   pickVerificationMessage,
@@ -456,6 +462,7 @@ test('normalizeHotmailMailApiMessages maps third-party payload fields into verif
       from: { emailAddress: { address: 'noreply@openai.com' } },
       bodyPreview: 'Use 135790 to continue',
       receivedDateTime: '2026-04-10T10:02:00.000Z',
+      recipients: { to: [], cc: [], bcc: [], all: [] },
     },
     {
       id: 'mail-2',
@@ -463,8 +470,65 @@ test('normalizeHotmailMailApiMessages maps third-party payload fields into verif
       from: { emailAddress: { address: 'alerts@example.com' } },
       bodyPreview: 'No code here',
       receivedDateTime: '2026-04-10T10:03:00.000Z',
+      recipients: { to: [], cc: [], bcc: [], all: [] },
     },
   ]);
+});
+
+test('Outlook alias helpers normalize limits and build +tag aliases', () => {
+  assert.equal(normalizeOutlookAliasMaxPerAccount('', 5), 5);
+  assert.equal(normalizeOutlookAliasMaxPerAccount('0'), 1);
+  assert.equal(normalizeOutlookAliasMaxPerAccount('99'), 50);
+  assert.equal(buildOutlookPlusAliasEmail('Base@outlook.com', 'PayPal 1!'), 'Base+paypal1@outlook.com');
+});
+
+test('normalizeHotmailAliasUsage and capacity helpers track used aliases', () => {
+  const account = { id: 'acct-1', email: 'base@outlook.com' };
+  const usage = normalizeHotmailAliasUsage({
+    'acct-1': {
+      aliases: {
+        'base+paypal1@outlook.com': {
+          used: true,
+          lastCheckedAt: 123,
+          reason: 'subscription_keyword',
+        },
+        'base+paypal2@outlook.com': {
+          email: 'base+paypal2@outlook.com',
+          used: false,
+        },
+      },
+    },
+  });
+
+  assert.equal(getHotmailAliasEntriesForAccount(usage, account).length, 2);
+  assert.equal(isHotmailAliasCapacityExhausted(account, usage, 1), true);
+  assert.equal(isHotmailAliasCapacityExhausted(account, usage, 2), false);
+});
+
+test('findSubscriptionMessageForAlias matches Plus mail by recipient alias', () => {
+  const messages = [
+    {
+      id: 'other',
+      subject: 'ChatGPT Plus subscription',
+      bodyPreview: 'Your Plus subscription is active',
+      recipients: {
+        all: ['base+paypal2@outlook.com'],
+      },
+    },
+    {
+      id: 'match',
+      subject: 'ChatGPT Plus subscription',
+      bodyPreview: 'Your Plus subscription is active',
+      toRecipients: [
+        { emailAddress: { address: 'base+paypal1@outlook.com' } },
+      ],
+    },
+  ];
+
+  const result = findSubscriptionMessageForAlias(messages, 'base+paypal1@outlook.com');
+
+  assert.equal(result.matched, true);
+  assert.equal(result.message.id, 'match');
 });
 
 test('getHotmailVerificationPollConfig gives Hotmail a slower initial wait and longer polling window', () => {

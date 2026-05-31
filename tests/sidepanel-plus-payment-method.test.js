@@ -350,7 +350,7 @@ return normalizePlusCheckAllowedRegionsValue;
 
   const updateModeSource = extractFunction('updatePlusModeUI');
   assert.match(updateModeSource, /rowPlusCheckAllowedRegions/);
-  assert.match(updateModeSource, /effectivePhonePlusModeEnabled/);
+  assert.match(updateModeSource, /rowPlusCheckAllowedRegions\.style\.display\s*=\s*enabled\s*\?/);
 
   const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
   assert.notEqual(dataUpdatedStart, -1);

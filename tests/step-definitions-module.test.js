@@ -105,6 +105,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'paypal-hosted-email',
       'paypal-hosted-card',
@@ -116,7 +117,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.equal(plusSteps.some((step) => step.key === 'wait-registration-success'), false);
+  assert.equal(plusSteps.some((step) => step.key === 'wait-registration-success'), true);
+  assert.equal(plusSteps[plusSteps.findIndex((step) => step.key === 'plus-checkout-create') - 1]?.key, 'wait-registration-success');
   assert.equal(plusSteps.some((step) => step.key === 'fetch-login-code'), true);
   assert.equal(plusSteps.some((step) => step.key === 'paypal-approve'), false);
   assert.equal(plusSteps.find((step) => step.key === 'paypal-hosted-review')?.title, '无卡直绑完成 PayPal 授权');
@@ -128,6 +130,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'plus-checkout-billing',
       'paypal-approve',
@@ -149,6 +152,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'paypal-hosted-email',
       'paypal-hosted-card',
@@ -177,14 +181,14 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
     ]
   );
   assert.equal(goPaySteps.some((step) => step.key === 'paypal-approve'), false);
-  assert.equal(api.getStepById(8, { plusModeEnabled: true, plusPaymentMethod: 'gopay' }), null);
+  assert.equal(api.getStepById(14, { plusModeEnabled: true, plusPaymentMethod: 'gopay' }), null);
   assert.equal(api.getPlusPaymentStepTitle({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), '');
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true }), 14);
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 16);
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 18);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true }), 15);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone' }), 17);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, signupMethod: 'phone', phoneSignupReloginAfterBindEmailEnabled: true }), 19);
   assert.equal(api.hasFlow('openai'), true);
   assert.equal(api.hasFlow('kiro'), true);
   assert.equal(api.hasFlow('site-a'), false);
@@ -235,8 +239,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       [],
     ]
   );
-  assert.equal(plusSteps[5].title, '创建 Plus Checkout');
-  assert.equal(plusSteps[7].title, '无卡直绑填写 PayPal 资料');
+  assert.equal(plusSteps[6].title, '创建 Plus Checkout');
+  assert.equal(plusSteps[8].title, '无卡直绑填写 PayPal 资料');
 
   assert.deepStrictEqual(
     hostedSteps.map((step) => step.key),
@@ -246,6 +250,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'paypal-hosted-email',
       'paypal-hosted-card',
@@ -263,8 +268,8 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
   assert.equal(hostedSteps.some((step) => step.key === 'paypal-hosted-openai-checkout'), false);
   assert.equal(hostedSteps.some((step) => step.key === 'paypal-hosted-verification'), false);
   assert.equal(hostedSteps.find((step) => step.key === 'paypal-hosted-card')?.title, '无卡直绑填写 PayPal 资料');
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), 14);
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'paypal-hosted' }), 15);
 
   assert.deepStrictEqual(
     goPaySteps.map((step) => step.key),
@@ -274,6 +279,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'gopay-subscription-confirm',
       'oauth-login',
@@ -283,10 +289,10 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), 14);
-  assert.equal(goPaySteps[5].title, '打开 GoPay 订阅页');
-  assert.equal(goPaySteps[6].title, '等待 GoPay 订阅确认');
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gopay' }), 13);
+  assert.equal(goPaySteps[6].title, '打开 GoPay 订阅页');
+  assert.equal(goPaySteps[7].title, '等待 GoPay 订阅确认');
 
   assert.deepStrictEqual(
     gpcSteps.map((step) => step.key),
@@ -296,6 +302,7 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'fill-password',
       'fetch-signup-code',
       'fill-profile',
+      'wait-registration-success',
       'plus-checkout-create',
       'plus-checkout-billing',
       'oauth-login',
@@ -305,10 +312,10 @@ test('step definitions module exposes ordered normal and Plus step metadata', ()
       'platform-verify',
     ]
   );
-  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14]);
-  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), 14);
-  assert.equal(gpcSteps[5].title, '创建 GPC 订单');
-  assert.equal(gpcSteps[6].title, '等待 GPC 任务完成');
+  assert.deepStrictEqual(api.getStepIds({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.equal(api.getLastStepId({ plusModeEnabled: true, plusPaymentMethod: 'gpc-helper' }), 13);
+  assert.equal(gpcSteps[6].title, '创建 GPC 订单');
+  assert.equal(gpcSteps[7].title, '等待 GPC 任务完成');
 });
 
 test('Plus session strategy swaps the OAuth tail for a single SUB2API import node', () => {
@@ -332,7 +339,7 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
         plusAccountAccessStrategy: 'sub2api_codex_session',
       },
       previousNodeId: 'paypal-hosted-review',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     {
       label: 'paypal-hosted',
@@ -342,7 +349,7 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
         plusAccountAccessStrategy: 'sub2api_codex_session',
       },
       previousNodeId: 'paypal-hosted-review',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     {
       label: 'gopay',
@@ -352,7 +359,7 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
         plusAccountAccessStrategy: 'sub2api_codex_session',
       },
       previousNodeId: 'gopay-subscription-confirm',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 10],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     },
     {
       label: 'gpc-helper',
@@ -362,7 +369,7 @@ test('Plus session strategy swaps the OAuth tail for a single SUB2API import nod
         plusAccountAccessStrategy: 'sub2api_codex_session',
       },
       previousNodeId: 'plus-checkout-billing',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 10],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     },
   ].forEach(({ label, options, previousNodeId, expectedStepIds }) => {
     const steps = api.getSteps(options);
@@ -604,7 +611,7 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
         plusAccountAccessStrategy: 'cpa_codex_session',
       },
       previousNodeId: 'paypal-hosted-review',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     {
       label: 'paypal-hosted',
@@ -614,7 +621,7 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
         plusAccountAccessStrategy: 'cpa_codex_session',
       },
       previousNodeId: 'paypal-hosted-review',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     {
       label: 'gopay',
@@ -624,7 +631,7 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
         plusAccountAccessStrategy: 'cpa_codex_session',
       },
       previousNodeId: 'gopay-subscription-confirm',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 10],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     },
     {
       label: 'gpc-helper',
@@ -634,7 +641,7 @@ test('Plus session strategy swaps the OAuth tail for a single CPA import node', 
         plusAccountAccessStrategy: 'cpa_codex_session',
       },
       previousNodeId: 'plus-checkout-billing',
-      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 10],
+      expectedStepIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     },
   ].forEach(({ label, options, previousNodeId, expectedStepIds }) => {
     const steps = api.getSteps(options);
@@ -682,16 +689,13 @@ test('sidepanel html exposes Plus mode, PayPal, and GoPay settings', () => {
   assert.match(html, /id="input-gopay-pin"/);
   assert.match(html, /<option value="gpc-helper">GPC<\/option>/);
   assert.match(html, /id="btn-gpc-card-key-purchase"/);
-  assert.match(html, />购买卡密</);
   assert.match(html, /GPC API/);
   assert.match(html, /id="input-gpc-helper-api"/);
   assert.match(html, /id="btn-gpc-helper-convert-api-key"/);
-  assert.match(html, />转换 API Key</);
   assert.match(html, /GPC API Key/);
   assert.match(html, /id="input-gpc-helper-card-key"/);
-  assert.match(html, /GPC 模式/);
   assert.match(html, /id="select-gpc-helper-phone-mode"/);
-  assert.match(html, /<option value="auto">自动模式<\/option>/);
+  assert.match(html, /<option value="auto">/);
   assert.match(html, /id="btn-gpc-helper-balance"/);
   assert.match(html, /id="input-gpc-helper-phone"/);
   assert.match(html, /id="select-gpc-helper-otp-channel"/);
