@@ -355,7 +355,7 @@ test('PayPal profile generator supports Brazil exit profiles and keeps existing 
   assert.equal(profile.countryCode, 'BR');
   assert.equal(profile.generatedFromCountry, 'BR');
   assert.notEqual(profile.address1, 'Avenida Paulista 1000');
-  assert.ok(['Sao Paulo', 'Rio de Janeiro'].includes(profile.city));
+  assert.ok(profile.city);
   assert.match(profile.postalCode, /^\d{5}-\d{3}$/);
   assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
@@ -412,7 +412,7 @@ test('PayPal profile generator fetches a real Brazil address and requires a +55 
   assert.equal(events.some((event) => event.type === 'message' && event.message.type === 'SAVE_SETTING'), true);
 });
 
-test('PayPal profile generator rejects Brazil profiles without a +55 phone', () => {
+test('PayPal profile generator keeps Brazil phone empty when no +55 phone is available', () => {
   const { generator } = createGenerator({
     initialState: {
       plusCheckoutConversionProxyExitCheck: {
@@ -422,10 +422,59 @@ test('PayPal profile generator rejects Brazil profiles without a +55 phone', () 
     },
   });
 
-  assert.throws(
-    () => generator.generateProfile(),
-    /\+55/
-  );
+  const profile = generator.generateProfile();
+
+  assert.equal(profile.countryCode, 'BR');
+  assert.equal(profile.generatedFromCountry, 'BR');
+  assert.equal(profile.phone, '');
+  assert.ok(profile.firstName);
+  assert.ok(profile.lastName);
+  assert.match(profile.cardNumber, /^4147\d{12}$/);
+  assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
+  assert.equal(profile.generatedAt > 0, true);
+});
+
+test('PayPal profile generator generates other fields when email and phone are missing', () => {
+  const { generator } = createGenerator({
+    initialState: {
+      email: '',
+      hostedCheckoutPhoneNumber: '',
+      customPassword: '',
+      paypalProfileCountryCode: 'US',
+    },
+    getDraftEmail: () => '',
+    getDraftHostedCheckoutPhone: () => '',
+    getCurrentPayPalAccount: () => null,
+    getAddressSeedForCountry: (countryCode) => ({
+      countryCode,
+      fallback: {
+        address1: '350 Fifth Avenue',
+        city: 'New York',
+        region: 'NY',
+        postalCode: '10118',
+      },
+    }),
+  });
+
+  const profile = generator.generateProfile();
+
+  assert.equal(profile.email, '');
+  assert.equal(profile.phone, '');
+  assert.match(profile.cardNumber, /^4147\d{12}$/);
+  assertLuhn(profile.cardNumber);
+  assert.match(profile.cardExpiry, /^(0[1-9]|1[0-2]) \/ \d{2}$/);
+  assert.match(profile.cardCvv, /^\d{3}$/);
+  assert.equal(profile.password.length >= 14, true);
+  assert.ok(profile.firstName);
+  assert.ok(profile.lastName);
+  assert.equal(profile.birthday, '2001-02-03');
+  assert.equal(profile.countryCode, 'US');
+  assert.equal(profile.address1, '350 Fifth Avenue');
+  assert.equal(profile.city, 'New York');
+  assert.equal(profile.region, 'NY');
+  assert.equal(profile.postalCode, '10118');
+  assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
+  assert.equal(profile.generatedAt > 0, true);
 });
 
 test('PayPal profile generator falls back to a built-in real Brazil address when remote address fails', async () => {

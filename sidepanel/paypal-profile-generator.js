@@ -584,7 +584,7 @@
             return normalized;
           }
         }
-        throw new Error('需要巴西 +55 接码号码：请导入 PayPal 接码池，或填写手动 PayPal 电话。');
+        return '';
       }
       return candidates[0] || '';
     }
