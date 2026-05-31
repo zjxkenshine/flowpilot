@@ -2582,6 +2582,173 @@ test('CLEAR_ACCOUNT_BOOK delegates to background clear helper and returns cleare
   assert.equal(calls.length, 1);
 });
 
+test('manual browser state cleanup delegates helper when auto-run is idle', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const calls = [];
+  const state = {
+    autoRunning: false,
+    autoRunPhase: 'idle',
+    browserFingerprintEnabled: true,
+    ipProxyAppliedExitIp: '203.0.113.8',
+    ipProxyAppliedExitRegion: 'US',
+  };
+
+  const router = api.createMessageRouter({
+    getState: async () => state,
+    isAutoRunLockedState: () => false,
+    ensureManualInteractionAllowed: async () => state,
+    manualCleanBrowserStateAndRegenerateFingerprint: async (...args) => {
+      calls.push(args);
+      return {
+        cleanup: {
+          skipped: false,
+          removedCount: 2,
+          siteDataCleanup: {
+            origins: ['https://chatgpt.com'],
+            closedTabs: 1,
+          },
+        },
+        fingerprint: {
+          profile: {
+            profileId: 'manual-profile',
+            exitRegion: 'US',
+          },
+          updates: {
+            browserFingerprintProfile: { profileId: 'manual-profile' },
+          },
+        },
+      };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT',
+    source: 'sidepanel',
+    payload: { reason: 'test' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.cleanup.removedCount, 2);
+  assert.equal(response.cleanup.siteDataCleanup.closedTabs, 1);
+  assert.equal(response.fingerprint.profile.profileId, 'manual-profile');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], state);
+  assert.deepEqual(calls[0][1], { reason: 'test' });
+});
+
+test('manual browser state cleanup is rejected while auto-run is locked', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let cleanupCalls = 0;
+
+  const router = api.createMessageRouter({
+    getState: async () => ({ autoRunning: true, autoRunPhase: 'running' }),
+    isAutoRunLockedState: () => true,
+    manualCleanBrowserStateAndRegenerateFingerprint: async () => {
+      cleanupCalls += 1;
+      return {};
+    },
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT',
+      source: 'sidepanel',
+      payload: {},
+    }, {}),
+    /不能手动清理浏览器状态|运行中/
+  );
+  assert.equal(cleanupCalls, 0);
+});
+
+test('manual browser state cleanup is rejected while a node is running', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  let cleanupCalls = 0;
+  const state = {
+    autoRunning: false,
+    autoRunPhase: 'idle',
+    nodeStatuses: {
+      'open-chatgpt': 'running',
+    },
+  };
+
+  const router = api.createMessageRouter({
+    getState: async () => state,
+    isAutoRunLockedState: () => false,
+    ensureManualInteractionAllowed: async () => state,
+    manualCleanBrowserStateAndRegenerateFingerprint: async () => {
+      cleanupCalls += 1;
+      return {};
+    },
+  });
+
+  await assert.rejects(
+    () => router.handleMessage({
+      type: 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT',
+      source: 'sidepanel',
+      payload: {},
+    }, {}),
+    /步骤正在执行|不能手动清理浏览器状态/
+  );
+  assert.equal(cleanupCalls, 0);
+});
+
+test('manual browser state cleanup can return skipped fingerprint when fingerprint is disabled', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const state = {
+    autoRunning: false,
+    autoRunPhase: 'idle',
+    browserFingerprintEnabled: false,
+  };
+
+  const router = api.createMessageRouter({
+    getState: async () => state,
+    isAutoRunLockedState: () => false,
+    ensureManualInteractionAllowed: async () => state,
+    manualCleanBrowserStateAndRegenerateFingerprint: async () => ({
+      cleanup: {
+        skipped: false,
+        siteDataCleanup: {
+          origins: ['https://chatgpt.com'],
+        },
+      },
+      fingerprint: {
+        skipped: true,
+        reason: 'disabled',
+      },
+    }),
+  });
+
+  const response = await router.handleMessage({
+    type: 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT',
+    source: 'sidepanel',
+    payload: {},
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.cleanup.skipped, false);
+  assert.deepEqual(response.cleanup.siteDataCleanup.origins, ['https://chatgpt.com']);
+  assert.equal(response.fingerprint.skipped, true);
+  assert.equal(response.fingerprint.reason, 'disabled');
+});
+
+test('background wires manual browser cleanup helper into message router', () => {
+  const source = fs.readFileSync('background.js', 'utf8');
+
+  assert.match(source, /async function manualCleanBrowserStateAndRegenerateFingerprint/);
+  assert.match(source, /clearOpenAiCookiesForContext\(\{/);
+  assert.match(source, /browserStateCleanupEnabled:\s*true/);
+  assert.match(source, /ensureBrowserFingerprintForProxyExit/);
+  assert.match(source, /manualCleanBrowserStateAndRegenerateFingerprint,/);
+});
+
 test('TEST_PLUS_CHECKOUT_CONVERSION_PROXY delegates proxy test when auto-run is idle', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

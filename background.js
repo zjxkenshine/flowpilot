@@ -13357,6 +13357,60 @@ async function ensureManualInteractionAllowed(actionLabel) {
   return state;
 }
 
+async function manualCleanBrowserStateAndRegenerateFingerprint(stateOverride = null, options = {}) {
+  const state = stateOverride || await getState();
+  const cleanupApi = self.MultiPageBackgroundStep1;
+  if (typeof cleanupApi?.clearOpenAiCookiesForContext !== 'function') {
+    throw new Error('手动清理浏览器状态能力尚未接入。');
+  }
+
+  await addLog('手动清理：正在清理 ChatGPT/OpenAI/支付相关站点 cookie、缓存和本地站点数据...', 'info');
+  const cleanup = await cleanupApi.clearOpenAiCookiesForContext({
+    addLog,
+    chrome,
+    clearSignupVerifiedPhoneCache: null,
+    stepLabel: '手动清理',
+    actionLabel: '手动清理前',
+    browserStateCleanupEnabled: true,
+    queryTabsInAutomationWindow,
+  });
+
+  const fingerprintEnabled = state?.browserFingerprintEnabled !== false
+    && state?.settingsState?.flows?.openai?.browserFingerprint?.enabled !== false;
+  if (!fingerprintEnabled) {
+    await addLog('手动清理：站点状态已清理，浏览器指纹已关闭，未重新生成。', 'info');
+    return {
+      cleanup,
+      fingerprint: {
+        skipped: true,
+        reason: 'disabled',
+      },
+    };
+  }
+
+  if (typeof browserFingerprintManager?.ensureBrowserFingerprintForProxyExit !== 'function') {
+    throw new Error('浏览器指纹刷新能力尚未接入。');
+  }
+
+  const latestState = await getState();
+  const proxyRouting = {
+    exitIp: String(latestState?.ipProxyAppliedExitIp || state?.ipProxyAppliedExitIp || '').trim(),
+    exitRegion: String(latestState?.ipProxyAppliedExitRegion || state?.ipProxyAppliedExitRegion || '').trim(),
+    exitSource: String(latestState?.ipProxyAppliedExitSource || state?.ipProxyAppliedExitSource || '').trim(),
+  };
+  const fingerprint = await browserFingerprintManager.ensureBrowserFingerprintForProxyExit(proxyRouting, {
+    state: latestState,
+    reason: options?.reason || 'manual-clean-browser-state',
+  });
+  if (fingerprint?.skipped) {
+    await addLog('手动清理：站点状态已清理，浏览器指纹未重新生成。', 'warn');
+  } else {
+    const region = String(fingerprint?.profile?.exitRegion || proxyRouting.exitRegion || 'US').trim() || 'US';
+    await addLog(`手动清理：站点状态已清理，并已重新生成浏览器指纹（地区 ${region}）。`, 'ok');
+  }
+  return { cleanup, fingerprint };
+}
+
 async function skipNode(nodeId) {
   const state = await ensureManualInteractionAllowed('跳过步骤');
   const normalizedNodeId = String(nodeId || '').trim();
@@ -19091,6 +19145,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   clearFailedSignupPhoneReuseActivation,
   clearFreeReusablePhoneActivation,
   clearBrowserFingerprint: (...args) => browserFingerprintManager?.clearBrowserFingerprint?.(...args),
+  manualCleanBrowserStateAndRegenerateFingerprint,
   clearLuckmailRuntimeState,
   clearYydsMailRuntimeState,
   clearStopRequest,

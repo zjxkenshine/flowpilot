@@ -2725,6 +2725,11 @@ header {
   text-align: left;
 }
 
+.manual-browser-state-cleanup-caption {
+  min-width: 132px;
+  text-align: left;
+}
+
 .plus-checkout-conversion-proxy-source-select {
   flex: 0 0 128px;
   width: 128px;

@@ -9,11 +9,13 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
   assert.match(html, /id="row-browser-fingerprint"/);
   assert.match(html, /id="row-browser-fingerprint-language"/);
   assert.match(html, /id="row-browser-state-cleanup"/);
+  assert.match(html, /id="row-manual-browser-state-cleanup"/);
   assert.match(html, /id="row-webrtc-leak-protection"/);
   assert.match(html, /id="input-browser-fingerprint-enabled"/);
   assert.match(html, /id="select-browser-fingerprint-level"/);
   assert.match(html, /id="select-browser-fingerprint-language"/);
   assert.match(html, /id="input-browser-state-cleanup-enabled"/);
+  assert.match(html, /id="btn-manual-browser-state-cleanup"/);
   assert.match(html, /id="input-webrtc-leak-protection-enabled"/);
   assert.match(html, /<option value="basic">/);
   assert.match(html, /<option value="standard">/);
@@ -34,6 +36,8 @@ test('sidepanel exposes browser fingerprint settings and wires persistence', () 
   assert.match(source, /selectBrowserFingerprintLevel\?\.addEventListener\('change'/);
   assert.match(source, /selectBrowserFingerprintLanguage\?\.addEventListener\('change'/);
   assert.match(source, /inputBrowserStateCleanupEnabled\?\.addEventListener\('change'/);
+  assert.match(source, /btnManualBrowserStateCleanup\?\.addEventListener\('click'/);
+  assert.match(source, /MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT/);
   assert.match(source, /inputWebRtcLeakProtectionEnabled\?\.addEventListener\('change'/);
   assert.match(source, /message\.payload\.browserStateCleanupEnabled/);
   assert.match(source, /message\.payload\.webRtcLeakProtectionEnabled/);

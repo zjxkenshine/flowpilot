@@ -23,6 +23,7 @@
       clearFailedSignupPhoneReuseActivation,
       clearFreeReusablePhoneActivation,
       clearBrowserFingerprint,
+      manualCleanBrowserStateAndRegenerateFingerprint,
       clearLuckmailRuntimeState,
       clearYydsMailRuntimeState,
       clearStopRequest,
@@ -1634,6 +1635,23 @@
           }
           const recordIds = Array.isArray(message.payload?.recordIds) ? message.payload.recordIds : [];
           const result = await deleteAccountRunHistoryRecords(recordIds, state);
+          return { ok: true, ...result };
+        }
+
+        case 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT': {
+          const state = typeof ensureManualInteractionAllowed === 'function'
+            ? await ensureManualInteractionAllowed('手动清理浏览器状态')
+            : await getState();
+          if (isAutoRunLockedState(state)) {
+            throw new Error('自动流程运行中，当前不能手动清理浏览器状态。');
+          }
+          if (Object.values(state?.nodeStatuses || {}).some((status) => status === 'running')) {
+            throw new Error('当前有步骤正在执行，不能手动清理浏览器状态。');
+          }
+          if (typeof manualCleanBrowserStateAndRegenerateFingerprint !== 'function') {
+            throw new Error('手动清理浏览器状态能力尚未接入。');
+          }
+          const result = await manualCleanBrowserStateAndRegenerateFingerprint(state, message.payload || {});
           return { ok: true, ...result };
         }
 

@@ -267,6 +267,9 @@ const selectBrowserFingerprintLanguage = document.getElementById('select-browser
 const browserFingerprintCaption = document.getElementById('browser-fingerprint-caption');
 const rowBrowserStateCleanup = document.getElementById('row-browser-state-cleanup');
 const inputBrowserStateCleanupEnabled = document.getElementById('input-browser-state-cleanup-enabled');
+const rowManualBrowserStateCleanup = document.getElementById('row-manual-browser-state-cleanup');
+const btnManualBrowserStateCleanup = document.getElementById('btn-manual-browser-state-cleanup');
+const manualBrowserStateCleanupCaption = document.getElementById('manual-browser-state-cleanup-caption');
 const rowWebRtcLeakProtection = document.getElementById('row-webrtc-leak-protection');
 const inputWebRtcLeakProtectionEnabled = document.getElementById('input-webrtc-leak-protection-enabled');
 const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
@@ -1959,6 +1962,7 @@ let currentAutoRun = {
   countdownTitle: '',
   countdownNote: '',
 };
+let manualBrowserStateCleanupInFlight = false;
 let pendingAutoRunStartTotalRuns = 0;
 let pendingAutoRunStartExpiresAt = 0;
 let settingsDirty = false;
@@ -16227,6 +16231,9 @@ function updateBrowserFingerprintUI(state = latestState) {
   if (typeof rowBrowserStateCleanup !== 'undefined' && rowBrowserStateCleanup) {
     rowBrowserStateCleanup.style.display = visible ? '' : 'none';
   }
+  if (typeof rowManualBrowserStateCleanup !== 'undefined' && rowManualBrowserStateCleanup) {
+    rowManualBrowserStateCleanup.style.display = visible ? '' : 'none';
+  }
   if (typeof rowWebRtcLeakProtection !== 'undefined' && rowWebRtcLeakProtection) {
     rowWebRtcLeakProtection.style.display = visible ? '' : 'none';
   }
@@ -16255,6 +16262,21 @@ function updateBrowserFingerprintUI(state = latestState) {
         enhanced: '增强生成：含 Canvas / Audio',
       }[level] || '标准生成')
       : '已关闭';
+  }
+  updateManualBrowserStateCleanupControl(enabled);
+}
+
+function updateManualBrowserStateCleanupControl(enabled) {
+  if (typeof btnManualBrowserStateCleanup !== 'undefined' && btnManualBrowserStateCleanup) {
+    const anyRunningNode = Object.values(getNodeStatuses()).some((status) => status === 'running');
+    const disabled = manualBrowserStateCleanupInFlight || anyRunningNode || isAutoRunLockedPhase() || isAutoRunPausedPhase() || isAutoRunScheduledPhase();
+    btnManualBrowserStateCleanup.disabled = disabled;
+    btnManualBrowserStateCleanup.textContent = manualBrowserStateCleanupInFlight ? '清理中...' : '清理并刷新指纹';
+  }
+  if (typeof manualBrowserStateCleanupCaption !== 'undefined' && manualBrowserStateCleanupCaption) {
+    manualBrowserStateCleanupCaption.textContent = manualBrowserStateCleanupInFlight
+      ? '正在清理相关站点数据'
+      : (enabled ? '会重新生成当前指纹' : '指纹关闭时仅清理站点');
   }
 }
 
@@ -16805,6 +16827,9 @@ function updateButtonStates() {
   });
 
   btnReset.disabled = anyRunning || autoScheduled || isAutoRunPausedPhase() || autoLocked;
+  if (typeof updateManualBrowserStateCleanupControl === 'function') {
+    updateManualBrowserStateCleanupControl(inputBrowserFingerprintEnabled ? inputBrowserFingerprintEnabled.checked : latestState?.browserFingerprintEnabled !== false);
+  }
   const disableIcloudControls = anyRunning || autoScheduled || autoLocked;
   if (btnIcloudRefresh) btnIcloudRefresh.disabled = disableIcloudControls;
   if (btnIcloudDeleteUsed) btnIcloudDeleteUsed.disabled = disableIcloudControls || !hasDeletableUsedIcloudAliases();
@@ -19599,6 +19624,44 @@ selectBrowserFingerprintLanguage?.addEventListener('change', () => {
 inputBrowserStateCleanupEnabled?.addEventListener('change', () => {
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
+});
+
+btnManualBrowserStateCleanup?.addEventListener('click', async () => {
+  if (manualBrowserStateCleanupInFlight) {
+    return;
+  }
+  manualBrowserStateCleanupInFlight = true;
+  updateBrowserFingerprintUI(latestState);
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'MANUAL_CLEAN_BROWSER_STATE_AND_REGENERATE_FINGERPRINT',
+      source: 'sidepanel',
+      payload: {
+        reason: 'sidepanel-manual-cleanup',
+      },
+    });
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+    if (response?.fingerprint?.updates) {
+      syncLatestState(response.fingerprint.updates);
+    }
+    updateBrowserFingerprintUI(latestState);
+    const skippedReason = String(response?.fingerprint?.reason || '').trim();
+    if (response?.fingerprint?.skipped && skippedReason === 'disabled') {
+      showToast('已清理相关站点数据；浏览器指纹已关闭，未刷新。', 'info', 2600);
+    } else if (response?.fingerprint?.skipped) {
+      showToast('已清理相关站点数据；浏览器指纹未刷新。', 'warn', 2600);
+    } else {
+      showToast('已清理相关站点数据，并刷新浏览器指纹。', 'success', 2600);
+    }
+  } catch (error) {
+    console.error('Failed to clean browser state manually:', error);
+    showToast(`手动清理失败：${error?.message || error}`, 'error', 4200);
+  } finally {
+    manualBrowserStateCleanupInFlight = false;
+    updateBrowserFingerprintUI(latestState);
+  }
 });
 
 inputWebRtcLeakProtectionEnabled?.addEventListener('change', () => {
