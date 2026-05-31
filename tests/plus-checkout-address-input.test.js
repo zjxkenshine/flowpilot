@@ -130,7 +130,7 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_ie merchant path by
   assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
 });
 
-test('CREATE_PLUS_CHECKOUT uses ID/IDR and openai_llc merchant path for GoPay', async () => {
+test('CREATE_PLUS_CHECKOUT uses hosted ID/IDR checkout for GoPay with session fallback', async () => {
   const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_gopay' });
 
   const result = await harness.send({
@@ -148,12 +148,45 @@ test('CREATE_PLUS_CHECKOUT uses ID/IDR and openai_llc merchant path for GoPay', 
   assert.ok(checkoutCall);
   const payload = JSON.parse(checkoutCall.options.body);
   assert.equal(payload.entry_point, 'all_plans_pricing_modal');
-  assert.equal(payload.checkout_ui_mode, 'custom');
+  assert.equal(payload.checkout_ui_mode, 'hosted');
   assert.deepEqual(payload.billing_details, { country: 'ID', currency: 'IDR' });
   assert.deepEqual(payload.promo_campaign, {
     promo_campaign_id: 'plus-1-month-free',
     is_coupon_from_query_param: false,
   });
+});
+
+test('CREATE_PLUS_CHECKOUT prefers GoPay hosted checkout URL response fields', async () => {
+  for (const [field, hostedUrl] of [
+    ['url', 'https://pay.openai.com/c/pay/cs_gopay_url'],
+    ['stripe_hosted_url', 'https://checkout.stripe.com/c/pay/cs_gopay_stripe'],
+    ['checkout_url', 'https://pay.openai.com/c/pay/cs_gopay_checkout'],
+  ]) {
+    const harness = createPlusCheckoutMessageHarness({
+      checkoutResponse: {
+        [field]: hostedUrl,
+      },
+    });
+
+    const result = await harness.send({
+      type: 'CREATE_PLUS_CHECKOUT',
+      source: 'test',
+      payload: { paymentMethod: 'gopay' },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.checkoutUrl, hostedUrl);
+    assert.equal(result.hostedCheckoutUrl, hostedUrl);
+    assert.equal(result.preferredCheckoutUrl, hostedUrl);
+    assert.equal(result.country, 'ID');
+    assert.equal(result.currency, 'IDR');
+
+    const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
+    assert.ok(checkoutCall);
+    const payload = JSON.parse(checkoutCall.options.body);
+    assert.equal(payload.checkout_ui_mode, 'hosted');
+    assert.deepEqual(payload.billing_details, { country: 'ID', currency: 'IDR' });
+  }
 });
 
 test('CREATE_PLUS_CHECKOUT uses hosted US/USD checkout for PayPal no-card binding', async () => {

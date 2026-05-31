@@ -584,6 +584,7 @@
               autoRunRetryPaypalCallback: false,
               autoRunPreserveIssueLogsOnRestart: false,
               phoneVerificationCodePrefetchEnabled: false,
+              registrationOnlyModeEnabled: false,
               registrationStageWaitSeconds: 30,
               signupIdentityRedirectTimeoutSeconds: 45,
               authContentScriptRecoveryTimeoutSeconds: 30,
@@ -1163,6 +1164,11 @@
                 ?? nested?.flows?.openai?.autoRun?.phoneVerificationCodePrefetchEnabled
                 ?? defaults.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled
               ),
+              registrationOnlyModeEnabled: Boolean(
+                input?.registrationOnlyModeEnabled
+                ?? nested?.flows?.openai?.autoRun?.registrationOnlyModeEnabled
+                ?? defaults.flows.openai.autoRun.registrationOnlyModeEnabled
+              ),
               registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
                 input?.registrationStageWaitSeconds
                 ?? nested?.flows?.openai?.autoRun?.registrationStageWaitSeconds
@@ -1404,6 +1410,7 @@
       next.autoRunRetryPaypalCallback = openaiState.autoRun.autoRunRetryPaypalCallback;
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
       next.phoneVerificationCodePrefetchEnabled = openaiState.autoRun.phoneVerificationCodePrefetchEnabled;
+      next.registrationOnlyModeEnabled = openaiState.autoRun.registrationOnlyModeEnabled;
       next.registrationStageWaitSeconds = openaiState.autoRun.registrationStageWaitSeconds;
       next.signupIdentityRedirectTimeoutSeconds = openaiState.autoRun.signupIdentityRedirectTimeoutSeconds;
       next.authContentScriptRecoveryTimeoutSeconds = openaiState.autoRun.authContentScriptRecoveryTimeoutSeconds;

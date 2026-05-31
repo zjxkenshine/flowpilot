@@ -586,6 +586,7 @@ const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures'
 const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-retry-paypal-callback');
 const inputAutoRunPreserveIssueLogsOnRestart = document.getElementById('input-auto-run-preserve-issue-logs-on-restart');
 const inputPhoneVerificationCodePrefetchEnabled = document.getElementById('input-phone-verification-code-prefetch-enabled');
+const inputRegistrationOnlyModeEnabled = document.getElementById('input-registration-only-mode-enabled');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
 const inputStep6CookieCleanupEnabled = document.getElementById('input-step6-cookie-cleanup-enabled');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
@@ -6759,6 +6760,9 @@ function collectSettingsPayload() {
       : false,
     phoneVerificationCodePrefetchEnabled: typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
       ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
+      : false,
+    registrationOnlyModeEnabled: typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
+      ? Boolean(inputRegistrationOnlyModeEnabled.checked)
       : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
@@ -14035,6 +14039,9 @@ function applySettingsState(state) {
   if (typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled) {
     inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(state?.phoneVerificationCodePrefetchEnabled);
   }
+  if (typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled) {
+    inputRegistrationOnlyModeEnabled.checked = Boolean(state?.registrationOnlyModeEnabled);
+  }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
     inputStep6CookieCleanupEnabled.checked = Boolean(state?.step6CookieCleanupEnabled);
@@ -18332,6 +18339,9 @@ async function startAutoRunFromCurrentSettings() {
   const phoneVerificationCodePrefetchEnabled = typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
     ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
     : false;
+  const registrationOnlyModeEnabled = typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
+    ? Boolean(inputRegistrationOnlyModeEnabled.checked)
+    : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
   const contributionQq = String(inputContributionQq?.value || '').trim();
   const fallbackThreadIntervalMinutes = normalizeAutoRunThreadIntervalMinutes(
@@ -18392,6 +18402,7 @@ async function startAutoRunFromCurrentSettings() {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      registrationOnlyModeEnabled,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
       contributionAdapterId: latestState?.contributionAdapterId || '',
       contributionNickname,
@@ -21109,6 +21120,11 @@ inputPhoneVerificationCodePrefetchEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputRegistrationOnlyModeEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 inputTempEmailBaseUrl.addEventListener('input', () => {
   markSettingsDirty(true);
   scheduleSettingsAutoSave();
@@ -23132,6 +23148,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && inputPhoneVerificationCodePrefetchEnabled
       ) {
         inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(message.payload.phoneVerificationCodePrefetchEnabled);
+      }
+      if (
+        message.payload.registrationOnlyModeEnabled !== undefined
+        && typeof inputRegistrationOnlyModeEnabled !== 'undefined'
+        && inputRegistrationOnlyModeEnabled
+      ) {
+        inputRegistrationOnlyModeEnabled.checked = Boolean(message.payload.registrationOnlyModeEnabled);
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

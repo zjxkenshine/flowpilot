@@ -1753,6 +1753,12 @@
           )
             ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
             : Boolean(state?.phoneVerificationCodePrefetchEnabled);
+          const registrationOnlyModeEnabled = Object.prototype.hasOwnProperty.call(
+            message.payload || {},
+            'registrationOnlyModeEnabled'
+          )
+            ? Boolean(message.payload?.registrationOnlyModeEnabled)
+            : Boolean(state?.registrationOnlyModeEnabled);
           const hasAutoRunPreserveIssueLogsOnRestart = Object.prototype.hasOwnProperty.call(
             message.payload || {},
             'autoRunPreserveIssueLogsOnRestart'
@@ -1765,12 +1771,14 @@
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
+            registrationOnlyModeEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
           });
           startAutoRunLoop(totalRuns, {
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
+            registrationOnlyModeEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
             mode,
           });
@@ -1820,6 +1828,12 @@
             )
               ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
               : Boolean(state?.phoneVerificationCodePrefetchEnabled),
+            registrationOnlyModeEnabled: Object.prototype.hasOwnProperty.call(
+              message.payload || {},
+              'registrationOnlyModeEnabled'
+            )
+              ? Boolean(message.payload?.registrationOnlyModeEnabled)
+              : Boolean(state?.registrationOnlyModeEnabled),
             autoRunPreserveIssueLogsOnRestart: Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart),
             mode: message.payload?.mode,
           });

@@ -126,6 +126,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
   'phoneVerificationCodePrefetchEnabled',
+  'registrationOnlyModeEnabled',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
   'signupVerificationReadyTimeoutSeconds',
@@ -233,6 +234,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
   phoneVerificationCodePrefetchEnabled: false,
+  registrationOnlyModeEnabled: false,
   signupIdentityRedirectTimeoutSeconds: 45,
   authContentScriptRecoveryTimeoutSeconds: 30,
   signupVerificationReadyTimeoutSeconds: 60,
@@ -599,6 +601,35 @@ test('buildPersistentSettingsPayload persists phone verification code prefetch i
   }, { requireKnownKeys: true });
   assert.equal(nested.phoneVerificationCodePrefetchEnabled, true);
   assert.equal(nested.settingsState.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled, true);
+});
+
+test('buildPersistentSettingsPayload persists registration-only mode into OpenAI auto-run settings', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.registrationOnlyModeEnabled, false);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+
+  const flat = api.buildPersistentSettingsPayload({
+    registrationOnlyModeEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.registrationOnlyModeEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            registrationOnlyModeEnabled: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.registrationOnlyModeEnabled, true);
+  assert.equal(nested.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
 });
 
 test('buildPersistentSettingsPayload persists signup identity redirect timeout into settings schema', () => {
@@ -1901,6 +1932,48 @@ function getRemovedKeys() {
   assert.equal(write.settingsState.flows.kiro.targetId, 'kiro-rs');
   assert.ok(api.getRemovedKeys().includes('panelMode'));
   assert.ok(api.getRemovedKeys().includes('kiroRsUrl'));
+});
+
+test('setPersistentSettings saves and reads registration-only mode', async () => {
+  const api = buildHarness(`
+let storageState = {};
+let persistedWrites = [];
+const chrome = {
+  storage: {
+    local: {
+      async get() {
+        return JSON.parse(JSON.stringify(storageState));
+      },
+      async remove(keys) {
+        const list = Array.isArray(keys) ? keys : [keys];
+        for (const key of list) {
+          delete storageState[key];
+        }
+      },
+      async set(payload) {
+        const clone = JSON.parse(JSON.stringify(payload));
+        storageState = { ...storageState, ...clone };
+        persistedWrites.push(clone);
+      },
+    },
+  },
+};
+function getPersistedWrites() {
+  return persistedWrites;
+}
+`);
+
+  const persisted = await api.setPersistentSettings({
+    registrationOnlyModeEnabled: true,
+  });
+  const readBack = await api.getPersistedSettings();
+  const write = api.getPersistedWrites().at(-1);
+
+  assert.equal(persisted.registrationOnlyModeEnabled, true);
+  assert.equal(persisted.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
+  assert.equal(readBack.registrationOnlyModeEnabled, true);
+  assert.equal(readBack.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
+  assert.equal(write.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
 });
 
 test('setPersistentSettings mirrors flat mail provider updates into canonical settingsState', async () => {

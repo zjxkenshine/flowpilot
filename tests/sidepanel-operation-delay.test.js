@@ -88,6 +88,18 @@ test('sidepanel exposes and wires auto-run issue log preservation switch', () =>
   assert.match(source, /inputAutoRunPreserveIssueLogsOnRestart\?\.addEventListener\('change'/);
 });
 
+test('sidepanel exposes and wires registration-only mode switch', () => {
+  assert.match(html, /id="input-registration-only-mode-enabled"/);
+  assert.match(html, /id="row-auto-retry-settings"/);
+  assert.match(html, /仅注册/);
+  assert.match(html, /确认账号注册成功后停止后续阶段/);
+  assert.match(source, /const inputRegistrationOnlyModeEnabled = document\.getElementById\('input-registration-only-mode-enabled'\);/);
+  assert.match(source, /registrationOnlyModeEnabled:\s*typeof inputRegistrationOnlyModeEnabled/);
+  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = Boolean\(state\?\.registrationOnlyModeEnabled\);/);
+  assert.match(source, /message\.payload\.registrationOnlyModeEnabled !== undefined/);
+  assert.match(source, /inputRegistrationOnlyModeEnabled\?\.addEventListener\('change'/);
+});
+
 test('sidepanel places thread interval inside auto retry settings grid', () => {
   const autoRetryIndex = html.indexOf('id="row-auto-retry-settings"');
   const oauthTimeoutIndex = html.indexOf('id="row-oauth-flow-timeout"');

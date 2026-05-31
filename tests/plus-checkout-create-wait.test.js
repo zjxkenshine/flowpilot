@@ -820,10 +820,10 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
     chrome: {
       tabs: {
         create: async () => ({ id: 99 }),
-        update: async () => {},
+        update: async (tabId, payload) => events.push({ type: 'tab-update', tabId, payload }),
       },
     },
-    completeNodeFromBackground: async () => {},
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     ensureContentScriptReadyOnTabUntilStopped: async () => {},
     registerTab: async () => {},
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
@@ -831,6 +831,8 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
           checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          hostedCheckoutUrl: 'https://pay.openai.com/c/pay/gopay-test-session',
+          preferredCheckoutUrl: 'https://pay.openai.com/c/pay/gopay-test-session',
           country: 'ID',
           currency: 'IDR',
         };
@@ -847,7 +849,7 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
       }
       throw new Error(`unexpected message type ${message.type}`);
     },
-    setState: async () => {},
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
     sleepWithStop: async () => {},
     waitForTabCompleteUntilStopped: async () => {},
   });
@@ -861,6 +863,16 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
     regionalCheckoutEnabled: false,
     billingDetails: { country: 'ID', currency: 'IDR' },
   });
+  assert.equal(
+    events.find((event) => event.type === 'tab-update')?.payload?.url,
+    'https://pay.openai.com/c/pay/gopay-test-session'
+  );
+  assert.equal(
+    events.some((event) => event.type === 'tab-message' && event.message?.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'),
+    false
+  );
+  assert.equal(events.find((event) => event.type === 'set-state')?.payload?.plusCheckoutCountry, 'ID');
+  assert.equal(events.find((event) => event.type === 'set-state')?.payload?.plusCheckoutCurrency, 'IDR');
   assert.equal(events.some((event) => event.type === 'proxy-apply'), false);
 });
 

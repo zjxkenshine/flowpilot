@@ -190,6 +190,117 @@ const bundle = [
   extractFunction('runAutoSequenceFromNodeGraph'),
 ].join('\n');
 
+function createRegistrationOnlyHarness(registrationOnlyModeEnabled, step6Status = 'pending') {
+  return new Function('registrationOnlyModeEnabled', 'step6Status', `
+const DEFAULT_ACTIVE_FLOW_ID = 'openai';
+const AUTO_STEP_DELAYS = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 };
+const LAST_STEP_ID = 10;
+const FINAL_OAUTH_CHAIN_START_STEP = 7;
+const SIGNUP_METHOD_PHONE = 'phone';
+const chrome = {
+  tabs: {
+    update: async () => {},
+  },
+  runtime: {
+    sendMessage: async () => {},
+  },
+};
+
+let currentState = {
+  email: 'only@example.com',
+  password: 'Secret123!',
+  mailProvider: '163',
+  registrationOnlyModeEnabled,
+  stepStatuses: {
+    1: 'completed',
+    2: 'completed',
+    3: 'completed',
+    4: 'completed',
+    5: 'completed',
+    6: step6Status,
+    7: 'pending',
+    8: 'pending',
+    9: 'pending',
+    10: 'pending',
+  },
+};
+const events = {
+  steps: [],
+  logs: [],
+};
+
+async function addLog(message, level = 'info') {
+  events.logs.push({ message, level });
+}
+async function ensureAutoEmailReady() {}
+async function broadcastAutoRunStatus() {}
+async function ensureResolvedSignupMethodForRun() { return 'email'; }
+async function getState() {
+  return currentState;
+}
+async function setState(updates = {}) {
+  currentState = {
+    ...currentState,
+    ...updates,
+    stepStatuses: updates.stepStatuses
+      ? { ...(currentState.stepStatuses || {}), ...updates.stepStatuses }
+      : currentState.stepStatuses,
+  };
+}
+async function sleepWithStop() {}
+function throwIfStopped() {}
+function isStopError() { return false; }
+function isStepDoneStatus(status) {
+  return status === 'completed' || status === 'manual_completed' || status === 'skipped';
+}
+function getErrorMessage(error) {
+  return error?.message || String(error || '');
+}
+async function executeStepAndWait(step) {
+  events.steps.push(step);
+  await setState({
+    stepStatuses: {
+      [step]: 'completed',
+    },
+  });
+}
+async function getTabId() {
+  return 1;
+}
+async function invalidateDownstreamAfterStepRestart() {}
+async function preserveFailedSignupPhoneReuseActivationForProtectedStep() {}
+function cancelPendingCommands() {}
+async function broadcastStopToContentScripts() {}
+function getLoginAuthStateLabel(state) {
+  return state || 'unknown';
+}
+async function getLoginAuthStateFromContent() {
+  return { state: 'unknown' };
+}
+function normalizePlusPaymentMethod(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+function isPhoneSmsPlatformRateLimitFailure() {
+  return false;
+}
+const phoneVerificationHelpers = null;
+
+${bundle}
+
+return {
+  async run() {
+    await runAutoSequenceFromStep(6, {
+      targetRun: 1,
+      totalRuns: 1,
+      attemptRuns: 1,
+      continued: false,
+    });
+    return events;
+  },
+};
+`)(registrationOnlyModeEnabled, step6Status);
+}
+
 test('auto-run restarts from step 1 with the same email after step 4 failure', async () => {
   const api = new Function(`
 const AUTO_STEP_DELAYS = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 };
@@ -356,6 +467,43 @@ return {
   assert.equal(currentState.failedSignupPhoneReuseActivation.source, 'signup-protected-step-failure-reuse');
   assert.match(currentState.failedSignupPhoneReuseActivation.reason, /页面异常/);
   assert.equal(events.logs.some(({ message }) => /沿用当前邮箱回到节点 open-chatgpt 重新开始/.test(message)), true);
+});
+
+test('auto-run registration-only mode stops after registration success before oauth tail', async () => {
+  const api = createRegistrationOnlyHarness(true);
+
+  const events = await api.run();
+
+  assert.deepStrictEqual(events.steps, [6]);
+  assert.equal(events.steps.includes(7), false);
+  assert.equal(
+    events.logs.some(({ message }) => message === '仅注册模式：已确认账号注册成功，本轮停止后续阶段。'),
+    true
+  );
+});
+
+test('auto-run registration-only mode also stops when registration success is already completed', async () => {
+  const api = createRegistrationOnlyHarness(true, 'completed');
+
+  const events = await api.run();
+
+  assert.deepStrictEqual(events.steps, []);
+  assert.equal(
+    events.logs.some(({ message }) => message === '仅注册模式：已确认账号注册成功，本轮停止后续阶段。'),
+    true
+  );
+});
+
+test('auto-run continues after registration success when registration-only mode is disabled', async () => {
+  const api = createRegistrationOnlyHarness(false);
+
+  const events = await api.run();
+
+  assert.deepStrictEqual(events.steps, [6, 7, 8, 9, 10]);
+  assert.equal(
+    events.logs.some(({ message }) => message === '仅注册模式：已确认账号注册成功，本轮停止后续阶段。'),
+    false
+  );
 });
 
 test('auto-run preserves signup phone activation for failed reuse when step 4 waits for verification page timeout', async () => {

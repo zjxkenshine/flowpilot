@@ -451,8 +451,8 @@
           <select id="select-plus-payment-method" class="data-select">
             <option value="paypal-hosted">PayPal 无卡直绑（兼容旧配置）</option>
             <option value="paypal">PayPal（默认 Hosted 自动闭环）</option>
-            <!--
             <option value="gopay">GoPay</option>
+            <!--
             <option value="gpc-helper">GPC</option>
             -->
           </select>
@@ -1221,6 +1221,16 @@
             <label class="toggle-switch" for="input-phone-verification-code-prefetch-enabled"
               title="手机号注册自动运行时，先无代理预取可接码手机号，正式流程再全程代理复用该号码">
               <input type="checkbox" id="input-phone-verification-code-prefetch-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group setting-group-secondary auto-retry-setting-cell">
+            <span class="setting-caption">仅注册</span>
+            <label class="toggle-switch" for="input-registration-only-mode-enabled"
+              title="开启后，确认账号注册成功后停止后续阶段">
+              <input type="checkbox" id="input-registration-only-mode-enabled" />
               <span class="toggle-switch-track" aria-hidden="true">
                 <span class="toggle-switch-thumb"></span>
               </span>

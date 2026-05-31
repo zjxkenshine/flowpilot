@@ -1745,12 +1745,14 @@ function resolveCheckoutBillingDetails(config = {}, options = {}) {
 
 function buildPlusCheckoutPayload(paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL, options = {}) {
   const config = getPaymentMethodConfig(paymentMethod);
-  return {
-    ...JSON.parse(JSON.stringify(PLUS_CHECKOUT_PAYLOAD_BASE)),
-    checkout_ui_mode: shouldUseHostedCheckoutFinalStep({
+  const shouldCreateHostedCheckout = config.id === PLUS_PAYMENT_METHOD_GOPAY
+    || shouldUseHostedCheckoutFinalStep({
       ...options,
       paymentMethod,
-    }) ? 'hosted' : 'custom',
+    });
+  return {
+    ...JSON.parse(JSON.stringify(PLUS_CHECKOUT_PAYLOAD_BASE)),
+    checkout_ui_mode: shouldCreateHostedCheckout ? 'hosted' : 'custom',
     billing_details: resolveCheckoutBillingDetails(config, options),
   };
 }
@@ -1764,7 +1766,21 @@ function buildPlusCheckoutUrl(checkoutSessionId, paymentMethod = PLUS_PAYMENT_ME
   return `https://chatgpt.com/checkout/${config.checkoutMerchantPath}/${sessionId}`;
 }
 
+function normalizeCheckoutResponseUrl(value = '') {
+  const url = String(value || '').trim();
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
 function findHostedCheckoutUrl(payload = {}) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    for (const key of ['url', 'stripe_hosted_url', 'checkout_url']) {
+      const directUrl = normalizeCheckoutResponseUrl(payload[key]);
+      if (directUrl) {
+        return directUrl;
+      }
+    }
+  }
+
   const queue = [payload];
   while (queue.length) {
     const current = queue.shift();
@@ -1822,14 +1838,19 @@ async function createPlusCheckoutSession(options = {}) {
   });
 
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.checkout_session_id) {
+  const hostedCheckoutUrl = findHostedCheckoutUrl(data);
+  const checkoutSessionId = String(data?.checkout_session_id || '').trim();
+  if (!response.ok || (!checkoutSessionId && !hostedCheckoutUrl)) {
     const detail = data?.detail || data?.message || `HTTP ${response.status}`;
     throw new Error(`创建 Plus Checkout 失败：${detail}`);
   }
 
-  const checkoutUrl = buildPlusCheckoutUrl(data.checkout_session_id, paymentMethod);
-  const hostedCheckoutUrl = findHostedCheckoutUrl(data);
-  const preferredCheckoutUrl = useHostedCheckoutFinalStep
+  const checkoutUrl = checkoutSessionId
+    ? buildPlusCheckoutUrl(checkoutSessionId, paymentMethod)
+    : hostedCheckoutUrl;
+  const shouldPreferHostedCheckoutUrl = paymentMethod === PLUS_PAYMENT_METHOD_GOPAY
+    || useHostedCheckoutFinalStep;
+  const preferredCheckoutUrl = shouldPreferHostedCheckoutUrl
     ? (hostedCheckoutUrl || checkoutUrl)
     : checkoutUrl;
 

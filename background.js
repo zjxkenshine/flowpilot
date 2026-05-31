@@ -1662,6 +1662,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunRetryPaypalCallback: false,
   autoRunPreserveIssueLogsOnRestart: false,
   phoneVerificationCodePrefetchEnabled: false,
+  registrationOnlyModeEnabled: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   oauthFlowTimeoutEnabled: true,
   autoRunDelayEnabled: false,
@@ -1887,6 +1888,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunRetryPaypalCallback',
   'autoRunPreserveIssueLogsOnRestart',
   'phoneVerificationCodePrefetchEnabled',
+  'registrationOnlyModeEnabled',
   'registrationStageWaitSeconds',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
@@ -3656,6 +3658,7 @@ function normalizeAutoRunTimerPlan(plan) {
   const autoRunRetryPaypalCallback = Boolean(plan.autoRunRetryPaypalCallback);
   const autoRunPreserveIssueLogsOnRestart = Boolean(plan.autoRunPreserveIssueLogsOnRestart);
   const phoneVerificationCodePrefetchEnabled = Boolean(plan.phoneVerificationCodePrefetchEnabled);
+  const registrationOnlyModeEnabled = Boolean(plan.registrationOnlyModeEnabled);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -3676,6 +3679,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      registrationOnlyModeEnabled,
       mode,
       currentRun: 0,
       attemptRun: 0,
@@ -3697,6 +3701,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      registrationOnlyModeEnabled,
       mode: 'restart',
       currentRun: normalizedCurrentRun,
       attemptRun: normalizedAttemptRun,
@@ -3717,6 +3722,7 @@ function normalizeAutoRunTimerPlan(plan) {
     autoRunRetryPaypalCallback,
     autoRunPreserveIssueLogsOnRestart,
     phoneVerificationCodePrefetchEnabled,
+    registrationOnlyModeEnabled,
     mode: 'restart',
     currentRun: normalizedCurrentRun,
     attemptRun: normalizedAttemptRun,
@@ -3749,6 +3755,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
     autoRunRetryPaypalCallback: state.scheduledAutoRunPlan?.autoRunRetryPaypalCallback ?? state.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: state.scheduledAutoRunPlan?.phoneVerificationCodePrefetchEnabled ?? state.phoneVerificationCodePrefetchEnabled,
+    registrationOnlyModeEnabled: state.scheduledAutoRunPlan?.registrationOnlyModeEnabled ?? state.registrationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: state.scheduledAutoRunPlan?.autoRunPreserveIssueLogsOnRestart ?? state.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: state.autoRunSessionId,
     mode: state.scheduledAutoRunPlan?.mode,
@@ -5044,6 +5051,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'autoRunRetryPaypalCallback':
     case 'autoRunPreserveIssueLogsOnRestart':
     case 'phoneVerificationCodePrefetchEnabled':
+    case 'registrationOnlyModeEnabled':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
@@ -6049,6 +6057,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('autoRunRetryPaypalCallback', ['flows', 'openai', 'autoRun', 'autoRunRetryPaypalCallback']);
   assignIfUpdated('autoRunPreserveIssueLogsOnRestart', ['flows', 'openai', 'autoRun', 'autoRunPreserveIssueLogsOnRestart']);
   assignIfUpdated('phoneVerificationCodePrefetchEnabled', ['flows', 'openai', 'autoRun', 'phoneVerificationCodePrefetchEnabled']);
+  assignIfUpdated('registrationOnlyModeEnabled', ['flows', 'openai', 'autoRun', 'registrationOnlyModeEnabled']);
   assignIfUpdated('registrationStageWaitSeconds', ['flows', 'openai', 'autoRun', 'registrationStageWaitSeconds']);
   assignIfUpdated('signupIdentityRedirectTimeoutSeconds', ['flows', 'openai', 'autoRun', 'signupIdentityRedirectTimeoutSeconds']);
   assignIfUpdated('authContentScriptRecoveryTimeoutSeconds', ['flows', 'openai', 'autoRun', 'authContentScriptRecoveryTimeoutSeconds']);
@@ -6304,6 +6313,7 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         autoRun: {
           autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
           phoneVerificationCodePrefetchEnabled: Boolean(prevState?.phoneVerificationCodePrefetchEnabled),
+          registrationOnlyModeEnabled: Boolean(prevState?.registrationOnlyModeEnabled),
           registrationStageWaitSeconds: normalizeRegistrationStageWaitSecondsForReset(
             prevState?.registrationStageWaitSeconds,
             getPersistedDefault('registrationStageWaitSeconds', 30)
@@ -13357,6 +13367,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+        registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: normalizedPlan.mode,
       },
@@ -13377,6 +13388,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+        registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
         mode: 'restart',
         resumeCurrentRun: nextRun,
@@ -13398,6 +13410,7 @@ function getAutoRunTimerResumeOptions(plan) {
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
       phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+      registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
       autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
       mode: 'restart',
       resumeCurrentRun: normalizedPlan.currentRun,
@@ -13495,6 +13508,7 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
         autoRunSkipFailures: plan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: plan.phoneVerificationCodePrefetchEnabled,
+        registrationOnlyModeEnabled: plan.registrationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(plan.totalRuns, plan.roundSummaries),
         autoRunTimerPlan: null,
@@ -13548,6 +13562,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     autoRunSkipFailures: options.autoRunSkipFailures,
     autoRunRetryPaypalCallback: options.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: options.phoneVerificationCodePrefetchEnabled,
+    registrationOnlyModeEnabled: options.registrationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: options.autoRunPreserveIssueLogsOnRestart,
     autoRunSessionId: sessionId,
     mode: options.mode,
@@ -13562,6 +13577,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
     autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: timerPlan.phoneVerificationCodePrefetchEnabled,
+    registrationOnlyModeEnabled: timerPlan.registrationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
     autoRunRoundSummaries: serializeAutoRunRoundSummaries(timerPlan.totalRuns, []),
   });
@@ -17780,6 +17796,18 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     return title && title !== nodeId ? `${nodeId}（${title}）` : nodeId;
   };
   const getNodeIndex = (state, nodeId) => getAutoRunWorkflowNodeIds(state).indexOf(nodeId);
+  const isRegistrationOnlyModeStopNode = (nodeId, state = {}) => (
+    nodeId === 'wait-registration-success'
+    && Boolean(state?.registrationOnlyModeEnabled)
+  );
+  const stopAfterRegistrationSuccessIfNeeded = async (nodeId, state = null) => {
+    const latestState = state || await getState();
+    if (!isRegistrationOnlyModeStopNode(nodeId, latestState)) {
+      return false;
+    }
+    await addLog('仅注册模式：已确认账号注册成功，本轮停止后续阶段。', 'ok');
+    return true;
+  };
   const shouldRunNamedNode = async (nodeId) => {
     const state = await getState();
     if (typeof isNodeExecutionAllowedForState === 'function' && !isNodeExecutionAllowedForState(nodeId, state)) {
@@ -18430,6 +18458,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     const currentStatus = getNodeStatusForNode(latestState, nodeId);
     if (isStepDoneStatus(currentStatus)) {
       await addLog(`自动运行：节点 ${nodeId} 当前状态为 ${currentStatus}，将直接继续后续流程。`, 'info');
+      if (await stopAfterRegistrationSuccessIfNeeded(nodeId, latestState)) {
+        break;
+      }
       nodeIndex += 1;
       continue;
     }
@@ -18440,6 +18471,9 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         nodeIds = getAutoRunWorkflowNodeIds(loopState);
         nodeIndex = Math.max(0, getNodeIndex(loopState, currentStartNodeId));
         continue;
+      }
+      if (await stopAfterRegistrationSuccessIfNeeded(nodeId)) {
+        break;
       }
       nodeIndex += 1;
     } catch (err) {
@@ -18703,6 +18737,7 @@ async function resumeAutoRun() {
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
     autoRunRetryPaypalCallback: Boolean(state.autoRunRetryPaypalCallback),
     phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
+    registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled),
     autoRunPreserveIssueLogsOnRestart: Boolean(state.autoRunPreserveIssueLogsOnRestart),
     mode: 'continue',
     resumeCurrentRun: currentRun,
