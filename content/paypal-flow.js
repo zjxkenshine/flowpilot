@@ -460,7 +460,7 @@ function findLoginNextButton() {
 
 function findEmailNextButton() {
   return findClickableByText([
-    /next|btn\s*next|btnnext/i,
+    /next|btn\s*next|btnnext|avan[cç]ar/i,
     /下一页|下一步/i,
   ]);
 }
@@ -1339,31 +1339,80 @@ function getHostedBrazilAddressValues(address = {}) {
 
 function fillHostedBrazilAddressFields(address = {}) {
   const values = getHostedBrazilAddressValues(address);
-  const filled = {
-    zip: fillHostedInputByText([/\bcep\b|postal|zip/i], values.zip).filled,
-    street: fillHostedInputByText([/endere[cç]o|address|logradouro/i], values.street, {
-      exclude: (input) => /cep|postal|zip|bairro|distrito|city|cidade|estado|state|(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number/i.test(getElementLabelText(input)),
-    }).filled,
-    number: fillHostedInputByText([/(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number|street\s*number/i], values.number, {
-      exclude: (input) => /card|cart[aã]o|cvv|cvc|csc|security|phone|telefone|celular|cpf|cnpj|document/i.test(getElementLabelText(input)),
-    }).filled,
-    neighborhood: fillHostedInputByText([/distrito|bairro|neighbou?rhood|district/i], values.neighborhood).filled,
-    city: fillHostedInputByText([/cidade|city|locality/i], values.city).filled,
-    state: values.state
-      ? selectHostedOptionByText([/estado|state|uf|region/i], [
-        new RegExp(`^${values.state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
-        new RegExp(values.state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
-      ]).selected
-      : false,
-  };
-  if (!filled.state) {
-    filled.state = fillHostedInputByText([/estado|state|uf|region/i], values.state).filled;
-  }
+  const zipFilled = values.zip
+    ? fillFirstHostedInputByIds(['billingPostalCode'], values.zip)
+      || fillHostedInputByText([/\bcep\b|postal|zip/i], values.zip).filled
+    : false;
+  const numberInput = getHostedBrazilRequiredNumberInput();
+  const numberFilled = numberInput && values.number
+    ? Boolean(fillInput(numberInput, values.number) || true)
+    : false;
   return {
-    attempted: Object.values(values).some(Boolean),
-    filledAny: Object.values(filled).some(Boolean),
-    ...filled,
+    attempted: Boolean(values.zip || values.number),
+    filledAny: Boolean(zipFilled || numberFilled),
+    zip: zipFilled,
+    number: numberFilled,
+    street: false,
+    neighborhood: false,
+    city: false,
+    state: false,
   };
+}
+
+function getHostedBrazilRequiredNumberInput() {
+  const byId = document.getElementById('billingHouseNumber');
+  if (byId && isVisibleElement(byId) && isEnabledControl(byId)) {
+    return byId;
+  }
+  return findHostedInputByText([/house\s*number|street\s*number|number|(?:^|\s)n(?:[^\w\s]|o|umero|\u00famero)?(?:\s|$)/i], {
+    exclude: (candidate) => /card|cvv|cvc|csc|security|phone|telefone|celular|cpf|cnpj|document/i.test(getElementLabelText(candidate)),
+  });
+}
+
+function hasHostedBrazilGeneratedAddressValues() {
+  const addressInput = findHostedInputByText([/endere[c\u00e7]o|address|logradouro/i], {
+    exclude: (input) => /cep|postal|zip|bairro|distrito|city|cidade|estado|state|house\s*number|street\s*number|number|(?:^|\s)n(?:[^\w\s]|o|umero|\u00famero)?(?:\s|$)/i.test(getElementLabelText(input)),
+  });
+  const cityInput = findHostedInputByText([/cidade|city|locality/i]);
+  const stateInput = findHostedInputByText([/estado|state|uf|region/i]);
+  const stateSelect = getVisibleHostedSelects().find((select) => /estado|state|uf|region/i.test(getElementLabelText(select))) || null;
+  return Boolean(
+    (!addressInput || normalizeText(addressInput.value || ''))
+    && (!cityInput || normalizeText(cityInput.value || ''))
+    && (!stateInput || normalizeText(stateInput.value || ''))
+    && (!stateSelect || normalizeText(stateSelect.value || ''))
+  );
+}
+
+async function waitForHostedBrazilGeneratedAddressValues(options = {}) {
+  const timeoutMs = Math.max(0, Math.floor(Number(options.timeoutMs ?? 4000) || 0));
+  const intervalMs = Math.max(50, Math.floor(Number(options.intervalMs ?? 250) || 0));
+  if (hasHostedBrazilGeneratedAddressValues()) {
+    return {
+      attempted: true,
+      ready: true,
+      timedOut: false,
+    };
+  }
+  try {
+    await waitUntil(hasHostedBrazilGeneratedAddressValues, {
+      timeoutMs,
+      intervalMs,
+      timeoutMessage: 'PayPal hosted checkout Brazil generated address fields did not populate before timeout.',
+    });
+    return {
+      attempted: true,
+      ready: true,
+      timedOut: false,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ready: false,
+      timedOut: true,
+      error: error?.message || String(error || ''),
+    };
+  }
 }
 
 function getHostedDocumentValue(payload = {}, address = {}) {
@@ -1595,35 +1644,21 @@ function assertHostedBrazilRequiredFieldsBeforeSubmit(payload = {}, address = {}
   if (documentInput && !normalizeText(documentInput.value || '')) {
     missing.push('CPF');
   }
-  const addressChecks = [
-    [[/endere[cç]o|address|logradouro/i], 'Endereço'],
-    [[/(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number|street\s*number/i], 'Nº'],
-    [[/cidade|city|locality/i], 'Cidade'],
-    [[/cep|postal|zip/i], 'CEP'],
-  ];
-  addressChecks.forEach(([patterns, label]) => {
-    const input = findHostedInputByText(patterns, label === 'Nº'
-      ? { exclude: (candidate) => /card|cart[aã]o|cvv|cvc|csc|security|phone|telefone|celular|cpf|cnpj|document/i.test(getElementLabelText(candidate)) }
-      : {});
-    if (input && !normalizeText(input.value || '')) {
-      missing.push(label);
-    }
-  });
-  const stateInput = findHostedInputByText([/estado|state|uf|region/i]);
-  const stateSelect = getVisibleHostedSelects().find((select) => /estado|state|uf|region/i.test(getElementLabelText(select))) || null;
-  if (stateInput && !normalizeText(stateInput.value || '')) {
-    missing.push('Estado');
+  const cepInput = findHostedInputByText([/cep|postal|zip/i]);
+  if (cepInput && !normalizeText(cepInput.value || '')) {
+    missing.push('CEP');
   }
-  if (stateSelect && !normalizeText(stateSelect.value || '')) {
-    missing.push('Estado');
+  const numberInput = getHostedBrazilRequiredNumberInput();
+  if (numberInput && !normalizeText(numberInput.value || '')) {
+    missing.push('Nº');
   }
-  const terms = getVisibleHostedCheckboxes().find((checkbox) => {
+  const requiredTerms = getVisibleHostedCheckboxes().find((checkbox) => {
     const text = getElementLabelText(checkbox);
-    return /contrato\s+do\s+usu[aá]rio|declara[cç][aã]o\s+de\s+privacidade|maior\s+de\s+idade|user\s+agreement|privacy\s+statement|terms/i.test(text)
-      && !/promo[cç][oõ]es|ofertas|marketing|receber|promotions|offers/i.test(text);
+    return /contrato\s+do\s+usu[a谩]rio|declara[c莽][a茫]o\s+de\s+privacidade|maior\s+de\s+idade|user\s+agreement|privacy\s+statement|terms/i.test(text)
+      && !/promo[c莽][o玫]es|ofertas|marketing|receber|promotions|offers/i.test(text);
   }) || null;
-  if (terms && terms.checked !== true && terms.getAttribute?.('aria-checked') !== 'true') {
-    missing.push('termos obrigatórios');
+  if (requiredTerms && requiredTerms.checked !== true && requiredTerms.getAttribute?.('aria-checked') !== 'true') {
+    missing.push('termos obrigat贸rios');
   }
   if (missing.length) {
     throw new Error(`PayPal hosted checkout Brazil required fields are empty before submit: ${Array.from(new Set(missing)).join(', ')}.`);
@@ -2065,6 +2100,9 @@ async function fillHostedGuestCheckout(payload = {}) {
     const addressFillResult = fillHostedAddressFields(address);
     const documentFillResult = fillHostedDocumentIfPresent(payload, address);
     const brazilTermsResult = isBrazil ? checkHostedBrazilRequiredTerms() : null;
+    const brazilGeneratedAddressResult = isBrazil
+      ? await waitForHostedBrazilGeneratedAddressValues()
+      : null;
     const addressSuggestionResult = payload.useAddressSuggestionFallback === true
       ? await selectHostedAddressSuggestionFallback()
       : {
@@ -2089,6 +2127,8 @@ async function fillHostedGuestCheckout(payload = {}) {
       hostedDocumentFilled: Boolean(documentFillResult?.filled),
       brazilTermsFound: Boolean(brazilTermsResult?.found),
       brazilTermsChecked: Boolean(brazilTermsResult?.checked),
+      brazilGeneratedAddressReady: Boolean(brazilGeneratedAddressResult?.ready),
+      brazilGeneratedAddressWaitTimedOut: Boolean(brazilGeneratedAddressResult?.timedOut),
       ...(brazilRequiredResult || {}),
       clicked: Boolean(clickResult?.clicked),
       ...addressSuggestionResult,
@@ -2119,10 +2159,12 @@ async function fillHostedGuestCheckout(payload = {}) {
     fillHostedInputById('password', values.password);
     fillHostedInputById('firstName', values.firstName);
     fillHostedInputById('lastName', values.lastName);
-    fillHostedInputById('billingLine1', address.street || address.address1 || '');
-    fillHostedInputById('billingCity', address.city || '');
     fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
-    selectHostedOptionByIdText('billingState', address.state || address.region || '');
+    if (!isBrazil) {
+      fillHostedInputById('billingLine1', address.street || address.address1 || '');
+      fillHostedInputById('billingCity', address.city || '');
+      selectHostedOptionByIdText('billingState', address.state || address.region || '');
+    }
     const nextDocumentFillResult = fillHostedDocumentIfPresent(payload, address);
     if (
       !documentFillResult
@@ -2173,6 +2215,9 @@ async function fillHostedGuestCheckout(payload = {}) {
       addressSuggestionSelectedText: '',
       addressSuggestionError: '',
     };
+  const brazilGeneratedAddressResult = isBrazil
+    ? await waitForHostedBrazilGeneratedAddressValues()
+    : null;
   const phoneCheck = verifyHostedPhoneBeforeSubmit(values.phone);
   const brazilRequiredResult = isBrazil ? assertHostedBrazilRequiredFieldsBeforeSubmit(payload, address) : null;
   const clickResult = await clickHostedSubmitButton({
@@ -2199,6 +2244,8 @@ async function fillHostedGuestCheckout(payload = {}) {
       brazilTermsChecked: Boolean(brazilFillResult?.termsChecked),
       brazilMarketingTermsSkipped: Boolean(brazilFillResult?.marketingTermsSkipped),
       brazilAddressFillResult: brazilFillResult?.addressFillResult || null,
+      brazilGeneratedAddressReady: Boolean(brazilGeneratedAddressResult?.ready),
+      brazilGeneratedAddressWaitTimedOut: Boolean(brazilGeneratedAddressResult?.timedOut),
       ...(brazilRequiredResult || {}),
     } : {}),
     ...addressSuggestionResult,

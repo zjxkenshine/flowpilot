@@ -245,6 +245,45 @@ test('PayPal hosted email finder detects login_email username field', () => {
   assert.equal(api.findEmailInput(), emailInput);
 });
 
+test('PayPal Brazil email page detects login email input and Avancar next button', () => {
+  const emailInput = createElement({
+    tag: 'input',
+    type: 'email',
+    id: 'email',
+    name: 'login_email',
+    placeholder: 'E-mail ou numero de celular',
+    attrs: {
+      autocomplete: 'username webauthn',
+      required: 'required',
+      'aria-describedby': 'emailErrorMessage',
+    },
+  });
+  const nextButton = createElement({
+    tag: 'button',
+    type: 'submit',
+    id: 'btnNext',
+    name: 'btnNext',
+    value: 'Next',
+    text: 'Avançar',
+    attrs: {
+      class: 'button actionContinue scTrack:unifiedlogin-login-click-next',
+      'pa-marked': '1',
+    },
+  });
+  const portugueseOnlyButton = createElement({
+    tag: 'button',
+    type: 'submit',
+    text: 'Avançar',
+  });
+
+  const api = loadApi([emailInput, nextButton]);
+  assert.equal(api.findEmailInput(), emailInput);
+  assert.equal(api.findEmailNextButton(), nextButton);
+
+  const fallbackApi = loadApi([portugueseOnlyButton]);
+  assert.equal(fallbackApi.findEmailNextButton(), portugueseOnlyButton);
+});
+
 test('PayPal combined login page still sees visible password input', () => {
   const emailInput = createElement({
     tag: 'input',
@@ -335,6 +374,7 @@ function createHostedPayPalHarness(options = {}) {
   let phoneFillCount = 0;
   let sleepCount = 0;
   let delayedReadOnlyEmailField = null;
+  let pendingBrazilGeneratedAddress = null;
   const body = { innerText: '', textContent: '' };
   const location = {
     href: 'https://www.paypal.com/checkoutweb/signup',
@@ -500,6 +540,8 @@ function createHostedPayPalHarness(options = {}) {
       { textContent: 'Rio de Janeiro', label: 'Rio de Janeiro', value: 'RJ' },
     ],
   });
+  const brazilBillingCepInput = createDomElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', name: 'billingPostalCode', attrs: { placeholder: 'CEP' } });
+  const brazilBillingHouseNumberInput = createDomElement({ tagName: 'INPUT', id: 'billingHouseNumber', type: 'text', name: 'billingHouseNumber', attrs: { placeholder: 'No' } });
   const brazilBirthdayInput = createDomElement({ tagName: 'INPUT', id: 'birth-br', type: 'text', attrs: { placeholder: 'Data de nascimento' } });
   const brazilCpfInput = createDomElement({ tagName: 'INPUT', id: 'cpf-br', type: 'text', attrs: { placeholder: 'CPF' } });
   const brazilRequiredTermsCheckbox = createDomElement({
@@ -663,6 +705,21 @@ function createHostedPayPalHarness(options = {}) {
       : 'Pay with debit or credit card';
     body.textContent = body.innerText;
     if (options.brazil) {
+      const cepInput = options.useBillingAddressIds ? brazilBillingCepInput : brazilCepInput;
+      const numberInput = options.useBillingAddressIds ? brazilBillingHouseNumberInput : brazilNumberInput;
+      pendingBrazilGeneratedAddress = options.generatedAddress || null;
+      [
+        brazilCepInput,
+        brazilBillingCepInput,
+        brazilAddressInput,
+        brazilNumberInput,
+        brazilBillingHouseNumberInput,
+        brazilNeighborhoodInput,
+        brazilCityInput,
+        brazilStateSelect,
+      ].forEach((element) => {
+        element.value = '';
+      });
       firstNameInput.setAttribute('placeholder', 'Nome');
       lastNameInput.setAttribute('placeholder', 'Sobrenome');
       passwordInput.setAttribute('placeholder', 'Criar senha');
@@ -678,9 +735,9 @@ function createHostedPayPalHarness(options = {}) {
         cardCvvInput,
         firstNameInput,
         lastNameInput,
-        brazilCepInput,
+        cepInput,
         brazilAddressInput,
-        brazilNumberInput,
+        numberInput,
         brazilNeighborhoodInput,
         brazilCityInput,
         brazilStateSelect,
@@ -1023,6 +1080,23 @@ function createHostedPayPalHarness(options = {}) {
       if (delayedReadOnlyEmailField && sleepCount >= 2 && !elements.includes(delayedReadOnlyEmailField)) {
         setElements([delayedReadOnlyEmailField, nextButton, createAccountButton]);
       }
+      if (pendingBrazilGeneratedAddress) {
+        const generated = pendingBrazilGeneratedAddress;
+        pendingBrazilGeneratedAddress = null;
+        if (Object.prototype.hasOwnProperty.call(generated, 'address')) {
+          brazilAddressInput.value = generated.address;
+        }
+        if (Object.prototype.hasOwnProperty.call(generated, 'neighborhood')) {
+          brazilNeighborhoodInput.value = generated.neighborhood;
+        }
+        if (Object.prototype.hasOwnProperty.call(generated, 'city')) {
+          brazilCityInput.value = generated.city;
+        }
+        if (Object.prototype.hasOwnProperty.call(generated, 'state')) {
+          brazilStateSelect.value = generated.state;
+        }
+        events.push({ type: 'brazil-generated-address' });
+      }
       return Promise.resolve();
     },
     fillInput(element, value) {
@@ -1100,8 +1174,10 @@ function createHostedPayPalHarness(options = {}) {
       creditRadio,
       debitRadio,
       cepInput: brazilCepInput,
+      billingCepInput: brazilBillingCepInput,
       addressInput: brazilAddressInput,
       numberInput: brazilNumberInput,
+      billingHouseNumberInput: brazilBillingHouseNumberInput,
       neighborhoodInput: brazilNeighborhoodInput,
       cityInput: brazilCityInput,
       stateSelect: brazilStateSelect,
@@ -1359,7 +1435,15 @@ test('PayPal hosted guest checkout fills Brazil-specific profile fields and requ
   const harness = createHostedPayPalHarness({
     renderPhone: (value) => value,
   });
-  harness.showGuestCheckout({ brazil: true });
+  harness.showGuestCheckout({
+    brazil: true,
+    generatedAddress: {
+      address: 'Rua Haddock Lobo',
+      neighborhood: 'Jardins',
+      city: 'Sao Paulo',
+      state: 'SP',
+    },
+  });
 
   const result = await harness.send({
     type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
@@ -1405,16 +1489,22 @@ test('PayPal hosted guest checkout fills Brazil-specific profile fields and requ
   assert.equal(result.brazilBirthdayFilled, true);
   assert.equal(result.brazilTermsChecked, true);
   assert.equal(result.brazilMarketingTermsSkipped, true);
+  assert.equal(result.brazilGeneratedAddressReady, true);
+  assert.equal(result.brazilGeneratedAddressWaitTimedOut, false);
   assert.equal(result.brazilRequiredFieldsReady, true);
   assert.equal(harness.countrySelect.value, 'BR');
   assert.equal(harness.brazil.phoneTypeSelect.value, 'mobile');
   assert.equal(harness.brazil.creditRadio.checked, true);
   assert.equal(harness.brazil.debitRadio.checked, false);
   assert.equal(harness.brazil.cepInput.value, '01414-003');
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'address-br'), false);
   assert.equal(harness.brazil.addressInput.value, 'Rua Haddock Lobo');
   assert.equal(harness.brazil.numberInput.value, '1307');
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'bairro-br'), false);
   assert.equal(harness.brazil.neighborhoodInput.value, 'Jardins');
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'city-br'), false);
   assert.equal(harness.brazil.cityInput.value, 'Sao Paulo');
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'state-br'), false);
   assert.equal(harness.brazil.stateSelect.value, 'SP');
   assert.equal(harness.brazil.birthdayInput.value, '03/02/2001');
   assert.equal(harness.brazil.cpfInput.value, '529.982.247-25');
@@ -1427,7 +1517,14 @@ test('PayPal hosted guest checkout still converts legacy Brazil ISO birthday', a
   const harness = createHostedPayPalHarness({
     renderPhone: (value) => value,
   });
-  harness.showGuestCheckout({ brazil: true });
+  harness.showGuestCheckout({
+    brazil: true,
+    generatedAddress: {
+      address: 'Rua Haddock Lobo',
+      city: 'Sao Paulo',
+      state: 'SP',
+    },
+  });
 
   const result = await harness.send({
     type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
@@ -1468,6 +1565,73 @@ test('PayPal hosted guest checkout still converts legacy Brazil ISO birthday', a
   assert.equal(result.ok, true);
   assert.equal(result.brazilBirthdayFilled, true);
   assert.equal(harness.brazil.birthdayInput.value, '03/02/2001');
+});
+
+test('PayPal hosted Brazil address fill uses CEP and billingHouseNumber only', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => value,
+  });
+  harness.showGuestCheckout({
+    brazil: true,
+    useBillingAddressIds: true,
+    generatedAddress: {
+      address: 'Praca Maua, 1',
+      neighborhood: 'Centro',
+      city: 'Rio de Janeiro',
+      state: 'RJ',
+    },
+  });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      countryCode: 'BR',
+      generatedFromCountry: 'BR',
+      email: 'guest.rj@example.com',
+      phone: '+5521987654321',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      cardType: 'credit',
+      password: 'Aa1example2',
+      firstName: 'Lucas',
+      lastName: 'Silva',
+      birthday: '03/02/2001',
+      cpf: '529.982.247-25',
+      documentNumber: '529.982.247-25',
+      address: {
+        countryCode: 'BR',
+        street: 'Praca Maua 1',
+        streetName: 'Praca Maua',
+        number: '15',
+        neighborhood: 'Centro',
+        city: 'Rio de Janeiro',
+        state: 'Rio de Janeiro',
+        stateCode: 'RJ',
+        zip: '20081-240',
+        postalCode: '20081-240',
+        cpf: '529.982.247-25',
+        documentNumber: '529.982.247-25',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, true);
+  assert.equal(result.brazilRequiredFieldsReady, true);
+  assert.equal(result.brazilGeneratedAddressReady, true);
+  assert.equal(harness.brazil.billingCepInput.value, '20081-240');
+  assert.equal(harness.brazil.billingHouseNumberInput.value, '15');
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'address-br'), false);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'bairro-br'), false);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'city-br'), false);
+  assert.equal(harness.events.some((event) => event.type === 'dispatch' && event.id === 'state-br'), false);
+  assert.equal(harness.brazil.addressInput.value, 'Praca Maua, 1');
+  assert.equal(harness.brazil.neighborhoodInput.value, 'Centro');
+  assert.equal(harness.brazil.cityInput.value, 'Rio de Janeiro');
+  assert.equal(harness.brazil.stateSelect.value, 'RJ');
 });
 
 test('PayPal hosted guest checkout address-only retry only refills billing address', async () => {
@@ -1514,6 +1678,50 @@ test('PayPal hosted guest checkout address-only retry only refills billing addre
       .map((event) => event.id),
     []
   );
+});
+
+test('PayPal hosted Brazil address-only retry waits for generated address values', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => value,
+  });
+  harness.showGuestCheckout({
+    brazil: true,
+    useBillingAddressIds: true,
+    generatedAddress: {
+      address: 'Praca Maua, 1',
+      city: 'Rio de Janeiro',
+      state: 'RJ',
+    },
+  });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      addressOnly: true,
+      countryCode: 'BR',
+      generatedFromCountry: 'BR',
+      cpf: '529.982.247-25',
+      documentNumber: '529.982.247-25',
+      address: {
+        countryCode: 'BR',
+        number: '15',
+        zip: '20081-240',
+        postalCode: '20081-240',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.addressOnly, true);
+  assert.equal(result.brazilGeneratedAddressReady, true);
+  assert.equal(result.brazilGeneratedAddressWaitTimedOut, false);
+  assert.equal(harness.brazil.billingCepInput.value, '20081-240');
+  assert.equal(harness.brazil.billingHouseNumberInput.value, '15');
+  assert.equal(harness.events.some((event) => event.type === 'brazil-generated-address'), true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'address-br'), false);
+  assert.equal(harness.brazil.addressInput.value, 'Praca Maua, 1');
 });
 
 test('PayPal hosted guest checkout fails when visible country select cannot switch to US', async () => {

@@ -1312,6 +1312,33 @@
       };
     }
 
+    function createRandomPayPalHostedGmailEmail() {
+      const helper = self.PayPalUtils?.buildRandomPayPalGmailEmail;
+      if (typeof helper === 'function') {
+        return String(helper()).trim().toLowerCase();
+      }
+      const localPart = `fp.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}`;
+      return `${localPart}@gmail.com`;
+    }
+
+    async function resolvePayPalHostedGeneratedEmail() {
+      const email = createRandomPayPalHostedGmailEmail();
+      if (!email || !/@gmail\.com$/i.test(email)) {
+        throw new Error('PayPal hosted checkout 随机 Gmail 生成失败。');
+      }
+      await persistPhonePlusPaymentEmail(email, { source: 'generated:paypal-random-gmail' });
+      await addHostedStepLog(
+        PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT,
+        `步骤 ${getHostedStepNumber(PAYPAL_HOSTED_STEP_OPENAI_CHECKOUT)}：PayPal 随机 Gmail 已生成 ${email}。`,
+        'info'
+      );
+      return {
+        email,
+        source: 'generated:paypal-random-gmail',
+        reused: false,
+      };
+    }
+
     async function resolveHostedCheckoutPaymentEmail(state = {}) {
       const latestState = await getLatestHostedState(state);
       const existing = await resolveExistingHostedCheckoutPaymentEmail(latestState);
@@ -3227,10 +3254,7 @@
       const mergedState = await getLatestHostedState(state);
       const existingStoredProfile = getHostedProfileFromState(mergedState) || {};
       const existingProfile = forceRefresh ? {} : existingStoredProfile;
-      const phonePlusMode = isPhonePlusModeState(mergedState);
-      const paymentEmailInfo = phonePlusMode
-        ? await resolvePhonePlusPaymentEmail(mergedState)
-        : await resolveExistingHostedCheckoutPaymentEmail(mergedState);
+      const paymentEmailInfo = await resolvePayPalHostedGeneratedEmail();
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
       });
@@ -3266,14 +3290,14 @@
           ? existingProfile.address
           : await fetchHostedCheckoutAddress(countryCode));
       const generatedProfile = buildHostedGuestProfile(address, {
-        email: paymentEmailInfo?.email || existingStoredProfile.email || existingProfile.email,
+        email: paymentEmailInfo.email,
         phone: nextPhone,
         countryCode,
       });
       const nextProfile = forceRefresh
         ? {
           ...generatedProfile,
-          email: paymentEmailInfo?.email || existingStoredProfile.email || generatedProfile.email,
+          email: paymentEmailInfo.email,
           address,
           phone: nextPhone,
           countryCode,
@@ -3282,7 +3306,7 @@
         : {
           ...generatedProfile,
           ...existingProfile,
-          email: paymentEmailInfo?.email || existingProfile.email || generatedProfile.email,
+          email: paymentEmailInfo.email,
           address,
           phone: nextPhone,
           countryCode,

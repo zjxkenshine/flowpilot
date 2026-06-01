@@ -7,10 +7,11 @@ const source = fs.readFileSync('background/steps/create-plus-checkout.js', 'utf8
 const checkoutConversionProxySource = fs.readFileSync('background/checkout-conversion-proxy.js', 'utf8');
 const plusCheckoutSource = fs.readFileSync('content/plus-checkout.js', 'utf8');
 const gopayUtilsSource = fs.readFileSync('gopay-utils.js', 'utf8');
+const paypalUtilsSource = fs.readFileSync('paypal-utils.js', 'utf8');
 const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
 const checkoutRegionsSource = fs.readFileSync('shared/plus-checkout-regions.js', 'utf8');
 const globalScope = {};
-new Function('self', `${gopayUtilsSource}; ${brazilSource}; ${checkoutRegionsSource};`)(globalScope);
+new Function('self', `${gopayUtilsSource}; ${paypalUtilsSource}; ${brazilSource}; ${checkoutRegionsSource};`)(globalScope);
 const api = new Function('self', `${source}; return self.MultiPageBackgroundPlusCheckoutCreate;`)(globalScope);
 const checkoutProxyApi = new Function('self', `${checkoutConversionProxySource}; return self.MultiPageBackgroundCheckoutConversionProxy;`)({});
 const PAYPAL_ADDRESS_RETRY_MAX_ATTEMPTS = 10;
@@ -605,6 +606,10 @@ function createHostedRuntimeState(overrides = {}) {
     hostedCheckoutPhoneNumber: '4155551234',
     ...overrides,
   };
+}
+
+function assertRandomPayPalGmailEmail(email) {
+  assert.match(email, /^fp\.[a-z0-9]+\.[a-z0-9]+@gmail\.com$/);
 }
 
 function normalizeTestPhoneActivation(record) {
@@ -3387,12 +3392,18 @@ test('PayPal no-card binding OpenAI checkout node submits hosted page and comple
   const profileState = events.filter((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile).at(-1)?.payload || {};
   assert.equal(profileState.plusHostedCheckoutGuestProfile.phone, '2125550000');
   assert.equal(profileState.plusHostedCheckoutPhoneDigits, '2125550000');
-  assert.equal(profileState.paypalGeneratedProfile.email, 'generated-run@example.com');
+  assertRandomPayPalGmailEmail(profileState.paypalGeneratedProfile.email);
+  assert.notEqual(profileState.paypalGeneratedProfile.email, 'generated-run@example.com');
+  assert.equal(profileState.plusHostedCheckoutGuestProfile.email, profileState.paypalGeneratedProfile.email);
   assert.equal(profileState.paypalGeneratedProfile.address1, '1 Main St');
   assert.equal(profileState.paypalGeneratedProfile.city, 'New York');
   assert.equal(profileState.paypalGeneratedProfile.region, 'New York');
   assert.equal(profileState.paypalGeneratedProfile.postalCode, '10001');
   assert.equal(profileState.paypalGeneratedProfile.fullAddress, '1 Main St New York New York 10001 US');
+  assert.equal(
+    events.some((event) => event.type === 'set-state' && event.payload.plusPaymentEmailState?.current === profileState.paypalGeneratedProfile.email),
+    true
+  );
   assert.equal(
     events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP')?.message?.payload?.address?.street,
     '1 Main St'
@@ -3944,13 +3955,14 @@ test('PayPal hosted email node completes when Next navigation drops the content 
     true
   );
   const hostedEmailSubmit = events.find((event) => event.type === 'tab-message' && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP');
-  assert.equal(hostedEmailSubmit.message.payload.email, 'generated-run@example.com');
+  assertRandomPayPalGmailEmail(hostedEmailSubmit.message.payload.email);
+  assert.notEqual(hostedEmailSubmit.message.payload.email, 'generated-run@example.com');
   assert.equal(hostedEmailSubmit.message.payload.emailInputStableWaitMs, 5000);
   assert.equal(hostedEmailSubmit.message.payload.emailInputTimeoutMs, 0);
   const profileState = events.find((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile)?.payload?.plusHostedCheckoutGuestProfile;
-  assert.equal(profileState.email, 'generated-run@example.com');
+  assert.equal(profileState.email, hostedEmailSubmit.message.payload.email);
   assert.equal(
-    events.some((event) => event.type === 'set-state' && event.payload.plusPaymentEmailState?.current === 'generated-run@example.com'),
+    events.some((event) => event.type === 'set-state' && event.payload.plusPaymentEmailState?.current === profileState.email),
     true
   );
 });
@@ -4501,7 +4513,8 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.phone, '4155551234');
   assert.ok(profileState.firstName);
   assert.ok(profileState.lastName);
-  assert.equal(profileState.email, cachedProfile.email);
+  assertRandomPayPalGmailEmail(profileState.email);
+  assert.notEqual(profileState.email, cachedProfile.email);
   assert.equal(profileEvent.payload.paypalGeneratedProfile.address1, '7 Fresh St');
   assert.equal(profileEvent.payload.paypalGeneratedProfile.city, 'Austin');
   assert.equal(profileEvent.payload.paypalGeneratedProfile.region, 'Texas');
@@ -4801,7 +4814,8 @@ test('PayPal hosted card node regenerates and persists a fresh guest profile bef
   assert.equal(profileState.address.street, '9 Later Stage Ave');
   assert.equal(profileState.address.city, 'Dallas');
   assert.equal(profileState.phone, '4155551234');
-  assert.equal(profileState.email, 'stale@example.com');
+  assertRandomPayPalGmailEmail(profileState.email);
+  assert.notEqual(profileState.email, 'stale@example.com');
   assert.equal(profileEvent.payload.paypalGeneratedProfile.address1, '9 Later Stage Ave');
   assert.equal(profileEvent.payload.paypalGeneratedProfile.city, 'Dallas');
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message?.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'), false);
@@ -5378,7 +5392,7 @@ test('PayPal hosted card node stops after invalid address retry limit', async ()
   assert.equal(events.some((event) => event.type === 'complete'), false);
 });
 
-test('Phone Plus hosted checkout reuses current provider runtime email as isolated payment email', async () => {
+test('Phone Plus hosted checkout ignores current provider runtime email and uses random Gmail', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -5434,18 +5448,20 @@ test('Phone Plus hosted checkout reuses current provider runtime email as isolat
 
   const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
   assert.ok(submitEvent);
-  assert.equal(submitEvent.message.payload.email, 'runtime@yyds.example.com');
+  assertRandomPayPalGmailEmail(submitEvent.message.payload.email);
+  assert.notEqual(submitEvent.message.payload.email, 'runtime@yyds.example.com');
   assert.equal(
-    events.some((event) => event.type === 'set-payment-email' && event.email === 'runtime@yyds.example.com'),
+    events.some((event) => event.type === 'set-payment-email' && event.email === submitEvent.message.payload.email),
     true
   );
+  assert.equal(events.some((event) => event.type === 'set-payment-email' && event.email === 'runtime@yyds.example.com'), false);
   assert.equal(
-    events.some((event) => event.type === 'log' && /支付邮箱已复用 runtime@yyds\.example\.com/.test(event.message)),
+    events.some((event) => event.type === 'log' && /PayPal 随机 Gmail 已生成/.test(event.message)),
     true
   );
 });
 
-test('Phone Plus hosted checkout prefers phone-prefixed Cloudflare email over stale payment cache', async () => {
+test('Phone Plus hosted checkout ignores phone-prefixed Cloudflare email and stale payment cache', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -5507,18 +5523,17 @@ test('Phone Plus hosted checkout prefers phone-prefixed Cloudflare email over st
 
   const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
   assert.ok(submitEvent);
-  assert.equal(submitEvent.message.payload.email, '8613812345678@mail.example.com');
+  assertRandomPayPalGmailEmail(submitEvent.message.payload.email);
+  assert.notEqual(submitEvent.message.payload.email, '8613812345678@mail.example.com');
+  assert.notEqual(submitEvent.message.payload.email, 'stale-payment@example.com');
+  assert.equal(events.some((event) => event.type === 'ensure-phone-email'), false);
   assert.deepStrictEqual(
-    events.find((event) => event.type === 'ensure-phone-email')?.options,
-    { fallbackToGenerated: false }
-  );
-  assert.deepStrictEqual(
-    events.find((event) => event.type === 'set-payment-email' && event.email === '8613812345678@mail.example.com')?.options,
-    { source: 'registration:phone-prefix-cloudflare-temp-email' }
+    events.find((event) => event.type === 'set-payment-email' && event.email === submitEvent.message.payload.email)?.options,
+    { source: 'generated:paypal-random-gmail' }
   );
 });
 
-test('Phone Plus hosted checkout uses Cloudflare phone-prefix payment source over stale payment cache', async () => {
+test('Phone Plus hosted checkout ignores Cloudflare phone-prefix payment source over stale payment cache', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -5582,14 +5597,17 @@ test('Phone Plus hosted checkout uses Cloudflare phone-prefix payment source ove
 
   const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
   assert.ok(submitEvent);
-  assert.equal(submitEvent.message.payload.email, '8613812345678@mail.example.com');
+  assertRandomPayPalGmailEmail(submitEvent.message.payload.email);
+  assert.notEqual(submitEvent.message.payload.email, '8613812345678@mail.example.com');
+  assert.notEqual(submitEvent.message.payload.email, 'stale-payment@example.com');
+  assert.equal(events.some((event) => event.type === 'ensure-phone-email'), false);
   assert.deepStrictEqual(
-    events.find((event) => event.type === 'set-payment-email' && event.email === '8613812345678@mail.example.com')?.options,
-    { source: 'registration:phone-prefix-cloudflare-email' }
+    events.find((event) => event.type === 'set-payment-email' && event.email === submitEvent.message.payload.email)?.options,
+    { source: 'generated:paypal-random-gmail' }
   );
 });
 
-test('Phone Plus hosted checkout uses random generated email when phone-prefix switch is disabled', async () => {
+test('Phone Plus hosted checkout ignores registration generator when phone-prefix switch is disabled', async () => {
   const events = [];
   let currentUrl = 'https://pay.openai.com/c/pay/test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -5663,19 +5681,18 @@ test('Phone Plus hosted checkout uses random generated email when phone-prefix s
 
   const submitEvent = events.find((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP');
   assert.ok(submitEvent);
-  assert.equal(submitEvent.message.payload.email, 'random-generated@mail.example.com');
+  assertRandomPayPalGmailEmail(submitEvent.message.payload.email);
+  assert.notEqual(submitEvent.message.payload.email, 'random-generated@mail.example.com');
+  assert.notEqual(submitEvent.message.payload.email, '8613812345678@mail.example.com');
   assert.equal(events.some((event) => event.type === 'ensure-phone-email'), false);
+  assert.equal(events.some((event) => event.type === 'fetch-generated-email'), false);
   assert.deepStrictEqual(
-    events.find((event) => event.type === 'fetch-generated-email')?.options,
-    { stateTarget: 'payment' }
-  );
-  assert.deepStrictEqual(
-    events.find((event) => event.type === 'set-payment-email' && event.email === 'random-generated@mail.example.com')?.options,
-    { source: 'generated:cloudflare-temp-email' }
+    events.find((event) => event.type === 'set-payment-email' && event.email === submitEvent.message.payload.email)?.options,
+    { source: 'generated:paypal-random-gmail' }
   );
 });
 
-test('Phone Plus hosted card refresh keeps saved payment email while refreshing profile details', async () => {
+test('Phone Plus hosted card refresh replaces saved payment email with random Gmail while refreshing profile details', async () => {
   const events = [];
   let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -5749,12 +5766,14 @@ test('Phone Plus hosted card refresh keeps saved payment email while refreshing 
 
   assert.ok(profileState);
   assert.ok(submitEvent);
-  assert.equal(profileState.email, 'saved-payment@example.com');
+  assertRandomPayPalGmailEmail(profileState.email);
+  assert.notEqual(profileState.email, 'saved-payment@example.com');
+  assert.notEqual(profileState.email, 'stale-profile@example.com');
   assert.equal(profileState.address.street, '11 Payment Keep Ave');
   assert.notEqual(profileState.cardNumber, '4000000000000002');
-  assert.equal(submitEvent.message.payload.email, 'saved-payment@example.com');
+  assert.equal(submitEvent.message.payload.email, profileState.email);
   assert.equal(
-    events.some((event) => event.type === 'set-payment-email' && event.email === 'saved-payment@example.com'),
+    events.some((event) => event.type === 'set-payment-email' && event.email === profileState.email),
     true
   );
 });

@@ -225,6 +225,14 @@
       return value;
     }
 
+    function buildRandomPayPalEmail() {
+      if (globalScope.PayPalUtils?.buildRandomPayPalGmailEmail) {
+        return globalScope.PayPalUtils.buildRandomPayPalGmailEmail();
+      }
+      const localPart = `fp.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}`;
+      return `${localPart}@gmail.com`;
+    }
+
     function buildBrazilPassword() {
       const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
       const digits = '0123456789';
@@ -644,15 +652,7 @@
           : (addressSeed?.countryCode || countryCode)
       );
       const fallback = addressSeed?.fallback || {};
-      const currentPayPalAccount = typeof helpers?.getCurrentPayPalAccount === 'function'
-        ? helpers.getCurrentPayPalAccount(currentState)
-        : null;
-      const email = String(
-        helpers?.getDraftEmail?.()
-        || currentState?.email
-        || currentPayPalAccount?.email
-        || ''
-      ).trim();
+      const email = buildRandomPayPalEmail();
       const phone = resolveProfilePhone(currentState, effectiveCountryCode);
       const generatedPassword = effectiveCountryCode === 'BR' ? buildBrazilPassword() : buildPassword();
       const password = String(

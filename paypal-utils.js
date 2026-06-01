@@ -1,6 +1,29 @@
 (function attachPayPalUtils(root, factory) {
   root.PayPalUtils = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createPayPalUtils() {
+  function getCryptoApi() {
+    return typeof crypto !== 'undefined' && crypto ? crypto : null;
+  }
+
+  function buildRandomToken() {
+    const cryptoApi = getCryptoApi();
+    if (cryptoApi?.getRandomValues) {
+      const values = new Uint32Array(2);
+      cryptoApi.getRandomValues(values);
+      return Array.from(values, (value) => value.toString(36).padStart(7, '0')).join('');
+    }
+    if (cryptoApi?.randomUUID) {
+      return cryptoApi.randomUUID().replace(/[^a-z0-9]/gi, '').slice(0, 14).toLowerCase();
+    }
+    return `${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function buildRandomPayPalGmailEmail() {
+    const timestamp = Math.max(0, Date.now()).toString(36);
+    const token = buildRandomToken().replace(/[^a-z0-9]/gi, '').toLowerCase() || '0';
+    return `fp.${timestamp}.${token}@gmail.com`;
+  }
+
   function normalizePayPalAccount(account = {}) {
     const normalizedEmail = String(account.email || '').trim().toLowerCase();
     const now = Date.now();
@@ -48,6 +71,7 @@
   }
 
   return {
+    buildRandomPayPalGmailEmail,
     findPayPalAccount,
     normalizePayPalAccount,
     normalizePayPalAccounts,

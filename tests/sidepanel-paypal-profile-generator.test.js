@@ -3,11 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const brazilSource = fs.readFileSync('shared/brazil-profile-generator.js', 'utf8');
+const paypalUtilsSource = fs.readFileSync('paypal-utils.js', 'utf8');
 const source = fs.readFileSync('sidepanel/paypal-profile-generator.js', 'utf8');
 
 function loadApi() {
   const windowObject = {};
-  return new Function('window', 'self', `${brazilSource}; ${source}; return window.SidepanelPayPalProfileGenerator;`)(windowObject, windowObject);
+  return new Function('window', 'self', `${paypalUtilsSource}; ${brazilSource}; ${source}; return window.SidepanelPayPalProfileGenerator;`)(windowObject, windowObject);
 }
 
 function createButton() {
@@ -167,7 +168,11 @@ function assertBrazilGeneratedPassword(password) {
   assert.match(password, /^(?=.*\d)[A-Za-z0-9]{14}$/);
 }
 
-test('PayPal profile generator binds current email, phone, proxy country, and local address seed', () => {
+function assertRandomPayPalGmailEmail(email) {
+  assert.match(email, /^fp\.[a-z0-9]+\.[a-z0-9]+@gmail\.com$/);
+}
+
+test('PayPal profile generator uses random Gmail, phone, proxy country, and local address seed', () => {
   const { generator } = createGenerator({
     initialState: {
       email: 'state@example.com',
@@ -184,7 +189,9 @@ test('PayPal profile generator binds current email, phone, proxy country, and lo
 
   const profile = generator.generateProfile();
 
-  assert.equal(profile.email, 'draft@example.com');
+  assertRandomPayPalGmailEmail(profile.email);
+  assert.notEqual(profile.email, 'draft@example.com');
+  assert.notEqual(profile.email, 'state@example.com');
   assert.equal(profile.phone, '+819012345678');
   assert.match(profile.cardNumber, /^4147\d{12}$/);
   assertLuhn(profile.cardNumber);
@@ -303,7 +310,7 @@ test('PayPal profile generator explicit BR country preference uses Brazil profil
   assert.equal(profile.documentNumber, profile.cpf);
 });
 
-test('PayPal profile generator falls back to selected PayPal account email and US address for unsupported country', () => {
+test('PayPal profile generator ignores selected PayPal account email and uses US address for unsupported country', () => {
   const { generator } = createGenerator({
     initialState: {
       ipProxyAppliedExitRegion: 'GB London',
@@ -326,7 +333,8 @@ test('PayPal profile generator falls back to selected PayPal account email and U
 
   const profile = generator.generateProfile();
 
-  assert.equal(profile.email, 'paypal@example.com');
+  assertRandomPayPalGmailEmail(profile.email);
+  assert.notEqual(profile.email, 'paypal@example.com');
   assert.equal(profile.phone, '');
   assert.equal(profile.countryCode, 'US');
   assert.equal(profile.generatedFromCountry, 'US');
@@ -334,7 +342,7 @@ test('PayPal profile generator falls back to selected PayPal account email and U
   assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
 });
 
-test('PayPal profile generator supports Brazil exit profiles and keeps existing email and phone sources', () => {
+test('PayPal profile generator supports Brazil exit profiles and keeps phone source with random Gmail', () => {
   const { generator } = createGenerator({
     initialState: {
       plusCheckoutConversionProxyExitCheck: {
@@ -356,7 +364,8 @@ test('PayPal profile generator supports Brazil exit profiles and keeps existing 
 
   const profile = generator.generateProfile();
 
-  assert.equal(profile.email, 'state@example.com');
+  assertRandomPayPalGmailEmail(profile.email);
+  assert.notEqual(profile.email, 'state@example.com');
   assert.equal(profile.phone, '+5511999998888');
   assert.equal(profile.countryCode, 'BR');
   assert.equal(profile.generatedFromCountry, 'BR');
@@ -446,7 +455,7 @@ test('PayPal profile generator keeps Brazil phone empty when no +55 phone is ava
   assert.equal(profile.generatedAt > 0, true);
 });
 
-test('PayPal profile generator generates other fields when email and phone are missing', () => {
+test('PayPal profile generator generates random Gmail and other fields when input email and phone are missing', () => {
   const { generator } = createGenerator({
     initialState: {
       email: '',
@@ -470,7 +479,7 @@ test('PayPal profile generator generates other fields when email and phone are m
 
   const profile = generator.generateProfile();
 
-  assert.equal(profile.email, '');
+  assertRandomPayPalGmailEmail(profile.email);
   assert.equal(profile.phone, '');
   assert.match(profile.cardNumber, /^4147\d{12}$/);
   assertLuhn(profile.cardNumber);
@@ -487,6 +496,17 @@ test('PayPal profile generator generates other fields when email and phone are m
   assert.equal(profile.postalCode, '10118');
   assert.equal(profile.fullAddress, '350 Fifth Avenue New York NY 10118 US');
   assert.equal(profile.generatedAt > 0, true);
+});
+
+test('PayPal profile generator creates a fresh random Gmail on each generation', () => {
+  const { generator } = createGenerator();
+
+  const first = generator.generateProfile();
+  const second = generator.generateProfile();
+
+  assertRandomPayPalGmailEmail(first.email);
+  assertRandomPayPalGmailEmail(second.email);
+  assert.notEqual(first.email, second.email);
 });
 
 test('PayPal profile generator falls back to a built-in real Brazil address when remote address fails', async () => {
@@ -571,8 +591,10 @@ test('PayPal profile generator persists generated profile and copies full profil
   const saveMessage = events.filter((event) => event.type === 'message').find((event) => event.message.type === 'SAVE_SETTING')?.message;
 
   assert.equal(saveMessage.type, 'SAVE_SETTING');
-  assert.equal(saveMessage.payload.paypalGeneratedProfile.email, 'user@example.com');
-  assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.email, 'user@example.com');
+  const generatedEmail = saveMessage.payload.paypalGeneratedProfile.email;
+  assertRandomPayPalGmailEmail(generatedEmail);
+  assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.email, generatedEmail);
+  assert.notEqual(generatedEmail, 'user@example.com');
   assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.address.street, 'Marunouchi 1-1');
   assert.equal(saveMessage.payload.plusHostedCheckoutGuestProfile.address.zip, '100-0005');
   assert.equal(saveMessage.payload.hostedCheckoutGuestProfile.address.street, 'Marunouchi 1-1');
@@ -586,7 +608,8 @@ test('PayPal profile generator persists generated profile and copies full profil
   await btnCopyProfile.click();
   const copied = events.filter((event) => event.type === 'copy').at(-1)?.text;
 
-  assert.match(copied, /user@example\.com/);
+  assert.match(copied, new RegExp(generatedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(copied.includes('user@example.com'), false);
   assert.match(copied, /\+4915123456789/);
   assert.match(copied, /4147\d{12}/);
   assert.match(copied, /CustomSecret123!/);
