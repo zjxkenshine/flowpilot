@@ -2893,6 +2893,10 @@
         heroSmsCountryFallback: [],
         heroSmsOperatorByCountry: {},
         heroSmsServiceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
+        heroSmsMinPrice: '',
+        heroSmsMaxPrice: '0.1',
+        heroSmsPreferredPrice: '',
+        heroSmsAcquirePriority: 'country',
       };
     }
 

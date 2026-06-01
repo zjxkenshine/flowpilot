@@ -7990,6 +7990,10 @@ test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number',
     heroSmsCountryId: 151,
     heroSmsCountryLabel: 'Japan',
     heroSmsOperatorByCountry: { 73: 'vivo', 151: 'docomo' },
+    heroSmsMinPrice: '0.08',
+    heroSmsMaxPrice: '0.03',
+    heroSmsPreferredPrice: '0.09',
+    heroSmsAcquirePriority: 'price_high',
   });
   const activation = {
     activationId: 'pp-br-activation-1',
@@ -8036,6 +8040,10 @@ test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number',
   assert.equal(requestCall.state.heroSmsCountryLabel, 'Brazil');
   assert.deepEqual(requestCall.state.heroSmsCountryFallback, []);
   assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, {});
+  assert.equal(requestCall.state.heroSmsMinPrice, '');
+  assert.equal(requestCall.state.heroSmsMaxPrice, '0.1');
+  assert.equal(requestCall.state.heroSmsPreferredPrice, '');
+  assert.equal(requestCall.state.heroSmsAcquirePriority, 'country');
   assert.equal(config.configSource, 'hero-sms-paypal-br');
   assert.equal(config.verificationUrl, '');
   assert.equal(config.phone, '+5511987654321');
