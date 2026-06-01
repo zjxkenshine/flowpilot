@@ -703,6 +703,74 @@ test('SAVE_SETTING disables IP proxy by applying direct mode cleanup state', asy
   });
 });
 
+test('DISABLE_IP_PROXY persists disabled state and releases plugin proxy takeover', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const applyCalls = [];
+  const broadcastCalls = [];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyHost: 'global.rotgb.711proxy.com',
+    ipProxyPort: '10000',
+    ipProxyApplied: true,
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    applyIpProxySettingsFromState: async (nextState, options = {}) => {
+      applyCalls.push({
+        state: { ...nextState },
+        options: { ...options },
+      });
+      return {
+        enabled: false,
+        applied: false,
+        reason: 'disabled',
+        provider: '711proxy',
+        exitDetecting: false,
+        exitIp: '',
+        exitRegion: '',
+        exitError: '',
+        error: '',
+      };
+    },
+    broadcastDataUpdate: (updates) => {
+      broadcastCalls.push({ ...updates });
+    },
+    buildPersistentSettingsPayload: (input = {}) => ({ ...input }),
+    getState: async () => ({ ...state }),
+    setPersistentSettings: async (updates) => ({ ...updates }),
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'DISABLE_IP_PROXY',
+    source: 'sidepanel',
+    payload: {
+      resetNetworkState: true,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(state.ipProxyEnabled, false);
+  assert.equal(response.state.ipProxyEnabled, false);
+  assert.equal(applyCalls.length, 1);
+  assert.equal(applyCalls[0].state.ipProxyEnabled, false);
+  assert.deepEqual(applyCalls[0].options, {
+    skipExitProbe: true,
+    resetNetworkState: true,
+    forceAuthRebind: false,
+    suppressAuthRebind: true,
+  });
+  assert.equal(response.proxyRouting.reason, 'disabled');
+  assert.deepEqual(broadcastCalls.at(-1), { ipProxyEnabled: false });
+});
+
 test('SAVE_SETTING applies IP proxy immediately when activation step is 1', async () => {
   const source = fs.readFileSync('background/message-router.js', 'utf8');
   const globalScope = { console };

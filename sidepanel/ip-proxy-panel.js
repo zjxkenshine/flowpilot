@@ -70,6 +70,7 @@ function getIpProxyActionLabel(action = '') {
   if (normalized === 'next') return '切换代理';
   if (normalized === 'change') return '会话换出口';
   if (normalized === 'probe') return '检测出口';
+  if (normalized === 'disable') return '关闭代理';
   return '代理操作';
 }
 
@@ -1958,6 +1959,11 @@ function updateIpProxyUI(state = latestState) {
     btnIpProxyProbe.disabled = actionBusy || !enabled || !canOperate;
     btnIpProxyProbe.textContent = busyAction === 'probe' ? '检测中...' : '检测出口';
   }
+  if (btnIpProxyDisable) {
+    btnIpProxyDisable.disabled = actionBusy || !enabled || !canOperate;
+    btnIpProxyDisable.textContent = busyAction === 'disable' ? '关闭中...' : '关闭代理';
+    btnIpProxyDisable.title = '关闭本插件代理并恢复浏览器原始代理';
+  }
   if (btnIpProxyExitRefresh) {
     btnIpProxyExitRefresh.disabled = actionBusy || !enabled || !canOperate;
     btnIpProxyExitRefresh.textContent = busyAction === 'probe' ? '刷新中...' : '刷新';
@@ -2141,6 +2147,55 @@ async function changeIpProxyExitBySession(options = {}) {
   scheduleIpProxyExitProbe({ silent: true });
   if (!silent) {
     showToast(`已执行 Change：${response?.display || formatIpProxyCurrentDisplay(latestState).text}`, 'success', 1800);
+  }
+  return response;
+}
+
+async function disableIpProxyByUser(options = {}) {
+  const { silent = false } = options;
+  const sendMessage = typeof sendSidepanelMessage === 'function'
+    ? sendSidepanelMessage
+    : (message) => chrome.runtime.sendMessage(message);
+  const response = await sendMessage({
+    type: 'DISABLE_IP_PROXY',
+    source: 'sidepanel',
+    payload: {
+      resetNetworkState: Boolean(options?.resetNetworkState),
+    },
+  });
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+  if (response?.state && typeof response.state === 'object') {
+    syncLatestState(response.state);
+  } else {
+    syncLatestState({ ipProxyEnabled: false });
+  }
+  if (typeof setIpProxyEnabled === 'function') {
+    setIpProxyEnabled(false);
+  }
+  const routing = response?.proxyRouting || {};
+  syncLatestState({
+    ipProxyEnabled: false,
+    ipProxyApplied: Boolean(routing.applied),
+    ipProxyAppliedReason: String(routing.reason || 'disabled').trim().toLowerCase() || 'disabled',
+    ipProxyAppliedHost: String(routing.host || '').trim(),
+    ipProxyAppliedPort: Number(routing.port) || 0,
+    ipProxyAppliedRegion: String(routing.region || '').trim(),
+    ipProxyAppliedHasAuth: Boolean(routing.hasAuth),
+    ipProxyAppliedProvider: normalizeIpProxyService(routing.provider || latestState?.ipProxyService || ''),
+    ipProxyAppliedError: String(routing.error || '').trim(),
+    ipProxyAppliedWarning: String(routing.warning || '').trim(),
+    ipProxyAppliedExitIp: String(routing.exitIp || '').trim(),
+    ipProxyAppliedExitRegion: String(routing.exitRegion || '').trim(),
+    ipProxyAppliedExitDetecting: Boolean(routing.exitDetecting),
+    ipProxyAppliedExitError: String(routing.exitError || '').trim(),
+    ipProxyAppliedExitSource: String(routing.exitSource || '').trim().toLowerCase(),
+    ipProxyAppliedAt: Date.now(),
+  });
+  updateIpProxyUI(latestState);
+  if (!silent) {
+    showToast('已关闭本插件代理，浏览器已回到原始代理设置', 'success', 2200);
   }
   return response;
 }

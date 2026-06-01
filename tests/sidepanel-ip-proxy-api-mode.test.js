@@ -49,6 +49,7 @@ test('sidepanel exposes read-only IP proxy exit info form below runtime status',
     'display-ip-proxy-exit-ip',
     'display-ip-proxy-exit-region',
     'btn-ip-proxy-exit-refresh',
+    'btn-ip-proxy-disable',
   ].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`));
   });
@@ -61,15 +62,20 @@ test('sidepanel exposes read-only IP proxy exit info form below runtime status',
   assert.match(source, /const displayIpProxyExitIp = document\.getElementById\('display-ip-proxy-exit-ip'\);/);
   assert.match(source, /const displayIpProxyExitRegion = document\.getElementById\('display-ip-proxy-exit-region'\);/);
   assert.match(source, /const btnIpProxyExitRefresh = document\.getElementById\('btn-ip-proxy-exit-refresh'\);/);
+  assert.match(source, /const btnIpProxyDisable = document\.getElementById\('btn-ip-proxy-disable'\);/);
   assert.match(source, /btnIpProxyExitRefresh\?\.addEventListener\('click'[\s\S]*runIpProxyActionWithLock\('probe'[\s\S]*await probeIpProxyExit\(\);/);
+  assert.match(source, /btnIpProxyDisable\?\.addEventListener\('click'[\s\S]*runIpProxyActionWithLock\('disable'[\s\S]*await disableIpProxyByUser\(\);/);
 
   assert.match(panelSource, /function setIpProxyExitInfoDisplay\(state = latestState\)/);
+  assert.match(panelSource, /async function disableIpProxyByUser\(options = \{\}\)/);
   assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitIp/);
   assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitRegion/);
   assert.match(panelSource, /const ipText = exitDetecting \? '检测中\.\.\.' : \(exitIp \|\| '未检测'\);/);
   assert.match(panelSource, /rowIpProxyExitInfo\.style\.display = showSettings \? '' : 'none';/);
   assert.match(panelSource, /btnIpProxyExitRefresh\.disabled = actionBusy \|\| !enabled \|\| !canOperate;/);
+  assert.match(panelSource, /btnIpProxyDisable\.disabled = actionBusy \|\| !enabled \|\| !canOperate;/);
   assert.match(panelSource, /type: 'PROBE_IP_PROXY_EXIT'/);
+  assert.match(panelSource, /type: 'DISABLE_IP_PROXY'/);
 });
 
 test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {

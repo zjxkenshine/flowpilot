@@ -2527,6 +2527,48 @@
           return { ok: true, ...result };
         }
 
+        case 'DISABLE_IP_PROXY': {
+          if (typeof applyIpProxySettingsFromState !== 'function') {
+            throw new Error('IP proxy disable capability is not available.');
+          }
+          const updates = { ipProxyEnabled: false };
+          const canonicalSettingsUpdates = typeof setPersistentSettings === 'function'
+            ? await setPersistentSettings(updates)
+            : updates;
+          const stateUpdates = {
+            ...canonicalSettingsUpdates,
+            ipProxyEnabled: false,
+          };
+          await setState(stateUpdates);
+          const mergedState = await getState();
+          const proxyRouting = await applyIpProxySettingsFromState({
+            ...mergedState,
+            ipProxyEnabled: false,
+          }, {
+            skipExitProbe: true,
+            resetNetworkState: Boolean(message.payload?.resetNetworkState),
+            forceAuthRebind: false,
+            suppressAuthRebind: true,
+          }).catch((error) => ({
+            enabled: false,
+            applied: false,
+            reason: 'disable_failed',
+            error: error?.message || String(error || 'IP proxy disable failed'),
+            exitDetecting: false,
+            exitIp: '',
+            exitRegion: '',
+            exitError: '',
+          }));
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(stateUpdates);
+          }
+          return {
+            ok: true,
+            state: await getState(),
+            proxyRouting,
+          };
+        }
+
         case 'PROBE_IP_PROXY_EXIT': {
           if (message.source === 'sidepanel') {
             await lockAutomationWindowFromMessage(message, sender);

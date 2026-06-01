@@ -683,7 +683,7 @@ test('pullIpProxyPoolFromApi always uses the apiUrl from the provided state snap
   assert.equal(pool[0].protocol, 'http');
 });
 
-test('IP proxy disabled state forces Chrome direct mode and clears runtime auth state', async () => {
+test('IP proxy disabled state releases Chrome proxy control and clears runtime auth state', async () => {
   const api = loadIpProxyCore();
   const proxyEvents = [];
   const stateUpdates = [];
@@ -781,9 +781,8 @@ test('IP proxy disabled state forces Chrome direct mode and clears runtime auth 
     assert.equal(status.reason, 'disabled');
     assert.equal(status.warning, '');
     assert.equal(api.getCurrentIpProxyAuthEntry(), null);
-    assert.deepEqual(proxyEvents.map((event) => event.type), ['set']);
+    assert.deepEqual(proxyEvents.map((event) => event.type), ['clear']);
     assert.deepEqual(proxyEvents[0].details, {
-      value: { mode: 'direct' },
       scope: 'regular',
     });
     assert.equal(browsingDataCalls.length, 1);

@@ -224,6 +224,7 @@ const btnIpProxyRefresh = document.getElementById('btn-ip-proxy-refresh');
 const btnIpProxyNext = document.getElementById('btn-ip-proxy-next');
 const btnIpProxyChange = document.getElementById('btn-ip-proxy-change');
 const btnIpProxyProbe = document.getElementById('btn-ip-proxy-probe');
+const btnIpProxyDisable = document.getElementById('btn-ip-proxy-disable');
 const btnIpProxyCheckIp = document.getElementById('btn-ip-proxy-check-ip');
 const ipProxyCurrent = document.getElementById('ip-proxy-current');
 const rowIpProxyRuntimeStatus = document.getElementById('row-ip-proxy-runtime-status');
@@ -20595,6 +20596,33 @@ btnIpProxyProbe?.addEventListener('click', async () => {
     if (result?.skipped) {
       return;
     }
+  } catch (err) {
+    showToast(err?.message || String(err || '未知错误'), 'error');
+  }
+});
+
+btnIpProxyDisable?.addEventListener('click', async () => {
+  try {
+    const result = typeof runIpProxyActionWithLock === 'function'
+      ? await runIpProxyActionWithLock('disable', async () => {
+        if (typeof setIpProxyEnabled === 'function') {
+          setIpProxyEnabled(false);
+        }
+        syncLatestState({ ipProxyEnabled: false });
+        await disableIpProxyByUser();
+      })
+      : await (async () => {
+        if (typeof setIpProxyEnabled === 'function') {
+          setIpProxyEnabled(false);
+        }
+        syncLatestState({ ipProxyEnabled: false });
+        await disableIpProxyByUser();
+        return { skipped: false };
+      })();
+    if (result?.skipped) {
+      return;
+    }
+    markSettingsDirty(false);
   } catch (err) {
     showToast(err?.message || String(err || '未知错误'), 'error');
   }

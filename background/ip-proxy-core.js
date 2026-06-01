@@ -3436,12 +3436,9 @@ async function disableIpProxySettings(options = {}) {
 
   let warning = '';
   try {
-    await callChromeProxySettings('set', {
-      value: { mode: 'direct' },
-      scope: IP_PROXY_SETTINGS_SCOPE,
-    });
+    await callChromeProxySettings('clear', { scope: IP_PROXY_SETTINGS_SCOPE });
   } catch (error) {
-    warning = error?.message || String(error || 'failed to switch proxy to direct mode');
+    warning = error?.message || String(error || 'failed to release extension proxy settings');
   }
 
   if (options?.resetNetworkState === true) {
