@@ -3,9 +3,10 @@
 console.log('[MultiPage:paypal-flow] Content script loaded on', location.href);
 
 const PAYPAL_FLOW_LISTENER_SENTINEL = 'data-multipage-paypal-flow-listener';
-const PAYPAL_FLOW_SCRIPT_VERSION = '2026-05-28-hosted-email-diagnostics-v2';
+const PAYPAL_FLOW_SCRIPT_VERSION = '2026-06-01-hosted-phone-error-pt-v1';
 const PAYPAL_HOSTED_GET_STATE_MESSAGE_V2 = 'PAYPAL_HOSTED_GET_STATE_V2';
 const PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE_V2 = 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2';
+const PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE_V2 = 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2';
 const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
 const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
 const PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT = 'guest_checkout';
@@ -49,6 +50,8 @@ if (document.documentElement.getAttribute(PAYPAL_FLOW_LISTENER_SENTINEL) !== PAY
       || message.type === PAYPAL_HOSTED_GET_STATE_MESSAGE_V2
       || message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
       || message.type === PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE_V2
+      || message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR'
+      || message.type === PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE_V2
     ) {
       resetStopState();
       handlePayPalCommand(message).then((result) => {
@@ -89,6 +92,9 @@ async function handlePayPalCommand(message) {
     case 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP':
     case PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE_V2:
       return runPayPalHostedCheckoutStep(message.payload || {});
+    case 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR':
+    case PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE_V2:
+      return dismissHostedGuestPhoneError(message.payload || {});
     default:
       throw new Error(`paypal-flow.js 不处理消息：${message.type}`);
   }
@@ -549,13 +555,67 @@ function hasPayPalHostedGuestCardError() {
 function getPayPalHostedGuestPhoneErrorMessage() {
   const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || '');
   const match = bodyText.match(
-    /We['\u2019]?re\s+unable\s+to\s+complete\s+your\s+request\.?\s*Try\s+a\s+different\s+phone\s+number\.?|Try\s+a\s+different\s+phone\s+number\.?|请尝试其他手机号|请更换手机号/i
+    /We['\u2019]?re\s+unable\s+to\s+complete\s+your\s+request\.?\s*Try\s+a\s+different\s+phone\s+number\.?|Try\s+a\s+different\s+phone\s+number\.?|N[aã]o\s+foi\s+poss[ií]vel\s+concluir\s+sua\s+solicita[cç][aã]o\.?\s*Tente\s+outro\s+n[uú]mero\s+de\s+telefone\.?|Tente\s+outro\s+n[uú]mero\s+de\s+telefone\.?|请尝试其他手机号|请更换手机号/i
   );
   return match ? match[0] : '';
 }
 
 function hasPayPalHostedGuestPhoneError() {
   return Boolean(getPayPalHostedGuestPhoneErrorMessage());
+}
+
+function findHostedGuestPhoneErrorOkButton() {
+  const direct = document.querySelector('button[data-testid="primary-button-exceed"]');
+  if (direct && isVisibleElement(direct) && isEnabledControl(direct)) {
+    return direct;
+  }
+  const fallback = findClickableByText([
+    /^ok$/i,
+  ]);
+  return fallback && isEnabledControl(fallback) ? fallback : null;
+}
+
+async function dismissHostedGuestPhoneError(payload = {}) {
+  await waitForDocumentComplete();
+  const message = getPayPalHostedGuestPhoneErrorMessage();
+  if (!message) {
+    return {
+      hostedGuestPhoneError: false,
+      hostedGuestPhoneErrorMessage: '',
+      phoneErrorDismissed: false,
+      okButtonFound: false,
+    };
+  }
+  const delayMs = Math.max(0, Math.floor(Number(
+    payload.dismissPhoneErrorDelayMs ?? payload.delayMs ?? 0
+  ) || 0));
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+  const button = findHostedGuestPhoneErrorOkButton();
+  if (!button) {
+    return {
+      hostedGuestPhoneError: true,
+      hostedGuestPhoneErrorMessage: message,
+      phoneErrorDismissed: false,
+      okButtonFound: false,
+    };
+  }
+  const buttonText = getActionText(button);
+  await performPayPalOperationWithDelay({
+    stepKey: getHostedStepKey(PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT),
+    kind: 'click',
+    label: 'hosted-paypal-phone-error-ok',
+  }, async () => {
+    simulateClick(button);
+  });
+  return {
+    hostedGuestPhoneError: true,
+    hostedGuestPhoneErrorMessage: message,
+    phoneErrorDismissed: true,
+    okButtonFound: true,
+    okButtonText: buttonText,
+  };
 }
 
 function isHostedCreateAccountAddressErrorText(text = '') {

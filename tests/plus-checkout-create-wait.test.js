@@ -3981,8 +3981,8 @@ test('PayPal hosted email node completes when missing email target error is foll
       if (message.type === 'PAYPAL_HOSTED_GET_STATE_V2' || message.type === 'PAYPAL_HOSTED_GET_STATE') {
         statePollCount += 1;
         return statePollCount >= 2
-          ? { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'guest_checkout' }
-          : { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'pay_login' };
+          ? { scriptVersion: '2026-06-01-hosted-phone-error-pt-v1', hostedStage: 'guest_checkout' }
+          : { scriptVersion: '2026-06-01-hosted-phone-error-pt-v1', hostedStage: 'pay_login' };
       }
       if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2' || message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
         throw new Error('PayPal hosted checkout 未找到邮箱输入框或只读邮箱字段。 URL: https://www.paypal.com/pay');
@@ -4034,7 +4034,7 @@ test('PayPal hosted state reinjects content script when script version is stale'
         statePollCount += 1;
         return statePollCount === 1
           ? { hostedStage: 'guest_checkout' }
-          : { scriptVersion: '2026-05-28-hosted-email-diagnostics-v2', hostedStage: 'create_account' };
+          : { scriptVersion: '2026-06-01-hosted-phone-error-pt-v1', hostedStage: 'create_account' };
       }
       if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2') {
         return { submitted: true };
@@ -5849,7 +5849,8 @@ test('Phone Plus hosted card refresh uses Brazil address source and normalizes +
   assert.equal(profileState.address.stateCode, 'SP');
   assert.equal(profileState.address.city, 'Sao Paulo');
   assert.equal(profileState.address.zip, '01414-003');
-  assert.match(profileState.birthday, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(profileState.password, /^(?=.*\d)[A-Za-z0-9]{14}$/);
+  assert.match(profileState.birthday, /^\d{2}\/\d{2}\/\d{4}$/);
   assert.equal(profileState.cardType, 'credit');
   assert.match(profileState.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.match(profileState.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
@@ -7394,10 +7395,16 @@ test('PayPal hosted card node disables bad sms pool phone and refills next enabl
           return {
             hostedStage: 'guest_checkout',
             hostedGuestPhoneError: true,
-            hostedGuestPhoneErrorMessage: 'Try a different phone number.',
+            hostedGuestPhoneErrorMessage: 'Não foi possível concluir sua solicitação. Tente outro número de telefone.',
           };
         }
         return { hostedStage: 'create_account' };
+      }
+      if (message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2' || message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR') {
+        return {
+          phoneErrorDismissed: true,
+          hostedGuestPhoneErrorMessage: 'Não foi possível concluir sua solicitação. Tente outro número de telefone.',
+        };
       }
       throw new Error(`unexpected message type ${message.type}`);
     },
@@ -7421,9 +7428,25 @@ test('PayPal hosted card node disables bad sms pool phone and refills next enabl
   const usage = latestState.hostedCheckoutSmsPoolUsage;
   assert.equal(usage['4155551111----http://pool-a.test/api/sms'].enabled, false);
   assert.equal(usage['4155551111----http://pool-a.test/api/sms'].failureCount, 2);
-  assert.match(usage['4155551111----http://pool-a.test/api/sms'].disabledReason, /different phone number|号码不可用/i);
+  assert.match(usage['4155551111----http://pool-a.test/api/sms'].disabledReason, /Tente outro número de telefone|号码不可用/i);
   assert.equal(latestState.hostedCheckoutCurrentSmsEntry.phone, '4155552222');
   assert.equal(latestState.plusHostedCheckoutGuestProfile.phone, '4155552222');
+  const dismissIndex = events.findIndex((event) => (
+    event.type === 'tab-message'
+    && (
+      event.message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2'
+      || event.message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR'
+    )
+  ));
+  const refillIndex = events.findIndex((event) => (
+    event.type === 'tab-message'
+    && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
+    && event.message.payload?.phone === '4155552222'
+  ));
+  assert.notEqual(dismissIndex, -1);
+  assert.notEqual(refillIndex, -1);
+  assert.equal(events[dismissIndex].message.payload?.dismissPhoneErrorDelayMs, 3000);
+  assert.equal(dismissIndex < refillIndex, true);
   assert.equal(
     events.some((event) => (
       event.type === 'tab-message'
@@ -8281,11 +8304,17 @@ test('PayPal hosted HeroSMS PayPal/BR phone rejection skips provider ban and swi
           return {
             hostedStage: 'guest_checkout',
             hostedGuestPhoneError: true,
-            hostedGuestPhoneErrorMessage: 'Try a different phone number.',
+            hostedGuestPhoneErrorMessage: 'Não foi possível concluir sua solicitação. Tente outro número de telefone.',
           };
         }
         currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
         return { hostedStage: 'create_account' };
+      }
+      if (message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2' || message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR') {
+        return {
+          phoneErrorDismissed: true,
+          hostedGuestPhoneErrorMessage: 'Não foi possível concluir sua solicitação. Tente outro número de telefone.',
+        };
       }
       if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
         return { submitted: true, phoneMatched: true };
@@ -8315,6 +8344,22 @@ test('PayPal hosted HeroSMS PayPal/BR phone rejection skips provider ban and swi
   assert.equal(phoneCalls.filter((call) => call.type === 'request').length, 1);
   assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-new-1');
   assert.equal(latestState.plusHostedCheckoutGuestProfile.phone, '+5521987654321');
+  const dismissIndex = events.findIndex((event) => (
+    event.type === 'tab-message'
+    && (
+      event.message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2'
+      || event.message.type === 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR'
+    )
+  ));
+  const refillIndex = events.findIndex((event) => (
+    event.type === 'tab-message'
+    && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
+    && event.message.payload?.phone === '+5521987654321'
+  ));
+  assert.notEqual(dismissIndex, -1);
+  assert.notEqual(refillIndex, -1);
+  assert.equal(events[dismissIndex].message.payload?.dismissPhoneErrorDelayMs, 3000);
+  assert.equal(dismissIndex < refillIndex, true);
   assert.equal(
     events.some((event) => (
       event.type === 'tab-message'

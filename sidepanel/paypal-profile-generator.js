@@ -225,6 +225,24 @@
       return value;
     }
 
+    function buildBrazilPassword() {
+      const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const digits = '0123456789';
+      const alphabet = `${letters}${digits}`;
+      const chars = [
+        letters[Math.floor(Math.random() * letters.length)],
+        digits[Math.floor(Math.random() * digits.length)],
+      ];
+      while (chars.length < 14) {
+        chars.push(alphabet[Math.floor(Math.random() * alphabet.length)]);
+      }
+      for (let index = chars.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [chars[index], chars[swapIndex]] = [chars[swapIndex], chars[index]];
+      }
+      return chars.join('');
+    }
+
     function buildVisaCard() {
       const digits = [4, 1, 4, 7];
       while (digits.length < 15) {
@@ -252,7 +270,7 @@
       };
     }
 
-    function buildBirthdayString(birthday = null) {
+    function buildBirthdayString(birthday = null, format = 'iso') {
       if (!birthday || typeof birthday !== 'object') {
         return '';
       }
@@ -262,7 +280,13 @@
       if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
         return '';
       }
-      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const yearText = String(year).padStart(4, '0');
+      const monthText = String(month).padStart(2, '0');
+      const dayText = String(day).padStart(2, '0');
+      if (format === 'br') {
+        return `${dayText}/${monthText}/${yearText}`;
+      }
+      return `${yearText}-${monthText}-${dayText}`;
     }
 
     function buildFullAddress({
@@ -630,10 +654,11 @@
         || ''
       ).trim();
       const phone = resolveProfilePhone(currentState, effectiveCountryCode);
+      const generatedPassword = effectiveCountryCode === 'BR' ? buildBrazilPassword() : buildPassword();
       const password = String(
         helpers?.getDraftCustomPassword?.()
         || currentState?.customPassword
-        || buildPassword()
+        || generatedPassword
       ).trim();
       const card = buildVisaCard();
       const address1 = String(fallback.address1 || '').trim();
@@ -650,7 +675,7 @@
         password,
         firstName: String(name?.firstName || '').trim(),
         lastName: String(name?.lastName || '').trim(),
-        birthday: buildBirthdayString(birthday),
+        birthday: buildBirthdayString(birthday, effectiveCountryCode === 'BR' ? 'br' : 'iso'),
         cpf: addressSeed?.cpf,
         cpfDigits: addressSeed?.cpfDigits,
         cnpj: addressSeed?.cnpj,

@@ -6,9 +6,10 @@
   const PLUS_CHECKOUT_ENTRY_URL = 'https://chatgpt.com/';
   const PLUS_CHECKOUT_INJECT_FILES = ['shared/plus-checkout-regions.js', 'content/utils.js', 'content/operation-delay.js', 'content/plus-checkout.js'];
   const PAYPAL_INJECT_FILES = ['content/utils.js', 'content/operation-delay.js', 'content/paypal-flow.js'];
-  const PAYPAL_FLOW_SCRIPT_VERSION = '2026-05-28-hosted-email-diagnostics-v2';
+  const PAYPAL_FLOW_SCRIPT_VERSION = '2026-06-01-hosted-phone-error-pt-v1';
   const PAYPAL_HOSTED_GET_STATE_MESSAGE = 'PAYPAL_HOSTED_GET_STATE_V2';
   const PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE = 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2';
+  const PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE = 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2';
   const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
   const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
@@ -107,6 +108,7 @@
   const PHONE_PLUS_CHECK_MAX_ATTEMPTS = 3;
   const DEFAULT_BROWSER_FINGERPRINT_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8';
   const HOSTED_CHECKOUT_GUEST_CARD_ERROR_SETTLE_MS = 8000;
+  const PAYPAL_HOSTED_PHONE_ERROR_DISMISS_DELAY_MS = 3000;
   const PAYPAL_GENERIC_ERROR_SESSION_SETTLE_WAIT_MS = 5000;
   const PAYPAL_HOSTED_STAGE_OUTSIDE = 'outside_paypal';
   const PAYPAL_HOSTED_STAGE_LOGIN = 'pay_login';
@@ -2086,13 +2088,19 @@
       return '';
     }
 
-    function buildHostedBirthdayString(date = new Date()) {
+    function buildHostedBirthdayString(date = new Date(), format = 'iso') {
       const now = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
       const age = 19 + Math.floor(Math.random() * 7);
       const year = now.getFullYear() - age;
       const month = 1 + Math.floor(Math.random() * 12);
       const day = 1 + Math.floor(Math.random() * new Date(year, month, 0).getDate());
-      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const yearText = String(year).padStart(4, '0');
+      const monthText = String(month).padStart(2, '0');
+      const dayText = String(day).padStart(2, '0');
+      if (format === 'br') {
+        return `${dayText}/${monthText}/${yearText}`;
+      }
+      return `${yearText}-${monthText}-${dayText}`;
     }
 
     function splitHostedBrazilStreetAddress(value = '') {
@@ -3742,6 +3750,24 @@
       return value;
     }
 
+    function buildRandomHostedBrazilPassword() {
+      const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const digits = '0123456789';
+      const alphabet = `${letters}${digits}`;
+      const chars = [
+        letters[Math.floor(Math.random() * letters.length)],
+        digits[Math.floor(Math.random() * digits.length)],
+      ];
+      while (chars.length < 14) {
+        chars.push(alphabet[Math.floor(Math.random() * alphabet.length)]);
+      }
+      for (let index = chars.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [chars[index], chars[swapIndex]] = [chars[swapIndex], chars[index]];
+      }
+      return chars.join('');
+    }
+
     function buildHostedVisaCard() {
       const digits = [4, 1, 4, 7];
       while (digits.length < 15) {
@@ -4030,11 +4056,11 @@
       const regionalName = pickHostedRegionalName(normalizedAddress.countryCode || countryCode);
       return {
         email: String(config?.email || buildRandomHostedEmail()).trim().toLowerCase(),
-        password: buildRandomHostedPassword(),
+        password: normalizedAddress.countryCode === 'BR' ? buildRandomHostedBrazilPassword() : buildRandomHostedPassword(),
         phone: String(config?.phone || '').trim(),
         firstName: regionalName.firstName || 'James',
         lastName: regionalName.lastName || 'Smith',
-        birthday: buildHostedBirthdayString(),
+        birthday: buildHostedBirthdayString(new Date(), normalizedAddress.countryCode === 'BR' ? 'br' : 'iso'),
         cardNumber: card.number,
         cardExpiry: card.expiry,
         cardCvv: card.cvv,
@@ -4978,6 +5004,46 @@
       });
     }
 
+    async function dismissHostedGuestPhoneErrorDialog(tabId, pageState = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
+      if (!pageState?.hostedGuestPhoneError) {
+        return null;
+      }
+      try {
+        const result = await sendHostedPayPalContentMessage(
+          tabId,
+          PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE,
+          'PAYPAL_HOSTED_DISMISS_PHONE_ERROR',
+          {
+            dismissPhoneErrorDelayMs: PAYPAL_HOSTED_PHONE_ERROR_DISMISS_DELAY_MS,
+          }
+        );
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        if (result?.phoneErrorDismissed) {
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${getHostedStepNumber(stepKey)}：检测到 PayPal 号码不可用提示，已等待 3 秒并点击 OK，准备切换号码。`,
+            'warn'
+          );
+        } else {
+          await addHostedStepLog(
+            stepKey,
+            `步骤 ${getHostedStepNumber(stepKey)}：检测到 PayPal 号码不可用提示，但未找到可点击的 OK 按钮，将继续切换号码。`,
+            'warn'
+          );
+        }
+        return result || null;
+      } catch (error) {
+        await addHostedStepLog(
+          stepKey,
+          `步骤 ${getHostedStepNumber(stepKey)}：关闭 PayPal 号码错误弹窗失败，将继续切换号码。${error?.message || String(error || '未知错误')}`,
+          'warn'
+        );
+        return null;
+      }
+    }
+
     function buildHostedVerificationResendLimitError() {
       return new Error(
         `${HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX}PayPal 验证码自动 Resend 重试已达到上限，请尝试在页面手动获取验证码并填入。`
@@ -5061,6 +5127,7 @@
         pageState?.hostedGuestPhoneErrorMessage
         || 'PayPal 提示当前号码不可用，请更换号码。'
       ).trim();
+      await dismissHostedGuestPhoneErrorDialog(tabId, pageState, stepKey);
       const runtimeConfig = await getHostedCheckoutRuntimeConfig({}, {
         ensureCurrentSmsEntry: false,
       });

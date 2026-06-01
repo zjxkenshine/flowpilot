@@ -163,6 +163,10 @@ function assertLuhn(number) {
   assert.equal(sum % 10, 0);
 }
 
+function assertBrazilGeneratedPassword(password) {
+  assert.match(password, /^(?=.*\d)[A-Za-z0-9]{14}$/);
+}
+
 test('PayPal profile generator binds current email, phone, proxy country, and local address seed', () => {
   const { generator } = createGenerator({
     initialState: {
@@ -291,6 +295,8 @@ test('PayPal profile generator explicit BR country preference uses Brazil profil
   assert.equal(profile.phone, '+5511987654321');
   assert.equal(profile.address1, 'Rua Haddock Lobo 1307');
   assert.equal(profile.fullAddress, 'Rua Haddock Lobo 1307 Sao Paulo SP 01414-003 BR');
+  assert.equal(profile.birthday, '03/02/2001');
+  assertBrazilGeneratedPassword(profile.password);
   assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
   assert.equal(profile.documentType, 'cpf');
@@ -354,6 +360,8 @@ test('PayPal profile generator supports Brazil exit profiles and keeps existing 
   assert.equal(profile.phone, '+5511999998888');
   assert.equal(profile.countryCode, 'BR');
   assert.equal(profile.generatedFromCountry, 'BR');
+  assert.equal(profile.birthday, '03/02/2001');
+  assertBrazilGeneratedPassword(profile.password);
   assert.notEqual(profile.address1, 'Avenida Paulista 1000');
   assert.ok(profile.city);
   assert.match(profile.postalCode, /^\d{5}-\d{3}$/);
@@ -405,6 +413,8 @@ test('PayPal profile generator fetches a real Brazil address and requires a +55 
   assert.equal(profile.city, 'Sao Paulo');
   assert.equal(profile.postalCode, '01414-003');
   assert.equal(profile.fullAddress, 'Rua Haddock Lobo 1307 Sao Paulo SP 01414-003 BR');
+  assert.equal(profile.birthday, '03/02/2001');
+  assertBrazilGeneratedPassword(profile.password);
   assert.match(profile.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.match(profile.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
   assert.match(fetchCalls[0].url, /^https:\/\/brasilapi\.com\.br\/api\/cep\/v2\/\d{8}$/);
@@ -427,6 +437,8 @@ test('PayPal profile generator keeps Brazil phone empty when no +55 phone is ava
   assert.equal(profile.countryCode, 'BR');
   assert.equal(profile.generatedFromCountry, 'BR');
   assert.equal(profile.phone, '');
+  assert.equal(profile.birthday, '03/02/2001');
+  assertBrazilGeneratedPassword(profile.password);
   assert.ok(profile.firstName);
   assert.ok(profile.lastName);
   assert.match(profile.cardNumber, /^4147\d{12}$/);

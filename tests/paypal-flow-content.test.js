@@ -520,6 +520,12 @@ function createHostedPayPalHarness(options = {}) {
     text: 'Agree & Create Account',
     attrs: { 'data-testid': 'submit-button' },
   });
+  const phoneErrorOkButton = createDomElement({
+    tagName: 'BUTTON',
+    id: 'phoneErrorOkButton',
+    text: 'OK',
+    attrs: { 'data-testid': 'primary-button-exceed' },
+  });
   const verificationInputs = Array.from({ length: 6 }, (_, index) => createDomElement({
     tagName: 'INPUT',
     id: `ci-ciBasic-${index}`,
@@ -838,6 +844,13 @@ function createHostedPayPalHarness(options = {}) {
     body.textContent = body.innerText;
   }
 
+  function showGuestPortuguesePhoneError() {
+    showGuestCheckout({ brazil: true });
+    body.innerText = 'Não foi possível concluir sua solicitação. Tente outro número de telefone.';
+    body.textContent = body.innerText;
+    setElements([...elements, phoneErrorOkButton]);
+  }
+
   const context = {
     console: { log() {}, warn() {}, error() {}, info() {} },
     location,
@@ -879,6 +892,9 @@ function createHostedPayPalHarness(options = {}) {
         }
         if (text.includes('submit-button') || text.includes('hosted-payment-submit-button')) {
           return elements.includes(submitButton) ? submitButton : null;
+        }
+        if (text.includes('primary-button-exceed')) {
+          return elements.includes(phoneErrorOkButton) ? phoneErrorOkButton : null;
         }
         return null;
       },
@@ -1104,6 +1120,7 @@ function createHostedPayPalHarness(options = {}) {
     showGenericError,
     showGuestCheckout,
     showGuestPhoneError,
+    showGuestPortuguesePhoneError,
     showVerification,
   };
 }
@@ -1360,7 +1377,7 @@ test('PayPal hosted guest checkout fills Brazil-specific profile fields and requ
       password: 'Aa1!example',
       firstName: 'Lucas',
       lastName: 'Silva',
-      birthday: '2001-02-03',
+      birthday: '03/02/2001',
       cpf: '529.982.247-25',
       documentNumber: '529.982.247-25',
       address: {
@@ -1404,6 +1421,53 @@ test('PayPal hosted guest checkout fills Brazil-specific profile fields and requ
   assert.equal(harness.brazil.requiredTermsCheckbox.checked, true);
   assert.equal(harness.brazil.marketingCheckbox.checked, false);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
+test('PayPal hosted guest checkout still converts legacy Brazil ISO birthday', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => value,
+  });
+  harness.showGuestCheckout({ brazil: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      countryCode: 'BR',
+      generatedFromCountry: 'BR',
+      email: 'guest.br@example.com',
+      phone: '+5511987654321',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      cardType: 'credit',
+      password: 'Aa1example2',
+      firstName: 'Lucas',
+      lastName: 'Silva',
+      birthday: '2001-02-03',
+      cpf: '529.982.247-25',
+      documentNumber: '529.982.247-25',
+      address: {
+        countryCode: 'BR',
+        street: 'Rua Haddock Lobo 1307',
+        streetName: 'Rua Haddock Lobo',
+        number: '1307',
+        neighborhood: 'Jardins',
+        city: 'Sao Paulo',
+        state: 'Sao Paulo',
+        stateCode: 'SP',
+        zip: '01414-003',
+        postalCode: '01414-003',
+        cpf: '529.982.247-25',
+        documentNumber: '529.982.247-25',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.brazilBirthdayFilled, true);
+  assert.equal(harness.brazil.birthdayInput.value, '03/02/2001');
 });
 
 test('PayPal hosted guest checkout address-only retry only refills billing address', async () => {
@@ -2058,6 +2122,37 @@ test('PayPal hosted guest checkout exposes card and phone errors', async () => {
   assert.equal(phoneState.hostedStage, 'guest_checkout');
   assert.equal(phoneState.hostedGuestPhoneError, true);
   assert.match(phoneState.hostedGuestPhoneErrorMessage, /different phone number/i);
+});
+
+test('PayPal hosted guest checkout dismisses Portuguese phone error OK dialog', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestPortuguesePhoneError();
+
+  const state = await harness.send({
+    type: 'PAYPAL_HOSTED_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.hostedStage, 'guest_checkout');
+  assert.equal(state.hostedGuestPhoneError, true);
+  assert.match(state.hostedGuestPhoneErrorMessage, /Não foi possível concluir sua solicitação/i);
+
+  const dismissResult = await harness.send({
+    type: 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR',
+    source: 'test',
+    payload: {
+      dismissPhoneErrorDelayMs: 3000,
+    },
+  });
+
+  assert.equal(dismissResult.ok, true);
+  assert.equal(dismissResult.phoneErrorDismissed, true);
+  assert.equal(dismissResult.okButtonFound, true);
+  assert.match(dismissResult.hostedGuestPhoneErrorMessage, /Tente outro número de telefone/i);
+  assert.equal(harness.events.some((event) => event.type === 'sleep' && event.ms === 3000), true);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'phoneErrorOkButton'), true);
 });
 
 test('PayPal hosted genericError copy is exposed with message', async () => {
