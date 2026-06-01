@@ -590,6 +590,95 @@ test('Phone Plus always uses OAuth tail even when a session import strategy is r
   });
 });
 
+test('registration activation only mode ends Plus flows at the activation checkpoint', () => {
+  const source = fs.readFileSync('data/step-definitions.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
+  const forbiddenTailKeys = [
+    'oauth-login',
+    'fetch-login-code',
+    'post-login-phone-verification',
+    'bind-email',
+    'fetch-bind-email-code',
+    'confirm-oauth',
+    'platform-verify',
+    'sub2api-session-import',
+    'cpa-session-import',
+  ];
+  const cases = [
+    {
+      label: 'paypal',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'paypal',
+        plusHostedCheckoutIsFinalStep: false,
+        registrationActivationOnlyModeEnabled: true,
+      },
+      expectedLastKey: 'plus-checkout-return',
+    },
+    {
+      label: 'paypal-hosted',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'paypal-hosted',
+        registrationActivationOnlyModeEnabled: true,
+      },
+      expectedLastKey: 'paypal-hosted-review',
+    },
+    {
+      label: 'gopay',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'gopay',
+        plusAccountAccessStrategy: 'sub2api_codex_session',
+        registrationActivationOnlyModeEnabled: true,
+      },
+      expectedLastKey: 'gopay-subscription-confirm',
+    },
+    {
+      label: 'gpc-helper',
+      options: {
+        plusModeEnabled: true,
+        plusPaymentMethod: 'gpc-helper',
+        plusAccountAccessStrategy: 'cpa_codex_session',
+        registrationActivationOnlyModeEnabled: true,
+      },
+      expectedLastKey: 'plus-checkout-billing',
+    },
+    {
+      label: 'phone-plus',
+      options: {
+        plusModeEnabled: true,
+        phonePlusModeEnabled: true,
+        plusPaymentMethod: 'gopay',
+        registrationActivationOnlyModeEnabled: true,
+      },
+      expectedLastKey: 'plus-check',
+    },
+  ];
+
+  cases.forEach(({ label, options, expectedLastKey }) => {
+    const steps = api.getSteps(options);
+    const nodes = api.getNodes(options);
+    const stepKeys = steps.map((step) => step.key);
+    const nodeIds = nodes.map((node) => node.nodeId);
+
+    assert.equal(stepKeys.at(-1), expectedLastKey, `${label} should end at activation checkpoint`);
+    assert.equal(nodeIds.at(-1), expectedLastKey, `${label} node graph should end at activation checkpoint`);
+    forbiddenTailKeys.forEach((key) => {
+      assert.equal(stepKeys.includes(key), false, `${label} should not include ${key}`);
+      assert.equal(nodeIds.includes(key), false, `${label} nodes should not include ${key}`);
+    });
+    assert.deepStrictEqual(nodes.at(-1)?.next, [], `${label} activation checkpoint should be terminal`);
+  });
+
+  const normalSteps = api.getSteps({
+    registrationActivationOnlyModeEnabled: true,
+  }).map((step) => step.key);
+  assert.equal(normalSteps.includes('oauth-login'), true);
+  assert.equal(normalSteps.includes('platform-verify'), true);
+});
+
 test('Plus session strategy swaps the OAuth tail for a single CPA import node', () => {
   const source = fs.readFileSync('data/step-definitions.js', 'utf8');
   const globalScope = {};

@@ -551,6 +551,52 @@ test('completeNodeFromBackground marks Phone Plus payment completion as plus bef
   )));
 });
 
+test('completeNodeFromBackground marks registration activation-only final node as plus', async () => {
+  const events = [];
+  const api = createApi(events, 'paypal-hosted-review', {
+    state: {
+      plusModeEnabled: true,
+      registrationActivationOnlyModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-review',
+    ],
+  });
+
+  await api.completeNodeFromBackground('paypal-hosted-review', { nodeId: 'paypal-hosted-review' });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const statusUpdate = events.find((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus');
+  assert.deepStrictEqual(statusUpdate?.updates, {
+    freeStatus: 'plus',
+    freeStatusDetection: {
+      freeStatus: 'plus',
+      reason: 'registration_activation_only_completed',
+      nodeId: 'paypal-hosted-review',
+    },
+  });
+  assert.ok(events.some((event) => event.type === 'broadcast' && event.payload?.freeStatus === 'plus'));
+  assert.ok(events.some((event) => (
+    event.type === 'account-book'
+    && event.stage === 'registration_success'
+    && event.state.freeStatus === 'plus'
+  )));
+  assert.ok(events.some((event) => (
+    event.type === 'account-book'
+    && event.stage === 'flow_completed'
+    && event.state.freeStatus === 'plus'
+  )));
+  assert.ok(events.some((event) => (
+    event.type === 'record'
+    && event.status === 'success'
+    && event.state.freeStatus === 'plus'
+  )));
+});
+
 test('completeNodeFromBackground skips Plus marking when hosted checkout verification failed', async () => {
   const events = [];
   const api = createApi(events, 'platform-verify', {
@@ -572,6 +618,34 @@ test('completeNodeFromBackground skips Plus marking when hosted checkout verific
     plusHostedCheckoutVerified: false,
     plusHostedCheckoutVerificationFailed: true,
   });
+
+  assert.equal(events.some((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus'), false);
+  assert.equal(events.some((event) => event.type === 'broadcast' && event.payload?.freeStatus === 'plus'), false);
+  assert.equal(events.some((event) => event.type === 'account-book' && event.stage === 'registration_success' && event.state.freeStatus === 'plus'), false);
+});
+
+test('completeNodeFromBackground skips activation-only plus marking when hosted checkout verification failed', async () => {
+  const events = [];
+  const api = createApi(events, 'paypal-hosted-review', {
+    state: {
+      plusModeEnabled: true,
+      registrationActivationOnlyModeEnabled: true,
+      freeStatus: 'free',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-review',
+    ],
+  });
+
+  await api.completeNodeFromBackground('paypal-hosted-review', {
+    nodeId: 'paypal-hosted-review',
+    plusHostedCheckoutVerified: false,
+    plusHostedCheckoutVerificationFailed: true,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
 
   assert.equal(events.some((event) => event.type === 'set-state' && event.updates?.freeStatus === 'plus'), false);
   assert.equal(events.some((event) => event.type === 'broadcast' && event.payload?.freeStatus === 'plus'), false);

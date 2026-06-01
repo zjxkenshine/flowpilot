@@ -83,6 +83,7 @@ const state = {
     totalRuns: 2,
     autoRunSkipFailures: false,
     registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
     autoRunSessionId: 42,
     countdownTitle: '已计划自动运行',
     countdownNote: '等待启动',
@@ -188,6 +189,52 @@ return {
 
   assert.equal(plan.registrationOnlyModeEnabled, true);
   assert.equal(resumeOptions.loopOptions.registrationOnlyModeEnabled, true);
+});
+
+test('auto-run timer plan preserves registration activation-only mode and disables registration-only', () => {
+  const api = new Function(`
+const AUTO_RUN_TIMER_KIND_SCHEDULED_START = 'scheduled_start';
+const AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS = 'between_rounds';
+const AUTO_RUN_TIMER_KIND_BEFORE_RETRY = 'before_retry';
+const AUTO_RUN_MAX_RETRIES_PER_ROUND = 5;
+
+let autoRunSessionId = 0;
+
+function formatAutoRunScheduleTime() {
+  return '05/31 10:00:00';
+}
+function serializeAutoRunRoundSummaries(totalRuns, summaries = []) {
+  return Array.isArray(summaries) ? summaries : [];
+}
+
+${extractFunction(helperSource, 'normalizeRunCount')}
+${extractFunction(helperSource, 'normalizeAutoRunTimerKind')}
+${extractFunction(helperSource, 'normalizeAutoRunSessionId')}
+${extractFunction(helperSource, 'normalizeAutoRunTimerPlan')}
+${extractFunction(helperSource, 'getAutoRunTimerResumeOptions')}
+
+return {
+  normalizeAutoRunTimerPlan,
+  getAutoRunTimerResumeOptions,
+};
+`)();
+
+  const plan = api.normalizeAutoRunTimerPlan({
+    kind: 'between_rounds',
+    fireAt: Date.now() + 60_000,
+    currentRun: 1,
+    totalRuns: 2,
+    autoRunSessionId: 42,
+    registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
+    roundSummaries: [{ round: 1, status: 'success' }],
+  });
+  const resumeOptions = api.getAutoRunTimerResumeOptions(plan);
+
+  assert.equal(plan.registrationActivationOnlyModeEnabled, true);
+  assert.equal(plan.registrationOnlyModeEnabled, false);
+  assert.equal(resumeOptions.loopOptions.registrationActivationOnlyModeEnabled, true);
+  assert.equal(resumeOptions.loopOptions.registrationOnlyModeEnabled, false);
 });
 
 test('launchAutoRunTimerPlan cancels an invalid scheduled start before restarting auto-run', async () => {

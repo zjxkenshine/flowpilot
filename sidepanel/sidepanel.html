@@ -1253,6 +1253,16 @@
             </label>
           </div>
           <div class="setting-group setting-group-secondary auto-retry-setting-cell">
+            <span class="setting-caption">仅注册激活</span>
+            <label class="toggle-switch" for="input-registration-activation-only-mode-enabled"
+              title="开启后，Plus 激活完成即停止，不执行 OAuth、会话导入或平台回调">
+              <input type="checkbox" id="input-registration-activation-only-mode-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group setting-group-secondary auto-retry-setting-cell">
             <span class="setting-caption">线程间隔</span>
             <div class="setting-controls">
               <input type="number" id="input-auto-skip-failures-thread-interval-minutes"

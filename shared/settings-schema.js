@@ -601,6 +601,7 @@
               autoRunPreserveIssueLogsOnRestart: false,
               phoneVerificationCodePrefetchEnabled: false,
               registrationOnlyModeEnabled: false,
+              registrationActivationOnlyModeEnabled: false,
               registrationStageWaitSeconds: 30,
               signupIdentityRedirectTimeoutSeconds: 45,
               authContentScriptRecoveryTimeoutSeconds: 30,
@@ -708,6 +709,16 @@
       const readyTimeoutSeconds = normalizeSignupVerificationReadyTimeoutSeconds(
         baseInputHasReadyRoundWaitSetting ? readyMaxRounds * readyRoundWaitSeconds : legacyReadyTimeoutSeconds,
         defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
+      );
+      const registrationActivationOnlyModeEnabled = Boolean(
+        input?.registrationActivationOnlyModeEnabled
+        ?? nested?.flows?.openai?.autoRun?.registrationActivationOnlyModeEnabled
+        ?? defaults.flows.openai.autoRun.registrationActivationOnlyModeEnabled
+      );
+      const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(
+        input?.registrationOnlyModeEnabled
+        ?? nested?.flows?.openai?.autoRun?.registrationOnlyModeEnabled
+        ?? defaults.flows.openai.autoRun.registrationOnlyModeEnabled
       );
 
       return {
@@ -1194,11 +1205,8 @@
                 ?? nested?.flows?.openai?.autoRun?.phoneVerificationCodePrefetchEnabled
                 ?? defaults.flows.openai.autoRun.phoneVerificationCodePrefetchEnabled
               ),
-              registrationOnlyModeEnabled: Boolean(
-                input?.registrationOnlyModeEnabled
-                ?? nested?.flows?.openai?.autoRun?.registrationOnlyModeEnabled
-                ?? defaults.flows.openai.autoRun.registrationOnlyModeEnabled
-              ),
+              registrationOnlyModeEnabled,
+              registrationActivationOnlyModeEnabled,
               registrationStageWaitSeconds: normalizeRegistrationStageWaitSeconds(
                 input?.registrationStageWaitSeconds
                 ?? nested?.flows?.openai?.autoRun?.registrationStageWaitSeconds
@@ -1443,6 +1451,7 @@
       next.autoRunPreserveIssueLogsOnRestart = openaiState.autoRun.autoRunPreserveIssueLogsOnRestart;
       next.phoneVerificationCodePrefetchEnabled = openaiState.autoRun.phoneVerificationCodePrefetchEnabled;
       next.registrationOnlyModeEnabled = openaiState.autoRun.registrationOnlyModeEnabled;
+      next.registrationActivationOnlyModeEnabled = openaiState.autoRun.registrationActivationOnlyModeEnabled;
       next.registrationStageWaitSeconds = openaiState.autoRun.registrationStageWaitSeconds;
       next.signupIdentityRedirectTimeoutSeconds = openaiState.autoRun.signupIdentityRedirectTimeoutSeconds;
       next.authContentScriptRecoveryTimeoutSeconds = openaiState.autoRun.authContentScriptRecoveryTimeoutSeconds;

@@ -2764,6 +2764,36 @@
       return nextActivation;
     }
 
+    async function persistHostedCheckoutHeroSmsPayPalCurrentActivation(activation = null) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        await clearHostedCheckoutHeroSmsPayPalActivation();
+        return null;
+      }
+      const nextActivation = {
+        ...normalizedActivation,
+        provider: 'hero-sms',
+        serviceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
+        countryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
+        countryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
+        maxUses: Math.max(1, Number(normalizedActivation.maxUses) || 999),
+        source: 'hosted-hero-sms-paypal-br',
+        hostedCheckoutSmsSource: HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR,
+      };
+      delete nextActivation.cachedAt;
+      delete nextActivation.expiresAt;
+      const patch = {
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]: null,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY]: 0,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY]: 0,
+        [HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]: nextActivation,
+        [HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY]: HERO_SMS_PAYPAL_BR_REGION,
+        [HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY]: HERO_SMS_PAYPAL_BR_REGION,
+      };
+      await applyHostedCheckoutRuntimePatch(patch);
+      return nextActivation;
+    }
+
     async function finalizeHostedCheckoutPhoneSmsActivationAfterSuccess(state = {}, activation = null) {
       const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
       if (!normalizedActivation) {
@@ -2772,11 +2802,27 @@
       }
       if (isHostedCheckoutHeroSmsPayPalActivation(normalizedActivation)) {
         if (!normalizedActivation.phoneCodeReceived) {
-          return persistHostedCheckoutHeroSmsPayPalActivation(normalizedActivation, {
-            cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt,
-            expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt,
-          });
+          const cachedAt = Math.max(
+            0,
+            Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt) || 0
+          );
+          const expiresAt = Math.max(
+            0,
+            Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt) || 0
+          );
+          if (expiresAt > Date.now()) {
+            return persistHostedCheckoutHeroSmsPayPalActivation(normalizedActivation, {
+              cachedAt,
+              expiresAt,
+            });
+          }
+          await clearHostedCheckoutPhoneSmsActivation();
+          return null;
         }
+        const codeReceivedAt = Math.max(
+          0,
+          Number(normalizedActivation.phoneCodeReceivedAt) || Date.now()
+        );
         const nextActivation = {
           ...normalizedActivation,
           successfulUses: Math.max(0, Number(normalizedActivation.successfulUses) || 0) + 1,
@@ -2785,8 +2831,8 @@
         delete nextActivation.phoneCodeReceivedAt;
         delete nextActivation.ignoredPhoneCodeKeys;
         return persistHostedCheckoutHeroSmsPayPalActivation(nextActivation, {
-          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt,
-          expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt,
+          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt || codeReceivedAt,
+          expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt || (codeReceivedAt + HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS),
         });
       }
       if (typeof phoneVerificationHelpers?.completePhoneActivation === 'function') {
@@ -2959,7 +3005,7 @@
       if (!activation?.phoneNumber) {
         throw new Error('PayPal HeroSMS（PayPal/BR）取号失败：HeroSMS 未返回有效手机号。');
       }
-      const persisted = await persistHostedCheckoutHeroSmsPayPalActivation({
+      const persisted = await persistHostedCheckoutHeroSmsPayPalCurrentActivation({
         ...activation,
         provider: 'hero-sms',
         serviceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
@@ -2970,7 +3016,7 @@
       });
       await addHostedStepLog(
         requestOptions.stepKey,
-        `步骤 ${getHostedStepNumber(requestOptions.stepKey)}：PayPal HeroSMS（PayPal/BR）已获取号码 ${maskHostedPhoneForLog(persisted.phoneNumber)}，缓存 20 分钟，期间不会回收/取消。`,
+        `Step ${getHostedStepNumber(requestOptions.stepKey)}: PayPal HeroSMS PayPal/BR number ${maskHostedPhoneForLog(persisted.phoneNumber)} acquired; it will be cached for 20 minutes after a PayPal code is received.`,
         'info'
       );
       return {
@@ -2983,24 +3029,42 @@
 
     async function ensureHostedCheckoutHeroSmsPayPalActivation(state = {}, options = {}) {
       const now = Date.now();
-      const current = normalizeHostedCheckoutPhoneSmsActivation(
+      const cached = normalizeHostedCheckoutPhoneSmsActivation(
         state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]
-          || state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
       );
       const expiresAt = Math.max(
         0,
-        Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || current?.expiresAt) || 0
+        Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || cached?.expiresAt) || 0
       );
+      if (
+        cached
+        && isHostedCheckoutHeroSmsPayPalActivation(cached)
+        && cached.phoneNumber
+        && expiresAt > now
+      ) {
+        const persisted = await persistHostedCheckoutHeroSmsPayPalActivation(cached, {
+          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || cached.cachedAt || (expiresAt - HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS),
+          expiresAt,
+        });
+        return {
+          activation: persisted,
+          reused: true,
+          requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          regionMatched: true,
+        };
+      }
+      const current = normalizeHostedCheckoutPhoneSmsActivation(
+        state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
+      );
+      const currentExpiresAt = Math.max(0, Number(current?.expiresAt) || 0);
       if (
         current
         && isHostedCheckoutHeroSmsPayPalActivation(current)
         && current.phoneNumber
-        && expiresAt > now
+        && currentExpiresAt <= 0
       ) {
-        const persisted = await persistHostedCheckoutHeroSmsPayPalActivation(current, {
-          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || current.cachedAt || (expiresAt - HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS),
-          expiresAt,
-        });
+        const persisted = await persistHostedCheckoutHeroSmsPayPalCurrentActivation(current);
         return {
           activation: persisted,
           reused: true,
@@ -4398,6 +4462,9 @@
         headers: { Accept: 'application/json,text/plain,*/*' },
       });
       const text = await response.text().catch(() => '');
+      if (/PHONE_CODE_TIMEOUT::|PHONE_RESEND_BANNED_NUMBER::|PHONE_RESEND_THROTTLED::/i.test(text)) {
+        throw new Error(text.trim());
+      }
       const payload = parseHostedCheckoutVerificationPayloadText(text);
       const code = extractHostedVerificationCode(payload);
       if (!code) {
@@ -4502,21 +4569,41 @@
         if (typeof phoneVerificationHelpers?.pollPhoneActivationCode !== 'function') {
           throw new Error('PayPal 跟随手机接码配置无法取码：手机接码轮询模块未加载。');
         }
-        const code = await phoneVerificationHelpers.pollPhoneActivationCode(state, activation, {
-          timeoutMs: Math.max(1, Number(runtimeConfig?.verificationPollAttempts) || 1)
-            * Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5)
-            * 1000,
-          intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
-        });
+        let code = '';
+        try {
+          code = await phoneVerificationHelpers.pollPhoneActivationCode(state, activation, {
+            timeoutMs: Math.max(1, Number(runtimeConfig?.verificationPollAttempts) || 1)
+              * Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5)
+              * 1000,
+            intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
+          });
+        } catch (error) {
+          await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);
+          throw error;
+        }
         if (code) {
-          await persistHostedCheckoutPhoneSmsActivation({
+          const codeReceivedAt = Date.now();
+          const nextActivation = {
             ...activation,
             phoneCodeReceived: true,
-            phoneCodeReceivedAt: Date.now(),
-          }, {
-            requestedRegion: runtimeConfig?.hostedCheckoutPhoneSmsRequestedRegion,
-            resolvedRegion: runtimeConfig?.hostedCheckoutPhoneSmsResolvedRegion,
-          });
+            phoneCodeReceivedAt: codeReceivedAt,
+          };
+          if (runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr || isHostedCheckoutHeroSmsPayPalActivation(nextActivation)) {
+            await persistHostedCheckoutHeroSmsPayPalActivation(nextActivation, {
+              cachedAt: codeReceivedAt,
+              expiresAt: codeReceivedAt + HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS,
+            });
+          } else {
+            await persistHostedCheckoutPhoneSmsActivation(nextActivation, {
+              requestedRegion: runtimeConfig?.hostedCheckoutPhoneSmsRequestedRegion,
+              resolvedRegion: runtimeConfig?.hostedCheckoutPhoneSmsResolvedRegion,
+            });
+          }
+        }
+        if (!code && (runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr || isHostedCheckoutHeroSmsPayPalActivation(activation))) {
+          const error = new Error('PHONE_CODE_TIMEOUT::PayPal HeroSMS PayPal/BR verification code was not received.');
+          await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);
+          throw error;
         }
         return code;
       }
@@ -5080,6 +5167,9 @@
 
     function shouldAutoDisableHostedCheckoutSmsEntry(error) {
       const message = String(typeof error === 'string' ? error : error?.message || '');
+      if (/PHONE_CODE_TIMEOUT::|PHONE_RESEND_BANNED_NUMBER::|PHONE_RESEND_THROTTLED::/i.test(message)) {
+        return true;
+      }
       return message.includes(HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX)
         || /hosted checkout 验证码接口暂未返回有效验证码|浏览器标签页兜底取码|未解析到验证码|验证码自动 Resend 重试已达到上限/i.test(message);
     }
@@ -5148,6 +5238,20 @@
         entry: currentEntry,
         nextEntry: result?.nextEntry || null,
       };
+    }
+
+    async function cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state = {}) {
+      if (!shouldAutoDisableHostedCheckoutSmsEntry(error)) {
+        return false;
+      }
+      await maybeAutoDisableHostedCheckoutCurrentSmsEntry(error).catch(() => null);
+      const latestState = await getLatestHostedState(state).catch(() => state);
+      await cancelHostedCheckoutPhoneSmsActivation(
+        latestState,
+        latestState?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY],
+        error?.message || String(error || 'PayPal verification code failed')
+      ).catch(() => {});
+      return true;
     }
 
     async function handleHostedGuestPhoneErrorWithSmsPool(tabId, pageState = {}, profile = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
@@ -5672,6 +5776,7 @@
         if (context.resendAttempts >= maxResendAttempts) {
           const error = buildHostedVerificationResendLimitError();
           await addHostedStepLog(stepKey, error.message.replace(HOSTED_CHECKOUT_VERIFICATION_RESEND_LIMIT_PREFIX, ''), 'error');
+          await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);
           throw error;
         }
         const attemptedCodes = Array.isArray(context.attemptedCodes) ? context.attemptedCodes : [];
@@ -6518,15 +6623,7 @@
         if (fallback?.phonePlusFallbackToFreeAuth) {
           return;
         }
-        await maybeAutoDisableHostedCheckoutCurrentSmsEntry(error).catch(() => null);
-        if (shouldAutoDisableHostedCheckoutSmsEntry(error)) {
-          const latestState = await getLatestHostedState(state).catch(() => state);
-          await cancelHostedCheckoutPhoneSmsActivation(
-            latestState,
-            latestState?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY],
-            error?.message || String(error || 'PayPal 验证码失败')
-          ).catch(() => {});
-        }
+        await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);
         throw error;
       }
     }

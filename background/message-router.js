@@ -1311,7 +1311,39 @@
             || postCompletionState?.plusHostedCheckoutVerified === false
             || postCompletionState?.plusHostedCheckoutVerificationFailed === true
           );
-          if (isPhonePlusPaymentCompletionNode && !hasUnverifiedPlusHostedCheckout) {
+          const registrationActivationOnlyCompletionNodeIds = [
+            'plus-checkout-return',
+            'paypal-hosted-review',
+            'gopay-subscription-confirm',
+            'plus-checkout-billing',
+            'plus-check',
+          ];
+          const isRegistrationActivationOnlyPaymentCompletionNode = Boolean(
+            postCompletionState?.registrationActivationOnlyModeEnabled
+            && (postCompletionState?.plusModeEnabled || postCompletionState?.phonePlusModeEnabled)
+            && isFinalNode
+            && registrationActivationOnlyCompletionNodeIds.includes(nodeId)
+          );
+          if (isRegistrationActivationOnlyPaymentCompletionNode && !hasUnverifiedPlusHostedCheckout) {
+            const freeStatusDetection = {
+              freeStatus: 'plus',
+              reason: 'registration_activation_only_completed',
+              nodeId,
+            };
+            const plusStatusUpdate = {
+              freeStatus: 'plus',
+              freeStatusDetection,
+            };
+            await setState(plusStatusUpdate);
+            broadcastDataUpdate(plusStatusUpdate);
+            postCompletionState = {
+              ...postCompletionState,
+              ...plusStatusUpdate,
+            };
+            if (typeof upsertAccountBookEntry === 'function') {
+              await upsertAccountBookEntry('registration_success', postCompletionState);
+            }
+          } else if (isPhonePlusPaymentCompletionNode && !hasUnverifiedPlusHostedCheckout) {
             const freeStatusDetection = {
               freeStatus: 'plus',
               reason: 'phone_plus_payment_completed',
@@ -1338,7 +1370,7 @@
             await upsertAccountBookEntry('registration_success', postCompletionState);
           }
           if (isFinalNode && typeof appendAccountRunRecord === 'function') {
-            await appendAccountRunRecord('success', completionState);
+            await appendAccountRunRecord('success', postCompletionState || completionState);
           }
           if (isFinalNode && typeof upsertAccountBookEntry === 'function') {
             await upsertAccountBookEntry('flow_completed', postCompletionState);
@@ -1753,12 +1785,18 @@
           )
             ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
             : Boolean(state?.phoneVerificationCodePrefetchEnabled);
-          const registrationOnlyModeEnabled = Object.prototype.hasOwnProperty.call(
+          const registrationActivationOnlyModeEnabled = Object.prototype.hasOwnProperty.call(
+            message.payload || {},
+            'registrationActivationOnlyModeEnabled'
+          )
+            ? Boolean(message.payload?.registrationActivationOnlyModeEnabled)
+            : Boolean(state?.registrationActivationOnlyModeEnabled);
+          const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && (Object.prototype.hasOwnProperty.call(
             message.payload || {},
             'registrationOnlyModeEnabled'
           )
             ? Boolean(message.payload?.registrationOnlyModeEnabled)
-            : Boolean(state?.registrationOnlyModeEnabled);
+            : Boolean(state?.registrationOnlyModeEnabled));
           const hasAutoRunPreserveIssueLogsOnRestart = Object.prototype.hasOwnProperty.call(
             message.payload || {},
             'autoRunPreserveIssueLogsOnRestart'
@@ -1772,6 +1810,7 @@
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
             registrationOnlyModeEnabled,
+            registrationActivationOnlyModeEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
           });
           startAutoRunLoop(totalRuns, {
@@ -1779,6 +1818,7 @@
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
             registrationOnlyModeEnabled,
+            registrationActivationOnlyModeEnabled,
             ...(includeAutoRunPreserveIssueLogsOnRestart ? { autoRunPreserveIssueLogsOnRestart } : {}),
             mode,
           });
@@ -1828,12 +1868,22 @@
             )
               ? Boolean(message.payload?.phoneVerificationCodePrefetchEnabled)
               : Boolean(state?.phoneVerificationCodePrefetchEnabled),
-            registrationOnlyModeEnabled: Object.prototype.hasOwnProperty.call(
+            registrationOnlyModeEnabled: !(
+              Object.prototype.hasOwnProperty.call(message.payload || {}, 'registrationActivationOnlyModeEnabled')
+                ? Boolean(message.payload?.registrationActivationOnlyModeEnabled)
+                : Boolean(state?.registrationActivationOnlyModeEnabled)
+            ) && (Object.prototype.hasOwnProperty.call(
               message.payload || {},
               'registrationOnlyModeEnabled'
             )
               ? Boolean(message.payload?.registrationOnlyModeEnabled)
-              : Boolean(state?.registrationOnlyModeEnabled),
+              : Boolean(state?.registrationOnlyModeEnabled)),
+            registrationActivationOnlyModeEnabled: Object.prototype.hasOwnProperty.call(
+              message.payload || {},
+              'registrationActivationOnlyModeEnabled'
+            )
+              ? Boolean(message.payload?.registrationActivationOnlyModeEnabled)
+              : Boolean(state?.registrationActivationOnlyModeEnabled),
             autoRunPreserveIssueLogsOnRestart: Boolean(message.payload?.autoRunPreserveIssueLogsOnRestart),
             mode: message.payload?.mode,
           });

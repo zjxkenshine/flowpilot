@@ -592,6 +592,7 @@ const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-
 const inputAutoRunPreserveIssueLogsOnRestart = document.getElementById('input-auto-run-preserve-issue-logs-on-restart');
 const inputPhoneVerificationCodePrefetchEnabled = document.getElementById('input-phone-verification-code-prefetch-enabled');
 const inputRegistrationOnlyModeEnabled = document.getElementById('input-registration-only-mode-enabled');
+const inputRegistrationActivationOnlyModeEnabled = document.getElementById('input-registration-activation-only-mode-enabled');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
 const inputStep6CookieCleanupEnabled = document.getElementById('input-step6-cookie-cleanup-enabled');
 const inputAutoDelayEnabled = document.getElementById('input-auto-delay-enabled');
@@ -6820,8 +6821,17 @@ function collectSettingsPayload() {
     phoneVerificationCodePrefetchEnabled: typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
       ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
       : false,
-    registrationOnlyModeEnabled: typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
-      ? Boolean(inputRegistrationOnlyModeEnabled.checked)
+    registrationOnlyModeEnabled: !(
+      typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
+        ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
+        : false
+    ) && (
+      typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
+        ? Boolean(inputRegistrationOnlyModeEnabled.checked)
+        : false
+    ),
+    registrationActivationOnlyModeEnabled: typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
+      ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
       : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
     step6CookieCleanupEnabled: typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled
@@ -14118,8 +14128,12 @@ function applySettingsState(state) {
   if (typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled) {
     inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(state?.phoneVerificationCodePrefetchEnabled);
   }
+  const registrationActivationOnlyModeEnabled = Boolean(state?.registrationActivationOnlyModeEnabled);
   if (typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled) {
-    inputRegistrationOnlyModeEnabled.checked = Boolean(state?.registrationOnlyModeEnabled);
+    inputRegistrationOnlyModeEnabled.checked = !registrationActivationOnlyModeEnabled && Boolean(state?.registrationOnlyModeEnabled);
+  }
+  if (typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled) {
+    inputRegistrationActivationOnlyModeEnabled.checked = registrationActivationOnlyModeEnabled;
   }
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
@@ -18418,7 +18432,10 @@ async function startAutoRunFromCurrentSettings() {
   const phoneVerificationCodePrefetchEnabled = typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
     ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
     : false;
-  const registrationOnlyModeEnabled = typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
+  const registrationActivationOnlyModeEnabled = typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
+    ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
+    : false;
+  const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
     ? Boolean(inputRegistrationOnlyModeEnabled.checked)
     : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
@@ -18482,6 +18499,7 @@ async function startAutoRunFromCurrentSettings() {
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
       registrationOnlyModeEnabled,
+      registrationActivationOnlyModeEnabled,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
       contributionAdapterId: latestState?.contributionAdapterId || '',
       contributionNickname,
@@ -21234,6 +21252,17 @@ inputPhoneVerificationCodePrefetchEnabled?.addEventListener('change', () => {
 });
 
 inputRegistrationOnlyModeEnabled?.addEventListener('change', () => {
+  if (inputRegistrationOnlyModeEnabled.checked && inputRegistrationActivationOnlyModeEnabled) {
+    inputRegistrationActivationOnlyModeEnabled.checked = false;
+  }
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputRegistrationActivationOnlyModeEnabled?.addEventListener('change', () => {
+  if (inputRegistrationActivationOnlyModeEnabled.checked && inputRegistrationOnlyModeEnabled) {
+    inputRegistrationOnlyModeEnabled.checked = false;
+  }
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
 });
@@ -23275,7 +23304,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && typeof inputRegistrationOnlyModeEnabled !== 'undefined'
         && inputRegistrationOnlyModeEnabled
       ) {
-        inputRegistrationOnlyModeEnabled.checked = Boolean(message.payload.registrationOnlyModeEnabled);
+        inputRegistrationOnlyModeEnabled.checked = !Boolean(message.payload.registrationActivationOnlyModeEnabled) && Boolean(message.payload.registrationOnlyModeEnabled);
+      }
+      if (
+        message.payload.registrationActivationOnlyModeEnabled !== undefined
+        && typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined'
+        && inputRegistrationActivationOnlyModeEnabled
+      ) {
+        inputRegistrationActivationOnlyModeEnabled.checked = Boolean(message.payload.registrationActivationOnlyModeEnabled);
+        if (inputRegistrationActivationOnlyModeEnabled.checked && inputRegistrationOnlyModeEnabled) {
+          inputRegistrationOnlyModeEnabled.checked = false;
+        }
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

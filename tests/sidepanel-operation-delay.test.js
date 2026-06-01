@@ -90,14 +90,21 @@ test('sidepanel exposes and wires auto-run issue log preservation switch', () =>
 
 test('sidepanel exposes and wires registration-only mode switch', () => {
   assert.match(html, /id="input-registration-only-mode-enabled"/);
+  assert.match(html, /id="input-registration-activation-only-mode-enabled"/);
   assert.match(html, /id="row-auto-retry-settings"/);
   assert.match(html, /仅注册/);
+  assert.match(html, /仅注册激活/);
   assert.match(html, /确认账号注册成功后停止后续阶段/);
   assert.match(source, /const inputRegistrationOnlyModeEnabled = document\.getElementById\('input-registration-only-mode-enabled'\);/);
-  assert.match(source, /registrationOnlyModeEnabled:\s*typeof inputRegistrationOnlyModeEnabled/);
-  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = Boolean\(state\?\.registrationOnlyModeEnabled\);/);
+  assert.match(source, /const inputRegistrationActivationOnlyModeEnabled = document\.getElementById\('input-registration-activation-only-mode-enabled'\);/);
+  assert.match(source, /registrationActivationOnlyModeEnabled:\s*typeof inputRegistrationActivationOnlyModeEnabled/);
+  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = !registrationActivationOnlyModeEnabled && Boolean\(state\?\.registrationOnlyModeEnabled\);/);
+  assert.match(source, /inputRegistrationActivationOnlyModeEnabled\.checked = registrationActivationOnlyModeEnabled;/);
   assert.match(source, /message\.payload\.registrationOnlyModeEnabled !== undefined/);
+  assert.match(source, /message\.payload\.registrationActivationOnlyModeEnabled !== undefined/);
   assert.match(source, /inputRegistrationOnlyModeEnabled\?\.addEventListener\('change'/);
+  assert.match(source, /inputRegistrationActivationOnlyModeEnabled\?\.addEventListener\('change'/);
+  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = false;/);
 });
 
 test('sidepanel places thread interval inside auto retry settings grid', () => {

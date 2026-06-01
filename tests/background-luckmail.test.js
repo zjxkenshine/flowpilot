@@ -557,6 +557,11 @@ const PERSISTED_SETTING_DEFAULTS = {
   luckmailPreserveTagName: '保留',
 };
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
+const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS = [
+  'hostedCheckoutHeroSmsPayPalActivation',
+  'hostedCheckoutHeroSmsPayPalCachedAt',
+  'hostedCheckoutHeroSmsPayPalExpiresAt',
+];
 function normalizeLuckmailBaseUrl(value) {
   const normalized = String(value || '').trim() || DEFAULT_LUCKMAIL_BASE_URL;
   return normalized.replace(/\\/$/, '');
@@ -868,6 +873,131 @@ test('resetState preserves LuckMail session config, used map, and preserve tag c
     maxUses: 3,
   });
   assert.equal(snapshot.storedPayload.currentPhoneActivation, null);
+});
+
+test('resetState only preserves verified, unexpired HeroSMS PayPal/BR hosted checkout cache', async () => {
+  const bundle = [
+    extractFunction('buildAccountContributionState'),
+    extractFunction('resetState'),
+  ].join('\n');
+
+  function createFactory(sessionState, persistedAliasState = {}) {
+    return new Function([
+      'let cleared = false;',
+      'let storedPayload = null;',
+      "const LOG_PREFIX = '[test]';",
+      "const DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME = 'preserve';",
+      'const DEFAULT_STATE = {',
+      "  luckmailApiKey: '',",
+      "  luckmailBaseUrl: 'https://mails.luckyous.com',",
+      "  luckmailEmailType: 'ms_graph',",
+      "  luckmailDomain: '',",
+      "  yydsMailApiKey: '',",
+      "  yydsMailBaseUrl: 'https://maliapi.215.im/v1',",
+      "  panelMode: 'cpa',",
+      '  luckmailUsedPurchases: {},',
+      '  luckmailPreserveTagId: 0,',
+      "  luckmailPreserveTagName: 'preserve',",
+      '  currentLuckmailPurchase: null,',
+      '  currentLuckmailMailCursor: null,',
+      '  currentYydsMailInbox: null,',
+      '  currentPhoneActivation: null,',
+      '  reusablePhoneActivation: null,',
+      '  freeReusablePhoneActivation: null,',
+      '  phoneReusableActivationPool: [],',
+      '  hostedCheckoutPhoneSmsActivation: null,',
+      "  hostedCheckoutPhoneSmsRequestedRegion: '',",
+      "  hostedCheckoutPhoneSmsResolvedRegion: '',",
+      '  hostedCheckoutHeroSmsPayPalActivation: null,',
+      '  hostedCheckoutHeroSmsPayPalCachedAt: 0,',
+      '  hostedCheckoutHeroSmsPayPalExpiresAt: 0,',
+      '  email: null,',
+      '};',
+      'const CONTRIBUTION_RUNTIME_DEFAULTS = {',
+      '  accountContributionEnabled: false,',
+      "  contributionSessionId: '',",
+      "  contributionAuthUrl: '',",
+      "  contributionAuthState: '',",
+      "  contributionCallbackUrl: '',",
+      "  contributionStatus: '',",
+      "  contributionStatusMessage: '',",
+      '  contributionLastPollAt: 0,',
+      "  contributionCallbackStatus: 'idle',",
+      "  contributionCallbackMessage: '',",
+      '  contributionAuthOpenedAt: 0,',
+      '  contributionAuthTabId: 0,',
+      '};',
+      'const CONTRIBUTION_RUNTIME_KEYS = Object.keys(CONTRIBUTION_RUNTIME_DEFAULTS);',
+      "function normalizeLuckmailBaseUrl(value) { return String(value || '').trim() || 'https://mails.luckyous.com'; }",
+      "function normalizeLuckmailEmailType(value) { return String(value || '').trim() || 'ms_graph'; }",
+      'function normalizeLuckmailUsedPurchases(value) { return value || {}; }',
+      "function normalizeYydsMailApiKey(value) { return String(value || '').trim(); }",
+      "function normalizeYydsMailBaseUrl(value) { return (String(value || '').trim() || 'https://maliapi.215.im/v1').replace(/\\/$/, ''); }",
+      'async function getPersistedSettings() { return {}; }',
+      `async function getPersistedAliasState() { return ${JSON.stringify(persistedAliasState)}; }`,
+      'function buildStatePatchWithRuntimeState(_currentState, updates) { return updates; }',
+      'const sessionState = ' + JSON.stringify(sessionState) + ';',
+      'const chrome = { storage: { session: {',
+      '  async get() { return sessionState; },',
+      '  async clear() { cleared = true; },',
+      '  async set(payload) { storedPayload = payload; },',
+      '} } };',
+      bundle,
+      'return {',
+      '  resetState,',
+      '  snapshot() { return { cleared, storedPayload }; },',
+      '};',
+    ].join('\n'));
+  }
+
+  const freshCurrentOnly = {
+    activationId: 'pp-br-current-only-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+  };
+  const currentOnlyApi = createFactory({
+    hostedCheckoutPhoneSmsActivation: freshCurrentOnly,
+    hostedCheckoutPhoneSmsRequestedRegion: 'BR',
+    hostedCheckoutPhoneSmsResolvedRegion: 'BR',
+  })();
+  await currentOnlyApi.resetState();
+  const currentOnlySnapshot = currentOnlyApi.snapshot();
+
+  assert.equal(currentOnlySnapshot.cleared, true);
+  assert.equal(currentOnlySnapshot.storedPayload.hostedCheckoutPhoneSmsActivation, null);
+  assert.equal(currentOnlySnapshot.storedPayload.hostedCheckoutHeroSmsPayPalActivation, null);
+  assert.equal(currentOnlySnapshot.storedPayload.hostedCheckoutHeroSmsPayPalCachedAt, 0);
+  assert.equal(currentOnlySnapshot.storedPayload.hostedCheckoutHeroSmsPayPalExpiresAt, 0);
+
+  const cachedAt = Date.now() - 60_000;
+  const expiresAt = Date.now() + 15 * 60_000;
+  const verifiedCache = {
+    activationId: 'pp-br-verified-cache-1',
+    phoneNumber: '+5521987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    cachedAt,
+    expiresAt,
+  };
+  const cachedApi = createFactory({}, {
+    hostedCheckoutHeroSmsPayPalActivation: verifiedCache,
+    hostedCheckoutHeroSmsPayPalCachedAt: cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: expiresAt,
+  })();
+  await cachedApi.resetState();
+  const cachedSnapshot = cachedApi.snapshot();
+
+  assert.equal(cachedSnapshot.storedPayload.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-verified-cache-1');
+  assert.equal(cachedSnapshot.storedPayload.hostedCheckoutPhoneSmsActivation.activationId, 'pp-br-verified-cache-1');
+  assert.equal(cachedSnapshot.storedPayload.hostedCheckoutHeroSmsPayPalCachedAt, cachedAt);
+  assert.equal(cachedSnapshot.storedPayload.hostedCheckoutHeroSmsPayPalExpiresAt, expiresAt);
 });
 
 test('message router platform verify marks current LuckMail purchase as used and clears runtime state', async () => {

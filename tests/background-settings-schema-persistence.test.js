@@ -132,6 +132,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'autoRunPreserveIssueLogsOnRestart',
   'phoneVerificationCodePrefetchEnabled',
   'registrationOnlyModeEnabled',
+  'registrationActivationOnlyModeEnabled',
   'signupIdentityRedirectTimeoutSeconds',
   'authContentScriptRecoveryTimeoutSeconds',
   'signupVerificationReadyTimeoutSeconds',
@@ -241,6 +242,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   autoRunPreserveIssueLogsOnRestart: false,
   phoneVerificationCodePrefetchEnabled: false,
   registrationOnlyModeEnabled: false,
+  registrationActivationOnlyModeEnabled: false,
   signupIdentityRedirectTimeoutSeconds: 45,
   authContentScriptRecoveryTimeoutSeconds: 30,
   signupVerificationReadyTimeoutSeconds: 60,
@@ -614,7 +616,9 @@ test('buildPersistentSettingsPayload persists registration-only mode into OpenAI
 
   const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
   assert.equal(defaults.registrationOnlyModeEnabled, false);
+  assert.equal(defaults.registrationActivationOnlyModeEnabled, false);
   assert.equal(defaults.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+  assert.equal(defaults.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, false);
 
   const flat = api.buildPersistentSettingsPayload({
     registrationOnlyModeEnabled: true,
@@ -636,6 +640,37 @@ test('buildPersistentSettingsPayload persists registration-only mode into OpenAI
   }, { requireKnownKeys: true });
   assert.equal(nested.registrationOnlyModeEnabled, true);
   assert.equal(nested.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
+});
+
+test('buildPersistentSettingsPayload persists registration activation-only mode and gives it priority', () => {
+  const api = buildHarness();
+
+  const flat = api.buildPersistentSettingsPayload({
+    registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
+  }, { fillDefaults: true });
+  assert.equal(flat.registrationActivationOnlyModeEnabled, true);
+  assert.equal(flat.registrationOnlyModeEnabled, false);
+  assert.equal(flat.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          autoRun: {
+            registrationOnlyModeEnabled: true,
+            registrationActivationOnlyModeEnabled: true,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.registrationActivationOnlyModeEnabled, true);
+  assert.equal(nested.registrationOnlyModeEnabled, false);
+  assert.equal(nested.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
+  assert.equal(nested.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
 });
 
 test('buildPersistentSettingsPayload persists signup identity redirect timeout into settings schema', () => {
@@ -2045,15 +2080,21 @@ function getPersistedWrites() {
 
   const persisted = await api.setPersistentSettings({
     registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
   });
   const readBack = await api.getPersistedSettings();
   const write = api.getPersistedWrites().at(-1);
 
-  assert.equal(persisted.registrationOnlyModeEnabled, true);
-  assert.equal(persisted.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
-  assert.equal(readBack.registrationOnlyModeEnabled, true);
-  assert.equal(readBack.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
-  assert.equal(write.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, true);
+  assert.equal(persisted.registrationActivationOnlyModeEnabled, true);
+  assert.equal(persisted.registrationOnlyModeEnabled, false);
+  assert.equal(persisted.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
+  assert.equal(persisted.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+  assert.equal(readBack.registrationActivationOnlyModeEnabled, true);
+  assert.equal(readBack.registrationOnlyModeEnabled, false);
+  assert.equal(readBack.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
+  assert.equal(readBack.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+  assert.equal(write.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
+  assert.equal(write.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
 });
 
 test('setPersistentSettings mirrors flat mail provider updates into canonical settingsState', async () => {

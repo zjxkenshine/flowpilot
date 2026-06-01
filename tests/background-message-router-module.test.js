@@ -1733,6 +1733,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
         autoRunRetryPaypalCallback: false,
         phoneVerificationCodePrefetchEnabled: false,
         registrationOnlyModeEnabled: false,
+        registrationActivationOnlyModeEnabled: false,
         autoRunPreserveIssueLogsOnRestart: false,
       },
     },
@@ -1744,6 +1745,7 @@ test('AUTO_RUN applies current flow selection from payload before starting loop'
         autoRunRetryPaypalCallback: false,
         phoneVerificationCodePrefetchEnabled: false,
         registrationOnlyModeEnabled: false,
+        registrationActivationOnlyModeEnabled: false,
         autoRunPreserveIssueLogsOnRestart: false,
         mode: 'restart',
       },
@@ -2561,6 +2563,166 @@ test('NODE_COMPLETE skips Phone Plus payment segment after non-free registration
   assert.equal(fallbackCalls[0][1].reason, 'phone-plus-registration-non-free');
   assert.equal(fallbackCalls[0][1].detail, 'freeStatus=unknown');
   assert.equal(fallbackCalls[0][1].nodeId, 'wait-registration-success');
+});
+
+test('NODE_COMPLETE marks registration activation-only final node as plus and completes account book', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const accountBookCalls = [];
+  const runRecords = [];
+  const broadcasts = [];
+  let state = {
+    nodeStatuses: {
+      'paypal-hosted-review': 'pending',
+    },
+    email: 'plus@example.com',
+    plusModeEnabled: true,
+    phonePlusModeEnabled: false,
+    registrationActivationOnlyModeEnabled: true,
+    freeStatus: 'free',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    appendAccountRunRecord: async (...args) => {
+      runRecords.push(args);
+    },
+    batchUpdateLuckmailPurchases: async () => {},
+    buildLocalhostCleanupPrefix: () => '',
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: () => ({}),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    clearAutoRunTimerAlarm: async () => {},
+    clearStopRequest: () => {},
+    getState: async () => ({ ...state, nodeStatuses: { ...state.nodeStatuses } }),
+    getNodeIdsForState: () => [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-review',
+    ],
+    getStepIdByNodeIdForState: (nodeId) => (nodeId === 'paypal-hosted-review' ? 9 : 0),
+    getStepDefinitionForState: (step) => ({ id: step, key: 'paypal-hosted-review' }),
+    getStepIdsForState: () => [1, 2, 3, 9],
+    getLastStepIdForState: () => 9,
+    getStopRequested: () => false,
+    getSourceLabel: () => '',
+    isCloudflareSecurityBlockedError: () => false,
+    isStopError: () => false,
+    notifyNodeComplete: () => {},
+    notifyNodeError: () => {},
+    setNodeStatus: async (nodeId, status) => {
+      state = {
+        ...state,
+        currentNodeId: nodeId,
+        nodeStatuses: {
+          ...state.nodeStatuses,
+          [nodeId]: status,
+        },
+      };
+    },
+    setState: async (updates) => {
+      state = { ...state, ...(updates || {}) };
+    },
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'paypal-hosted-review',
+    payload: { nodeId: 'paypal-hosted-review' },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(state.freeStatus, 'plus');
+  assert.deepStrictEqual(state.freeStatusDetection, {
+    freeStatus: 'plus',
+    reason: 'registration_activation_only_completed',
+    nodeId: 'paypal-hosted-review',
+  });
+  assert.equal(broadcasts.some((payload) => payload.freeStatus === 'plus'), true);
+  assert.equal(accountBookCalls.some(([stage, entryState]) => stage === 'registration_success' && entryState.freeStatus === 'plus'), true);
+  assert.equal(accountBookCalls.some(([stage, entryState]) => stage === 'flow_completed' && entryState.freeStatus === 'plus'), true);
+  assert.equal(runRecords.some(([status, recordState]) => status === 'success' && recordState.freeStatus === 'plus'), true);
+});
+
+test('NODE_COMPLETE does not mark activation-only hosted checkout as plus when verification failed', async () => {
+  const source = fs.readFileSync('background/message-router.js', 'utf8');
+  const globalScope = { console };
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundMessageRouter;`)(globalScope);
+  const accountBookCalls = [];
+  const broadcasts = [];
+  let state = {
+    nodeStatuses: {
+      'paypal-hosted-review': 'pending',
+    },
+    plusModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
+    freeStatus: 'free',
+  };
+
+  const router = api.createMessageRouter({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => {},
+    batchUpdateLuckmailPurchases: async () => {},
+    buildLocalhostCleanupPrefix: () => '',
+    buildLuckmailSessionSettingsPayload: () => ({}),
+    buildPersistentSettingsPayload: () => ({}),
+    broadcastDataUpdate: (payload) => broadcasts.push(payload),
+    clearAutoRunTimerAlarm: async () => {},
+    clearStopRequest: () => {},
+    getState: async () => ({ ...state, nodeStatuses: { ...state.nodeStatuses } }),
+    getNodeIdsForState: () => [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'paypal-hosted-review',
+    ],
+    getStepIdByNodeIdForState: (nodeId) => (nodeId === 'paypal-hosted-review' ? 9 : 0),
+    getStepDefinitionForState: (step) => ({ id: step, key: 'paypal-hosted-review' }),
+    getStepIdsForState: () => [1, 2, 3, 9],
+    getLastStepIdForState: () => 9,
+    getStopRequested: () => false,
+    getSourceLabel: () => '',
+    isCloudflareSecurityBlockedError: () => false,
+    isStopError: () => false,
+    notifyNodeComplete: () => {},
+    notifyNodeError: () => {},
+    setNodeStatus: async (nodeId, status) => {
+      state = {
+        ...state,
+        currentNodeId: nodeId,
+        nodeStatuses: {
+          ...state.nodeStatuses,
+          [nodeId]: status,
+        },
+      };
+    },
+    setState: async (updates) => {
+      state = { ...state, ...(updates || {}) };
+    },
+    upsertAccountBookEntry: async (...args) => {
+      accountBookCalls.push(args);
+    },
+  });
+
+  const response = await router.handleMessage({
+    type: 'NODE_COMPLETE',
+    nodeId: 'paypal-hosted-review',
+    payload: {
+      nodeId: 'paypal-hosted-review',
+      plusHostedCheckoutVerified: false,
+      plusHostedCheckoutVerificationFailed: true,
+    },
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(state.freeStatus, 'free');
+  assert.equal(broadcasts.some((payload) => payload.freeStatus === 'plus'), false);
+  assert.equal(accountBookCalls.some(([stage, entryState]) => stage === 'registration_success' && entryState.freeStatus === 'plus'), false);
 });
 
 test('NODE_COMPLETE records registration-success account book entry when kiro register finalization completes', async () => {

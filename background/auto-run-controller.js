@@ -132,7 +132,8 @@
         plusPaymentMethod: state.plusPaymentMethod,
         phoneVerificationEnabled: state.phoneVerificationEnabled,
         phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
-        registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled),
+        registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled) && !Boolean(state.registrationActivationOnlyModeEnabled),
+        registrationActivationOnlyModeEnabled: Boolean(state.registrationActivationOnlyModeEnabled),
         phoneSignupReloginAfterBindEmailEnabled: state.phoneSignupReloginAfterBindEmailEnabled,
         paypalEmail: state.paypalEmail,
         paypalPassword: state.paypalPassword,
@@ -406,9 +407,12 @@
         autoRunRetryPaypalCallback = false,
         phoneVerificationCodePrefetchEnabled = false,
         registrationOnlyModeEnabled = false,
+        registrationActivationOnlyModeEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
+      const activationOnlyModeEnabled = Boolean(registrationActivationOnlyModeEnabled);
+      const normalizedRegistrationOnlyModeEnabled = !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
       if (totalRuns <= 1 || targetRun >= totalRuns) {
         return false;
       }
@@ -436,7 +440,8 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
-        registrationOnlyModeEnabled,
+        registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
+        registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
@@ -445,7 +450,8 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
-        registrationOnlyModeEnabled,
+        registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
+        registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
@@ -459,9 +465,12 @@
         autoRunRetryPaypalCallback = false,
         phoneVerificationCodePrefetchEnabled = false,
         registrationOnlyModeEnabled = false,
+        registrationActivationOnlyModeEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
+      const activationOnlyModeEnabled = Boolean(registrationActivationOnlyModeEnabled);
+      const normalizedRegistrationOnlyModeEnabled = !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
       const fallbackThreadIntervalMinutes = normalizeAutoRunFallbackThreadIntervalMinutes(
         (await getState()).autoRunFallbackThreadIntervalMinutes
       );
@@ -483,7 +492,8 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
-        registrationOnlyModeEnabled,
+        registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
+        registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
         roundSummaries,
         countdownTitle: '线程间隔中',
@@ -492,7 +502,8 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
-        registrationOnlyModeEnabled,
+        registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
+        registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
       });
@@ -557,7 +568,8 @@
       const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
       const autoRunRetryPaypalCallback = Boolean(options.autoRunRetryPaypalCallback);
       const phoneVerificationCodePrefetchEnabled = Boolean(options.phoneVerificationCodePrefetchEnabled);
-      const registrationOnlyModeEnabled = Boolean(options.registrationOnlyModeEnabled);
+      const registrationActivationOnlyModeEnabled = Boolean(options.registrationActivationOnlyModeEnabled);
+      const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(options.registrationOnlyModeEnabled);
       const autoRunPreserveIssueLogsOnRestart = Boolean(options.autoRunPreserveIssueLogsOnRestart);
       const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
       const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
@@ -597,6 +609,7 @@
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
         registrationOnlyModeEnabled,
+        registrationActivationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
         autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
         ...getAutoRunStatusPayload(initialPhase, {
@@ -664,6 +677,7 @@
               autoRunSessionId: sessionId,
               phoneVerificationCodePrefetchEnabled,
               registrationOnlyModeEnabled,
+              registrationActivationOnlyModeEnabled,
               signupPhoneCodePrefetchEnabled: false,
               signupPhonePrefetchPhase: '',
               signupPhonePrefetchActivation: null,
@@ -687,6 +701,7 @@
               autoRunRetryPaypalCallback,
               phoneVerificationCodePrefetchEnabled,
               registrationOnlyModeEnabled,
+              registrationActivationOnlyModeEnabled,
               autoRunPreserveIssueLogsOnRestart,
               ...(phoneVerificationCodePrefetchEnabled ? {} : {
                 signupPhoneCodePrefetchEnabled: false,
@@ -749,6 +764,7 @@
               continued: useExistingProgress,
               phoneVerificationCodePrefetchEnabled,
               registrationOnlyModeEnabled,
+              registrationActivationOnlyModeEnabled,
             });
 
             roundSummary.status = 'success';
@@ -1027,6 +1043,7 @@
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
                   registrationOnlyModeEnabled,
+                  registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1093,6 +1110,7 @@
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
                   registrationOnlyModeEnabled,
+                  registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1355,6 +1373,7 @@
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
                   registrationOnlyModeEnabled,
+                  registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
                   roundSummaries,
                 });
@@ -1428,6 +1447,7 @@
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
             registrationOnlyModeEnabled,
+            registrationActivationOnlyModeEnabled,
             autoRunPreserveIssueLogsOnRestart,
             roundSummaries,
           });

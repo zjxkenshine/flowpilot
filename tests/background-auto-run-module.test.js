@@ -471,6 +471,99 @@ test('auto-run controller forwards registration-only mode into workflow context'
   assert.equal(currentState.registrationOnlyModeEnabled, true);
 });
 
+test('auto-run controller forwards registration activation-only mode and disables registration-only', async () => {
+  const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundAutoRunController;`)(globalScope);
+
+  let currentState = {
+    nodeStatuses: {},
+    autoRunRoundSummaries: [],
+    tabRegistry: {},
+    sourceLastUrls: {},
+  };
+  const contexts = [];
+  const runtime = {
+    state: {
+      autoRunActive: false,
+      autoRunCurrentRun: 0,
+      autoRunTotalRuns: 0,
+      autoRunAttemptRun: 0,
+      autoRunSessionId: 0,
+    },
+    get() {
+      return { ...this.state };
+    },
+    set(updates = {}) {
+      this.state = { ...this.state, ...updates };
+    },
+  };
+
+  const controller = api.createAutoRunController({
+    addLog: async () => {},
+    appendAccountRunRecord: async () => null,
+    AUTO_RUN_MAX_RETRIES_PER_ROUND: 1,
+    AUTO_RUN_RETRY_DELAY_MS: 1,
+    AUTO_RUN_TIMER_KIND_BEFORE_RETRY: 'before_retry',
+    AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS: 'between_rounds',
+    broadcastAutoRunStatus: async () => {},
+    broadcastStopToContentScripts: async () => {},
+    cancelPendingCommands: () => {},
+    clearStopRequest: () => {},
+    createAutoRunSessionId: () => 104,
+    getAutoRunStatusPayload: () => ({}),
+    getErrorMessage: (error) => error?.message || String(error || ''),
+    getFirstUnfinishedNodeId: () => 'open-chatgpt',
+    getPendingAutoRunTimerPlan: () => null,
+    getRunningNodeIds: () => [],
+    getState: async () => ({ ...currentState }),
+    getStopRequested: () => false,
+    hasSavedNodeProgress: () => false,
+    isAddPhoneAuthFailure: () => false,
+    isCloudCheckoutAlreadyPaidFailure: () => false,
+    isHostedCheckoutCardFallbackFailure: () => false,
+    isHostedCheckoutGenericErrorFailure: () => false,
+    isHostedCheckoutVerificationResendLimitFailure: () => false,
+    isGpcTaskEndedFailure: () => false,
+    isKiroProxyFailure: () => false,
+    isPhoneSmsPlatformRateLimitFailure: () => false,
+    isPlusCheckoutNonFreeTrialFailure: () => false,
+    isRestartCurrentAttemptError: () => false,
+    isStep4Route405RecoveryLimitFailure: () => false,
+    isSignupUserAlreadyExistsFailure: () => false,
+    isStopError: () => false,
+    launchAutoRunTimerPlan: async () => false,
+    normalizeAutoRunFallbackThreadIntervalMinutes: () => 0,
+    persistAutoRunTimerPlan: async () => ({}),
+    resetState: async () => {
+      currentState = { ...currentState, nodeStatuses: {}, tabRegistry: {}, sourceLastUrls: {} };
+    },
+    runAutoSequenceFromNode: async (_nodeId, context = {}) => {
+      contexts.push({ ...context });
+    },
+    runtime,
+    setState: async (updates = {}) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    throwIfAutoRunSessionStopped: () => {},
+    waitForRunningNodesToFinish: async () => currentState,
+    chrome: { runtime: { sendMessage: () => Promise.resolve() } },
+  });
+
+  await controller.autoRunLoop(2, {
+    registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
+    mode: 'restart',
+  });
+
+  assert.equal(contexts.length, 2);
+  assert.deepEqual(contexts.map((context) => context.registrationActivationOnlyModeEnabled), [true, true]);
+  assert.deepEqual(contexts.map((context) => context.registrationOnlyModeEnabled), [false, false]);
+  assert.equal(currentState.registrationActivationOnlyModeEnabled, true);
+  assert.equal(currentState.registrationOnlyModeEnabled, false);
+});
+
 test('auto-run controller restores phone prefetch runtime after completion', async () => {
   const source = fs.readFileSync('background/auto-run-controller.js', 'utf8');
   const globalScope = {};

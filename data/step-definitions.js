@@ -253,6 +253,13 @@
       driverId: 'background/plus-check',
       command: 'plus-check',
     };
+    if (options?.registrationActivationOnlyModeEnabled) {
+      return [
+        ...registrationSteps,
+        ...paymentSegment,
+        plusCheckStep,
+      ];
+    }
     const tailStartId = plusCheckStep.id + 1;
     const tailSteps = createOpenAiAuthTail(
       tailStartId,
@@ -280,6 +287,12 @@
       registrationSteps.length + 1,
       (registrationSteps.length + 1) * 10
     );
+    if (options?.registrationActivationOnlyModeEnabled) {
+      return [
+        ...registrationSteps,
+        ...paymentSegment,
+      ];
+    }
     const sessionTailFactory = resolvePlusSessionImportTail(options, signupMethod);
     const tailStartId = registrationSteps.length + paymentSegment.length + 1;
     const authTailFactory = options?.hostedCheckoutAuthTail
@@ -457,6 +470,10 @@
     return Boolean(options?.plusModeEnabled || options?.plusMode || isPhonePlusModeEnabled(options));
   }
 
+  function isRegistrationActivationOnlyModeEnabled(options = {}) {
+    return Boolean(options?.registrationActivationOnlyModeEnabled) && isPlusModeEnabled(options);
+  }
+
   function shouldTreatHostedCheckoutAsFinalStep(options = {}) {
     if (!isPlusModeEnabled(options)) {
       return false;
@@ -532,7 +549,32 @@
       ...options,
       plusPaymentMethod: paymentMethod,
     });
+    const activationOnlyModeEnabled = isRegistrationActivationOnlyModeEnabled(options);
     if (isPhonePlusModeEnabled(options)) {
+      if (activationOnlyModeEnabled) {
+        if (useHostedCheckoutFinalStep) {
+          return createPhonePlusSteps(PLUS_PAYPAL_HOSTED_CHECKOUT_PREFIX_STEP_DEFINITIONS, {
+            ...options,
+            registrationActivationOnlyModeEnabled: true,
+          });
+        }
+        if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+          return createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, {
+            ...options,
+            registrationActivationOnlyModeEnabled: true,
+          });
+        }
+        if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+          return createPhonePlusSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, {
+            ...options,
+            registrationActivationOnlyModeEnabled: true,
+          });
+        }
+        return createPhonePlusSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS, {
+          ...options,
+          registrationActivationOnlyModeEnabled: true,
+        });
+      }
       if (useHostedCheckoutFinalStep) {
         return reloginAfterBindEmail
           ? PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
@@ -562,6 +604,13 @@
     }
     const plusAccountAccessStrategy = normalizePlusAccountAccessStrategy(options?.plusAccountAccessStrategy);
     if (useHostedCheckoutFinalStep) {
+      if (activationOnlyModeEnabled) {
+        return createPlusSteps(PLUS_PAYPAL_HOSTED_CHECKOUT_PREFIX_STEP_DEFINITIONS, signupMethod, {
+          ...options,
+          hostedCheckoutAuthTail: true,
+          registrationActivationOnlyModeEnabled: true,
+        });
+      }
       if (signupMethod === SIGNUP_METHOD_PHONE) {
         return reloginAfterBindEmail
           ? PLUS_PAYPAL_HOSTED_CHECKOUT_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
@@ -576,6 +625,12 @@
       return PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS;
     }
     if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
+      if (activationOnlyModeEnabled) {
+        return createPlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, signupMethod, {
+          ...options,
+          registrationActivationOnlyModeEnabled: true,
+        });
+      }
       if (signupMethod === SIGNUP_METHOD_PHONE) {
         return reloginAfterBindEmail
           ? PLUS_GPC_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
@@ -590,6 +645,12 @@
       return PLUS_GPC_STEP_DEFINITIONS;
     }
     if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY) {
+      if (activationOnlyModeEnabled) {
+        return createPlusSteps(PLUS_GOPAY_PREFIX_STEP_DEFINITIONS, signupMethod, {
+          ...options,
+          registrationActivationOnlyModeEnabled: true,
+        });
+      }
       if (signupMethod === SIGNUP_METHOD_PHONE) {
         return reloginAfterBindEmail
           ? PLUS_GOPAY_PHONE_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS
@@ -602,6 +663,12 @@
         return PLUS_GOPAY_CPA_SESSION_STEP_DEFINITIONS;
       }
       return PLUS_GOPAY_STEP_DEFINITIONS;
+    }
+    if (activationOnlyModeEnabled) {
+      return createPlusSteps(PLUS_PAYPAL_PREFIX_STEP_DEFINITIONS, signupMethod, {
+        ...options,
+        registrationActivationOnlyModeEnabled: true,
+      });
     }
     if (signupMethod === SIGNUP_METHOD_PHONE) {
       return reloginAfterBindEmail
