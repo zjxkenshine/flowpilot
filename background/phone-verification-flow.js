@@ -1240,10 +1240,15 @@
       return !runningInNode;
     }
 
+    function resolveHeroSmsServiceCode(config = {}, fallback = HERO_SMS_SERVICE_CODE) {
+      return String(config?.serviceCode || fallback || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE;
+    }
+
     async function fetchHeroSmsPricePayloads(config, countryConfig, options = {}) {
       const payloads = [];
       const resultsByAction = {};
       const errors = [];
+      const serviceCode = resolveHeroSmsServiceCode(config);
       const actions = Array.isArray(options.actions) && options.actions.length
         ? options.actions
         : (
@@ -1256,10 +1261,10 @@
         try {
           const query = { action };
           if (action === 'getTopCountriesByService') {
-            query.service = HERO_SMS_SERVICE_CODE;
+            query.service = serviceCode;
             query.freePrice = 'true';
           } else {
-            query.service = HERO_SMS_SERVICE_CODE;
+            query.service = serviceCode;
             query.country = countryConfig.id;
             if (action === 'getPricesExtended') {
               query.freePrice = 'true';
@@ -3041,6 +3046,7 @@
         provider,
         apiKey,
         baseUrl: normalizeUrl(state.heroSmsBaseUrl, DEFAULT_HERO_SMS_BASE_URL),
+        serviceCode: normalizeNexSmsServiceCode(state.heroSmsServiceCode, HERO_SMS_SERVICE_CODE),
         countryCandidates: resolveCountryCandidates(state),
         heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
       };
@@ -3055,6 +3061,7 @@
         provider: PHONE_SMS_PROVIDER_HERO,
         apiKey,
         baseUrl: normalizeUrl(state.heroSmsBaseUrl, DEFAULT_HERO_SMS_BASE_URL),
+        serviceCode: normalizeNexSmsServiceCode(state.heroSmsServiceCode, HERO_SMS_SERVICE_CODE),
         countryCandidates: resolveCountryCandidates(state),
         heroSmsOperatorByCountry: normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry),
       };
@@ -3423,7 +3430,7 @@
             const plan = heroProvider.planPriceTiers({
               fetchResults: resultsByAction,
               countryId: normalizeCountryId(countryConfig?.id, 0),
-              serviceCode: HERO_SMS_SERVICE_CODE,
+              serviceCode: resolveHeroSmsServiceCode(config),
               preserveUnboundedFallback: true,
             });
             if (Array.isArray(plan?.mergedTiers) && plan.mergedTiers.length) {
@@ -3484,7 +3491,7 @@
         const plan = heroProvider.planPriceTiers({
           fetchResults,
           countryId: normalizeCountryId(countryConfig?.id, 0),
-          serviceCode: HERO_SMS_SERVICE_CODE,
+          serviceCode: resolveHeroSmsServiceCode(config),
           userLimit,
           minPriceLimit: options?.minPriceLimit ?? null,
           maxPriceLimit: options?.maxPriceLimit ?? userLimit,
@@ -3587,7 +3594,7 @@
     async function fetchPhoneActivationPayload(config, countryConfig, action, options = {}) {
       const query = {
         action,
-        service: HERO_SMS_SERVICE_CODE,
+        service: resolveHeroSmsServiceCode(config),
         country: countryConfig.id,
       };
       const operator = String(options.operator || '').trim();
@@ -6099,6 +6106,29 @@
     function buildPhoneSmsRegionOverrideState(state = {}, providerId = '', regionCode = '') {
       const normalizedProvider = normalizePhoneSmsProvider(providerId || state?.phoneSmsProvider);
       const normalizedRegion = normalizePhoneSmsIsoRegion(regionCode);
+      if (
+        normalizedProvider === PHONE_SMS_PROVIDER_HERO
+        && normalizedRegion === 'BR'
+        && String(state?.heroSmsServiceCode || '').trim().toLowerCase() === 'paypal'
+      ) {
+        return {
+          state: {
+            ...state,
+            heroSmsCountryId: 73,
+            heroSmsCountryLabel: 'Brazil',
+            heroSmsCountryFallback: [],
+            heroSmsOperatorByCountry: {},
+            heroSmsServiceCode: 'paypal',
+          },
+          requestedRegion: normalizedRegion,
+          resolvedRegion: normalizedRegion,
+          regionMatched: true,
+          countryConfig: {
+            id: 73,
+            label: 'Brazil',
+          },
+        };
+      }
       const candidates = resolveCountryCandidatesForProvider(state, normalizedProvider);
       const matched = matchPhoneSmsCountryCandidateForRegion(candidates, normalizedProvider, normalizedRegion);
       if (!normalizedRegion || !matched) {

@@ -18,9 +18,18 @@
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
   const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
   const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
+  const HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR = 'hero_sms_paypal_br';
   const HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY = 'hostedCheckoutPhoneSmsActivation';
   const HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY = 'hostedCheckoutPhoneSmsRequestedRegion';
   const HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY = 'hostedCheckoutPhoneSmsResolvedRegion';
+  const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY = 'hostedCheckoutHeroSmsPayPalActivation';
+  const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY = 'hostedCheckoutHeroSmsPayPalCachedAt';
+  const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY = 'hostedCheckoutHeroSmsPayPalExpiresAt';
+  const HERO_SMS_PAYPAL_BR_COUNTRY_ID = 73;
+  const HERO_SMS_PAYPAL_BR_COUNTRY_LABEL = 'Brazil';
+  const HERO_SMS_PAYPAL_BR_REGION = 'BR';
+  const HERO_SMS_PAYPAL_SERVICE_CODE = 'paypal';
+  const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS = 20 * 60 * 1000;
   const HOSTED_CHECKOUT_US_ADDRESS_ENDPOINT = 'https://randomuser.me/api/?nat=us&inc=location&noinfo';
   const SUPPORTED_PLUS_CHECKOUT_PROFILE_COUNTRIES = Object.freeze(
     (typeof self !== 'undefined' && self.MultiPagePlusCheckoutRegions?.getSupportedRegionCodes)
@@ -629,9 +638,13 @@
 
     function normalizeHostedCheckoutSmsSource(value = '') {
       const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
-      return normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
-        ? HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
-        : HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
+      if (normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS) {
+        return HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS;
+      }
+      if (normalized === HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR) {
+        return HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR;
+      }
+      return HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
     }
 
     function normalizeHostedCheckoutPhoneSmsActivation(record = null) {
@@ -678,6 +691,20 @@
       }
       return Math.max(0, Number(normalizedActivation.successfulUses) || 0)
         < Math.max(1, Number(normalizedActivation.maxUses) || 1);
+    }
+
+    function isHostedCheckoutHeroSmsPayPalActivation(activation = null) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        return false;
+      }
+      return String(normalizedActivation.hostedCheckoutSmsSource || '').trim() === HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR
+        || String(normalizedActivation.source || '').trim() === 'hosted-hero-sms-paypal-br'
+        || (
+          String(normalizedActivation.provider || '').trim().toLowerCase() === 'hero-sms'
+          && String(normalizedActivation.serviceCode || '').trim().toLowerCase() === HERO_SMS_PAYPAL_SERVICE_CODE
+          && Number(normalizedActivation.countryId) === HERO_SMS_PAYPAL_BR_COUNTRY_ID
+        );
     }
 
     function normalizePlusCheckoutVerificationFailureStrategy(value = '') {
@@ -2412,6 +2439,40 @@
           poolSize: 0,
         };
       }
+      if (hostedSmsSource === HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR) {
+        const phoneSmsResult = await ensureHostedCheckoutHeroSmsPayPalActivation(mergedState, {
+          stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+        });
+        const activation = normalizeHostedCheckoutPhoneSmsActivation(phoneSmsResult?.activation);
+        const phone = normalizeBrazilHostedPhoneForPayload(activation?.phoneNumber || '');
+        if (!phone) {
+          throw buildHostedCheckoutConfigError(
+            'PayPal HeroSMS（PayPal/BR）未获取到有效的巴西 +55 手机号。',
+            {
+              configSource: 'hero-sms-paypal-br',
+              poolSize: 0,
+              selectedEntry: null,
+            }
+          );
+        }
+        return {
+          ...commonRuntimeConfig(),
+          verificationUrl: '',
+          phone,
+          hostedCheckoutSmsPoolAutoDisableEnabled: false,
+          hostedCheckoutCurrentSmsEntry: null,
+          hostedCheckoutUsesSmsPool: false,
+          hostedCheckoutUsesPhoneSms: true,
+          hostedCheckoutUsesHeroSmsPayPalBr: true,
+          hostedCheckoutPhoneSmsActivation: activation,
+          hostedCheckoutHeroSmsPayPalActivation: activation,
+          hostedCheckoutPhoneSmsRequestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          hostedCheckoutPhoneSmsResolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          hostedCheckoutSmsPoolMaxUses: normalizeHostedCheckoutSmsPoolMaxUses(mergedState?.hostedCheckoutSmsPoolMaxUses),
+          configSource: 'hero-sms-paypal-br',
+          poolSize: 0,
+        };
+      }
       const rawPoolText = String(mergedState?.hostedCheckoutSmsPoolText || '').trim();
       const poolEntries = parseHostedCheckoutSmsPoolEntries(rawPoolText);
       const poolUsage = normalizeHostedCheckoutSmsPoolUsage(mergedState?.hostedCheckoutSmsPoolUsage || {});
@@ -2576,6 +2637,17 @@
       });
     }
 
+    async function clearHostedCheckoutHeroSmsPayPalActivation() {
+      await applyHostedCheckoutRuntimePatch({
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]: null,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY]: 0,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY]: 0,
+        [HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]: null,
+        [HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY]: '',
+        [HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY]: '',
+      });
+    }
+
     async function persistHostedCheckoutPhoneSmsActivation(activation = null, options = {}) {
       const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
       if (!normalizedActivation) {
@@ -2591,11 +2663,62 @@
       return normalizedActivation;
     }
 
+    async function persistHostedCheckoutHeroSmsPayPalActivation(activation = null, options = {}) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      if (!normalizedActivation) {
+        await clearHostedCheckoutHeroSmsPayPalActivation();
+        return null;
+      }
+      const now = Math.max(0, Number(options?.cachedAt) || Date.now());
+      const expiresAt = Math.max(now + 1, Number(options?.expiresAt) || (now + HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS));
+      const nextActivation = {
+        ...normalizedActivation,
+        provider: 'hero-sms',
+        serviceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
+        countryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
+        countryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
+        maxUses: Math.max(1, Number(normalizedActivation.maxUses) || 999),
+        source: 'hosted-hero-sms-paypal-br',
+        hostedCheckoutSmsSource: HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR,
+        cachedAt: now,
+        expiresAt,
+      };
+      const patch = {
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]: nextActivation,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY]: now,
+        [HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY]: expiresAt,
+        [HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]: nextActivation,
+        [HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY]: HERO_SMS_PAYPAL_BR_REGION,
+        [HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY]: HERO_SMS_PAYPAL_BR_REGION,
+      };
+      await applyHostedCheckoutRuntimePatch(patch);
+      return nextActivation;
+    }
+
     async function finalizeHostedCheckoutPhoneSmsActivationAfterSuccess(state = {}, activation = null) {
       const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
       if (!normalizedActivation) {
         await clearHostedCheckoutPhoneSmsActivation();
         return null;
+      }
+      if (isHostedCheckoutHeroSmsPayPalActivation(normalizedActivation)) {
+        if (!normalizedActivation.phoneCodeReceived) {
+          return persistHostedCheckoutHeroSmsPayPalActivation(normalizedActivation, {
+            cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt,
+            expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt,
+          });
+        }
+        const nextActivation = {
+          ...normalizedActivation,
+          successfulUses: Math.max(0, Number(normalizedActivation.successfulUses) || 0) + 1,
+        };
+        delete nextActivation.phoneCodeReceived;
+        delete nextActivation.phoneCodeReceivedAt;
+        delete nextActivation.ignoredPhoneCodeKeys;
+        return persistHostedCheckoutHeroSmsPayPalActivation(nextActivation, {
+          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt,
+          expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt,
+        });
       }
       if (typeof phoneVerificationHelpers?.completePhoneActivation === 'function') {
         await phoneVerificationHelpers.completePhoneActivation(state, normalizedActivation).catch(() => {});
@@ -2629,6 +2752,13 @@
         await clearHostedCheckoutPhoneSmsActivation();
         return;
       }
+      if (isHostedCheckoutHeroSmsPayPalActivation(normalizedActivation)) {
+        await clearHostedCheckoutHeroSmsPayPalActivation();
+        if (reason) {
+          await addLog(`PayPal HeroSMS（PayPal/BR）缓存号码已清理：${reason}`, 'warn');
+        }
+        return;
+      }
       if (typeof phoneVerificationHelpers?.cancelPhoneActivation === 'function') {
         await phoneVerificationHelpers.cancelPhoneActivation(state, normalizedActivation).catch(() => {});
       }
@@ -2644,6 +2774,13 @@
       );
       if (!normalizedActivation) {
         await clearHostedCheckoutPhoneSmsActivation();
+        return;
+      }
+      if (isHostedCheckoutHeroSmsPayPalActivation(normalizedActivation)) {
+        await clearHostedCheckoutHeroSmsPayPalActivation();
+        if (reason) {
+          await addLog(`PayPal HeroSMS（PayPal/BR）缓存号码已丢弃：${reason}`, 'warn');
+        }
         return;
       }
       if (typeof phoneVerificationHelpers?.banPhoneActivation === 'function') {
@@ -2703,6 +2840,106 @@
         resolvedRegion: result?.resolvedRegion || '',
         regionMatched: Boolean(result?.regionMatched),
       };
+    }
+
+    function buildHostedCheckoutHeroSmsPayPalState(state = {}) {
+      return {
+        ...state,
+        phoneSmsProvider: 'hero-sms',
+        heroSmsCountryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
+        heroSmsCountryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
+        heroSmsCountryFallback: [],
+        heroSmsOperatorByCountry: {},
+        heroSmsServiceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
+      };
+    }
+
+    async function requestHostedCheckoutHeroSmsPayPalActivation(state = {}, options = {}) {
+      if (typeof phoneVerificationHelpers?.requestPhoneActivationForRegion !== 'function'
+        && typeof phoneVerificationHelpers?.requestPhoneActivation !== 'function') {
+        throw buildHostedCheckoutConfigError(
+          'PayPal HeroSMS（PayPal/BR）接码需要手机接码模块，但当前环境未加载。',
+          {
+            configSource: 'hero-sms-paypal-br',
+            poolSize: 0,
+            selectedEntry: null,
+          }
+        );
+      }
+      const requestState = buildHostedCheckoutHeroSmsPayPalState(state);
+      const requestOptions = {
+        ...options,
+        step: options?.step || 8,
+        stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+        providerId: 'hero-sms',
+        regionCode: HERO_SMS_PAYPAL_BR_REGION,
+      };
+      const result = typeof phoneVerificationHelpers?.requestPhoneActivationForRegion === 'function'
+        ? await phoneVerificationHelpers.requestPhoneActivationForRegion(requestState, requestOptions)
+        : {
+          activation: await phoneVerificationHelpers.requestPhoneActivation(requestState, requestOptions),
+          requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          regionMatched: true,
+        };
+      const activation = normalizeHostedCheckoutPhoneSmsActivation(result?.activation);
+      if (!activation?.phoneNumber) {
+        throw new Error('PayPal HeroSMS（PayPal/BR）取号失败：HeroSMS 未返回有效手机号。');
+      }
+      const persisted = await persistHostedCheckoutHeroSmsPayPalActivation({
+        ...activation,
+        provider: 'hero-sms',
+        serviceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
+        countryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
+        countryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
+        source: 'hosted-hero-sms-paypal-br',
+        hostedCheckoutSmsSource: HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR,
+      });
+      await addHostedStepLog(
+        requestOptions.stepKey,
+        `步骤 ${getHostedStepNumber(requestOptions.stepKey)}：PayPal HeroSMS（PayPal/BR）已获取号码 ${maskHostedPhoneForLog(persisted.phoneNumber)}，缓存 20 分钟，期间不会回收/取消。`,
+        'info'
+      );
+      return {
+        activation: persisted,
+        requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+        resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+        regionMatched: true,
+      };
+    }
+
+    async function ensureHostedCheckoutHeroSmsPayPalActivation(state = {}, options = {}) {
+      const now = Date.now();
+      const current = normalizeHostedCheckoutPhoneSmsActivation(
+        state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]
+          || state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
+      );
+      const expiresAt = Math.max(
+        0,
+        Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || current?.expiresAt) || 0
+      );
+      if (
+        current
+        && isHostedCheckoutHeroSmsPayPalActivation(current)
+        && current.phoneNumber
+        && expiresAt > now
+      ) {
+        const persisted = await persistHostedCheckoutHeroSmsPayPalActivation(current, {
+          cachedAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || current.cachedAt || (expiresAt - HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS),
+          expiresAt,
+        });
+        return {
+          activation: persisted,
+          reused: true,
+          requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          regionMatched: true,
+        };
+      }
+      if (current) {
+        await clearHostedCheckoutHeroSmsPayPalActivation();
+      }
+      return requestHostedCheckoutHeroSmsPayPalActivation(state, options);
     }
 
     async function ensureHostedCheckoutPhoneSmsActivation(state = {}, options = {}) {
@@ -4727,14 +4964,18 @@
           runtimeConfig.hostedCheckoutPhoneSmsActivation,
           `PayPal 提示号码不可用：${phoneErrorMessage}`
         );
-        const nextResult = await requestHostedCheckoutPhoneSmsActivation(latestState, { stepKey });
+        const nextResult = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
+          ? await requestHostedCheckoutHeroSmsPayPalActivation(latestState, { stepKey })
+          : await requestHostedCheckoutPhoneSmsActivation(latestState, { stepKey });
         const nextActivation = normalizeHostedCheckoutPhoneSmsActivation(nextResult?.activation);
         if (!nextActivation?.phoneNumber) {
           throw new Error(`步骤 ${getHostedStepNumber(stepKey)}：PayPal 提示当前号码不可用，且跟随手机接码配置未获取到新号码：${phoneErrorMessage}`);
         }
         const nextProfile = {
           ...profile,
-          phone: normalizeHostedPhoneForPayload(nextActivation.phoneNumber),
+          phone: runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
+            ? normalizeBrazilHostedPhoneForPayload(nextActivation.phoneNumber)
+            : normalizeHostedPhoneForPayload(nextActivation.phoneNumber),
         };
         await persistHostedGuestProfile(nextProfile);
         await addHostedStepLog(
@@ -7162,6 +7403,7 @@
       executePayPalHostedCreateAccount,
       executePayPalHostedReview,
       executePhonePlusCheck,
+      getHostedCheckoutRuntimeConfig,
       fetchHostedCheckoutVerificationCodeManually,
       testCheckoutConversionProxy,
     };

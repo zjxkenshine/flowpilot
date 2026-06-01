@@ -774,6 +774,7 @@ const DEFAULT_HOSTED_CHECKOUT_VERIFICATION_POPUP_DELAY_SECONDS = 20;
 const DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES = 3;
 const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
 const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
+const HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR = 'hero_sms_paypal_br';
 const DEFAULT_PLUS_PAYMENT_METHOD = PLUS_PAYMENT_METHOD_PAYPAL;
 const PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH = 'oauth';
 const PLUS_ACCOUNT_ACCESS_STRATEGY_SUB2API_CODEX_SESSION = 'sub2api_codex_session';
@@ -3992,9 +3993,13 @@ function normalizeHostedCheckoutSmsPoolMaxUsesValue(value, fallback = DEFAULT_HO
 
 function normalizeHostedCheckoutSmsSourceValue(value = '') {
   const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
-  return normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
-    ? HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS
-    : HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
+  if (normalized === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS) {
+    return HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS;
+  }
+  if (normalized === HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR) {
+    return HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR;
+  }
+  return HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
 }
 
 function normalizePayPalProfileCountryCodeValue(value, fallback = 'US') {

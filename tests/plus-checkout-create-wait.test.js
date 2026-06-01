@@ -607,6 +607,30 @@ function createHostedRuntimeState(overrides = {}) {
   };
 }
 
+function normalizeTestPhoneActivation(record) {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  const activationId = String(record.activationId || record.id || '').trim();
+  const phoneNumber = String(record.phoneNumber || record.phone || record.number || '').trim();
+  if (!activationId || !phoneNumber) {
+    return null;
+  }
+  return {
+    ...record,
+    activationId,
+    phoneNumber,
+    provider: String(record.provider || '').trim(),
+    serviceCode: String(record.serviceCode || '').trim(),
+    countryId: Number(record.countryId) || 0,
+    countryLabel: String(record.countryLabel || '').trim(),
+    successfulUses: Number(record.successfulUses) || 0,
+    maxUses: Number(record.maxUses) || 3,
+    ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+    ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: record.phoneCodeReceivedAt } : {}),
+  };
+}
+
 function createHostedAddressResponse(address = {}) {
   const mergedAddress = {
     Address: '7 Fresh St',
@@ -7913,6 +7937,382 @@ test('PayPal hosted phone-sms mode follows configured 711 region and reuses rece
   assert.equal(activationUpdates.at(-1).phoneNumber, '+819012345678');
   assert.equal(activationUpdates.at(-1).successfulUses, 1);
   assert.equal(phoneCalls.some((call) => call.type === 'complete'), true);
+});
+
+test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number', async () => {
+  const events = [];
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutVerificationUrl: '',
+    hostedCheckoutPhoneNumber: '',
+    plusCheckoutConversionProxySource: '711proxy_pool',
+    plusCheckoutConversionProxy711Region: 'JP',
+    plusCheckoutConversionProxyExitCheck: {
+      exitRegion: 'US',
+    },
+    heroSmsApiKey: 'hero-key',
+    heroSmsBaseUrl: 'https://herosms.example/stubs/handler_api.php',
+    heroSmsServiceCode: 'dr',
+    heroSmsCountryId: 151,
+    heroSmsCountryLabel: 'Japan',
+    heroSmsOperatorByCountry: { 73: 'vivo', 151: 'docomo' },
+  });
+  const activation = {
+    activationId: 'pp-br-activation-1',
+    phoneNumber: '5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    successfulUses: 0,
+    maxUses: 3,
+  };
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async (state, options) => {
+        phoneCalls.push({ type: 'request', state, options });
+        return {
+          activation,
+          requestedRegion: options.regionCode,
+          resolvedRegion: options.regionCode,
+          regionMatched: true,
+        };
+      },
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+  });
+
+  const config = await executor.getHostedCheckoutRuntimeConfig({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+  });
+
+  const requestCall = phoneCalls.find((call) => call.type === 'request');
+  assert.equal(requestCall.options.providerId, 'hero-sms');
+  assert.equal(requestCall.options.regionCode, 'BR');
+  assert.equal(requestCall.state.phoneSmsProvider, 'hero-sms');
+  assert.equal(requestCall.state.heroSmsServiceCode, 'paypal');
+  assert.equal(requestCall.state.heroSmsCountryId, 73);
+  assert.equal(requestCall.state.heroSmsCountryLabel, 'Brazil');
+  assert.deepEqual(requestCall.state.heroSmsCountryFallback, []);
+  assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, {});
+  assert.equal(config.configSource, 'hero-sms-paypal-br');
+  assert.equal(config.verificationUrl, '');
+  assert.equal(config.phone, '+5511987654321');
+  assert.equal(config.hostedCheckoutUsesPhoneSms, true);
+  assert.equal(config.hostedCheckoutUsesHeroSmsPayPalBr, true);
+  assert.equal(config.hostedCheckoutPhoneSmsRequestedRegion, 'BR');
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-activation-1');
+  assert.equal(latestState.hostedCheckoutPhoneSmsActivation.activationId, 'pp-br-activation-1');
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalExpiresAt > latestState.hostedCheckoutHeroSmsPayPalCachedAt, true);
+});
+
+test('PayPal hosted HeroSMS PayPal/BR mode reuses cached activation for 20 minutes', async () => {
+  const now = Date.now();
+  const cachedActivation = {
+    activationId: 'pp-br-cached-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    successfulUses: 0,
+    maxUses: 3,
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    cachedAt: now - 60_000,
+    expiresAt: now + 15 * 60_000,
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalActivation: cachedActivation,
+    hostedCheckoutHeroSmsPayPalCachedAt: cachedActivation.cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: cachedActivation.expiresAt,
+  });
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async () => {
+        phoneCalls.push({ type: 'request' });
+        throw new Error('should not buy another PayPal HeroSMS number');
+      },
+    },
+    setState: async (payload) => {
+      latestState = { ...latestState, ...payload };
+    },
+  });
+
+  const config = await executor.getHostedCheckoutRuntimeConfig({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+  });
+
+  assert.equal(phoneCalls.length, 0);
+  assert.equal(config.phone, '+5511987654321');
+  assert.equal(config.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-cached-1');
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalExpiresAt, cachedActivation.expiresAt);
+});
+
+test('PayPal hosted HeroSMS PayPal/BR mode buys a new number after cache expires', async () => {
+  const now = Date.now();
+  const expiredActivation = {
+    activationId: 'pp-br-expired-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    cachedAt: now - 25 * 60_000,
+    expiresAt: now - 1_000,
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalActivation: expiredActivation,
+    hostedCheckoutHeroSmsPayPalCachedAt: expiredActivation.cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: expiredActivation.expiresAt,
+  });
+  const activation = {
+    activationId: 'pp-br-fresh-1',
+    phoneNumber: '+5521987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+  };
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async () => {},
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async (state, options) => {
+        phoneCalls.push({ state, options });
+        return {
+          activation,
+          requestedRegion: 'BR',
+          resolvedRegion: 'BR',
+          regionMatched: true,
+        };
+      },
+    },
+    setState: async (payload) => {
+      latestState = { ...latestState, ...payload };
+    },
+  });
+
+  const config = await executor.getHostedCheckoutRuntimeConfig({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+  });
+
+  assert.equal(phoneCalls.length, 1);
+  assert.equal(phoneCalls[0].options.regionCode, 'BR');
+  assert.equal(phoneCalls[0].state.heroSmsServiceCode, 'paypal');
+  assert.equal(config.phone, '+5521987654321');
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-fresh-1');
+});
+
+test('PayPal hosted HeroSMS PayPal/BR success keeps cache and skips provider complete', async () => {
+  const events = [];
+  const currentUrl = 'https://chatgpt.com/payments/success';
+  const cachedAt = Date.now() - 60_000;
+  const expiresAt = cachedAt + 20 * 60_000;
+  const activation = {
+    activationId: 'pp-br-success-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    successfulUses: 0,
+    maxUses: 999,
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    cachedAt,
+    expiresAt,
+    phoneCodeReceived: true,
+    phoneCodeReceivedAt: cachedAt + 5_000,
+  };
+  const phoneCalls = [];
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalActivation: activation,
+    hostedCheckoutHeroSmsPayPalCachedAt: cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: expiresAt,
+    hostedCheckoutPhoneSmsActivation: activation,
+  });
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async () => {
+        throw new Error('should reuse cached PayPal HeroSMS activation');
+      },
+      completePhoneActivation: async (_state, item) => {
+        phoneCalls.push({ type: 'complete', activation: item });
+      },
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async () => ({}),
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedReview({
+    plusCheckoutTabId: 456,
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalActivation: activation,
+    hostedCheckoutHeroSmsPayPalCachedAt: cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: expiresAt,
+    hostedCheckoutPhoneSmsActivation: activation,
+  });
+
+  assert.equal(phoneCalls.some((call) => call.type === 'complete'), false);
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-success-1');
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.successfulUses, 1);
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.phoneCodeReceived, undefined);
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalExpiresAt, expiresAt);
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-review'), true);
+});
+
+test('PayPal hosted HeroSMS PayPal/BR phone rejection skips provider ban and switches local cache', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let statePollCount = 0;
+  const oldActivation = {
+    activationId: 'pp-br-old-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    source: 'hosted-hero-sms-paypal-br',
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    cachedAt: Date.now() - 60_000,
+    expiresAt: Date.now() + 15 * 60_000,
+  };
+  const newActivation = {
+    activationId: 'pp-br-new-1',
+    phoneNumber: '+5521987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalActivation: oldActivation,
+    hostedCheckoutHeroSmsPayPalCachedAt: oldActivation.cachedAt,
+    hostedCheckoutHeroSmsPayPalExpiresAt: oldActivation.expiresAt,
+    hostedCheckoutPhoneSmsActivation: oldActivation,
+  });
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async (url) => (/meiguodizhi\.com/i.test(url) ? createHostedAddressResponse() : {
+      ok: true,
+      json: async () => ({}),
+      text: async () => '{}',
+    }),
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async (state, options) => {
+        phoneCalls.push({ type: 'request', state, options });
+        return {
+          activation: newActivation,
+          requestedRegion: 'BR',
+          resolvedRegion: 'BR',
+          regionMatched: true,
+        };
+      },
+      banPhoneActivation: async (_state, item) => {
+        phoneCalls.push({ type: 'ban', activation: item });
+      },
+      cancelPhoneActivation: async (_state, item) => {
+        phoneCalls.push({ type: 'cancel', activation: item });
+      },
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        statePollCount += 1;
+        if (statePollCount === 1) {
+          return {
+            hostedStage: 'guest_checkout',
+            hostedGuestPhoneError: true,
+            hostedGuestPhoneErrorMessage: 'Try a different phone number.',
+          };
+        }
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return { hostedStage: 'create_account' };
+      }
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        return { submitted: true, phoneMatched: true };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '+5511987654321',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(phoneCalls.some((call) => call.type === 'ban'), false);
+  assert.equal(phoneCalls.some((call) => call.type === 'cancel'), false);
+  assert.equal(phoneCalls.filter((call) => call.type === 'request').length, 1);
+  assert.equal(latestState.hostedCheckoutHeroSmsPayPalActivation.activationId, 'pp-br-new-1');
+  assert.equal(latestState.plusHostedCheckoutGuestProfile.phone, '+5521987654321');
+  assert.equal(
+    events.some((event) => (
+      event.type === 'tab-message'
+      && event.message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP'
+      && event.message.payload?.phone === '+5521987654321'
+    )),
+    true
+  );
+  assert.equal(events.some((event) => event.type === 'complete' && event.step === 'paypal-hosted-card'), true);
 });
 
 test('PayPal hosted phone-sms mode polls phone provider code without manual verification URL', async () => {

@@ -389,6 +389,7 @@ test('sidepanel PayPal hosted sms pool max uses renders and syncs through settin
 test('sidepanel PayPal hosted sms source selector renders and syncs through settings', () => {
   assert.match(sidepanelHtml, /id="row-hosted-checkout-sms-source"/);
   assert.match(sidepanelHtml, /id="select-hosted-checkout-sms-source"/);
+  assert.match(sidepanelHtml, /<option value="hero_sms_paypal_br">HeroSMS（PayPal\/BR）<\/option>/);
   assert.match(sidepanelHtml, /<option value="fixed_pool">固定接码池（默认）<\/option>/);
   assert.match(sidepanelHtml, /<option value="phone_sms">跟随手机接码配置<\/option>/);
 
@@ -396,12 +397,15 @@ test('sidepanel PayPal hosted sms source selector renders and syncs through sett
   const normalize = new Function(`
 const HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL = 'fixed_pool';
 const HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS = 'phone_sms';
+const HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR = 'hero_sms_paypal_br';
 ${normalizeSource}
 return normalizeHostedCheckoutSmsSourceValue;
 `)();
   assert.equal(normalize(undefined), 'fixed_pool');
   assert.equal(normalize('fixed-pool'), 'fixed_pool');
   assert.equal(normalize('phone-sms'), 'phone_sms');
+  assert.equal(normalize('hero-sms-paypal-br'), 'hero_sms_paypal_br');
+  assert.equal(normalize('hero_sms_paypal_br'), 'hero_sms_paypal_br');
   assert.equal(normalize('bad'), 'fixed_pool');
 
   const collectSource = extractFunction('collectSettingsPayload');

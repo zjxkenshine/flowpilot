@@ -246,6 +246,72 @@ test('phone verification helper maps PayPal region override to HeroSMS countries
   }
 });
 
+test('phone verification helper requests HeroSMS PayPal Brazil without operator override', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const country = parsedUrl.searchParams.get('country');
+      const service = parsedUrl.searchParams.get('service');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => buildHeroSmsPricesPayload({ country, service, cost: 0.08 }),
+        };
+      }
+      if (action === 'getNumber') {
+        return {
+          ok: true,
+          text: async () => 'ACCESS_NUMBER:paypalbr123:5511987654321',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({
+      heroSmsApiKey: 'demo-key',
+      phoneSmsProvider: 'hero-sms',
+      heroSmsServiceCode: 'paypal',
+      heroSmsOperatorByCountry: { 73: 'vivo' },
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const result = await helpers.requestPhoneActivationForRegion({
+    heroSmsApiKey: 'demo-key',
+    phoneSmsProvider: 'hero-sms',
+    heroSmsServiceCode: 'paypal',
+    heroSmsCountryId: 52,
+    heroSmsCountryLabel: 'Thailand',
+    heroSmsCountryFallback: [{ id: 73, label: 'France' }],
+    heroSmsOperatorByCountry: { 73: 'vivo' },
+    phoneActivationRetryRounds: 1,
+  }, { regionCode: 'BR', providerId: 'hero-sms' });
+
+  const getPricesRequest = requests.find((entry) => entry.searchParams.get('action') === 'getPrices');
+  const getNumberRequest = requests.find((entry) => entry.searchParams.get('action') === 'getNumber');
+  assert.equal(result.requestedRegion, 'BR');
+  assert.equal(result.resolvedRegion, 'BR');
+  assert.equal(result.regionMatched, true);
+  assert.equal(result.activation.phoneNumber, '5511987654321');
+  assert.equal(result.activation.serviceCode, 'paypal');
+  assert.equal(result.activation.countryId, 73);
+  assert.equal(result.activation.countryLabel, 'Brazil');
+  assert.equal(result.activation.operator, undefined);
+  assert.equal(getPricesRequest.searchParams.get('service'), 'paypal');
+  assert.equal(getPricesRequest.searchParams.get('country'), '73');
+  assert.equal(getPricesRequest.searchParams.get('operator'), null);
+  assert.equal(getNumberRequest.searchParams.get('service'), 'paypal');
+  assert.equal(getNumberRequest.searchParams.get('country'), '73');
+  assert.equal(getNumberRequest.searchParams.get('operator'), null);
+});
+
 test('phone verification helper sends HeroSMS operator for the selected country and records it on activation', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({

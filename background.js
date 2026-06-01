@@ -897,6 +897,11 @@ const PERSISTENT_ALIAS_STATE_KEYS = [
   'icloudAliasCache',
   'icloudAliasCacheAt',
 ];
+const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS = [
+  'hostedCheckoutHeroSmsPayPalActivation',
+  'hostedCheckoutHeroSmsPayPalCachedAt',
+  'hostedCheckoutHeroSmsPayPalExpiresAt',
+];
 const ACCOUNT_BOOK_STORAGE_KEY = 'accountBookEntries';
 const ACCOUNT_RUN_HISTORY_STORAGE_KEY = 'accountRunHistory';
 const SIGNUP_METHOD_EMAIL = 'email';
@@ -1964,6 +1969,9 @@ const DEFAULT_STATE = {
   icloudAliasCacheAt: 0,
   logs: [], // 侧边栏展示的运行日志。
   ...PERSISTED_SETTING_DEFAULTS, // 合并 chrome.storage.local 中持久化保存的用户配置。
+  hostedCheckoutHeroSmsPayPalActivation: null,
+  hostedCheckoutHeroSmsPayPalCachedAt: 0,
+  hostedCheckoutHeroSmsPayPalExpiresAt: 0,
   luckmailApiKey: '',
   luckmailBaseUrl: DEFAULT_LUCKMAIL_BASE_URL,
   luckmailEmailType: DEFAULT_LUCKMAIL_EMAIL_TYPE,
@@ -4831,7 +4839,13 @@ function normalizePersistentSettingValue(key, value) {
     }
     case 'hostedCheckoutSmsSource': {
       const normalized = String(value || '').trim().toLowerCase().replace(/-/g, '_');
-      return normalized === 'phone_sms' ? 'phone_sms' : 'fixed_pool';
+      if (normalized === 'phone_sms') {
+        return 'phone_sms';
+      }
+      if (normalized === 'hero_sms_paypal_br') {
+        return 'hero_sms_paypal_br';
+      }
+      return 'fixed_pool';
     }
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
@@ -5577,6 +5591,11 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
   }
   if (payload.plusCheckoutRegionCode !== undefined) {
     payload.plusCheckoutRegionalCheckoutEnabled = payload.plusCheckoutRegionCode !== 'US';
+  }
+  for (const key of HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      delete payload[key];
+    }
   }
 
   const hasPhoneSmsReuseEnabled = Object.prototype.hasOwnProperty.call(normalizedInput, 'phoneSmsReuseEnabled');
@@ -6554,9 +6573,21 @@ function buildFreshAutoRunKeepState(prevState = {}) {
 
 async function getPersistedAliasState() {
   try {
-    const stored = await chrome.storage.local.get(PERSISTENT_ALIAS_STATE_KEYS);
+    const stored = await chrome.storage.local.get([
+      ...PERSISTENT_ALIAS_STATE_KEYS,
+      ...HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS,
+    ]);
     const manualAliasUsage = normalizeBooleanMap(stored.manualAliasUsage);
     const preservedAliases = normalizeBooleanMap(stored.preservedAliases);
+    const heroSmsPayPalExpiresAt = Math.max(0, Number(stored.hostedCheckoutHeroSmsPayPalExpiresAt || 0) || 0);
+    const heroSmsPayPalActivation = (
+      isPlainObjectValue(stored.hostedCheckoutHeroSmsPayPalActivation)
+      && String(stored.hostedCheckoutHeroSmsPayPalActivation.activationId || stored.hostedCheckoutHeroSmsPayPalActivation.id || '').trim()
+      && String(stored.hostedCheckoutHeroSmsPayPalActivation.phoneNumber || stored.hostedCheckoutHeroSmsPayPalActivation.phone || '').trim()
+      && heroSmsPayPalExpiresAt > Date.now()
+    )
+      ? stored.hostedCheckoutHeroSmsPayPalActivation
+      : null;
     return {
       manualAliasUsage,
     preservedAliases,
@@ -6565,6 +6596,11 @@ async function getPersistedAliasState() {
       preservedEmails: toNormalizedEmailSet(preservedAliases),
     }),
       icloudAliasCacheAt: Math.max(0, Number(stored.icloudAliasCacheAt) || 0),
+      hostedCheckoutHeroSmsPayPalActivation: heroSmsPayPalActivation,
+      hostedCheckoutHeroSmsPayPalCachedAt: heroSmsPayPalActivation
+        ? Math.max(0, Number(stored.hostedCheckoutHeroSmsPayPalCachedAt || heroSmsPayPalActivation.cachedAt) || 0)
+        : 0,
+      hostedCheckoutHeroSmsPayPalExpiresAt: heroSmsPayPalActivation ? heroSmsPayPalExpiresAt : 0,
     };
   } catch (err) {
     console.warn(LOG_PREFIX, 'Failed to read persisted iCloud alias state:', err?.message || err);
@@ -6573,6 +6609,9 @@ async function getPersistedAliasState() {
       preservedAliases: {},
       icloudAliasCache: [],
       icloudAliasCacheAt: 0,
+      hostedCheckoutHeroSmsPayPalActivation: null,
+      hostedCheckoutHeroSmsPayPalCachedAt: 0,
+      hostedCheckoutHeroSmsPayPalExpiresAt: 0,
     };
   }
 }
@@ -6679,6 +6718,17 @@ async function setState(updates) {
     }
     if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'icloudAliasCacheAt')) {
       persistentAliasUpdates.icloudAliasCacheAt = Math.max(0, Number(sessionUpdates.icloudAliasCacheAt) || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'hostedCheckoutHeroSmsPayPalActivation')) {
+      persistentAliasUpdates.hostedCheckoutHeroSmsPayPalActivation = isPlainObjectValue(sessionUpdates.hostedCheckoutHeroSmsPayPalActivation)
+        ? sessionUpdates.hostedCheckoutHeroSmsPayPalActivation
+        : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'hostedCheckoutHeroSmsPayPalCachedAt')) {
+      persistentAliasUpdates.hostedCheckoutHeroSmsPayPalCachedAt = Math.max(0, Number(sessionUpdates.hostedCheckoutHeroSmsPayPalCachedAt) || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(sessionUpdates, 'hostedCheckoutHeroSmsPayPalExpiresAt')) {
+      persistentAliasUpdates.hostedCheckoutHeroSmsPayPalExpiresAt = Math.max(0, Number(sessionUpdates.hostedCheckoutHeroSmsPayPalExpiresAt) || 0);
     }
     if (Object.keys(persistentAliasUpdates).length > 0) {
       await chrome.storage.local.set(persistentAliasUpdates);
@@ -7491,6 +7541,9 @@ async function resetState() {
     'hostedCheckoutPhoneSmsActivation',
     'hostedCheckoutPhoneSmsRequestedRegion',
     'hostedCheckoutPhoneSmsResolvedRegion',
+    'hostedCheckoutHeroSmsPayPalActivation',
+    'hostedCheckoutHeroSmsPayPalCachedAt',
+    'hostedCheckoutHeroSmsPayPalExpiresAt',
   ]),
     getPersistedSettings(),
     getPersistedAliasState(),
@@ -7545,6 +7598,28 @@ async function resetState() {
   )
     ? prev.hostedCheckoutPhoneSmsActivation
     : null;
+  const hostedCheckoutHeroSmsPayPalCandidate = prev.hostedCheckoutHeroSmsPayPalActivation
+    || persistedAliasState.hostedCheckoutHeroSmsPayPalActivation
+    || null;
+  const hostedCheckoutHeroSmsPayPalExpiresAt = Math.max(
+    0,
+    Number(
+      prev.hostedCheckoutHeroSmsPayPalExpiresAt
+      || persistedAliasState.hostedCheckoutHeroSmsPayPalExpiresAt
+      || hostedCheckoutHeroSmsPayPalCandidate?.expiresAt
+      || 0
+    ) || 0
+  );
+  const hostedCheckoutHeroSmsPayPalActivation = (
+    hostedCheckoutHeroSmsPayPalCandidate
+    && typeof hostedCheckoutHeroSmsPayPalCandidate === 'object'
+    && !Array.isArray(hostedCheckoutHeroSmsPayPalCandidate)
+    && String(hostedCheckoutHeroSmsPayPalCandidate.activationId || hostedCheckoutHeroSmsPayPalCandidate.id || '').trim()
+    && String(hostedCheckoutHeroSmsPayPalCandidate.phoneNumber || hostedCheckoutHeroSmsPayPalCandidate.phone || '').trim()
+    && hostedCheckoutHeroSmsPayPalExpiresAt > Date.now()
+  )
+    ? hostedCheckoutHeroSmsPayPalCandidate
+    : null;
   await chrome.storage.session.clear();
   const resetPayload = buildStatePatchWithRuntimeState({}, {
     ...DEFAULT_STATE,
@@ -7577,6 +7652,9 @@ async function resetState() {
     hostedCheckoutPhoneSmsActivation,
     hostedCheckoutPhoneSmsRequestedRegion: hostedCheckoutPhoneSmsActivation ? String(prev.hostedCheckoutPhoneSmsRequestedRegion || '').trim() : '',
     hostedCheckoutPhoneSmsResolvedRegion: hostedCheckoutPhoneSmsActivation ? String(prev.hostedCheckoutPhoneSmsResolvedRegion || '').trim() : '',
+    hostedCheckoutHeroSmsPayPalActivation,
+    hostedCheckoutHeroSmsPayPalCachedAt: hostedCheckoutHeroSmsPayPalActivation ? Math.max(0, Number(prev.hostedCheckoutHeroSmsPayPalCachedAt || persistedAliasState.hostedCheckoutHeroSmsPayPalCachedAt || hostedCheckoutHeroSmsPayPalActivation.cachedAt) || 0) : 0,
+    hostedCheckoutHeroSmsPayPalExpiresAt: hostedCheckoutHeroSmsPayPalActivation ? hostedCheckoutHeroSmsPayPalExpiresAt : 0,
     preferredIcloudHost: prev.preferredIcloudHost || '',
     automationWindowId: Number.isInteger(Number(prev.automationWindowId))
       && Number(prev.automationWindowId) >= 0

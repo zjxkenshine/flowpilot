@@ -61,6 +61,11 @@ const DEFAULT_ACTIVE_FLOW_ID = 'openai';
 const DEFAULT_IP_PROXY_ACTIVATION_STEP = 1;
 const DEFAULT_SUB2API_GROUP_NAMES = ['codex', 'openai-plus'];
 const DEFAULT_SUB2API_ACCOUNT_PRIORITY = 1;
+const HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS = [
+  'hostedCheckoutHeroSmsPayPalActivation',
+  'hostedCheckoutHeroSmsPayPalCachedAt',
+  'hostedCheckoutHeroSmsPayPalExpiresAt',
+];
 const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'activeFlowId',
   'openaiIntegrationTargetId',
@@ -205,6 +210,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationPollAttempts: 6,
   hostedCheckoutVerificationPollIntervalSeconds: 5,
   hostedCheckoutVerificationResendMaxAttempts: 1,
+  hostedCheckoutSmsSource: 'fixed_pool',
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
@@ -1221,6 +1227,43 @@ test('buildPersistentSettingsPayload persists PayPal hosted checkout resend stra
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollAttempts, 9);
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationPollIntervalSeconds, 7);
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutVerificationResendMaxAttempts, 3);
+});
+
+test('buildPersistentSettingsPayload persists PayPal HeroSMS hosted checkout sms source', () => {
+  const api = buildHarness();
+
+  const flat = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+  }, { fillDefaults: true });
+  assert.equal(flat.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(flat.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+
+  const hyphenAlias = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsSource: 'hero-sms-paypal-br',
+  }, { fillDefaults: true });
+  assert.equal(hyphenAlias.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(hyphenAlias.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+
+  const nested = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nested.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(nested.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+
+  const invalid = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsSource: 'unknown-source',
+  }, { fillDefaults: true });
+  assert.equal(invalid.hostedCheckoutSmsSource, 'fixed_pool');
+  assert.equal(invalid.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'fixed_pool');
 });
 
 test('buildPersistentSettingsPayload persists PayPal hosted security challenge switch into settings schema', () => {

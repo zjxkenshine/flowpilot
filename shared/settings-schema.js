@@ -1084,9 +1084,13 @@
                     ?? nested?.flows?.openai?.plus?.hostedCheckoutSmsSource
                     ?? defaults.flows.openai.plus.hostedCheckoutSmsSource
                 ).trim().toLowerCase().replace(/-/g, '_');
-                return normalized === 'phone_sms' || normalized === 'phone-sms'
-                  ? 'phone_sms'
-                  : 'fixed_pool';
+                if (normalized === 'phone_sms') {
+                  return 'phone_sms';
+                }
+                if (normalized === 'hero_sms_paypal_br') {
+                  return 'hero_sms_paypal_br';
+                }
+                return 'fixed_pool';
               })(),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
