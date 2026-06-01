@@ -9947,13 +9947,54 @@ function createPhonePlusCheckHarness(options = {}) {
       },
     },
   };
+  const chromeMock = {
+    tabs: {
+      reload: async (targetTabId) => events.push({ type: 'tab-reload', tabId: targetTabId }),
+    },
+  };
+  if (options.cookies !== false) {
+    const cookieStores = Array.isArray(options.cookieStores) ? options.cookieStores : [{ id: 'store-a' }];
+    const cookiesByDomain = options.cookiesByDomain && typeof options.cookiesByDomain === 'object'
+      ? options.cookiesByDomain
+      : {};
+    chromeMock.cookies = {
+      getAllCookieStores: async () => {
+        events.push({ type: 'cookie-stores' });
+        if (typeof options.onGetAllCookieStores === 'function') {
+          return options.onGetAllCookieStores();
+        }
+        return cookieStores;
+      },
+      getAll: async (details) => {
+        events.push({ type: 'cookie-get-all', details });
+        if (typeof options.onCookieGetAll === 'function') {
+          return options.onCookieGetAll(details);
+        }
+        return cookiesByDomain[details.domain] || [];
+      },
+      remove: async (details) => {
+        events.push({ type: 'cookie-remove', details });
+        if (typeof options.onCookieRemove === 'function') {
+          return options.onCookieRemove(details);
+        }
+        return details;
+      },
+    };
+  }
+  if (options.browsingData !== false) {
+    chromeMock.browsingData = {
+      removeCookies: async (details) => {
+        events.push({ type: 'browsing-data-remove-cookies', details });
+        if (typeof options.onBrowsingDataRemoveCookies === 'function') {
+          return options.onBrowsingDataRemoveCookies(details);
+        }
+        return undefined;
+      },
+    };
+  }
   const executor = api.createPlusCheckoutCreateExecutor({
     addLog: async (message, level = 'info', logOptions = {}) => events.push({ type: 'log', message, level, options: logOptions }),
-    chrome: {
-      tabs: {
-        reload: async (targetTabId) => events.push({ type: 'tab-reload', tabId: targetTabId }),
-      },
-    },
+    chrome: chromeMock,
     completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
     createAutomationTab: async (payload) => {
       events.push({ type: 'tab-create', payload });
@@ -10010,6 +10051,100 @@ test('Phone Plus plus-check completes when refreshed session confirms Plus', asy
   assert.equal(getState().plusHostedCheckoutVerified, true);
   assert.equal(getState().phonePlusCheckVerifiedAt > 0, true);
   assert.equal(events.some((event) => event.type === 'fallback'), false);
+});
+
+test('Phone Plus plus-check clears only payment cookies before opening ChatGPT session', async () => {
+  const cookiesByDomain = {
+    'pay.openai.com': [
+      { domain: 'pay.openai.com', path: '/c/pay', name: 'pay-session', storeId: 'store-a' },
+    ],
+    'paypal.com': [
+      { domain: '.paypal.com', path: '/', name: 'paypal-session', storeId: 'store-a' },
+    ],
+    'checkout.stripe.com': [
+      { domain: 'checkout.stripe.com', path: '/', name: 'stripe-session', storeId: 'store-a' },
+    ],
+    'gopayapi.com': [
+      { domain: '.gopayapi.com', path: '/', name: 'gopay-session', storeId: 'store-a' },
+    ],
+  };
+  const { events, executor, getState } = createPhonePlusCheckHarness({
+    planType: 'plus',
+    cookiesByDomain,
+  });
+
+  await executor.executePhonePlusCheck(getState());
+
+  const firstCookieQueryIndex = events.findIndex((event) => event.type === 'cookie-get-all');
+  const firstChatGptOpenIndex = events.findIndex((event) => event.type === 'tab-create');
+  assert.notEqual(firstCookieQueryIndex, -1);
+  assert.notEqual(firstChatGptOpenIndex, -1);
+  assert.equal(firstCookieQueryIndex < firstChatGptOpenIndex, true);
+
+  const queriedDomains = events
+    .filter((event) => event.type === 'cookie-get-all')
+    .map((event) => event.details.domain);
+  assert.ok(queriedDomains.includes('pay.openai.com'));
+  assert.ok(queriedDomains.includes('paypal.com'));
+  assert.ok(queriedDomains.includes('checkout.stripe.com'));
+  assert.ok(queriedDomains.includes('gopayapi.com'));
+  assert.ok(queriedDomains.includes('midtrans.com'));
+  assert.equal(queriedDomains.includes('chatgpt.com'), false);
+  assert.equal(queriedDomains.includes('auth.openai.com'), false);
+  assert.equal(queriedDomains.includes('accounts.openai.com'), false);
+
+  const removedCookieUrls = events
+    .filter((event) => event.type === 'cookie-remove')
+    .map((event) => event.details.url)
+    .sort();
+  assert.deepStrictEqual(removedCookieUrls, [
+    'https://checkout.stripe.com/',
+    'https://gopayapi.com/',
+    'https://pay.openai.com/c/pay',
+    'https://paypal.com/',
+  ]);
+
+  const browsingDataCall = events.find((event) => event.type === 'browsing-data-remove-cookies');
+  assert.ok(browsingDataCall);
+  assert.equal(browsingDataCall.details.since, 0);
+  assert.ok(browsingDataCall.details.origins.includes('https://pay.openai.com'));
+  assert.ok(browsingDataCall.details.origins.includes('https://www.paypal.com'));
+  assert.ok(browsingDataCall.details.origins.includes('https://checkout.stripe.com'));
+  assert.ok(browsingDataCall.details.origins.includes('https://gopayapi.com'));
+  assert.ok(browsingDataCall.details.origins.includes('https://app.midtrans.com'));
+  assert.equal(browsingDataCall.details.origins.includes('https://chatgpt.com'), false);
+  assert.equal(browsingDataCall.details.origins.includes('https://auth.openai.com'), false);
+  assert.equal(browsingDataCall.details.origins.includes('https://accounts.openai.com'), false);
+});
+
+test('Phone Plus plus-check continues when payment cookie cleanup is unavailable or partially fails', async () => {
+  const unavailableHarness = createPhonePlusCheckHarness({
+    planType: 'plus',
+    cookies: false,
+  });
+  await unavailableHarness.executor.executePhonePlusCheck(unavailableHarness.getState());
+  assert.ok(unavailableHarness.events.find((event) => event.type === 'complete' && event.step === 'plus-check'));
+  assert.equal(unavailableHarness.events.some((event) => event.type === 'tab-create'), true);
+  assert.equal(
+    unavailableHarness.events.some((event) => event.type === 'log' && /cookies API/.test(event.message) && event.level === 'warn'),
+    true
+  );
+
+  const partialFailureHarness = createPhonePlusCheckHarness({
+    planType: 'plus',
+    cookiesByDomain: {
+      'paypal.com': [
+        { domain: '.paypal.com', path: '/', name: 'paypal-session', storeId: 'store-a' },
+      ],
+    },
+    onCookieRemove: async () => null,
+  });
+  await partialFailureHarness.executor.executePhonePlusCheck(partialFailureHarness.getState());
+  assert.ok(partialFailureHarness.events.find((event) => event.type === 'complete' && event.step === 'plus-check'));
+  assert.equal(
+    partialFailureHarness.events.some((event) => event.type === 'log' && /cookies 删除失败/.test(event.message) && event.level === 'warn'),
+    true
+  );
 });
 
 for (const initialAttemptCount of [0, 1]) {

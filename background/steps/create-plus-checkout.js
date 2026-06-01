@@ -73,6 +73,38 @@
     'https://meiguodizhi.com',
     'https://mail-api.yuecheng.shop',
   ];
+  const PLUS_CHECK_PAYMENT_COOKIE_CLEAR_DOMAINS = [
+    'pay.openai.com',
+    'paypal.com',
+    'stripe.com',
+    'checkout.stripe.com',
+    'js.stripe.com',
+    'pm-redirects.stripe.com',
+    'gopayapi.com',
+    'gojek.com',
+    'midtrans.com',
+    'xendit.co',
+  ];
+  const PLUS_CHECK_PAYMENT_COOKIE_CLEAR_ORIGINS = [
+    'https://pay.openai.com',
+    'https://www.paypal.com',
+    'https://paypal.com',
+    'https://stripe.com',
+    'https://www.stripe.com',
+    'https://checkout.stripe.com',
+    'https://js.stripe.com',
+    'https://pm-redirects.stripe.com',
+    'https://gopayapi.com',
+    'https://pin-web-client.gopayapi.com',
+    'https://merchants-gws-app.gopayapi.com',
+    'https://gojek.com',
+    'https://www.gojek.com',
+    'https://midtrans.com',
+    'https://www.midtrans.com',
+    'https://app.midtrans.com',
+    'https://xendit.co',
+    'https://www.xendit.co',
+  ];
   const HOSTED_CHECKOUT_TRANSITION_TIMEOUT_MS = 120000;
   const HOSTED_CHECKOUT_PAYPAL_TIMEOUT_MS = 10 * 60 * 1000;
   const HOSTED_CHECKOUT_EMAIL_INPUT_STABLE_WAIT_MS = 5000;
@@ -354,6 +386,14 @@
       ));
     }
 
+    function shouldClearPlusCheckPaymentCookie(cookie) {
+      const domain = normalizeRetryCookieDomain(cookie?.domain);
+      if (!domain) return false;
+      return PLUS_CHECK_PAYMENT_COOKIE_CLEAR_DOMAINS.some((target) => (
+        domain === target || domain.endsWith(`.${target}`)
+      ));
+    }
+
     function buildPlusCheckoutRetryCookieRemovalUrl(cookie) {
       const host = normalizeRetryCookieDomain(cookie?.domain);
       const rawPath = String(cookie?.path || '/');
@@ -371,7 +411,7 @@
       ].join('|');
     }
 
-    async function collectPlusCheckoutRetryCookies() {
+    async function collectCookiesForDomains(domains = [], shouldClearCookie = () => true, options = {}) {
       if (!chrome?.cookies?.getAll) {
         return [];
       }
@@ -379,12 +419,13 @@
         ? await chrome.cookies.getAllCookieStores()
         : [{ id: undefined }];
       const queryDomains = Array.from(new Set(
-        PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_DOMAINS
+        (Array.isArray(domains) ? domains : [])
           .map((domain) => normalizeRetryCookieDomain(domain))
           .filter(Boolean)
       ));
       const cookies = [];
       const seen = new Set();
+      const logPrefix = String(options?.logPrefix || 'plus-cookie-cleanup').trim() || 'plus-cookie-cleanup';
 
       for (const store of stores || []) {
         const storeId = store?.id;
@@ -393,7 +434,7 @@
           try {
             batch = await chrome.cookies.getAll(storeId ? { storeId, domain } : { domain });
           } catch (error) {
-            console.warn('[MultiPage:plus-checkout-retry] query cookies failed', {
+            console.warn(`[MultiPage:${logPrefix}] query cookies failed`, {
               storeId: storeId || '',
               domain,
               message: error?.message || String(error || 'unknown error'),
@@ -401,7 +442,7 @@
             continue;
           }
           for (const cookie of batch || []) {
-            if (!shouldClearPlusCheckoutRetryCookie(cookie)) continue;
+            if (!shouldClearCookie(cookie)) continue;
             const key = buildPlusCheckoutRetryCookieKey(cookie, storeId);
             if (seen.has(key)) continue;
             seen.add(key);
@@ -413,7 +454,23 @@
       return cookies;
     }
 
-    async function removePlusCheckoutRetryCookie(cookie) {
+    async function collectPlusCheckoutRetryCookies() {
+      return collectCookiesForDomains(
+        PLUS_CHECKOUT_RETRY_COOKIE_CLEAR_DOMAINS,
+        shouldClearPlusCheckoutRetryCookie,
+        { logPrefix: 'plus-checkout-retry' }
+      );
+    }
+
+    async function collectPlusCheckPaymentCookies() {
+      return collectCookiesForDomains(
+        PLUS_CHECK_PAYMENT_COOKIE_CLEAR_DOMAINS,
+        shouldClearPlusCheckPaymentCookie,
+        { logPrefix: 'plus-check-payment-cookie-cleanup' }
+      );
+    }
+
+    async function removePlusCookie(cookie, options = {}) {
       if (!chrome?.cookies?.remove) {
         return false;
       }
@@ -431,13 +488,22 @@
         const result = await chrome.cookies.remove(details);
         return Boolean(result);
       } catch (error) {
-        console.warn('[MultiPage:plus-checkout-retry] remove cookie failed', {
+        const logPrefix = String(options?.logPrefix || 'plus-cookie-cleanup').trim() || 'plus-cookie-cleanup';
+        console.warn(`[MultiPage:${logPrefix}] remove cookie failed`, {
           domain: cookie?.domain,
           name: cookie?.name,
           message: error?.message || String(error || 'unknown error'),
         });
         return false;
       }
+    }
+
+    async function removePlusCheckoutRetryCookie(cookie) {
+      return removePlusCookie(cookie, { logPrefix: 'plus-checkout-retry' });
+    }
+
+    async function removePlusCheckPaymentCookie(cookie) {
+      return removePlusCookie(cookie, { logPrefix: 'plus-check-payment-cookie-cleanup' });
     }
 
     function isPlusCheckoutRetryPaymentTabUrl(url = '') {
@@ -554,6 +620,38 @@
           await addLog(`步骤 6：Plus Checkout 重试前 browsingData 补扫 cookies 失败：${error?.message || String(error || '未知错误')}`, 'warn');
         }
       }
+      return removedCount;
+    }
+
+    async function clearPlusCheckPaymentCookies() {
+      if (!chrome?.cookies?.getAll || !chrome?.cookies?.remove) {
+        await addLog('Plus Check：无法访问 cookies API，跳过支付 cookies 清理。', 'warn', { nodeId: 'plus-check' });
+        return 0;
+      }
+      const cookies = await collectPlusCheckPaymentCookies();
+      let removedCount = 0;
+      let failedCount = 0;
+      for (const cookie of cookies) {
+        if (await removePlusCheckPaymentCookie(cookie)) {
+          removedCount += 1;
+        } else {
+          failedCount += 1;
+        }
+      }
+      if (failedCount > 0) {
+        await addLog(`Plus Check：有 ${failedCount} 个支付 cookies 删除失败，继续检查 Plus 状态。`, 'warn', { nodeId: 'plus-check' });
+      }
+      if (chrome.browsingData?.removeCookies) {
+        try {
+          await chrome.browsingData.removeCookies({
+            since: 0,
+            origins: PLUS_CHECK_PAYMENT_COOKIE_CLEAR_ORIGINS,
+          });
+        } catch (error) {
+          await addLog(`Plus Check：browsingData 补扫支付 cookies 失败：${error?.message || String(error || '未知错误')}`, 'warn', { nodeId: 'plus-check' });
+        }
+      }
+      await addLog(`Plus Check：开始检查前已清理支付 cookies（删除 ${removedCount} 个）。`, 'info', { nodeId: 'plus-check' });
       return removedCount;
     }
 
@@ -7511,6 +7609,12 @@
         'info',
         { nodeId: 'plus-check' }
       );
+
+      try {
+        await clearPlusCheckPaymentCookies();
+      } catch (error) {
+        await addLog(`Plus Check：清理支付 cookies 失败，继续检查 Plus 状态：${getErrorMessage(error)}`, 'warn', { nodeId: 'plus-check' });
+      }
 
       let inspection = null;
       let failureReason = '';
