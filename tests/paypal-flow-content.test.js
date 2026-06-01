@@ -371,6 +371,13 @@ function createHostedPayPalHarness(options = {}) {
       nextSibling: null,
       isConnected: false,
       style: { display: 'block', visibility: 'visible', opacity: '1' },
+      querySelector(selector) {
+        const text = String(selector || '');
+        if (text === 'label') {
+          return this.children?.find?.((child) => child.tagName === 'LABEL') || null;
+        }
+        return null;
+      },
       getAttribute(key) {
         if (key === 'id') return this.id;
         if (key === 'type') return this.type;
@@ -395,6 +402,11 @@ function createHostedPayPalHarness(options = {}) {
       blur() {},
       click() {
         events.push({ type: 'native-click', id: this.id, text: this.textContent });
+        if (this.type === 'checkbox') {
+          this.checked = !this.checked;
+        } else if (this.type === 'radio') {
+          this.checked = true;
+        }
       },
       remove() {
         events.push({ type: 'remove', id: this.id });
@@ -421,6 +433,7 @@ function createHostedPayPalHarness(options = {}) {
     options: [
       { textContent: 'Germany', label: 'Germany', value: 'DE' },
       { textContent: 'United States', label: 'United States', value: 'US' },
+      { textContent: 'Brasil', label: 'Brasil', value: 'BR' },
     ],
   });
   const emailInput = createDomElement({ tagName: 'INPUT', id: 'email', type: 'email', name: 'email' });
@@ -443,7 +456,63 @@ function createHostedPayPalHarness(options = {}) {
     options: [
       { textContent: 'New York', label: 'New York', value: 'NY' },
       { textContent: 'California', label: 'California', value: 'CA' },
+      { textContent: 'Sao Paulo', label: 'Sao Paulo', value: 'SP' },
+      { textContent: 'SP', label: 'SP', value: 'SP' },
     ],
+  });
+  const phoneTypeSelect = createDomElement({
+    tagName: 'SELECT',
+    id: 'phoneType',
+    name: 'phoneType',
+    value: '',
+    attrs: { 'aria-label': 'Tipo de telefone' },
+    options: [
+      { textContent: 'Celular', label: 'Celular', value: 'mobile' },
+      { textContent: 'Residencial', label: 'Residencial', value: 'home' },
+    ],
+  });
+  const creditRadio = createDomElement({
+    tagName: 'INPUT',
+    id: 'credit',
+    type: 'radio',
+    name: 'cardType',
+    attrs: { 'aria-label': 'Crédito' },
+  });
+  const debitRadio = createDomElement({
+    tagName: 'INPUT',
+    id: 'debit',
+    type: 'radio',
+    name: 'cardType',
+    attrs: { 'aria-label': 'Débito' },
+  });
+  const brazilCepInput = createDomElement({ tagName: 'INPUT', id: 'postal-code-br', type: 'text', attrs: { placeholder: 'CEP' } });
+  const brazilAddressInput = createDomElement({ tagName: 'INPUT', id: 'address-br', type: 'text', attrs: { placeholder: 'Endereço' } });
+  const brazilNumberInput = createDomElement({ tagName: 'INPUT', id: 'number-br', type: 'text', attrs: { placeholder: 'Nº' } });
+  const brazilNeighborhoodInput = createDomElement({ tagName: 'INPUT', id: 'bairro-br', type: 'text', attrs: { placeholder: 'Distrito/Bairro (opcional)' } });
+  const brazilCityInput = createDomElement({ tagName: 'INPUT', id: 'city-br', type: 'text', attrs: { placeholder: 'Cidade' } });
+  const brazilStateSelect = createDomElement({
+    tagName: 'SELECT',
+    id: 'state-br',
+    value: '',
+    attrs: { 'aria-label': 'Estado' },
+    options: [
+      { textContent: 'Sao Paulo', label: 'Sao Paulo', value: 'SP' },
+      { textContent: 'Rio de Janeiro', label: 'Rio de Janeiro', value: 'RJ' },
+    ],
+  });
+  const brazilBirthdayInput = createDomElement({ tagName: 'INPUT', id: 'birth-br', type: 'text', attrs: { placeholder: 'Data de nascimento' } });
+  const brazilCpfInput = createDomElement({ tagName: 'INPUT', id: 'cpf-br', type: 'text', attrs: { placeholder: 'CPF' } });
+  const brazilRequiredTermsCheckbox = createDomElement({
+    tagName: 'INPUT',
+    id: 'terms-br',
+    type: 'checkbox',
+    attrs: { 'aria-label': 'Você confirma que leu, aceita e concorda com o Contrato do Usuário e com a Declaração de Privacidade do PayPal, e que é maior de idade.' },
+  });
+  const brazilMarketingCheckbox = createDomElement({
+    tagName: 'INPUT',
+    id: 'marketing-br',
+    type: 'checkbox',
+    attrs: { 'aria-label': 'Receber promoções e ofertas do PayPal.' },
   });
   const submitButton = createDomElement({
     tagName: 'BUTTON',
@@ -583,8 +652,42 @@ function createHostedPayPalHarness(options = {}) {
     location.href = 'https://www.paypal.com/checkoutweb/signup';
     location.host = 'www.paypal.com';
     location.pathname = '/checkoutweb/signup';
-    body.innerText = 'Pay with debit or credit card';
+    body.innerText = options.brazil
+      ? 'Pague com cartão de débito ou de crédito Brasil CEP Endereço Nº Distrito/Bairro Cidade Estado Data de nascimento CPF Contrato do Usuário Declaração de Privacidade'
+      : 'Pay with debit or credit card';
     body.textContent = body.innerText;
+    if (options.brazil) {
+      firstNameInput.setAttribute('placeholder', 'Nome');
+      lastNameInput.setAttribute('placeholder', 'Sobrenome');
+      passwordInput.setAttribute('placeholder', 'Criar senha');
+      setElements([
+        countrySelect,
+        emailInput,
+        phoneTypeSelect,
+        phoneInput,
+        debitRadio,
+        creditRadio,
+        cardNumberInput,
+        cardExpiryInput,
+        cardCvvInput,
+        firstNameInput,
+        lastNameInput,
+        brazilCepInput,
+        brazilAddressInput,
+        brazilNumberInput,
+        brazilNeighborhoodInput,
+        brazilCityInput,
+        brazilStateSelect,
+        passwordInput,
+        brazilBirthdayInput,
+        brazilCpfInput,
+        brazilRequiredTermsCheckbox,
+        brazilMarketingCheckbox,
+        ...(options.addressSuggestions ? [createAccountSuggestionContainer, createAccountSuggestionList, createAccountSuggestionButton0, createAccountSuggestionButton1] : []),
+        submitButton,
+      ]);
+      return;
+    }
     setElements([
       countrySelect,
       emailInput,
@@ -761,6 +864,10 @@ function createHostedPayPalHarness(options = {}) {
       },
       querySelector(selector) {
         const text = String(selector || '');
+        const labelForMatch = text.match(/^label\[for="(.+)"\]$/);
+        if (labelForMatch) {
+          return elements.find((element) => element.tagName === 'LABEL' && element.getAttribute('for') === labelForMatch[1]) || null;
+        }
         if (text === '#captcha-standalone') {
           return elements.includes(captchaOverlay) ? captchaOverlay : null;
         }
@@ -778,7 +885,21 @@ function createHostedPayPalHarness(options = {}) {
       querySelectorAll(selector) {
         const text = String(selector || '');
         if (text === '*') return elements.slice();
+        if (text.includes(',')) {
+          const seen = new Set();
+          return text.split(',')
+            .flatMap((part) => this.querySelectorAll(part.trim()))
+            .filter((element) => {
+              if (seen.has(element)) return false;
+              seen.add(element);
+              return true;
+            });
+        }
         if (text === 'input') return elements.filter((element) => element.tagName === 'INPUT');
+        if (text === 'textarea') return elements.filter((element) => element.tagName === 'TEXTAREA');
+        if (text === 'select') return elements.filter((element) => element.tagName === 'SELECT');
+        if (text.includes('input[type="checkbox"]')) return elements.filter((element) => element.tagName === 'INPUT' && element.type === 'checkbox');
+        if (text.includes('input[type="radio"]')) return elements.filter((element) => element.tagName === 'INPUT' && element.type === 'radio');
         if (text === 'input[type="email"]') return elements.filter((element) => element.type === 'email');
         if (text === 'input[type="password"]') return elements.filter((element) => element.type === 'password');
         if (text === 'input[type="tel"]') return elements.filter((element) => element.tagName === 'INPUT' && element.type === 'tel');
@@ -793,6 +914,30 @@ function createHostedPayPalHarness(options = {}) {
         }
         if (text.includes('inputmode') && text.includes('tel')) {
           return elements.filter((element) => element.tagName === 'INPUT' && /^tel$/i.test(element.getAttribute('inputmode') || ''));
+        }
+        if (text.includes('cpf')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /cpf/i.test([
+            element.id,
+            element.name,
+            element.getAttribute('placeholder'),
+            element.getAttribute('aria-label'),
+          ].filter(Boolean).join(' ')));
+        }
+        if (text.includes('document')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /document|cpf|cnpj/i.test([
+            element.id,
+            element.name,
+            element.getAttribute('placeholder'),
+            element.getAttribute('aria-label'),
+          ].filter(Boolean).join(' ')));
+        }
+        if (text.includes('tax')) {
+          return elements.filter((element) => element.tagName === 'INPUT' && /tax|cpf|cnpj/i.test([
+            element.id,
+            element.name,
+            element.getAttribute('placeholder'),
+            element.getAttribute('aria-label'),
+          ].filter(Boolean).join(' ')));
         }
         if (text.includes('addressSuggestionContainer') || text.includes('suggestedAddressList') || text.includes('Auto-suggested address')) {
           return elements.filter((element) => (
@@ -934,6 +1079,21 @@ function createHostedPayPalHarness(options = {}) {
     send,
     setElements,
     elements: () => elements.slice(),
+    brazil: {
+      phoneTypeSelect,
+      creditRadio,
+      debitRadio,
+      cepInput: brazilCepInput,
+      addressInput: brazilAddressInput,
+      numberInput: brazilNumberInput,
+      neighborhoodInput: brazilNeighborhoodInput,
+      cityInput: brazilCityInput,
+      stateSelect: brazilStateSelect,
+      birthdayInput: brazilBirthdayInput,
+      cpfInput: brazilCpfInput,
+      requiredTermsCheckbox: brazilRequiredTermsCheckbox,
+      marketingCheckbox: brazilMarketingCheckbox,
+    },
     showBlockedPage,
     showCaptchaOverlay,
     showGuestCardError,
@@ -1178,6 +1338,74 @@ test('PayPal hosted guest checkout accepts profile address aliases', async () =>
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
 });
 
+test('PayPal hosted guest checkout fills Brazil-specific profile fields and required terms', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => value,
+  });
+  harness.showGuestCheckout({ brazil: true });
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      countryCode: 'BR',
+      generatedFromCountry: 'BR',
+      email: 'guest.br@example.com',
+      phone: '+5511987654321',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      cardType: 'credit',
+      password: 'Aa1!example',
+      firstName: 'Lucas',
+      lastName: 'Silva',
+      birthday: '2001-02-03',
+      cpf: '529.982.247-25',
+      documentNumber: '529.982.247-25',
+      address: {
+        countryCode: 'BR',
+        street: 'Rua Haddock Lobo 1307',
+        streetName: 'Rua Haddock Lobo',
+        number: '1307',
+        neighborhood: 'Jardins',
+        city: 'Sao Paulo',
+        state: 'Sao Paulo',
+        stateCode: 'SP',
+        zip: '01414-003',
+        postalCode: '01414-003',
+        cpf: '529.982.247-25',
+        documentNumber: '529.982.247-25',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, true);
+  assert.equal(result.phoneMatched, true);
+  assert.equal(result.brazilPhoneTypeSelected, true);
+  assert.equal(result.brazilCardTypeSelected, true);
+  assert.equal(result.brazilBirthdayFilled, true);
+  assert.equal(result.brazilTermsChecked, true);
+  assert.equal(result.brazilMarketingTermsSkipped, true);
+  assert.equal(result.brazilRequiredFieldsReady, true);
+  assert.equal(harness.countrySelect.value, 'BR');
+  assert.equal(harness.brazil.phoneTypeSelect.value, 'mobile');
+  assert.equal(harness.brazil.creditRadio.checked, true);
+  assert.equal(harness.brazil.debitRadio.checked, false);
+  assert.equal(harness.brazil.cepInput.value, '01414-003');
+  assert.equal(harness.brazil.addressInput.value, 'Rua Haddock Lobo');
+  assert.equal(harness.brazil.numberInput.value, '1307');
+  assert.equal(harness.brazil.neighborhoodInput.value, 'Jardins');
+  assert.equal(harness.brazil.cityInput.value, 'Sao Paulo');
+  assert.equal(harness.brazil.stateSelect.value, 'SP');
+  assert.equal(harness.brazil.birthdayInput.value, '03/02/2001');
+  assert.equal(harness.brazil.cpfInput.value, '529.982.247-25');
+  assert.equal(harness.brazil.requiredTermsCheckbox.checked, true);
+  assert.equal(harness.brazil.marketingCheckbox.checked, false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
 test('PayPal hosted guest checkout address-only retry only refills billing address', async () => {
   const harness = createHostedPayPalHarness();
   harness.showGuestCheckout();
@@ -1256,7 +1484,7 @@ test('PayPal hosted guest checkout fails when visible country select cannot swit
   });
 
   assert.equal(result.ok, undefined);
-  assert.match(result.error, /country dropdown does not contain United States/);
+  assert.match(result.error, /country dropdown does not contain (?:United States|US)/);
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
 });
 

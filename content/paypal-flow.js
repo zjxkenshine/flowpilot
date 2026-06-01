@@ -158,6 +158,44 @@ function getActionText(el) {
   ].filter(Boolean).join(' '));
 }
 
+function getElementLabelText(el = null) {
+  if (!el || el.nodeType !== 1) {
+    return '';
+  }
+  const parts = [
+    getActionText(el),
+    el.getAttribute?.('data-testid'),
+    el.getAttribute?.('autocomplete'),
+    el.getAttribute?.('inputmode'),
+  ];
+  const id = String(el.id || '').trim();
+  if (id) {
+    const escapedId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(id)
+      : id.replace(/["\\]/g, '\\$&');
+    const directLabel = document.querySelector?.(`label[for="${escapedId}"]`);
+    if (directLabel) {
+      parts.push(directLabel.textContent, directLabel.getAttribute?.('aria-label'));
+    }
+  }
+  let node = el.parentElement;
+  let depth = 0;
+  while (node && node.nodeType === 1 && node !== document.body && depth < 4) {
+    if (/label/i.test(String(node.tagName || ''))) {
+      parts.push(node.textContent, node.getAttribute?.('aria-label'));
+    } else {
+      parts.push(node.getAttribute?.('aria-label'), node.getAttribute?.('title'));
+      const label = node.querySelector?.('label');
+      if (label) {
+        parts.push(label.textContent, label.getAttribute?.('aria-label'));
+      }
+    }
+    node = node.parentElement;
+    depth += 1;
+  }
+  return normalizeText(parts.filter(Boolean).join(' '));
+}
+
 function getVisibleControls(selector) {
   return Array.from(document.querySelectorAll(selector)).filter(isVisibleElement);
 }
@@ -895,6 +933,119 @@ function fillFirstHostedInputByIds(ids = [], value = '') {
   return false;
 }
 
+function getVisibleHostedInputs() {
+  return getVisibleControls('input, textarea')
+    .filter((input) => {
+      const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+      return isEnabledControl(input)
+        && !['hidden', 'checkbox', 'radio', 'submit', 'button', 'file'].includes(type);
+    });
+}
+
+function findHostedInputByText(patterns = [], options = {}) {
+  const normalizedPatterns = (Array.isArray(patterns) ? patterns : [patterns]).filter(Boolean);
+  if (!normalizedPatterns.length) {
+    return null;
+  }
+  const exclude = typeof options.exclude === 'function' ? options.exclude : () => false;
+  return getVisibleHostedInputs().find((input) => {
+    if (exclude(input)) return false;
+    const text = getElementLabelText(input);
+    return normalizedPatterns.some((pattern) => pattern.test(text));
+  }) || null;
+}
+
+function fillHostedInputByText(patterns = [], value = '', options = {}) {
+  const input = findHostedInputByText(patterns, options);
+  if (!input) {
+    return {
+      found: false,
+      filled: false,
+      descriptor: '',
+    };
+  }
+  fillInput(input, String(value || ''));
+  return {
+    found: true,
+    filled: true,
+    descriptor: getHostedInputDescriptor(input),
+  };
+}
+
+function getVisibleHostedSelects() {
+  return getVisibleControls('select').filter(isEnabledControl);
+}
+
+function selectHostedOption(select = null, optionPatterns = []) {
+  const normalizedPatterns = (Array.isArray(optionPatterns) ? optionPatterns : [optionPatterns]).filter(Boolean);
+  if (!select || !normalizedPatterns.length) {
+    return false;
+  }
+  const option = Array.from(select.options || []).find((item) => {
+    const text = normalizeText([
+      item.textContent,
+      item.label,
+      item.value,
+    ].filter(Boolean).join(' '));
+    return normalizedPatterns.some((pattern) => pattern.test(text));
+  });
+  if (!option) {
+    return false;
+  }
+  select.value = option.value;
+  option.selected = true;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function selectHostedOptionByText(selectPatterns = [], optionPatterns = []) {
+  const normalizedSelectPatterns = (Array.isArray(selectPatterns) ? selectPatterns : [selectPatterns]).filter(Boolean);
+  const select = getVisibleHostedSelects().find((candidate) => {
+    const text = getElementLabelText(candidate);
+    return normalizedSelectPatterns.some((pattern) => pattern.test(text));
+  }) || null;
+  return {
+    found: Boolean(select),
+    selected: selectHostedOption(select, optionPatterns),
+  };
+}
+
+function getHostedRadioOrCheckboxText(el = null) {
+  return getElementLabelText(el);
+}
+
+function clickHostedChoiceByText(patterns = [], options = {}) {
+  const normalizedPatterns = (Array.isArray(patterns) ? patterns : [patterns]).filter(Boolean);
+  const controls = getVisibleControls('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"], label, button, [role="button"]')
+    .filter((el) => isEnabledControl(el));
+  const target = controls.find((el) => {
+    const text = getHostedRadioOrCheckboxText(el);
+    return normalizedPatterns.some((pattern) => pattern.test(text));
+  }) || null;
+  if (!target) {
+    return {
+      found: false,
+      clicked: false,
+      checked: false,
+      descriptor: '',
+    };
+  }
+  const alreadyChecked = target.checked === true || target.getAttribute?.('aria-checked') === 'true';
+  if (!alreadyChecked || options.force === true) {
+    simulateClick(target);
+    if ('checked' in target && /checkbox|radio/i.test(String(target.type || ''))) {
+      target.checked = true;
+    }
+  }
+  return {
+    found: true,
+    clicked: !alreadyChecked || options.force === true,
+    checked: target.checked === true || target.getAttribute?.('aria-checked') === 'true' || alreadyChecked,
+    descriptor: getHostedInputDescriptor(target),
+  };
+}
+
 const PAYPAL_HOSTED_ADDRESS_LINE1_IDS = [
   'billingLine1',
   'billingAddressLine1',
@@ -1059,6 +1210,13 @@ function fillHostedAddressFields(address = {}) {
   const city = source.city || source.locality || source.billingCity || '';
   const zip = source.zip || source.postalCode || source.postcode || source.billingPostalCode || '';
   const state = source.state || source.region || source.administrativeArea || source.billingState || '';
+  const countryCode = normalizeHostedCountryCode(source.countryCode || source.country || '') || '';
+  if (countryCode === 'BR') {
+    const brazilResult = fillHostedBrazilAddressFields(source);
+    if (brazilResult.filledAny) {
+      return brazilResult;
+    }
+  }
   const filled = {
     street: fillFirstHostedInputByIds([
       'billingLine1',
@@ -1090,6 +1248,59 @@ function fillHostedAddressFields(address = {}) {
   };
   return {
     attempted: Boolean(street || city || zip || state),
+    filledAny: Object.values(filled).some(Boolean),
+    ...filled,
+  };
+}
+
+function getHostedBrazilAddressValues(address = {}) {
+  const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+  const street = normalizeText(source.streetName || source.streetLine || source.addressLine || source.address1 || source.street || '');
+  const streetName = normalizeText(source.streetName || source.streetLine || '');
+  const number = normalizeText(source.number || source.streetNumber || '');
+  let parsedStreetName = streetName;
+  let parsedNumber = number;
+  if (!parsedStreetName || !parsedNumber) {
+    const match = street.match(/^(.+?)\s+([A-Za-z0-9-]+)\s*$/);
+    if (match && /\d/.test(match[2])) {
+      parsedStreetName = parsedStreetName || match[1].trim();
+      parsedNumber = parsedNumber || match[2].trim();
+    }
+  }
+  return {
+    street: parsedStreetName || street,
+    number: parsedNumber,
+    neighborhood: normalizeText(source.neighborhood || source.bairro || source.district || ''),
+    city: normalizeText(source.city || source.locality || source.billingCity || ''),
+    state: normalizeText(source.stateCode || source.uf || source.state || source.region || source.administrativeArea || source.billingState || ''),
+    zip: normalizeText(source.zip || source.postalCode || source.postcode || source.billingPostalCode || source.cep || ''),
+  };
+}
+
+function fillHostedBrazilAddressFields(address = {}) {
+  const values = getHostedBrazilAddressValues(address);
+  const filled = {
+    zip: fillHostedInputByText([/\bcep\b|postal|zip/i], values.zip).filled,
+    street: fillHostedInputByText([/endere[cç]o|address|logradouro/i], values.street, {
+      exclude: (input) => /cep|postal|zip|bairro|distrito|city|cidade|estado|state|(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number/i.test(getElementLabelText(input)),
+    }).filled,
+    number: fillHostedInputByText([/(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number|street\s*number/i], values.number, {
+      exclude: (input) => /card|cart[aã]o|cvv|cvc|csc|security|phone|telefone|celular|cpf|cnpj|document/i.test(getElementLabelText(input)),
+    }).filled,
+    neighborhood: fillHostedInputByText([/distrito|bairro|neighbou?rhood|district/i], values.neighborhood).filled,
+    city: fillHostedInputByText([/cidade|city|locality/i], values.city).filled,
+    state: values.state
+      ? selectHostedOptionByText([/estado|state|uf|region/i], [
+        new RegExp(`^${values.state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+        new RegExp(values.state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+      ]).selected
+      : false,
+  };
+  if (!filled.state) {
+    filled.state = fillHostedInputByText([/estado|state|uf|region/i], values.state).filled;
+  }
+  return {
+    attempted: Object.values(values).some(Boolean),
     filledAny: Object.values(filled).some(Boolean),
     ...filled,
   };
@@ -1183,6 +1394,182 @@ function fillHostedDocumentIfPresent(payload = {}, address = {}) {
     found: true,
     filled: false,
     descriptor: getHostedInputDescriptor(input),
+  };
+}
+
+function findHostedBrazilDocumentInput() {
+  return findHostedDocumentInput();
+}
+
+function normalizeHostedBrazilBirthday(value = '') {
+  const raw = normalizeText(value);
+  const digits = raw.replace(/\D/g, '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-');
+    return `${day}/${month}/${year}`;
+  }
+  if (/^\d{8}$/.test(digits)) {
+    if (/^(19|20)\d{2}/.test(digits)) {
+      return `${digits.slice(6, 8)}/${digits.slice(4, 6)}/${digits.slice(0, 4)}`;
+    }
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+  }
+  return raw;
+}
+
+function fillHostedBrazilBirthday(payload = {}) {
+  const birthday = normalizeHostedBrazilBirthday(payload.birthday || '');
+  if (!birthday) {
+    return {
+      attempted: false,
+      found: false,
+      filled: false,
+    };
+  }
+  const result = fillHostedInputByText([
+    /data\s+de\s+nascimento|nascimento|birth\s*date|birthday|date\s+of\s+birth/i,
+  ], birthday);
+  return {
+    attempted: true,
+    found: result.found,
+    filled: result.filled,
+    descriptor: result.descriptor,
+  };
+}
+
+function fillHostedBrazilPhoneType() {
+  return selectHostedOptionByText([/tipo\s+de\s+telefone|phone\s*type|telefone/i], [/celular|mobile|cell/i]);
+}
+
+function selectHostedBrazilCardType(payload = {}) {
+  const requested = normalizeText(payload.cardType || 'credit').toLowerCase();
+  const patterns = requested === 'debit' || requested === 'debito' || requested === 'débito'
+    ? [/d[eé]bito|debit/i]
+    : [/cr[eé]dito|credit/i];
+  return clickHostedChoiceByText(patterns);
+}
+
+function getVisibleHostedCheckboxes() {
+  return getVisibleControls('input[type="checkbox"], [role="checkbox"]').filter(isEnabledControl);
+}
+
+function checkHostedBrazilRequiredTerms() {
+  const checkboxes = getVisibleHostedCheckboxes();
+  let found = false;
+  let checked = false;
+  let skippedMarketing = false;
+  for (const checkbox of checkboxes) {
+    const text = getElementLabelText(checkbox);
+    if (/promo[cç][oõ]es|ofertas|marketing|receber|alterar\s+essa\s+configura[cç][aã]o|promotions|offers/i.test(text)) {
+      skippedMarketing = true;
+      continue;
+    }
+    const isRequiredTerms = /contrato\s+do\s+usu[aá]rio|declara[cç][aã]o\s+de\s+privacidade|maior\s+de\s+idade|user\s+agreement|privacy\s+statement|terms/i.test(text);
+    if (!isRequiredTerms) {
+      continue;
+    }
+    found = true;
+    if (checkbox.checked !== true && checkbox.getAttribute?.('aria-checked') !== 'true') {
+      simulateClick(checkbox);
+      if ('checked' in checkbox) {
+        checkbox.checked = true;
+      }
+    }
+    checked = checkbox.checked === true || checkbox.getAttribute?.('aria-checked') === 'true';
+  }
+  return {
+    found,
+    checked,
+    skippedMarketing,
+  };
+}
+
+function isHostedBrazilProfile(payload = {}, address = {}) {
+  const countryCode = normalizeHostedCountryCode(
+    address?.countryCode
+    || address?.country
+    || payload?.countryCode
+    || payload?.generatedFromCountry
+    || ''
+  );
+  if (countryCode === 'BR') {
+    return true;
+  }
+  const pageText = normalizeText(document.body?.innerText || document.body?.textContent || '');
+  return /\bCPF\b|\bCEP\b|Data\s+de\s+nascimento|Distrito\/Bairro|Pa[ií]s\s+Brasil/i.test(pageText);
+}
+
+function fillHostedBrazilGuestFields(payload = {}, address = {}, values = {}) {
+  const phoneTypeResult = fillHostedBrazilPhoneType();
+  const cardTypeResult = selectHostedBrazilCardType(payload);
+  const firstNameResult = fillHostedInputByText([/(?:^|\s)nome(?:\s|$)|first\s*name|given\s*name/i], values.firstName || payload.firstName || '', {
+    exclude: (input) => /sobrenome|last\s*name|family\s*name/i.test(getElementLabelText(input)),
+  });
+  const lastNameResult = fillHostedInputByText([/sobrenome|last\s*name|family\s*name/i], values.lastName || payload.lastName || '');
+  const passwordResult = fillHostedInputByText([/criar\s+senha|senha|password/i], values.password || payload.password || '');
+  const birthdayResult = fillHostedBrazilBirthday(payload);
+  const addressResult = fillHostedBrazilAddressFields(address);
+  const documentResult = fillHostedDocumentIfPresent(payload, address);
+  const termsResult = checkHostedBrazilRequiredTerms();
+  return {
+    phoneTypeSelected: Boolean(phoneTypeResult.selected),
+    phoneTypeFound: Boolean(phoneTypeResult.found),
+    cardTypeFound: Boolean(cardTypeResult.found),
+    cardTypeSelected: Boolean(cardTypeResult.found),
+    firstNameFilled: Boolean(firstNameResult.filled),
+    lastNameFilled: Boolean(lastNameResult.filled),
+    passwordFilled: Boolean(passwordResult.filled),
+    birthdayInputFound: Boolean(birthdayResult.found),
+    birthdayFilled: Boolean(birthdayResult.filled),
+    addressFillResult: addressResult,
+    documentFillResult: documentResult,
+    termsFound: Boolean(termsResult.found),
+    termsChecked: Boolean(termsResult.checked),
+    marketingTermsSkipped: Boolean(termsResult.skippedMarketing),
+  };
+}
+
+function assertHostedBrazilRequiredFieldsBeforeSubmit(payload = {}, address = {}) {
+  const missing = [];
+  const documentInput = findHostedBrazilDocumentInput();
+  if (documentInput && !normalizeText(documentInput.value || '')) {
+    missing.push('CPF');
+  }
+  const addressChecks = [
+    [[/endere[cç]o|address|logradouro/i], 'Endereço'],
+    [[/(?:^|\s)n[ºo°](?:\s|$)|n[úu]mero|number|street\s*number/i], 'Nº'],
+    [[/cidade|city|locality/i], 'Cidade'],
+    [[/cep|postal|zip/i], 'CEP'],
+  ];
+  addressChecks.forEach(([patterns, label]) => {
+    const input = findHostedInputByText(patterns, label === 'Nº'
+      ? { exclude: (candidate) => /card|cart[aã]o|cvv|cvc|csc|security|phone|telefone|celular|cpf|cnpj|document/i.test(getElementLabelText(candidate)) }
+      : {});
+    if (input && !normalizeText(input.value || '')) {
+      missing.push(label);
+    }
+  });
+  const stateInput = findHostedInputByText([/estado|state|uf|region/i]);
+  const stateSelect = getVisibleHostedSelects().find((select) => /estado|state|uf|region/i.test(getElementLabelText(select))) || null;
+  if (stateInput && !normalizeText(stateInput.value || '')) {
+    missing.push('Estado');
+  }
+  if (stateSelect && !normalizeText(stateSelect.value || '')) {
+    missing.push('Estado');
+  }
+  const terms = getVisibleHostedCheckboxes().find((checkbox) => {
+    const text = getElementLabelText(checkbox);
+    return /contrato\s+do\s+usu[aá]rio|declara[cç][aã]o\s+de\s+privacidade|maior\s+de\s+idade|user\s+agreement|privacy\s+statement|terms/i.test(text)
+      && !/promo[cç][oõ]es|ofertas|marketing|receber|promotions|offers/i.test(text);
+  }) || null;
+  if (terms && terms.checked !== true && terms.getAttribute?.('aria-checked') !== 'true') {
+    missing.push('termos obrigatórios');
+  }
+  if (missing.length) {
+    throw new Error(`PayPal hosted checkout Brazil required fields are empty before submit: ${Array.from(new Set(missing)).join(', ')}.`);
+  }
+  return {
+    brazilRequiredFieldsReady: true,
   };
 }
 
@@ -1606,6 +1993,7 @@ async function fillHostedGuestCheckout(payload = {}) {
   await waitForDocumentComplete();
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
   const countryCode = normalizeHostedCountryCode(address.countryCode || payload.countryCode || payload.generatedFromCountry || 'US') || 'US';
+  const isBrazil = isHostedBrazilProfile(payload, address);
   const countryResult = selectHostedCountryById('country', countryCode);
   if (countryResult.missing) {
     throw new Error(`PayPal hosted checkout country dropdown does not contain ${countryCode}.`);
@@ -1616,6 +2004,7 @@ async function fillHostedGuestCheckout(payload = {}) {
   if (payload.addressOnly === true) {
     const addressFillResult = fillHostedAddressFields(address);
     const documentFillResult = fillHostedDocumentIfPresent(payload, address);
+    const brazilTermsResult = isBrazil ? checkHostedBrazilRequiredTerms() : null;
     const addressSuggestionResult = payload.useAddressSuggestionFallback === true
       ? await selectHostedAddressSuggestionFallback()
       : {
@@ -1624,6 +2013,7 @@ async function fillHostedGuestCheckout(payload = {}) {
         addressSuggestionSelectedText: '',
         addressSuggestionError: '',
       };
+    const brazilRequiredResult = isBrazil ? assertHostedBrazilRequiredFieldsBeforeSubmit(payload, address) : null;
     const clickResult = await clickHostedSubmitButton({
       stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
       label: 'hosted-paypal-address-submit',
@@ -1637,6 +2027,9 @@ async function fillHostedGuestCheckout(payload = {}) {
       addressFillResult,
       hostedDocumentInputFound: Boolean(documentFillResult?.found),
       hostedDocumentFilled: Boolean(documentFillResult?.filled),
+      brazilTermsFound: Boolean(brazilTermsResult?.found),
+      brazilTermsChecked: Boolean(brazilTermsResult?.checked),
+      ...(brazilRequiredResult || {}),
       clicked: Boolean(clickResult?.clicked),
       ...addressSuggestionResult,
     };
@@ -1680,6 +2073,7 @@ async function fillHostedGuestCheckout(payload = {}) {
     }
     return phoneFill;
   };
+  let brazilFillResult = null;
   const phonePostFillCheckDelayMs = Math.max(
     0,
     Math.floor(Number(payload.phonePostFillCheckDelayMs ?? PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS) || 0)
@@ -1693,6 +2087,9 @@ async function fillHostedGuestCheckout(payload = {}) {
   let phoneInputDescriptor = '';
   for (let attempt = 0; attempt <= phoneEmptyRefillMaxRetries; attempt += 1) {
     const phoneFill = fillProfileFields();
+    if (isBrazil) {
+      brazilFillResult = fillHostedBrazilGuestFields(payload, address, values);
+    }
     phoneRefillAttempts += 1;
     phoneInputDescriptor = phoneFill?.descriptor || phoneInputDescriptor;
     if (phonePostFillCheckDelayMs > 0) {
@@ -1717,6 +2114,7 @@ async function fillHostedGuestCheckout(payload = {}) {
       addressSuggestionError: '',
     };
   const phoneCheck = verifyHostedPhoneBeforeSubmit(values.phone);
+  const brazilRequiredResult = isBrazil ? assertHostedBrazilRequiredFieldsBeforeSubmit(payload, address) : null;
   const clickResult = await clickHostedSubmitButton({
     stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
     label: 'hosted-paypal-card-submit',
@@ -1732,6 +2130,17 @@ async function fillHostedGuestCheckout(payload = {}) {
     phoneValueReady,
     hostedDocumentInputFound: Boolean(documentFillResult?.found),
     hostedDocumentFilled: Boolean(documentFillResult?.filled),
+    ...(isBrazil ? {
+      brazilPhoneTypeSelected: Boolean(brazilFillResult?.phoneTypeSelected),
+      brazilCardTypeSelected: Boolean(brazilFillResult?.cardTypeSelected),
+      brazilBirthdayInputFound: Boolean(brazilFillResult?.birthdayInputFound),
+      brazilBirthdayFilled: Boolean(brazilFillResult?.birthdayFilled),
+      brazilTermsFound: Boolean(brazilFillResult?.termsFound),
+      brazilTermsChecked: Boolean(brazilFillResult?.termsChecked),
+      brazilMarketingTermsSkipped: Boolean(brazilFillResult?.marketingTermsSkipped),
+      brazilAddressFillResult: brazilFillResult?.addressFillResult || null,
+      ...(brazilRequiredResult || {}),
+    } : {}),
     ...addressSuggestionResult,
     ...phoneCheck,
   };

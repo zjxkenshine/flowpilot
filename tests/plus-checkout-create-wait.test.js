@@ -5843,8 +5843,14 @@ test('Phone Plus hosted card refresh uses Brazil address source and normalizes +
   assert.equal(profileState.generatedFromCountry, 'BR');
   assert.equal(profileState.phone, '+5511987654321');
   assert.equal(profileState.address.street, 'Rua Haddock Lobo 1307');
+  assert.equal(profileState.address.streetName, 'Rua Haddock Lobo');
+  assert.equal(profileState.address.number, '1307');
+  assert.equal(profileState.address.neighborhood, 'Jardins');
+  assert.equal(profileState.address.stateCode, 'SP');
   assert.equal(profileState.address.city, 'Sao Paulo');
   assert.equal(profileState.address.zip, '01414-003');
+  assert.match(profileState.birthday, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(profileState.cardType, 'credit');
   assert.match(profileState.cpf, /^\d{3}\.\d{3}\.\d{3}-\d{2}$/);
   assert.match(profileState.cnpj, /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/);
   assert.equal(profileState.documentType, 'cpf');
@@ -5857,6 +5863,11 @@ test('Phone Plus hosted card refresh uses Brazil address source and normalizes +
   ));
   assert.equal(submitEvent.message.payload.documentNumber, profileState.cpf);
   assert.equal(submitEvent.message.payload.cnpj, profileState.cnpj);
+  assert.equal(submitEvent.message.payload.birthday, profileState.birthday);
+  assert.equal(submitEvent.message.payload.cardType, 'credit');
+  assert.equal(submitEvent.message.payload.address.number, '1307');
+  assert.equal(submitEvent.message.payload.address.neighborhood, 'Jardins');
+  assert.equal(submitEvent.message.payload.address.stateCode, 'SP');
 });
 
 test('Phone Plus hosted card refresh uses Brazil phone-only sms pool entry', async () => {

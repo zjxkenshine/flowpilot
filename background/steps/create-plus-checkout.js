@@ -2086,6 +2086,40 @@
       return '';
     }
 
+    function buildHostedBirthdayString(date = new Date()) {
+      const now = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+      const age = 19 + Math.floor(Math.random() * 7);
+      const year = now.getFullYear() - age;
+      const month = 1 + Math.floor(Math.random() * 12);
+      const day = 1 + Math.floor(Math.random() * new Date(year, month, 0).getDate());
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+
+    function splitHostedBrazilStreetAddress(value = '') {
+      const normalized = normalizeString(value);
+      if (!normalized) {
+        return { streetName: '', number: '' };
+      }
+      const commaMatch = normalized.match(/^(.+?),\s*([A-Za-z0-9-]+)\s*$/);
+      if (commaMatch) {
+        return {
+          streetName: commaMatch[1].trim(),
+          number: commaMatch[2].trim(),
+        };
+      }
+      const trailingNumberMatch = normalized.match(/^(.+?)\s+([A-Za-z0-9-]+)\s*$/);
+      if (trailingNumberMatch && /\d/.test(trailingNumberMatch[2])) {
+        return {
+          streetName: trailingNumberMatch[1].trim(),
+          number: trailingNumberMatch[2].trim(),
+        };
+      }
+      return {
+        streetName: normalized,
+        number: '',
+      };
+    }
+
     function normalizeHostedCheckoutPoolPhone(value = '') {
       return normalizeHostedPhoneForPayload(value);
     }
@@ -3112,6 +3146,7 @@
         cardNumber: String(source.cardNumber || '').trim(),
         cardExpiry: String(source.cardExpiry || '').trim(),
         cardCvv: String(source.cardCvv || '').trim(),
+        cardType: String(source.cardType || '').trim(),
         password: String(source.password || '').trim(),
         firstName: String(source.firstName || '').trim(),
         lastName: String(source.lastName || '').trim(),
@@ -3125,8 +3160,12 @@
         documentDigits: firstNonEmptyHostedProfileValue(source.documentDigits, address.documentDigits),
         countryCode,
         address1,
+        streetName: firstNonEmptyHostedProfileValue(source.streetName, address.streetName),
+        number: firstNonEmptyHostedProfileValue(source.number, source.streetNumber, address.number, address.streetNumber),
+        neighborhood: firstNonEmptyHostedProfileValue(source.neighborhood, source.bairro, address.neighborhood, address.bairro),
         city,
         region,
+        stateCode: firstNonEmptyHostedProfileValue(source.stateCode, address.stateCode),
         postalCode,
         fullAddress: firstNonEmptyHostedProfileValue(
           source.fullAddress,
@@ -3762,11 +3801,24 @@
       if (!streetLine || !city || !state || !zip) {
         return null;
       }
+      const splitStreet = normalizedCountryCode === 'BR'
+        ? splitHostedBrazilStreetAddress(streetLine)
+        : { streetName: streetLine, number: '' };
       return {
         street: streetLine,
+        address1: streetLine,
+        streetName: firstNonEmpty(source.streetName, source.streetLine, splitStreet.streetName, streetLine),
+        number: firstNonEmpty(source.number, source.streetNumber, splitStreet.number),
+        neighborhood: firstNonEmpty(source.neighborhood, source.bairro),
         city,
         state,
+        stateCode: firstNonEmpty(
+          source.stateCode,
+          source.uf,
+          /^[A-Za-z]{2}$/.test(normalizeString(source.state)) ? source.state : ''
+        ),
         zip,
+        postalCode: zip,
         countryCode: normalizedCountryCode,
         country: getHostedCountryName(normalizedCountryCode),
         cpf: String(source.cpf || '').trim(),
@@ -3814,11 +3866,25 @@
       if (!street || !city || !state || !zip) {
         return null;
       }
+      const splitStreet = splitHostedBrazilStreetAddress(street);
       return {
         street,
+        address1: street,
+        streetName: firstNonEmpty(source.streetName, fallback.streetName, splitStreet.streetName, street),
+        number: firstNonEmpty(source.number, source.streetNumber, fallback.number, fallback.streetNumber, splitStreet.number),
+        neighborhood: firstNonEmpty(source.neighborhood, source.bairro, fallback.neighborhood, fallback.bairro),
         city,
         state,
+        stateCode: firstNonEmpty(
+          source.stateCode,
+          source.uf,
+          /^[A-Za-z]{2}$/.test(normalizeString(source.state)) ? source.state : '',
+          fallback.stateCode,
+          fallback.uf,
+          /^[A-Za-z]{2}$/.test(normalizeString(fallback.state)) ? fallback.state : ''
+        ),
         zip,
+        postalCode: zip,
         countryCode: 'BR',
         country: 'Brazil',
         cpf: String(source.cpf || fallback.cpf || '').trim(),
@@ -3829,6 +3895,33 @@
         documentNumber: String(source.documentNumber || fallback.documentNumber || source.cpf || fallback.cpf || '').trim(),
         documentDigits: String(source.documentDigits || fallback.documentDigits || source.cpfDigits || fallback.cpfDigits || '').trim(),
         source: String(source.source || fallback.source || 'local_brazil_profile_fallback').trim(),
+      };
+    }
+
+    function enrichHostedBrazilAddress(address = {}) {
+      const source = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+      const street = firstNonEmpty(source.street, source.address1);
+      const splitStreet = splitHostedBrazilStreetAddress(street);
+      const zip = normalizeBrazilHostedPostalCode(
+        firstNonEmpty(source.zip, source.postalCode),
+        firstNonEmpty(source.postalCode, source.zip)
+      );
+      return {
+        ...source,
+        street,
+        address1: firstNonEmpty(source.address1, street),
+        streetName: firstNonEmpty(source.streetName, source.streetLine, splitStreet.streetName, street),
+        number: firstNonEmpty(source.number, source.streetNumber, splitStreet.number),
+        neighborhood: firstNonEmpty(source.neighborhood, source.bairro),
+        stateCode: firstNonEmpty(
+          source.stateCode,
+          source.uf,
+          /^[A-Za-z]{2}$/.test(normalizeString(source.state)) ? source.state : ''
+        ),
+        zip: zip || firstNonEmpty(source.zip, source.postalCode),
+        postalCode: zip || firstNonEmpty(source.postalCode, source.zip),
+        countryCode: 'BR',
+        country: 'Brazil',
       };
     }
 
@@ -3845,11 +3938,14 @@
       return {
         countryCode: 'BR',
         source: 'local_brazil_profile_fallback',
-        address1: fallbackAddress.street,
         street: fallbackAddress.street,
+        address1: fallbackAddress.street,
+        streetName: fallbackAddress.streetName || splitHostedBrazilStreetAddress(fallbackAddress.street).streetName,
+        number: fallbackAddress.number || splitHostedBrazilStreetAddress(fallbackAddress.street).number,
+        neighborhood: fallbackAddress.neighborhood || '',
         city: fallbackAddress.city,
         state: fallbackAddress.state,
-        stateCode: fallbackAddress.state,
+        stateCode: fallbackAddress.stateCode || fallbackAddress.state,
         postalCode: fallbackAddress.zip,
         zip: fallbackAddress.zip,
         cpf: '',
@@ -3890,7 +3986,7 @@
         const address = self.MultiPageBrazilProfileGenerator?.toHostedCheckoutAddress
           ? self.MultiPageBrazilProfileGenerator.toHostedCheckoutAddress(profile)
           : normalizeHostedBrazilAddress(profile, getFallbackHostedCheckoutAddress('BR'));
-        return address || getFallbackHostedCheckoutAddress('BR');
+        return address ? enrichHostedBrazilAddress(address) : getFallbackHostedCheckoutAddress('BR');
       }
       if (normalizedCountryCode !== 'US') {
         return getFallbackHostedCheckoutAddress(normalizedCountryCode);
@@ -3938,9 +4034,11 @@
         phone: String(config?.phone || '').trim(),
         firstName: regionalName.firstName || 'James',
         lastName: regionalName.lastName || 'Smith',
+        birthday: buildHostedBirthdayString(),
         cardNumber: card.number,
         cardExpiry: card.expiry,
         cardCvv: card.cvv,
+        cardType: 'credit',
         address: normalizedAddress,
         cpf: normalizedAddress.cpf || '',
         cpfDigits: normalizedAddress.cpfDigits || '',
@@ -3961,6 +4059,12 @@
         ? source.address
         : {};
       return {
+        birthday: firstNonEmptyHostedProfileValue(source.birthday, address.birthday),
+        cardType: firstNonEmptyHostedProfileValue(source.cardType, address.cardType),
+        streetName: firstNonEmptyHostedProfileValue(source.streetName, address.streetName),
+        number: firstNonEmptyHostedProfileValue(source.number, source.streetNumber, address.number, address.streetNumber),
+        neighborhood: firstNonEmptyHostedProfileValue(source.neighborhood, source.bairro, address.neighborhood, address.bairro),
+        stateCode: firstNonEmptyHostedProfileValue(source.stateCode, address.stateCode),
         documentType: firstNonEmptyHostedProfileValue(source.documentType, address.documentType),
         documentNumber: firstNonEmptyHostedProfileValue(source.documentNumber, address.documentNumber, source.cpf, address.cpf),
         documentDigits: firstNonEmptyHostedProfileValue(source.documentDigits, address.documentDigits, source.cpfDigits, address.cpfDigits),
@@ -3973,13 +4077,16 @@
 
     function mergeHostedProfileAddress(profile = {}, address = {}) {
       const nextAddress = address && typeof address === 'object' && !Array.isArray(address) ? address : {};
+      const addressPayload = getHostedProfileDocumentPayload({
+        ...(profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {}),
+        address: nextAddress,
+      });
       return {
         ...(profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {}),
         address: nextAddress,
-        ...getHostedProfileDocumentPayload({
-          ...(profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : {}),
-          address: nextAddress,
-        }),
+        birthday: addressPayload.birthday || profile.birthday || '',
+        cardType: addressPayload.cardType || profile.cardType || '',
+        ...addressPayload,
       };
     }
 
