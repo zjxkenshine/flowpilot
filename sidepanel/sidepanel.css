@@ -1356,7 +1356,7 @@ header {
 .ip-proxy-exit-info {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr) minmax(118px, 0.72fr) auto;
   align-items: stretch;
   gap: 8px;
 }

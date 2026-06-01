@@ -47,6 +47,66 @@
     return Math.max(1, Math.floor(numeric));
   }
 
+  const DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS = Object.freeze([
+    'proxy',
+    'vpn',
+    'tor',
+    'recent_abuse',
+    'bot_status',
+  ]);
+  const IP_PROXY_PURITY_BLOCK_SIGNAL_VALUES = Object.freeze([
+    ...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS,
+    'active_vpn',
+    'active_tor',
+  ]);
+
+  function normalizeIpProxyPurityProvider(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'ipqualityscore' ? 'ipqualityscore' : 'ipqualityscore';
+  }
+
+  function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = 75) {
+    const fallbackNumber = Math.min(100, Math.max(0, Math.floor(Number(fallback) || 75)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(100, Math.max(0, Math.floor(numeric)));
+  }
+
+  function normalizeIpProxyPurityMaxAttempts(value = '', fallback = 5) {
+    const fallbackNumber = Math.min(50, Math.max(1, Math.floor(Number(fallback) || 5)));
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      return fallbackNumber;
+    }
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      return fallbackNumber;
+    }
+    return Math.min(50, Math.max(1, Math.floor(numeric)));
+  }
+
+  function normalizeIpProxyPurityBlockSignals(value = DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS) {
+    const source = Array.isArray(value)
+      ? value
+      : String(value || '').split(/[\s,;|/]+/);
+    const selected = [];
+    source
+      .map((item) => String(item || '').trim().toLowerCase().replace(/-/g, '_'))
+      .forEach((signal) => {
+        if (!IP_PROXY_PURITY_BLOCK_SIGNAL_VALUES.includes(signal) || selected.includes(signal)) {
+          return;
+        }
+        selected.push(signal);
+      });
+    return selected.length ? selected : [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS];
+  }
+
   function normalizeRegistrationStageWaitSeconds(value, fallback = 30) {
     const fallbackNumber = Math.min(600, Math.max(0, Math.floor(Number(fallback) || 30)));
     const rawValue = String(value ?? '').trim();
@@ -509,6 +569,14 @@
             provider: '711proxy',
             mode: 'account',
             activationStep: 1,
+            purityCheck: {
+              enabled: false,
+              provider: 'ipqualityscore',
+              apiKey: '',
+              fraudScoreThreshold: 75,
+              maxAttempts: 5,
+              blockSignals: [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS],
+            },
           },
         },
         flows: {
@@ -561,6 +629,7 @@
             plus: {
               plusModeEnabled: false,
               phonePlusModeEnabled: false,
+              plusAccountTypePaymentControlEnabled: true,
               plusPaymentMethod: 'paypal',
               plusHostedCheckoutIsFinalStep: true,
               plusAccountAccessStrategy: 'oauth',
@@ -754,6 +823,40 @@
               ?? defaults.services.proxy.activationStep,
               defaults.services.proxy.activationStep
             ),
+            purityCheck: {
+              enabled: Boolean(
+                nested?.services?.proxy?.purityCheck?.enabled
+                ?? input?.ipProxyPurityCheckEnabled
+                ?? defaults.services.proxy.purityCheck.enabled
+              ),
+              provider: normalizeIpProxyPurityProvider(
+                nested?.services?.proxy?.purityCheck?.provider
+                ?? input?.ipProxyPurityProvider
+                ?? defaults.services.proxy.purityCheck.provider
+              ),
+              apiKey: String(
+                nested?.services?.proxy?.purityCheck?.apiKey
+                ?? input?.ipProxyPurityApiKey
+                ?? defaults.services.proxy.purityCheck.apiKey
+              ),
+              fraudScoreThreshold: normalizeIpProxyPurityFraudScoreThreshold(
+                nested?.services?.proxy?.purityCheck?.fraudScoreThreshold
+                ?? input?.ipProxyPurityFraudScoreThreshold
+                ?? defaults.services.proxy.purityCheck.fraudScoreThreshold,
+                defaults.services.proxy.purityCheck.fraudScoreThreshold
+              ),
+              maxAttempts: normalizeIpProxyPurityMaxAttempts(
+                nested?.services?.proxy?.purityCheck?.maxAttempts
+                ?? input?.ipProxyPurityMaxAttempts
+                ?? defaults.services.proxy.purityCheck.maxAttempts,
+                defaults.services.proxy.purityCheck.maxAttempts
+              ),
+              blockSignals: normalizeIpProxyPurityBlockSignals(
+                nested?.services?.proxy?.purityCheck?.blockSignals
+                ?? input?.ipProxyPurityBlockSignals
+                ?? defaults.services.proxy.purityCheck.blockSignals
+              ),
+            },
           },
           account: {
             customPassword: String(
@@ -940,6 +1043,11 @@
                 ?? nested?.flows?.openai?.plus?.phonePlusModeEnabled
                 ?? defaults.flows.openai.plus.phonePlusModeEnabled
               ),
+              plusAccountTypePaymentControlEnabled: (
+                input?.plusAccountTypePaymentControlEnabled
+                ?? nested?.flows?.openai?.plus?.plusAccountTypePaymentControlEnabled
+                ?? defaults.flows.openai.plus.plusAccountTypePaymentControlEnabled
+              ) !== false,
               plusPaymentMethod: String(
                 input?.plusPaymentMethod
                 ?? nested?.flows?.openai?.plus?.plusPaymentMethod
@@ -1413,6 +1521,7 @@
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
+      next.plusAccountTypePaymentControlEnabled = openaiState.plus.plusAccountTypePaymentControlEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;
       next.plusAccountAccessStrategy = openaiState.plus.plusAccountAccessStrategy;
@@ -1467,6 +1576,12 @@
       next.ipProxyService = normalizedState.services.proxy.provider;
       next.ipProxyMode = normalizedState.services.proxy.mode;
       next.ipProxyActivationStep = normalizedState.services.proxy.activationStep;
+      next.ipProxyPurityCheckEnabled = normalizedState.services.proxy.purityCheck.enabled;
+      next.ipProxyPurityProvider = normalizedState.services.proxy.purityCheck.provider;
+      next.ipProxyPurityApiKey = normalizedState.services.proxy.purityCheck.apiKey;
+      next.ipProxyPurityFraudScoreThreshold = normalizedState.services.proxy.purityCheck.fraudScoreThreshold;
+      next.ipProxyPurityMaxAttempts = normalizedState.services.proxy.purityCheck.maxAttempts;
+      next.ipProxyPurityBlockSignals = cloneValue(normalizedState.services.proxy.purityCheck.blockSignals);
       next.kiroRsUrl = kiroState.targets['kiro-rs'].baseUrl;
       next.kiroRsKey = kiroState.targets['kiro-rs'].apiKey;
       next.stepExecutionRangeByFlow = buildStepExecutionRangeByFlow(normalizedState);

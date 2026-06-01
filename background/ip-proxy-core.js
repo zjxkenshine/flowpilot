@@ -7,6 +7,7 @@ let ipProxyProbeInFlightPromise = null;
 let lastAppliedIpProxyEntrySignature = '';
 let ipProxyAuthHostVariantToggle = false;
 const ipProxyHostResolveCache = new Map();
+const ipProxyPurityResultCache = new Map();
 const IP_PROXY_HOST_RESOLVE_CACHE_TTL_MS = 60 * 1000;
 const ipProxyHostResolveCursor = new Map();
 let lastAppliedIpProxyAuthSnapshot = {
@@ -121,6 +122,31 @@ const IP_PROXY_PAGE_CONTEXT_BASELINE_TIMEOUT_MS = 6000;
 const IP_PROXY_DIAGNOSTICS_SUMMARY_MAX_ITEMS = 8;
 const IP_PROXY_GUARD_BLOCK_RULE_ID = 10991;
 const IP_PROXY_GUARD_REGEX = '^https?:\\/\\/([^\\/]+\\.)?(chatgpt\\.com|openai\\.com)(\\/|$)';
+const DEFAULT_IP_PROXY_PURITY_PROVIDER = 'ipqualityscore';
+const DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD = 75;
+const DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS = 5;
+const IP_PROXY_PURITY_MIN_SCORE_THRESHOLD = 0;
+const IP_PROXY_PURITY_MAX_SCORE_THRESHOLD = 100;
+const IP_PROXY_PURITY_MIN_ATTEMPTS = 1;
+const IP_PROXY_PURITY_MAX_ATTEMPTS = 50;
+const IP_PROXY_PURITY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const IP_PROXY_PURITY_CHECK_TIMEOUT_MS = 8000;
+const IP_PROXY_PURITY_BLOCK_SIGNAL_VALUES = Object.freeze([
+  'proxy',
+  'vpn',
+  'tor',
+  'recent_abuse',
+  'bot_status',
+  'active_vpn',
+  'active_tor',
+]);
+const DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS = Object.freeze([
+  'proxy',
+  'vpn',
+  'tor',
+  'recent_abuse',
+  'bot_status',
+]);
 
 function normalizeIpProxyProviderValue(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
@@ -538,6 +564,62 @@ function normalizeIpProxyPoolTargetCount(value = '', fallback = 20) {
 
 function normalizeIpProxySwitchIpRoundCount(value = '', fallback = 1) {
   return normalizeIpProxyPoolTargetCount(value, fallback);
+}
+
+function normalizeIpProxyPurityProvider(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === DEFAULT_IP_PROXY_PURITY_PROVIDER
+    ? DEFAULT_IP_PROXY_PURITY_PROVIDER
+    : DEFAULT_IP_PROXY_PURITY_PROVIDER;
+}
+
+function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD) {
+  const rawValue = String(value ?? '').trim();
+  const fallbackValue = Math.max(
+    IP_PROXY_PURITY_MIN_SCORE_THRESHOLD,
+    Math.min(IP_PROXY_PURITY_MAX_SCORE_THRESHOLD, Number(fallback) || DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD)
+  );
+  if (!rawValue) {
+    return fallbackValue;
+  }
+  const numeric = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(numeric)) {
+    return fallbackValue;
+  }
+  return Math.max(IP_PROXY_PURITY_MIN_SCORE_THRESHOLD, Math.min(IP_PROXY_PURITY_MAX_SCORE_THRESHOLD, numeric));
+}
+
+function normalizeIpProxyPurityMaxAttempts(value = '', fallback = DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS) {
+  const rawValue = String(value ?? '').trim();
+  const fallbackValue = Math.max(
+    IP_PROXY_PURITY_MIN_ATTEMPTS,
+    Math.min(IP_PROXY_PURITY_MAX_ATTEMPTS, Number(fallback) || DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS)
+  );
+  if (!rawValue) {
+    return fallbackValue;
+  }
+  const numeric = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(numeric)) {
+    return fallbackValue;
+  }
+  return Math.max(IP_PROXY_PURITY_MIN_ATTEMPTS, Math.min(IP_PROXY_PURITY_MAX_ATTEMPTS, numeric));
+}
+
+function normalizeIpProxyPurityBlockSignals(value = DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[\s,，、|/]+/);
+  const selected = [];
+  source
+    .map((item) => String(item || '').trim().toLowerCase().replace(/-/g, '_'))
+    .forEach((signal) => {
+      if (!IP_PROXY_PURITY_BLOCK_SIGNAL_VALUES.includes(signal) || selected.includes(signal)) {
+        return;
+      }
+      selected.push(signal);
+    });
+  return selected.length ? selected : [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS];
 }
 
 function normalizeIpProxyAccountLifeMinutes(value = '') {
@@ -1484,6 +1566,7 @@ function buildIpProxyRoutingStatePatch(status = {}) {
   const exitError = String(status?.exitError || '').trim();
   const exitSource = String(status?.exitSource || '').trim().toLowerCase();
   const exitEndpoint = String(status?.exitEndpoint || status?.endpoint || '').trim();
+  const purity = normalizeIpProxyPurityResultForState(status?.purity || status?.ipPurity || null);
   return {
     ipProxyApplied: applied,
     ipProxyAppliedReason: reason,
@@ -1501,6 +1584,57 @@ function buildIpProxyRoutingStatePatch(status = {}) {
     ipProxyAppliedExitError: exitError,
     ipProxyAppliedExitSource: exitSource,
     ipProxyAppliedExitEndpoint: exitEndpoint,
+    ipProxyAppliedPurityStatus: purity.status,
+    ipProxyAppliedPurityProvider: purity.provider,
+    ipProxyAppliedPurityScore: purity.score,
+    ipProxyAppliedPurityReasons: purity.reasons,
+    ipProxyAppliedPurityCheckedAt: purity.checkedAt,
+    ipProxyAppliedPurityError: purity.error,
+  };
+}
+
+function normalizeIpProxyPurityResultForState(result = null) {
+  if (!result || typeof result !== 'object') {
+    return {
+      status: '',
+      provider: '',
+      score: null,
+      reasons: [],
+      checkedAt: 0,
+      error: '',
+    };
+  }
+  const provider = normalizeIpProxyPurityProvider(result.provider || DEFAULT_IP_PROXY_PURITY_PROVIDER);
+  const checkedAt = Math.max(0, Number(result.checkedAt || result.at || Date.now()) || 0);
+  const rawScore = result.score ?? result.fraudScore ?? result.fraud_score;
+  const numericScore = Number(rawScore);
+  const score = Number.isFinite(numericScore)
+    ? Math.max(0, Math.min(100, Math.round(numericScore)))
+    : null;
+  const reasons = Array.from(new Set((Array.isArray(result.reasons) ? result.reasons : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)));
+  const error = String(result.error || '').trim();
+  let status = String(result.status || '').trim().toLowerCase();
+  if (!status) {
+    if (error) {
+      status = 'error';
+    } else if (result.ok === true) {
+      status = 'passed';
+    } else if (result.ok === false) {
+      status = 'failed';
+    }
+  }
+  if (!['passed', 'failed', 'error', 'skipped'].includes(status)) {
+    status = '';
+  }
+  return {
+    status,
+    provider,
+    score,
+    reasons,
+    checkedAt,
+    error,
   };
 }
 
@@ -1540,6 +1674,9 @@ function shouldEnableIpProxyLeakGuardForStatus(status = {}) {
     return false;
   }
   const reason = String(status?.reason || '').trim().toLowerCase();
+  if (reason === 'purity_failed') {
+    return false;
+  }
   // connectivity_failed 表示 PAC/代理接管已经下发，只是探测或目标站点失败。
   // 此时继续启用 DNR 会把 chatgpt.com 变成 ERR_BLOCKED_BY_CLIENT，掩盖真实代理链路结果。
   return reason !== 'connectivity_failed';
@@ -1560,6 +1697,246 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = IP_PROXY_FETCH_TI
   } finally {
     clearTimeout(timer);
   }
+}
+
+function isIpProxyPurityCheckConfigured(state = {}) {
+  return Boolean(
+    state?.ipProxyPurityCheckEnabled
+    && String(state?.ipProxyPurityApiKey || '').trim()
+  );
+}
+
+function getIpProxyPurityCacheKey(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '') {
+  const normalizedProvider = normalizeIpProxyPurityProvider(provider);
+  const normalizedIp = String(ip || '').trim();
+  return normalizedProvider && normalizedIp ? `${normalizedProvider}:${normalizedIp}` : '';
+}
+
+function readCachedIpProxyPurityResult(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '') {
+  const key = getIpProxyPurityCacheKey(provider, ip);
+  if (!key) {
+    return null;
+  }
+  const cached = ipProxyPurityResultCache.get(key);
+  if (!cached || !cached.expiresAt || cached.expiresAt <= Date.now()) {
+    ipProxyPurityResultCache.delete(key);
+    return null;
+  }
+  return cached.result || null;
+}
+
+function writeCachedIpProxyPurityResult(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '', result = null) {
+  const key = getIpProxyPurityCacheKey(provider, ip);
+  if (!key || !result) {
+    return;
+  }
+  ipProxyPurityResultCache.set(key, {
+    result,
+    expiresAt: Date.now() + IP_PROXY_PURITY_CACHE_TTL_MS,
+  });
+}
+
+function getIpqsBooleanSignal(payload = {}, signal = '') {
+  const normalizedSignal = String(signal || '').trim();
+  if (!normalizedSignal) {
+    return false;
+  }
+  const candidates = [
+    normalizedSignal,
+    normalizedSignal.replace(/_/g, '-'),
+    normalizedSignal.replace(/_/g, ''),
+  ];
+  return candidates.some((key) => payload?.[key] === true || String(payload?.[key]).trim().toLowerCase() === 'true');
+}
+
+function normalizeIpqsPurityResponse(payload = {}, options = {}) {
+  const threshold = normalizeIpProxyPurityFraudScoreThreshold(options?.threshold);
+  const blockSignals = normalizeIpProxyPurityBlockSignals(options?.blockSignals);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {
+      ok: false,
+      status: 'error',
+      provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+      score: null,
+      reasons: ['invalid_response'],
+      checkedAt: Date.now(),
+      error: 'IPQS 返回内容无效',
+      raw: null,
+    };
+  }
+
+  const successValue = payload.success;
+  if (successValue === false || String(successValue).trim().toLowerCase() === 'false') {
+    const message = String(payload.message || payload.error || 'IPQS 查询失败').trim();
+    return {
+      ok: false,
+      status: 'error',
+      provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+      score: null,
+      reasons: ['api_error'],
+      checkedAt: Date.now(),
+      error: message,
+      raw: payload,
+    };
+  }
+
+  const scoreNumber = Number(payload.fraud_score ?? payload.fraudScore ?? payload.score);
+  const score = Number.isFinite(scoreNumber)
+    ? Math.max(0, Math.min(100, Math.round(scoreNumber)))
+    : null;
+  const reasons = [];
+  if (score !== null && score >= threshold) {
+    reasons.push(`fraud_score>=${threshold}`);
+  }
+  blockSignals.forEach((signal) => {
+    if (getIpqsBooleanSignal(payload, signal)) {
+      reasons.push(signal);
+    }
+  });
+
+  return {
+    ok: reasons.length === 0,
+    status: reasons.length === 0 ? 'passed' : 'failed',
+    provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+    score,
+    reasons,
+    checkedAt: Date.now(),
+    error: '',
+    raw: payload,
+  };
+}
+
+async function checkIpProxyPurity(exitIp = '', state = {}, options = {}) {
+  const ip = String(exitIp || '').trim();
+  const provider = normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || DEFAULT_IP_PROXY_PURITY_PROVIDER);
+  if (!ip) {
+    return {
+      ok: false,
+      status: 'error',
+      provider,
+      score: null,
+      reasons: ['missing_exit_ip'],
+      checkedAt: Date.now(),
+      error: '未检测到出口 IP，无法查询纯净度',
+      raw: null,
+    };
+  }
+  if (!isIpProxyPurityCheckConfigured(state)) {
+    return {
+      ok: true,
+      status: 'skipped',
+      provider,
+      score: null,
+      reasons: [],
+      checkedAt: 0,
+      error: '',
+      raw: null,
+    };
+  }
+
+  const cached = options?.ignoreCache ? null : readCachedIpProxyPurityResult(provider, ip);
+  if (cached) {
+    return {
+      ...cached,
+      cached: true,
+    };
+  }
+
+  const apiKey = String(state?.ipProxyPurityApiKey || '').trim();
+  const endpoint = `https://ipqualityscore.com/api/json/ip/${encodeURIComponent(apiKey)}/${encodeURIComponent(ip)}`;
+  try {
+    const response = await fetchWithTimeout(endpoint, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+      },
+    }, Number(options?.timeoutMs) || IP_PROXY_PURITY_CHECK_TIMEOUT_MS);
+    if (!response.ok) {
+      const errorResult = {
+        ok: false,
+        status: 'error',
+        provider,
+        score: null,
+        reasons: [`http_${response.status}`],
+        checkedAt: Date.now(),
+        error: `IPQS 查询失败：HTTP ${response.status}`,
+        raw: null,
+      };
+      writeCachedIpProxyPurityResult(provider, ip, errorResult);
+      return errorResult;
+    }
+    const payload = await response.json().catch(() => null);
+    const result = normalizeIpqsPurityResponse(payload, {
+      threshold: state?.ipProxyPurityFraudScoreThreshold,
+      blockSignals: state?.ipProxyPurityBlockSignals,
+    });
+    writeCachedIpProxyPurityResult(provider, ip, result);
+    return result;
+  } catch (error) {
+    const errorResult = {
+      ok: false,
+      status: 'error',
+      provider,
+      score: null,
+      reasons: ['request_failed'],
+      checkedAt: Date.now(),
+      error: `IPQS 查询异常：${error?.message || String(error || '未知错误')}`,
+      raw: null,
+    };
+    writeCachedIpProxyPurityResult(provider, ip, errorResult);
+    return errorResult;
+  }
+}
+
+function buildIpProxyPurityReasonText(purity = null) {
+  const normalized = normalizeIpProxyPurityResultForState(purity);
+  const scorePart = normalized.score !== null ? `score=${normalized.score}` : '';
+  const reasonsPart = normalized.reasons.length ? normalized.reasons.join(',') : '';
+  const errorPart = normalized.error || '';
+  return [scorePart, reasonsPart, errorPart].filter(Boolean).join(' ');
+}
+
+function applyIpProxyPurityExpectation(status = {}, purity = null) {
+  const normalizedPurity = normalizeIpProxyPurityResultForState(purity);
+  if (!normalizedPurity.status || normalizedPurity.status === 'skipped' || normalizedPurity.status === 'passed') {
+    return {
+      ...status,
+      purity: normalizedPurity,
+    };
+  }
+  const reasonText = buildIpProxyPurityReasonText(normalizedPurity);
+  return {
+    ...status,
+    applied: false,
+    reason: 'purity_failed',
+    error: `IP 纯净度检测未通过${reasonText ? `：${reasonText}` : ''}`,
+    purity: normalizedPurity,
+  };
+}
+
+async function maybeApplyIpProxyPurityExpectation(status = {}, state = {}, options = {}) {
+  if (!isIpProxyPurityCheckConfigured(state)) {
+    return status;
+  }
+  const exitIp = String(status?.exitIp || '').trim();
+  if (!exitIp) {
+    return status;
+  }
+  if (!isReadyIpProxyExitRouting(status)) {
+    return status;
+  }
+  const purity = await checkIpProxyPurity(exitIp, state, options).catch((error) => ({
+    ok: false,
+    status: 'error',
+    provider: normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || DEFAULT_IP_PROXY_PURITY_PROVIDER),
+    score: null,
+    reasons: ['request_failed'],
+    checkedAt: Date.now(),
+    error: error?.message || String(error || 'IP 纯净度检测失败'),
+    raw: null,
+  }));
+  return applyIpProxyPurityExpectation(status, purity);
 }
 
 function extractIpv4FromText(value = '') {
@@ -1902,6 +2279,9 @@ function shouldVerifyIpProxyTargetReachability(status = {}) {
     return false;
   }
   if (status?.applied === false && String(status?.reason || '').trim().toLowerCase() === 'connectivity_failed') {
+    return false;
+  }
+  if (status?.applied === false && String(status?.reason || '').trim().toLowerCase() === 'purity_failed') {
     return false;
   }
   return true;
@@ -3844,6 +4224,7 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
         : (reachability?.error || buildProbeDiagnosticsSummary(targetDiagnostics, IP_PROXY_DIAGNOSTICS_SUMMARY_MAX_ITEMS)),
     });
   }
+  normalizedExitStatus = await maybeApplyIpProxyPurityExpectation(normalizedExitStatus, resolvedState);
   await syncIpProxyLeakGuardForStatus(normalizedExitStatus);
   await updateIpProxyRuntimeStatus(normalizedExitStatus);
   return normalizedExitStatus;
@@ -3872,6 +4253,7 @@ function isReadyIpProxyExitRouting(status = {}) {
     'proxy_api_unavailable',
     'disabled',
     'disabled_probe_only',
+    'purity_failed',
   ].includes(reason);
 }
 
@@ -3942,6 +4324,14 @@ async function restore711ApiProxyRuntimeAfterDifferentExitFailure(originalState 
     exitError: String(originalState?.ipProxyAppliedExitError || '').trim(),
     exitSource: String(originalState?.ipProxyAppliedExitSource || '').trim().toLowerCase(),
     exitEndpoint: String(originalState?.ipProxyAppliedExitEndpoint || '').trim(),
+    purity: normalizeIpProxyPurityResultForState({
+      status: originalState?.ipProxyAppliedPurityStatus,
+      provider: originalState?.ipProxyAppliedPurityProvider,
+      score: originalState?.ipProxyAppliedPurityScore,
+      reasons: originalState?.ipProxyAppliedPurityReasons,
+      checkedAt: originalState?.ipProxyAppliedPurityCheckedAt,
+      error: originalState?.ipProxyAppliedPurityError,
+    }),
   };
   await syncIpProxyLeakGuardForStatus(restoredStatus);
   await updateIpProxyRuntimeStatus(restoredStatus);
@@ -3980,6 +4370,19 @@ async function store711ApiProxyPoolForFirstEntrySwitch(state = {}, pool = [], pr
   };
 }
 
+function buildIpProxyPurityAttemptFailureReason(stats = {}) {
+  if (stats?.sawSameExit) {
+    return 'same_exit_exhausted';
+  }
+  if (stats?.emptyPool) {
+    return 'empty_pool_without_refresh';
+  }
+  if (Number(stats?.purityFailureCount || 0) > 0) {
+    return 'purity_failed_exhausted';
+  }
+  return 'probe_failed_exhausted';
+}
+
 async function switch711ApiProxyUntilExitChanged(options = {}) {
   const originalState = options.state || await getState();
   const mode = normalizeIpProxyMode(options.mode || originalState?.ipProxyMode);
@@ -4002,6 +4405,10 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
     1,
     Math.min(500, Number(options.maxItems) || resolveIpProxyPoolTargetCountForMode(originalState, mode))
   );
+  const hasAttemptBudget = Number.isFinite(Number(options.maxAttempts)) && Number(options.maxAttempts) > 0;
+  const maxAttempts = hasAttemptBudget
+    ? Math.max(1, Math.min(maxItems, Math.floor(Number(options.maxAttempts))))
+    : 0;
   const switchProxy = typeof options.switchProxyFn === 'function' ? options.switchProxyFn : switchIpProxy;
   const pullPool = typeof options.pullPoolFn === 'function' ? options.pullPoolFn : pullIpProxyPoolFromApi;
   const stats = {
@@ -4009,20 +4416,41 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
     refreshedPool: false,
     sawSameExit: false,
     sawProbeFailure: false,
+    purityFailureCount: 0,
     emptyPool: false,
   };
+  const hasRemainingAttemptBudget = () => !hasAttemptBudget || stats.attemptedCount < maxAttempts;
   let lastResult = null;
   let lastRouting = null;
+  let lastPurity = null;
 
   await updateIpProxyRuntimeStatus(build711ApiDifferentExitStatusSeed(originalState, provider));
 
-  const acceptResultIfChanged = (result = {}) => {
+  const acceptResultIfChanged = async (result = {}, stateForPurity = originalState) => {
     const routing = result?.proxyRouting || {};
     lastRouting = routing;
+    lastPurity = routing?.purity || null;
     const exitIp = String(routing?.exitIp || '').trim();
+    let checkedRouting = routing;
     if (isReadyIpProxyExitRouting(routing) && (!previousExitIp || exitIp !== previousExitIp)) {
+      checkedRouting = await maybeApplyIpProxyPurityExpectation(routing, stateForPurity);
+      lastRouting = checkedRouting;
+      lastPurity = checkedRouting?.purity || null;
+      if (String(checkedRouting?.reason || '').trim().toLowerCase() === 'purity_failed') {
+        stats.purityFailureCount += 1;
+        if (result && typeof result === 'object') {
+          result.proxyRouting = checkedRouting;
+        }
+        await syncIpProxyLeakGuardForStatus(checkedRouting);
+        await updateIpProxyRuntimeStatus({
+          ...checkedRouting,
+          exitDetecting: false,
+        });
+        return null;
+      }
       return {
         ...result,
+        proxyRouting: checkedRouting,
         exitCheckCompleted: true,
         exitChanged: true,
         previousExitIp,
@@ -4041,7 +4469,10 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
 
   const attemptFromState = async (sourceState = {}, attemptLimit = 0) => {
     let latestState = sourceState;
-    const limit = Math.max(0, Number(attemptLimit) || 0);
+    const budgetRemaining = hasAttemptBudget
+      ? Math.max(0, maxAttempts - stats.attemptedCount)
+      : Number.POSITIVE_INFINITY;
+    const limit = Math.max(0, Math.min(Number(attemptLimit) || 0, budgetRemaining));
     for (let attempt = 0; attempt < limit; attempt += 1) {
       const switched = await switchProxy('next', {
         mode: 'api',
@@ -4052,7 +4483,11 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
       });
       stats.attemptedCount += 1;
       lastResult = switched;
-      const accepted = acceptResultIfChanged(switched);
+      const stateForPurity = {
+        ...latestState,
+        ...(switched?.proxyRouting ? { ipProxyAppliedExitIp: switched.proxyRouting.exitIp } : {}),
+      };
+      const accepted = await acceptResultIfChanged(switched, stateForPurity);
       if (accepted) {
         if (switched?.proxyRouting && typeof switched.proxyRouting === 'object') {
           await syncIpProxyLeakGuardForStatus(switched.proxyRouting);
@@ -4106,7 +4541,7 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
       }
     }
 
-    if (allowRefreshOnExhausted) {
+    if (allowRefreshOnExhausted && hasRemainingAttemptBudget()) {
       const latestState = await getState();
       const fresh = await pullAndStoreFreshPool(latestState);
       if (fresh.pool.length) {
@@ -4118,7 +4553,7 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
     }
   }
 
-  const skippedReason = build711ApiDifferentExitSkippedReason(stats);
+  const skippedReason = buildIpProxyPurityAttemptFailureReason(stats) || build711ApiDifferentExitSkippedReason(stats);
   const restoredStatus = await restore711ApiProxyRuntimeAfterDifferentExitFailure(originalState, {
     previousExitIp,
   });
@@ -4141,6 +4576,8 @@ async function switch711ApiProxyUntilExitChanged(options = {}) {
     previousExitIp,
     attemptedCount: stats.attemptedCount,
     refreshedPool: stats.refreshedPool,
+    purityFailureCount: stats.purityFailureCount,
+    purity: lastPurity,
   };
 }
 
@@ -4243,6 +4680,9 @@ function buildIpProxyExitRegionMatchFailureMessage(check = {}, stats = {}) {
   if (check?.code === 'missing_exit_ip') {
     return `${prefix}，仍未检测到可用出口 IP。`;
   }
+  if (check?.code === 'purity_failed') {
+    return `${prefix}，IP 纯净度检测未通过${detail ? `：${detail}` : '。'}`;
+  }
   return `${prefix}，IP 代理出口不可用${detail ? `：${detail}` : '。'}`;
 }
 
@@ -4284,6 +4724,7 @@ async function switchIpProxyUntilExitRegionMatches(options = {}) {
     missingExitCount: 0,
     missingRegionCount: 0,
     connectivityFailureCount: 0,
+    purityFailureCount: 0,
   };
   let latestState = originalState;
   let lastResult = null;
@@ -4294,13 +4735,37 @@ async function switchIpProxyUntilExitRegionMatches(options = {}) {
     const check = buildIpProxyExitRegionMatchCheck(result, stateForCheck);
     lastCheck = check;
     if (check.ok) {
+      const checkedRouting = await maybeApplyIpProxyPurityExpectation(result?.proxyRouting || {}, stateForCheck);
+      if (checkedRouting && typeof checkedRouting === 'object') {
+        result.proxyRouting = checkedRouting;
+      }
+      if (String(checkedRouting?.reason || '').trim().toLowerCase() === 'purity_failed') {
+        const purityCheck = {
+          ok: false,
+          code: 'purity_failed',
+          expectedRegion: check.expectedRegion,
+          exitIp: check.exitIp,
+          exitRegion: check.exitRegion,
+          detail: buildIpProxyPurityReasonText(checkedRouting?.purity),
+        };
+        lastCheck = purityCheck;
+        stats.purityFailureCount += 1;
+        await syncIpProxyLeakGuardForStatus(checkedRouting);
+        await updateIpProxyRuntimeStatus({
+          ...checkedRouting,
+          exitDetecting: false,
+        });
+        return null;
+      }
       return {
         ...result,
+        proxyRouting: checkedRouting,
         exitRegionMatched: Boolean(check.expectedRegion),
         expectedRegion: check.expectedRegion,
         exitCheck: check,
         attemptedCount: stats.attemptedCount,
         refreshedPool: stats.refreshedPool,
+        purity: checkedRouting?.purity || null,
       };
     }
     if (check.code === 'region_mismatch') {
@@ -4326,7 +4791,11 @@ async function switchIpProxyUntilExitRegionMatches(options = {}) {
         maxItems,
       });
       stats.attemptedCount += 1;
-      const accepted = await acceptOrRecord(switched, latestState);
+      const stateForCheck = {
+        ...latestState,
+        ...(switched?.proxyRouting ? { ipProxyAppliedExitIp: switched.proxyRouting.exitIp } : {}),
+      };
+      const accepted = await acceptOrRecord(switched, stateForCheck);
       if (accepted) {
         return accepted;
       }
@@ -4351,7 +4820,11 @@ async function switchIpProxyUntilExitRegionMatches(options = {}) {
     });
     stats.refreshedPool = true;
     stats.attemptedCount += 1;
-    const refreshedAccepted = await acceptOrRecord(refreshed, latestState);
+    const refreshedCheckState = {
+      ...latestState,
+      ...(refreshed?.proxyRouting ? { ipProxyAppliedExitIp: refreshed.proxyRouting.exitIp } : {}),
+    };
+    const refreshedAccepted = await acceptOrRecord(refreshed, refreshedCheckState);
     if (refreshedAccepted) {
       return refreshedAccepted;
     }
@@ -4384,6 +4857,7 @@ async function switchIpProxyUntilExitRegionMatches(options = {}) {
     missingExitCount: stats.missingExitCount,
     missingRegionCount: stats.missingRegionCount,
     connectivityFailureCount: stats.connectivityFailureCount,
+    purityFailureCount: stats.purityFailureCount,
     error: buildIpProxyExitRegionMatchFailureMessage(lastCheck || {}, stats),
   };
 }
@@ -4837,6 +5311,7 @@ async function probeIpProxyExit(options = {}) {
           : (reachability?.error || buildProbeDiagnosticsSummary(targetDiagnostics, IP_PROXY_DIAGNOSTICS_SUMMARY_MAX_ITEMS)),
       });
     }
+    normalized = await maybeApplyIpProxyPurityExpectation(normalized, state);
     return normalized;
   };
 

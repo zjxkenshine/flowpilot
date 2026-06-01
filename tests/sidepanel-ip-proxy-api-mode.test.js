@@ -17,6 +17,10 @@ test('sidepanel IP proxy API mode is exposed with structured 711 fields', () => 
     'input-ip-proxy-api-ptype',
     'input-ip-proxy-switch-ip-round-count',
     'input-ip-proxy-auto-refresh-pool-on-exhausted',
+    'input-ip-proxy-purity-check-enabled',
+    'input-ip-proxy-purity-api-key',
+    'input-ip-proxy-purity-threshold',
+    'input-ip-proxy-purity-max-attempts',
     'select-ip-proxy-api-host',
     'select-ip-proxy-api-proto',
     'select-ip-proxy-api-stype',
@@ -48,6 +52,7 @@ test('sidepanel exposes read-only IP proxy exit info form below runtime status',
     'row-ip-proxy-exit-info',
     'display-ip-proxy-exit-ip',
     'display-ip-proxy-exit-region',
+    'display-ip-proxy-purity-status',
     'btn-ip-proxy-exit-refresh',
     'btn-ip-proxy-disable',
   ].forEach((id) => {
@@ -61,6 +66,7 @@ test('sidepanel exposes read-only IP proxy exit info form below runtime status',
   assert.match(source, /const rowIpProxyExitInfo = document\.getElementById\('row-ip-proxy-exit-info'\);/);
   assert.match(source, /const displayIpProxyExitIp = document\.getElementById\('display-ip-proxy-exit-ip'\);/);
   assert.match(source, /const displayIpProxyExitRegion = document\.getElementById\('display-ip-proxy-exit-region'\);/);
+  assert.match(source, /const displayIpProxyPurityStatus = document\.getElementById\('display-ip-proxy-purity-status'\);/);
   assert.match(source, /const btnIpProxyExitRefresh = document\.getElementById\('btn-ip-proxy-exit-refresh'\);/);
   assert.match(source, /const btnIpProxyDisable = document\.getElementById\('btn-ip-proxy-disable'\);/);
   assert.match(source, /btnIpProxyExitRefresh\?\.addEventListener\('click'[\s\S]*runIpProxyActionWithLock\('probe'[\s\S]*await probeIpProxyExit\(\);/);
@@ -70,6 +76,7 @@ test('sidepanel exposes read-only IP proxy exit info form below runtime status',
   assert.match(panelSource, /async function disableIpProxyByUser\(options = \{\}\)/);
   assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitIp/);
   assert.match(panelSource, /runtimeState\?\.ipProxyAppliedExitRegion/);
+  assert.match(panelSource, /runtimeState\?\.ipProxyAppliedPurityStatus/);
   assert.match(panelSource, /const ipText = exitDetecting \? '检测中\.\.\.' : \(exitIp \|\| '未检测'\);/);
   assert.match(panelSource, /rowIpProxyExitInfo\.style\.display = showSettings \? '' : 'none';/);
   assert.match(panelSource, /btnIpProxyExitRefresh\.disabled = actionBusy \|\| !enabled \|\| !canOperate;/);
@@ -110,6 +117,31 @@ test('sidepanel enables IP proxy API mode and wires 711 API inputs', () => {
   assert.match(panelSource, /apiRouteMode/);
   assert.match(panelSource, /normalizeIpProxyApiRegionForPanel/);
   assert.match(panelSource, /apiSessType/);
+});
+
+test('sidepanel wires IP proxy purity settings and runtime display', () => {
+  const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
+  const panelSource = fs.readFileSync('sidepanel/ip-proxy-panel.js', 'utf8');
+
+  [
+    'inputIpProxyPurityCheckEnabled',
+    'inputIpProxyPurityApiKey',
+    'inputIpProxyPurityThreshold',
+    'inputIpProxyPurityMaxAttempts',
+    'displayIpProxyPurityStatus',
+  ].forEach((name) => {
+    assert.match(source, new RegExp(`const ${name} = document\\.getElementById\\(`));
+  });
+
+  assert.match(source, /ipProxyPurityCheckEnabled:[\s\S]*inputIpProxyPurityCheckEnabled[\s\S]*Boolean\(inputIpProxyPurityCheckEnabled\.checked\)/);
+  assert.match(source, /ipProxyPurityApiKey:[\s\S]*inputIpProxyPurityApiKey[\s\S]*String\(inputIpProxyPurityApiKey\.value \|\| ''\)\.trim\(\)/);
+  assert.match(source, /ipProxyPurityFraudScoreThreshold/);
+  assert.match(source, /ipProxyPurityMaxAttempts/);
+  assert.match(source, /inputIpProxyPurityCheckEnabled\?\.addEventListener\('change'/);
+  assert.match(panelSource, /rowIpProxyPurityCheckEnabled\.style\.display = showSettings \? '' : 'none';/);
+  assert.match(panelSource, /rowIpProxyPurityApiKey\.style\.display = showSettings && purityEnabled \? '' : 'none';/);
+  assert.match(panelSource, /displayIpProxyPurityStatus\.textContent = purityText;/);
+  assert.match(panelSource, /IP 纯净度不通过，请切换节点/);
 });
 
 test('sidepanel exposes IP proxy activation step selector backed by workflow nodes', () => {

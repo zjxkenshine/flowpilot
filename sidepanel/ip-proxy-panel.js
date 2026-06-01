@@ -218,6 +218,24 @@ function normalizeIpProxySwitchIpRoundCount(value = '', fallback = 1) {
   return normalizeIpProxyPoolTargetCount(value, fallback);
 }
 
+function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = 75) {
+  const fallbackValue = Math.max(0, Math.min(100, Number(fallback) || 75));
+  const numeric = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isInteger(numeric)) {
+    return fallbackValue;
+  }
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function normalizeIpProxyPurityMaxAttempts(value = '', fallback = 5) {
+  const fallbackValue = Math.max(1, Math.min(50, Number(fallback) || 5));
+  const numeric = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isInteger(numeric)) {
+    return fallbackValue;
+  }
+  return Math.max(1, Math.min(50, numeric));
+}
+
 function normalizeIpProxyAccountLifeMinutes(value = '', fallback = '') {
   const rawValue = String(value ?? '').trim();
   if (!rawValue) {
@@ -691,6 +709,26 @@ function buildCurrentIpProxyActionStateOverride(state = latestState, options = {
   return {
     ipProxyService: selectedService,
     ipProxyServiceProfiles: profiles,
+    ipProxyPurityCheckEnabled: typeof inputIpProxyPurityCheckEnabled !== 'undefined' && inputIpProxyPurityCheckEnabled
+      ? Boolean(inputIpProxyPurityCheckEnabled.checked)
+      : Boolean(state?.ipProxyPurityCheckEnabled),
+    ipProxyPurityProvider: 'ipqualityscore',
+    ipProxyPurityApiKey: typeof inputIpProxyPurityApiKey !== 'undefined' && inputIpProxyPurityApiKey
+      ? String(inputIpProxyPurityApiKey.value || '').trim()
+      : String(state?.ipProxyPurityApiKey || '').trim(),
+    ipProxyPurityFraudScoreThreshold: normalizeIpProxyPurityFraudScoreThreshold(
+      typeof inputIpProxyPurityThreshold !== 'undefined' && inputIpProxyPurityThreshold
+        ? inputIpProxyPurityThreshold.value
+        : state?.ipProxyPurityFraudScoreThreshold,
+      75
+    ),
+    ipProxyPurityMaxAttempts: normalizeIpProxyPurityMaxAttempts(
+      typeof inputIpProxyPurityMaxAttempts !== 'undefined' && inputIpProxyPurityMaxAttempts
+        ? inputIpProxyPurityMaxAttempts.value
+        : state?.ipProxyPurityMaxAttempts,
+      5
+    ),
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
     ...(typeof buildIpProxyStatePatchFromServiceProfile === 'function'
       ? buildIpProxyStatePatchFromServiceProfile(selectedService, currentProfile)
       : {}),
@@ -1476,6 +1514,24 @@ function formatIpProxyRuntimeStatus(state = latestState) {
   const exitDetecting = Boolean(state?.ipProxyAppliedExitDetecting);
   const exitError = String(state?.ipProxyAppliedExitError || '').trim();
   const exitSource = String(state?.ipProxyAppliedExitSource || '').trim().toLowerCase();
+  const purityStatus = String(state?.ipProxyAppliedPurityStatus || '').trim().toLowerCase();
+  const purityScore = state?.ipProxyAppliedPurityScore;
+  const purityReasons = Array.isArray(state?.ipProxyAppliedPurityReasons)
+    ? state.ipProxyAppliedPurityReasons.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const purityError = String(state?.ipProxyAppliedPurityError || '').trim();
+  const purityText = (() => {
+    if (!purityStatus) return '';
+    const scorePart = purityScore === null || purityScore === undefined || purityScore === ''
+      ? ''
+      : `score=${purityScore}`;
+    const reasonsPart = purityReasons.length ? purityReasons.join(',') : '';
+    const detail = [scorePart, reasonsPart, purityError].filter(Boolean).join(' ');
+    if (purityStatus === 'passed') return `纯净度通过${detail ? `（${detail}）` : ''}`;
+    if (purityStatus === 'failed') return `纯净度不通过${detail ? `（${detail}）` : ''}`;
+    if (purityStatus === 'error') return `纯净度检测异常${detail ? `（${detail}）` : ''}`;
+    return '';
+  })();
   const exitSourceSuffix = exitSource === 'page_context'
     ? '（页面探测）'
     : (exitSource === 'background_fallback'
@@ -1487,7 +1543,7 @@ function formatIpProxyRuntimeStatus(state = latestState) {
   const exitSummary = exitIp
     ? `${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}${exitSourceSuffix}`
     : (exitDetecting ? '检测中...' : '未检测到');
-  const details = [accountSourceDetail, errorText, warningText, exitError]
+  const details = [accountSourceDetail, errorText, warningText, exitError, purityText]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
     .join('\n');
@@ -1564,6 +1620,16 @@ function formatIpProxyRuntimeStatus(state = latestState) {
       hideCurrentDisplay: true,
     };
   }
+  if (reason === 'purity_failed') {
+    const prefix = endpointSummary ? `当前代理：${endpointSummary}${accountSourceTag}` : '当前代理：未知';
+    const exitPart = exitIp ? `；当前出口：${exitSummary}` : '';
+    return {
+      stateClass: 'state-error',
+      text: `${prefix}${exitPart}；IP 纯净度不通过，请切换节点。`,
+      details: errorText || details,
+      hideCurrentDisplay: true,
+    };
+  }
 
   return {
     stateClass: 'state-warning',
@@ -1610,8 +1676,32 @@ function setIpProxyExitInfoDisplay(state = latestState) {
   const exitDetecting = Boolean(runtimeState?.ipProxyAppliedExitDetecting);
   const exitIp = String(runtimeState?.ipProxyAppliedExitIp || '').trim();
   const exitRegion = String(runtimeState?.ipProxyAppliedExitRegion || '').trim();
+  const purityStatus = String(runtimeState?.ipProxyAppliedPurityStatus || '').trim().toLowerCase();
+  const purityScore = runtimeState?.ipProxyAppliedPurityScore;
+  const purityReasons = Array.isArray(runtimeState?.ipProxyAppliedPurityReasons)
+    ? runtimeState.ipProxyAppliedPurityReasons.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const purityError = String(runtimeState?.ipProxyAppliedPurityError || '').trim();
   const ipText = exitDetecting ? '检测中...' : (exitIp || '未检测');
   const regionText = exitDetecting ? '检测中...' : (exitRegion || '未检测');
+  const purityText = (() => {
+    if (exitDetecting) return '检测中...';
+    if (!purityStatus || purityStatus === 'skipped') return '未检测';
+    const scoreText = purityScore === null || purityScore === undefined || purityScore === ''
+      ? ''
+      : ` ${purityScore}`;
+    if (purityStatus === 'passed') return `通过${scoreText}`;
+    if (purityStatus === 'failed') return `不通过${scoreText}`;
+    if (purityStatus === 'error') return '异常';
+    return '未检测';
+  })();
+  const purityTitle = (() => {
+    const scorePart = purityScore === null || purityScore === undefined || purityScore === ''
+      ? ''
+      : `fraud_score=${purityScore}`;
+    const reasonsPart = purityReasons.length ? `原因：${purityReasons.join(', ')}` : '';
+    return [purityText, scorePart, reasonsPart, purityError].filter(Boolean).join(' | ');
+  })();
 
   if (displayIpProxyExitIp) {
     displayIpProxyExitIp.textContent = ipText;
@@ -1622,6 +1712,11 @@ function setIpProxyExitInfoDisplay(state = latestState) {
     displayIpProxyExitRegion.textContent = regionText;
     displayIpProxyExitRegion.title = regionText;
     displayIpProxyExitRegion.classList.toggle('has-value', Boolean(exitRegion) && !exitDetecting);
+  }
+  if (displayIpProxyPurityStatus) {
+    displayIpProxyPurityStatus.textContent = purityText;
+    displayIpProxyPurityStatus.title = purityTitle || purityText;
+    displayIpProxyPurityStatus.classList.toggle('has-value', purityStatus === 'passed' && !exitDetecting);
   }
 }
 
@@ -1781,6 +1876,19 @@ function updateIpProxyUI(state = latestState) {
   if (autoSyncIntervalRow) {
     autoSyncIntervalRow.style.display = showSettings ? '' : 'none';
   }
+  const purityEnabled = Boolean(inputIpProxyPurityCheckEnabled?.checked);
+  if (typeof rowIpProxyPurityCheckEnabled !== 'undefined' && rowIpProxyPurityCheckEnabled) {
+    rowIpProxyPurityCheckEnabled.style.display = showSettings ? '' : 'none';
+  }
+  if (typeof rowIpProxyPurityApiKey !== 'undefined' && rowIpProxyPurityApiKey) {
+    rowIpProxyPurityApiKey.style.display = showSettings && purityEnabled ? '' : 'none';
+  }
+  if (typeof rowIpProxyPurityThreshold !== 'undefined' && rowIpProxyPurityThreshold) {
+    rowIpProxyPurityThreshold.style.display = showSettings && purityEnabled ? '' : 'none';
+  }
+  if (typeof rowIpProxyPurityMaxAttempts !== 'undefined' && rowIpProxyPurityMaxAttempts) {
+    rowIpProxyPurityMaxAttempts.style.display = showSettings && purityEnabled ? '' : 'none';
+  }
   if (rowIpProxyHost) {
     rowIpProxyHost.style.display = showSettings && isAccountMode ? '' : 'none';
   }
@@ -1920,6 +2028,16 @@ function updateIpProxyUI(state = latestState) {
     }
     autoSyncIntervalInput.disabled = !enabled || !autoSyncEnabled;
   }
+  [
+    inputIpProxyPurityCheckEnabled,
+    inputIpProxyPurityApiKey,
+    inputIpProxyPurityThreshold,
+    inputIpProxyPurityMaxAttempts,
+  ].forEach((input) => {
+    if (input) {
+      input.disabled = !enabled || (input !== inputIpProxyPurityCheckEnabled && !purityEnabled);
+    }
+  });
 
   const runtimeStatus = formatIpProxyRuntimeStatus(runtimeState);
   setIpProxyRuntimeStatusDisplay(runtimeStatus);

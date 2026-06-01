@@ -361,6 +361,37 @@ test('settings schema normalizes Plus checkout verification failure strategy', (
   assert.equal(invalid.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
 });
 
+test('settings schema defaults and syncs Plus account type payment control', () => {
+  const { settingsSchema } = loadApis();
+  const schema = settingsSchema.createSettingsSchema();
+
+  const defaults = schema.normalizeSettingsState({});
+  const defaultView = schema.buildSettingsView(defaults);
+  assert.equal(defaults.flows.openai.plus.plusAccountTypePaymentControlEnabled, true);
+  assert.equal(defaultView.plusAccountTypePaymentControlEnabled, true);
+
+  const flatDisabled = schema.normalizeSettingsState({
+    plusAccountTypePaymentControlEnabled: false,
+  });
+  const flatView = schema.buildSettingsView(flatDisabled);
+  assert.equal(flatDisabled.flows.openai.plus.plusAccountTypePaymentControlEnabled, false);
+  assert.equal(flatView.plusAccountTypePaymentControlEnabled, false);
+  assert.equal(flatView.settingsState.flows.openai.plus.plusAccountTypePaymentControlEnabled, false);
+
+  const nestedDisabled = schema.normalizeSettingsState({
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            plusAccountTypePaymentControlEnabled: false,
+          },
+        },
+      },
+    },
+  });
+  assert.equal(nestedDisabled.flows.openai.plus.plusAccountTypePaymentControlEnabled, false);
+});
+
 test('settings schema normalizes Plus Check allowed regions in canonical state and read view', () => {
   const { settingsSchema } = loadApis();
   const schema = settingsSchema.createSettingsSchema();

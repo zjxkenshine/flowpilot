@@ -57,7 +57,11 @@ return {
   pullIpProxyPoolFromApi,
   getAccountModeProxyPoolFromState,
   getCurrentIpProxyAuthEntry,
+  checkIpProxyPurity,
   normalize711ProxyApiConfig,
+  normalizeIpqsPurityResponse,
+  normalizeIpProxyPurityFraudScoreThreshold,
+  normalizeIpProxyPurityMaxAttempts,
   normalizeIpProxyAccountList,
   normalizeIpProxyListFromPayload,
   normalizeProxyPoolEntries,
@@ -151,6 +155,105 @@ test('IP proxy routing state patch keeps exit probe endpoint for diagnostics', (
   assert.equal(patch.ipProxyAppliedExitIp, '219.104.171.52');
   assert.equal(patch.ipProxyAppliedExitRegion, 'JP');
   assert.equal(patch.ipProxyAppliedExitEndpoint, 'https://ipinfo.io/json');
+});
+
+test('IPQS purity response normalization passes clean low-risk IPs', () => {
+  const api = loadIpProxyCore();
+  const result = api.normalizeIpqsPurityResponse({
+    success: true,
+    fraud_score: 10,
+    proxy: false,
+    vpn: false,
+    tor: false,
+    recent_abuse: false,
+    bot_status: false,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.score, 10);
+  assert.deepEqual(result.reasons, []);
+});
+
+test('IPQS purity response normalization blocks threshold and risk signals', () => {
+  const api = loadIpProxyCore();
+  const byScore = api.normalizeIpqsPurityResponse({
+    success: true,
+    fraud_score: 75,
+  });
+  assert.equal(byScore.ok, false);
+  assert.equal(byScore.status, 'failed');
+  assert.deepEqual(byScore.reasons, ['fraud_score>=75']);
+
+  for (const signal of ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status']) {
+    const result = api.normalizeIpqsPurityResponse({
+      success: true,
+      fraud_score: 10,
+      [signal]: true,
+    });
+    assert.equal(result.ok, false, signal);
+    assert.ok(result.reasons.includes(signal), signal);
+  }
+});
+
+test('IPQS purity response normalization treats API errors and invalid payloads as failed', () => {
+  const api = loadIpProxyCore();
+
+  const invalid = api.normalizeIpqsPurityResponse(null);
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 'error');
+  assert.ok(invalid.reasons.includes('invalid_response'));
+
+  const apiError = api.normalizeIpqsPurityResponse({
+    success: false,
+    message: 'Invalid API key',
+  });
+  assert.equal(apiError.ok, false);
+  assert.equal(apiError.status, 'error');
+  assert.ok(apiError.reasons.includes('api_error'));
+  assert.match(apiError.error, /Invalid API key/);
+});
+
+test('IPQS purity check caches same IP result to avoid duplicate API calls', async () => {
+  const api = loadIpProxyCore();
+  const originalFetch = global.fetch;
+  let fetchCalls = 0;
+  global.fetch = async (url) => {
+    fetchCalls += 1;
+    assert.match(String(url), /ipqualityscore\.com\/api\/json\/ip\/test-key\/198\.51\.100\.12/);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        fraud_score: 10,
+        proxy: false,
+        vpn: false,
+        tor: false,
+        recent_abuse: false,
+        bot_status: false,
+      }),
+    };
+  };
+
+  try {
+    const state = {
+      ipProxyPurityCheckEnabled: true,
+      ipProxyPurityApiKey: 'test-key',
+      ipProxyPurityFraudScoreThreshold: 75,
+      ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
+    };
+    const first = await api.checkIpProxyPurity('198.51.100.12', state);
+    const second = await api.checkIpProxyPurity('198.51.100.12', state);
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(second.cached, true);
+    assert.equal(fetchCalls, 1);
+  } finally {
+    if (originalFetch === undefined) delete global.fetch;
+    else global.fetch = originalFetch;
+  }
 });
 
 test('IP proxy page probes do not fall back to other windows when the locked window is unavailable', async () => {
@@ -1170,6 +1273,140 @@ test('711 API different-exit rotation restores old exit state when every candida
   }
 });
 
+test('711 API different-exit rotation honors purity max attempts', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalAddLog = globalThis.addLog;
+  const originalFetch = global.fetch;
+  const oldExitIp = '203.0.113.8';
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy' },
+    { host: '10.0.0.2', port: 9000, protocol: 'http', provider: '711proxy' },
+    { host: '10.0.0.3', port: 9000, protocol: 'http', provider: '711proxy' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'api',
+    ipProxyApiUrl: 'http://global.rotgbapi.711proxy.com:8089/gen?count=3&proto=http&stype=text&split=%5Cr%5Cn&zone=custom&ptype=1&sessType=rotating',
+    ipProxyApiPool: pool,
+    ipProxyApiCurrentIndex: 0,
+    ipProxyApiCurrent: pool[0],
+    ipProxyApplied: true,
+    ipProxyAppliedReason: 'applied',
+    ipProxyAppliedExitIp: oldExitIp,
+    ipProxyAppliedExitRegion: 'JP',
+    ipProxyAppliedExitDetecting: false,
+    ipProxyPurityCheckEnabled: true,
+    ipProxyPurityApiKey: 'test-key',
+    ipProxyPurityFraudScoreThreshold: 75,
+    ipProxyPurityMaxAttempts: 2,
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
+  };
+  let switchCalls = 0;
+  let fetchCalls = 0;
+  let appliedPac = '';
+
+  try {
+    api.chrome.proxy = {
+      settings: {
+        clear(_details, callback) {
+          callback();
+        },
+        set(details, callback) {
+          appliedPac = details?.value?.pacScript?.data || '';
+          callback();
+        },
+        get(_details, callback) {
+          callback({
+            levelOfControl: 'controlled_by_this_extension',
+            value: {
+              mode: 'pac_script',
+              pacScript: { data: appliedPac },
+            },
+          });
+        },
+      },
+    };
+    api.chrome.runtime = {};
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    globalThis.addLog = async () => {};
+    global.fetch = async () => {
+      fetchCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          fraud_score: 95,
+          proxy: true,
+        }),
+      };
+    };
+
+    const result = await api.switch711ApiProxyUntilExitChanged({
+      state,
+      maxAttempts: state.ipProxyPurityMaxAttempts,
+      allowRefreshOnExhausted: true,
+      switchProxyFn: async () => {
+        switchCalls += 1;
+        const index = Math.min(switchCalls, pool.length - 1);
+        const current = pool[index];
+        state = {
+          ...state,
+          ipProxyApiCurrentIndex: index,
+          ipProxyApiCurrent: current,
+        };
+        return {
+          mode: 'api',
+          provider: '711proxy',
+          count: pool.length,
+          index,
+          current,
+          display: `${current.host}:${current.port} (${index + 1}/${pool.length})`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: current.host,
+            port: current.port,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: `198.51.100.${50 + switchCalls}`,
+            exitRegion: 'US',
+            exitSource: 'page_context',
+          },
+        };
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'purity_failed_exhausted');
+    assert.equal(result.attemptedCount, 2);
+    assert.equal(result.purityFailureCount, 2);
+    assert.equal(switchCalls, 2);
+    assert.equal(fetchCalls, 2);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    if (originalAddLog === undefined) delete globalThis.addLog;
+    else globalThis.addLog = originalAddLog;
+    if (originalFetch === undefined) delete global.fetch;
+    else global.fetch = originalFetch;
+  }
+});
+
 test('IP proxy region-match rotation skips mismatched exit country and accepts matching exit', async () => {
   const api = loadIpProxyCore();
   const originalGetState = globalThis.getState;
@@ -1244,6 +1481,276 @@ test('IP proxy region-match rotation skips mismatched exit country and accepts m
     else globalThis.setState = originalSetState;
     if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
     else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+  }
+});
+
+test('IP proxy region-match rotation skips impure IP and accepts the next clean IP', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalFetch = global.fetch;
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+    { host: '10.0.0.2', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyAccountPool: pool,
+    ipProxyAccountCurrentIndex: 0,
+    ipProxyAccountCurrent: pool[0],
+    ipProxyPurityCheckEnabled: true,
+    ipProxyPurityApiKey: 'test-key',
+    ipProxyPurityFraudScoreThreshold: 75,
+    ipProxyPurityMaxAttempts: 2,
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
+  };
+  let switchCalls = 0;
+  const requestedUrls = [];
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    global.fetch = async (url) => {
+      requestedUrls.push(String(url));
+      const isFirstIp = String(url).includes('198.51.100.20');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          fraud_score: isFirstIp ? 90 : 10,
+          proxy: false,
+          vpn: false,
+          tor: false,
+          recent_abuse: false,
+          bot_status: false,
+        }),
+      };
+    };
+
+    const result = await api.switchIpProxyUntilExitRegionMatches({
+      state,
+      switchProxyFn: async () => {
+        switchCalls += 1;
+        const current = pool[Math.min(switchCalls - 1, pool.length - 1)];
+        state = {
+          ...state,
+          ipProxyAccountCurrentIndex: switchCalls - 1,
+          ipProxyAccountCurrent: current,
+        };
+        return {
+          mode: 'account',
+          provider: '711proxy',
+          count: pool.length,
+          index: switchCalls - 1,
+          current,
+          display: `${current.host}:${current.port} [${current.region}]`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: current.host,
+            port: current.port,
+            region: current.region,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: switchCalls === 1 ? '198.51.100.20' : '203.0.113.20',
+            exitRegion: 'US',
+            exitSource: 'page_context',
+          },
+        };
+      },
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.exitRegionMatched, true);
+    assert.equal(result.proxyRouting.exitIp, '203.0.113.20');
+    assert.equal(result.proxyRouting.purity.status, 'passed');
+    assert.equal(result.attemptedCount, 2);
+    assert.equal(switchCalls, 2);
+    assert.equal(requestedUrls.length, 2);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    if (originalFetch === undefined) delete global.fetch;
+    else global.fetch = originalFetch;
+  }
+});
+
+test('IP proxy region-match rotation reports skipped after purity max attempts', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalFetch = global.fetch;
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+    { host: '10.0.0.2', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyAccountPool: pool,
+    ipProxyAccountCurrentIndex: 0,
+    ipProxyAccountCurrent: pool[0],
+    ipProxyPurityCheckEnabled: true,
+    ipProxyPurityApiKey: 'test-key',
+    ipProxyPurityFraudScoreThreshold: 75,
+    ipProxyPurityMaxAttempts: 2,
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
+  };
+  let switchCalls = 0;
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        fraud_score: 10,
+        proxy: true,
+      }),
+    });
+
+    const result = await api.switchIpProxyUntilExitRegionMatches({
+      state,
+      switchProxyFn: async () => {
+        const current = pool[switchCalls % pool.length];
+        switchCalls += 1;
+        state = {
+          ...state,
+          ipProxyAccountCurrentIndex: switchCalls - 1,
+          ipProxyAccountCurrent: current,
+        };
+        return {
+          mode: 'account',
+          provider: '711proxy',
+          count: pool.length,
+          index: switchCalls - 1,
+          current,
+          display: `${current.host}:${current.port} [${current.region}]`,
+          pool,
+          proxyRouting: {
+            enabled: true,
+            applied: true,
+            reason: 'applied',
+            host: current.host,
+            port: current.port,
+            region: current.region,
+            provider: '711proxy',
+            exitDetecting: false,
+            exitIp: `198.51.100.${30 + switchCalls}`,
+            exitRegion: 'US',
+            exitSource: 'page_context',
+          },
+        };
+      },
+      maxAttempts: 2,
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'purity_failed');
+    assert.equal(result.purityFailureCount, 2);
+    assert.match(result.error, /IP 纯净度检测未通过/);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    if (originalFetch === undefined) delete global.fetch;
+    else global.fetch = originalFetch;
+  }
+});
+
+test('IP proxy region-match rotation does not call IPQS when purity check is disabled', async () => {
+  const api = loadIpProxyCore();
+  const originalGetState = globalThis.getState;
+  const originalSetState = globalThis.setState;
+  const originalBroadcastDataUpdate = globalThis.broadcastDataUpdate;
+  const originalFetch = global.fetch;
+  const pool = [
+    { host: '10.0.0.1', port: 9000, protocol: 'http', provider: '711proxy', region: 'US' },
+  ];
+  let state = {
+    ipProxyEnabled: true,
+    ipProxyService: '711proxy',
+    ipProxyMode: 'account',
+    ipProxyAccountPool: pool,
+    ipProxyAccountCurrentIndex: 0,
+    ipProxyAccountCurrent: pool[0],
+    ipProxyPurityCheckEnabled: false,
+    ipProxyPurityApiKey: 'test-key',
+  };
+  let fetchCalls = 0;
+
+  try {
+    globalThis.getState = async () => state;
+    globalThis.setState = async (updates) => {
+      state = { ...state, ...updates };
+    };
+    globalThis.broadcastDataUpdate = () => {};
+    global.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error('IPQS should not be called');
+    };
+
+    const result = await api.switchIpProxyUntilExitRegionMatches({
+      state,
+      switchProxyFn: async () => ({
+        mode: 'account',
+        provider: '711proxy',
+        count: pool.length,
+        index: 0,
+        current: pool[0],
+        display: `${pool[0].host}:${pool[0].port} [US]`,
+        pool,
+        proxyRouting: {
+          enabled: true,
+          applied: true,
+          reason: 'applied',
+          host: pool[0].host,
+          port: pool[0].port,
+          region: 'US',
+          provider: '711proxy',
+          exitDetecting: false,
+          exitIp: '198.51.100.40',
+          exitRegion: 'US',
+          exitSource: 'page_context',
+        },
+      }),
+      maxAttempts: 1,
+    });
+
+    assert.equal(result.exitRegionMatched, true);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    if (originalGetState === undefined) delete globalThis.getState;
+    else globalThis.getState = originalGetState;
+    if (originalSetState === undefined) delete globalThis.setState;
+    else globalThis.setState = originalSetState;
+    if (originalBroadcastDataUpdate === undefined) delete globalThis.broadcastDataUpdate;
+    else globalThis.broadcastDataUpdate = originalBroadcastDataUpdate;
+    if (originalFetch === undefined) delete global.fetch;
+    else global.fetch = originalFetch;
   }
 });
 

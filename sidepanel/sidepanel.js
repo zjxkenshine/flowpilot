@@ -203,6 +203,14 @@ const rowIpProxyAutoSyncEnabled = document.getElementById('row-ip-proxy-auto-syn
 const inputIpProxyAutoSyncEnabled = document.getElementById('input-ip-proxy-auto-sync-enabled');
 const rowIpProxyAutoSyncInterval = document.getElementById('row-ip-proxy-auto-sync-interval');
 const inputIpProxyAutoSyncIntervalMinutes = document.getElementById('input-ip-proxy-auto-sync-interval-minutes');
+const rowIpProxyPurityCheckEnabled = document.getElementById('row-ip-proxy-purity-check-enabled');
+const inputIpProxyPurityCheckEnabled = document.getElementById('input-ip-proxy-purity-check-enabled');
+const rowIpProxyPurityApiKey = document.getElementById('row-ip-proxy-purity-api-key');
+const inputIpProxyPurityApiKey = document.getElementById('input-ip-proxy-purity-api-key');
+const rowIpProxyPurityThreshold = document.getElementById('row-ip-proxy-purity-threshold');
+const inputIpProxyPurityThreshold = document.getElementById('input-ip-proxy-purity-threshold');
+const rowIpProxyPurityMaxAttempts = document.getElementById('row-ip-proxy-purity-max-attempts');
+const inputIpProxyPurityMaxAttempts = document.getElementById('input-ip-proxy-purity-max-attempts');
 const rowIpProxyHost = document.getElementById('row-ip-proxy-host');
 const inputIpProxyHost = document.getElementById('input-ip-proxy-host');
 const rowIpProxyPort = document.getElementById('row-ip-proxy-port');
@@ -236,6 +244,7 @@ const ipProxyRuntimeDetailsText = document.getElementById('ip-proxy-runtime-deta
 const rowIpProxyExitInfo = document.getElementById('row-ip-proxy-exit-info');
 const displayIpProxyExitIp = document.getElementById('display-ip-proxy-exit-ip');
 const displayIpProxyExitRegion = document.getElementById('display-ip-proxy-exit-region');
+const displayIpProxyPurityStatus = document.getElementById('display-ip-proxy-purity-status');
 const btnIpProxyExitRefresh = document.getElementById('btn-ip-proxy-exit-refresh');
 const rowCodex2ApiUrl = document.getElementById('row-codex2api-url');
 const inputCodex2ApiUrl = document.getElementById('input-codex2api-url');
@@ -277,6 +286,8 @@ const rowPlusPaymentMethod = document.getElementById('row-plus-payment-method');
 const selectPlusPaymentMethod = document.getElementById('select-plus-payment-method');
 const rowPlusCheckoutVerificationFailureStrategy = document.getElementById('row-plus-verification-failure-strategy');
 const selectPlusCheckoutVerificationFailureStrategy = document.getElementById('select-plus-checkout-verification-failure-strategy');
+const rowPlusAccountTypePaymentControl = document.getElementById('row-plus-account-type-payment-control');
+const inputPlusAccountTypePaymentControlEnabled = document.getElementById('input-plus-account-type-payment-control-enabled');
 const rowPlusCheckAllowedRegions = document.getElementById('row-plus-check-allowed-regions');
 const plusCheckAllowedRegionInputs = Array.from(document.querySelectorAll('[data-plus-check-region]'));
 const rowPlusCheckoutCreatePreWait = document.getElementById('row-plus-checkout-create-pre-wait');
@@ -2233,6 +2244,7 @@ const PRIVACY_MASKED_INPUT_IDS = Object.freeze([
   'input-ip-proxy-account-session-prefix',
   'input-ip-proxy-host',
   'input-ip-proxy-region',
+  'input-ip-proxy-purity-api-key',
   'input-account-run-history-helper-base-url',
   'input-free-reusable-phone',
   'input-signup-phone',
@@ -5545,6 +5557,29 @@ function collectSettingsPayload() {
   const defaultHostedCheckoutSmsPoolMaxUses = typeof DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES !== 'undefined'
     ? DEFAULT_HOSTED_CHECKOUT_SMS_POOL_MAX_USES
     : 3;
+  const defaultAndroidAppHelperBaseUrl = typeof DEFAULT_ANDROID_APP_HELPER_BASE_URL !== 'undefined'
+    ? DEFAULT_ANDROID_APP_HELPER_BASE_URL
+    : 'http://127.0.0.1:18768';
+  const normalizeAndroidAppHelperBaseUrlInput = typeof normalizeAndroidAppHelperBaseUrlValue === 'function'
+    ? normalizeAndroidAppHelperBaseUrlValue
+    : ((value = '') => {
+      const rawValue = String(value || defaultAndroidAppHelperBaseUrl).trim();
+      try {
+        const parsed = new URL(rawValue);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          return defaultAndroidAppHelperBaseUrl;
+        }
+        const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+        if (['/health', '/gopay/approve', '/device/snapshot'].includes(endpointPath)) {
+          parsed.pathname = '';
+          parsed.search = '';
+          parsed.hash = '';
+        }
+        return parsed.toString().replace(/\/$/, '');
+      } catch {
+        return defaultAndroidAppHelperBaseUrl;
+      }
+    });
   const normalizeHostedCheckoutVerificationPopupDelaySecondsInput = typeof normalizeHostedCheckoutVerificationPopupDelaySeconds === 'function'
     ? normalizeHostedCheckoutVerificationPopupDelaySeconds
     : ((value) => {
@@ -6374,7 +6409,7 @@ function collectSettingsPayload() {
   );
   const androidAppHelperBaseUrl = typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl
     ? inputAndroidAppHelperUrl.value
-    : (latestState?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL);
+    : (latestState?.androidAppHelperBaseUrl || defaultAndroidAppHelperBaseUrl);
   const selectedSub2ApiGroupName = String(inputSub2ApiGroup.value || '').trim();
   const sub2apiGroupNames = [];
   const seenSub2ApiGroupNames = new Set();
@@ -6513,6 +6548,38 @@ function collectSettingsPayload() {
       currentIpProxyStateOverride.ipProxyAutoSyncIntervalMinutes,
       latestState?.ipProxyAutoSyncIntervalMinutes
     ),
+    ipProxyPurityCheckEnabled: typeof inputIpProxyPurityCheckEnabled !== 'undefined' && inputIpProxyPurityCheckEnabled
+      ? Boolean(inputIpProxyPurityCheckEnabled.checked)
+      : Boolean(latestState?.ipProxyPurityCheckEnabled),
+    ipProxyPurityProvider: 'ipqualityscore',
+    ipProxyPurityApiKey: typeof inputIpProxyPurityApiKey !== 'undefined' && inputIpProxyPurityApiKey
+      ? String(inputIpProxyPurityApiKey.value || '').trim()
+      : String(latestState?.ipProxyPurityApiKey || '').trim(),
+    ipProxyPurityFraudScoreThreshold: typeof normalizeIpProxyPurityFraudScoreThreshold === 'function'
+      ? normalizeIpProxyPurityFraudScoreThreshold(
+        typeof inputIpProxyPurityThreshold !== 'undefined' && inputIpProxyPurityThreshold
+          ? inputIpProxyPurityThreshold.value
+          : latestState?.ipProxyPurityFraudScoreThreshold,
+        75
+      )
+      : Math.max(0, Math.min(100, Number.parseInt(String(
+        typeof inputIpProxyPurityThreshold !== 'undefined' && inputIpProxyPurityThreshold
+          ? inputIpProxyPurityThreshold.value
+          : latestState?.ipProxyPurityFraudScoreThreshold
+      ).trim(), 10) || 75)),
+    ipProxyPurityMaxAttempts: typeof normalizeIpProxyPurityMaxAttempts === 'function'
+      ? normalizeIpProxyPurityMaxAttempts(
+        typeof inputIpProxyPurityMaxAttempts !== 'undefined' && inputIpProxyPurityMaxAttempts
+          ? inputIpProxyPurityMaxAttempts.value
+          : latestState?.ipProxyPurityMaxAttempts,
+        5
+      )
+      : Math.max(1, Math.min(50, Number.parseInt(String(
+        typeof inputIpProxyPurityMaxAttempts !== 'undefined' && inputIpProxyPurityMaxAttempts
+          ? inputIpProxyPurityMaxAttempts.value
+          : latestState?.ipProxyPurityMaxAttempts
+      ).trim(), 10) || 5)),
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
     ipProxyHost: currentIpProxyServiceProfile.host,
     ipProxyPort: Number.parseInt(String(currentIpProxyServiceProfile.port || '').trim(), 10) || 0,
     ipProxyProtocol: currentIpProxyServiceProfile.protocol,
@@ -6540,6 +6607,9 @@ function collectSettingsPayload() {
       : Boolean(latestState?.webRtcLeakProtectionEnabled),
     plusModeEnabled: payloadPlusModeEnabled,
     phonePlusModeEnabled: payloadPhonePlusModeEnabled,
+    plusAccountTypePaymentControlEnabled: typeof inputPlusAccountTypePaymentControlEnabled !== 'undefined' && inputPlusAccountTypePaymentControlEnabled
+      ? Boolean(inputPlusAccountTypePaymentControlEnabled.checked)
+      : latestState?.plusAccountTypePaymentControlEnabled !== false,
     plusPaymentMethod,
     plusHostedCheckoutIsFinalStep: latestState?.plusHostedCheckoutIsFinalStep !== false,
     plusAccountAccessStrategy: payloadPlusAccountAccessStrategy,
@@ -6747,7 +6817,7 @@ function collectSettingsPayload() {
         ? inputAndroidAppAutomationEnabled.checked
         : latestState?.androidAppAutomationEnabled
     ),
-    androidAppHelperBaseUrl: normalizeAndroidAppHelperBaseUrlValue(androidAppHelperBaseUrl),
+    androidAppHelperBaseUrl: normalizeAndroidAppHelperBaseUrlInput(androidAppHelperBaseUrl),
     ...(accountContributionEnabled ? {} : {
       customPassword: inputPassword.value,
     }),
@@ -12010,6 +12080,9 @@ function updatePlusModeUI() {
     ? PLUS_ACCOUNT_ACCESS_STRATEGY_CODEX_SESSION_UI
     : 'codex_session';
   const defaultMethod = typeof DEFAULT_PLUS_PAYMENT_METHOD !== 'undefined' ? DEFAULT_PLUS_PAYMENT_METHOD : paypalValue;
+  const defaultAndroidAppHelperBaseUrl = typeof DEFAULT_ANDROID_APP_HELPER_BASE_URL !== 'undefined'
+    ? DEFAULT_ANDROID_APP_HELPER_BASE_URL
+    : 'http://127.0.0.1:18768';
   const resolveStrategyTargetId = typeof normalizePlusStrategyTargetId === 'function'
     ? normalizePlusStrategyTargetId
     : ((value = '') => {
@@ -12223,6 +12296,12 @@ function updatePlusModeUI() {
     selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
       latestState?.plusCheckoutVerificationFailureStrategy
     );
+  }
+  if (typeof rowPlusAccountTypePaymentControl !== 'undefined' && rowPlusAccountTypePaymentControl) {
+    rowPlusAccountTypePaymentControl.style.display = enabled ? '' : 'none';
+  }
+  if (typeof inputPlusAccountTypePaymentControlEnabled !== 'undefined' && inputPlusAccountTypePaymentControlEnabled) {
+    inputPlusAccountTypePaymentControlEnabled.checked = latestState?.plusAccountTypePaymentControlEnabled !== false;
   }
   if (typeof rowPlusCheckAllowedRegions !== 'undefined' && rowPlusCheckAllowedRegions) {
     rowPlusCheckAllowedRegions.style.display = enabled ? '' : 'none';
@@ -12440,7 +12519,7 @@ function updatePlusModeUI() {
   }
   if (typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl) {
     inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(
-      latestState?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL
+      latestState?.androidAppHelperBaseUrl || defaultAndroidAppHelperBaseUrl
     );
   }
   if (typeof rowAndroidAppAutomationEnabled !== 'undefined' && rowAndroidAppAutomationEnabled) {
@@ -13530,6 +13609,9 @@ function applySettingsState(state) {
   };
   syncLatestState(state);
   const defaultActiveFlowId = typeof DEFAULT_ACTIVE_FLOW_ID === 'string' ? DEFAULT_ACTIVE_FLOW_ID : 'openai';
+  const defaultAndroidAppHelperBaseUrl = typeof DEFAULT_ANDROID_APP_HELPER_BASE_URL !== 'undefined'
+    ? DEFAULT_ANDROID_APP_HELPER_BASE_URL
+    : 'http://127.0.0.1:18768';
   const appliedFlowSelection = typeof syncFlowSelectorsFromState === 'function'
     ? syncFlowSelectorsFromState(state)
     : {
@@ -13591,6 +13673,9 @@ function applySettingsState(state) {
     selectPlusCheckoutVerificationFailureStrategy.value = normalizePlusCheckoutVerificationFailureStrategy(
       state?.plusCheckoutVerificationFailureStrategy
     );
+  }
+  if (typeof inputPlusAccountTypePaymentControlEnabled !== 'undefined' && inputPlusAccountTypePaymentControlEnabled) {
+    inputPlusAccountTypePaymentControlEnabled.checked = state?.plusAccountTypePaymentControlEnabled !== false;
   }
   if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
     syncPlusCheckAllowedRegionsControl(state?.plusCheckAllowedRegions || []);
@@ -13671,7 +13756,7 @@ function applySettingsState(state) {
     inputAndroidAppAutomationEnabled.checked = Boolean(state?.androidAppAutomationEnabled);
   }
   if (typeof inputAndroidAppHelperUrl !== 'undefined' && inputAndroidAppHelperUrl) {
-    inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(state?.androidAppHelperBaseUrl || DEFAULT_ANDROID_APP_HELPER_BASE_URL);
+    inputAndroidAppHelperUrl.value = normalizeAndroidAppHelperBaseUrlValue(state?.androidAppHelperBaseUrl || defaultAndroidAppHelperBaseUrl);
   }
   if (typeof inputHostedCheckoutVerificationUrl !== 'undefined' && inputHostedCheckoutVerificationUrl) {
     inputHostedCheckoutVerificationUrl.value = normalizeHostedCheckoutVerificationUrlValue(state?.hostedCheckoutVerificationUrl || '');
@@ -13783,6 +13868,9 @@ function applySettingsState(state) {
   }
   if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
     syncPlusCheckAllowedRegionsControl(state?.plusCheckAllowedRegions || []);
+  }
+  if (typeof inputPlusAccountTypePaymentControlEnabled !== 'undefined' && inputPlusAccountTypePaymentControlEnabled) {
+    inputPlusAccountTypePaymentControlEnabled.checked = state?.plusAccountTypePaymentControlEnabled !== false;
   }
   if (typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl) {
     inputPlusCheckoutCloudConversionApiUrl.value = normalizePlusCheckoutCloudConversionApiUrlValue(state?.plusCheckoutCloudConversionApiUrl || '');
@@ -13968,6 +14056,26 @@ function applySettingsState(state) {
   if (typeof inputIpProxyAutoSyncIntervalMinutes !== 'undefined' && inputIpProxyAutoSyncIntervalMinutes) {
     inputIpProxyAutoSyncIntervalMinutes.value = String(
       resolveIpProxyAutoSyncIntervalMinutes(state?.ipProxyAutoSyncIntervalMinutes)
+    );
+  }
+  if (typeof inputIpProxyPurityCheckEnabled !== 'undefined' && inputIpProxyPurityCheckEnabled) {
+    inputIpProxyPurityCheckEnabled.checked = Boolean(state?.ipProxyPurityCheckEnabled);
+  }
+  if (typeof inputIpProxyPurityApiKey !== 'undefined' && inputIpProxyPurityApiKey) {
+    inputIpProxyPurityApiKey.value = String(state?.ipProxyPurityApiKey || '');
+  }
+  if (typeof inputIpProxyPurityThreshold !== 'undefined' && inputIpProxyPurityThreshold) {
+    inputIpProxyPurityThreshold.value = String(
+      typeof normalizeIpProxyPurityFraudScoreThreshold === 'function'
+        ? normalizeIpProxyPurityFraudScoreThreshold(state?.ipProxyPurityFraudScoreThreshold, 75)
+        : (Number.parseInt(String(state?.ipProxyPurityFraudScoreThreshold || '').trim(), 10) || 75)
+    );
+  }
+  if (typeof inputIpProxyPurityMaxAttempts !== 'undefined' && inputIpProxyPurityMaxAttempts) {
+    inputIpProxyPurityMaxAttempts.value = String(
+      typeof normalizeIpProxyPurityMaxAttempts === 'function'
+        ? normalizeIpProxyPurityMaxAttempts(state?.ipProxyPurityMaxAttempts, 5)
+        : (Number.parseInt(String(state?.ipProxyPurityMaxAttempts || '').trim(), 10) || 5)
     );
   }
   if (typeof inputIpProxyHost !== 'undefined' && inputIpProxyHost) {
@@ -19626,6 +19734,14 @@ inputPlusCheckoutCloudConversionEnabled?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPlusAccountTypePaymentControlEnabled?.addEventListener('change', () => {
+  syncLatestState({
+    plusAccountTypePaymentControlEnabled: Boolean(inputPlusAccountTypePaymentControlEnabled.checked),
+  });
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 selectPlusCheckoutRegionCode?.addEventListener('change', () => {
   const regionCode = normalizePlusCheckoutRegionCodeValue(selectPlusCheckoutRegionCode.value, 'US');
   selectPlusCheckoutRegionCode.value = regionCode;
@@ -21108,6 +21224,49 @@ inputIpProxyAutoSyncIntervalMinutes?.addEventListener('blur', () => {
     ? Math.max(1, Math.min(1440, numeric))
     : 15;
   inputIpProxyAutoSyncIntervalMinutes.value = String(normalized);
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxyPurityCheckEnabled?.addEventListener('change', () => {
+  markSettingsDirty(true);
+  if (typeof updateIpProxyUI === 'function') {
+    updateIpProxyUI(latestState);
+  }
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxyPurityApiKey?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputIpProxyPurityApiKey?.addEventListener('blur', () => {
+  inputIpProxyPurityApiKey.value = String(inputIpProxyPurityApiKey.value || '').trim();
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxyPurityThreshold?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputIpProxyPurityThreshold?.addEventListener('blur', () => {
+  inputIpProxyPurityThreshold.value = String(
+    typeof normalizeIpProxyPurityFraudScoreThreshold === 'function'
+      ? normalizeIpProxyPurityFraudScoreThreshold(inputIpProxyPurityThreshold.value || '', 75)
+      : Math.max(0, Math.min(100, Number.parseInt(String(inputIpProxyPurityThreshold.value || '').trim(), 10) || 75))
+  );
+  saveSettings({ silent: true }).catch(() => {});
+});
+
+inputIpProxyPurityMaxAttempts?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputIpProxyPurityMaxAttempts?.addEventListener('blur', () => {
+  inputIpProxyPurityMaxAttempts.value = String(
+    typeof normalizeIpProxyPurityMaxAttempts === 'function'
+      ? normalizeIpProxyPurityMaxAttempts(inputIpProxyPurityMaxAttempts.value || '', 5)
+      : Math.max(1, Math.min(50, Number.parseInt(String(inputIpProxyPurityMaxAttempts.value || '').trim(), 10) || 5))
+  );
   saveSettings({ silent: true }).catch(() => {});
 });
 
@@ -22718,6 +22877,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.plusCheckoutVerificationFailureStrategy
         );
       }
+      if (message.payload.plusAccountTypePaymentControlEnabled !== undefined && inputPlusAccountTypePaymentControlEnabled) {
+        inputPlusAccountTypePaymentControlEnabled.checked = message.payload.plusAccountTypePaymentControlEnabled !== false;
+      }
       if (message.payload.plusCheckAllowedRegions !== undefined && typeof syncPlusCheckAllowedRegionsControl === 'function') {
         syncPlusCheckAllowedRegionsControl(message.payload.plusCheckAllowedRegions);
       }
@@ -22783,6 +22945,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.ipProxyPoolTargetCount !== undefined
         || message.payload.ipProxySwitchIpRoundCount !== undefined
         || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
+        || message.payload.ipProxyPurityCheckEnabled !== undefined
+        || message.payload.ipProxyPurityProvider !== undefined
+        || message.payload.ipProxyPurityApiKey !== undefined
+        || message.payload.ipProxyPurityFraudScoreThreshold !== undefined
+        || message.payload.ipProxyPurityMaxAttempts !== undefined
+        || message.payload.ipProxyPurityBlockSignals !== undefined
         || message.payload.ipProxyApiCount !== undefined
         || message.payload.ipProxyApiRegion !== undefined
         || message.payload.ipProxyApiZone !== undefined
@@ -22823,6 +22991,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.ipProxyAppliedExitDetecting !== undefined
         || message.payload.ipProxyAppliedExitError !== undefined
         || message.payload.ipProxyAppliedExitSource !== undefined
+        || message.payload.ipProxyAppliedPurityStatus !== undefined
+        || message.payload.ipProxyAppliedPurityProvider !== undefined
+        || message.payload.ipProxyAppliedPurityScore !== undefined
+        || message.payload.ipProxyAppliedPurityReasons !== undefined
+        || message.payload.ipProxyAppliedPurityCheckedAt !== undefined
+        || message.payload.ipProxyAppliedPurityError !== undefined
         || message.payload.ipProxyAutoSyncEnabled !== undefined
         || message.payload.ipProxyAutoSyncIntervalMinutes !== undefined
       ) {
@@ -22851,6 +23025,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           || message.payload.ipProxyPoolTargetCount !== undefined
           || message.payload.ipProxySwitchIpRoundCount !== undefined
           || message.payload.ipProxyAutoRefreshPoolOnExhausted !== undefined
+          || message.payload.ipProxyPurityCheckEnabled !== undefined
+          || message.payload.ipProxyPurityProvider !== undefined
+          || message.payload.ipProxyPurityApiKey !== undefined
+          || message.payload.ipProxyPurityFraudScoreThreshold !== undefined
+          || message.payload.ipProxyPurityMaxAttempts !== undefined
+          || message.payload.ipProxyPurityBlockSignals !== undefined
           || message.payload.ipProxyHost !== undefined
           || message.payload.ipProxyPort !== undefined
           || message.payload.ipProxyProtocol !== undefined
@@ -22897,6 +23077,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const numeric = Number.parseInt(String(message.payload.ipProxyAutoSyncIntervalMinutes ?? '').trim(), 10);
           inputIpProxyAutoSyncIntervalMinutes.value = String(
             Number.isFinite(numeric) ? Math.max(1, Math.min(1440, numeric)) : 15
+          );
+        }
+        if (message.payload.ipProxyPurityCheckEnabled !== undefined && inputIpProxyPurityCheckEnabled) {
+          inputIpProxyPurityCheckEnabled.checked = Boolean(message.payload.ipProxyPurityCheckEnabled);
+        }
+        if (message.payload.ipProxyPurityApiKey !== undefined && inputIpProxyPurityApiKey) {
+          inputIpProxyPurityApiKey.value = String(message.payload.ipProxyPurityApiKey || '');
+        }
+        if (message.payload.ipProxyPurityFraudScoreThreshold !== undefined && inputIpProxyPurityThreshold) {
+          inputIpProxyPurityThreshold.value = String(
+            typeof normalizeIpProxyPurityFraudScoreThreshold === 'function'
+              ? normalizeIpProxyPurityFraudScoreThreshold(message.payload.ipProxyPurityFraudScoreThreshold, 75)
+              : (Number.parseInt(String(message.payload.ipProxyPurityFraudScoreThreshold ?? '').trim(), 10) || 75)
+          );
+        }
+        if (message.payload.ipProxyPurityMaxAttempts !== undefined && inputIpProxyPurityMaxAttempts) {
+          inputIpProxyPurityMaxAttempts.value = String(
+            typeof normalizeIpProxyPurityMaxAttempts === 'function'
+              ? normalizeIpProxyPurityMaxAttempts(message.payload.ipProxyPurityMaxAttempts, 5)
+              : (Number.parseInt(String(message.payload.ipProxyPurityMaxAttempts ?? '').trim(), 10) || 5)
           );
         }
         if (message.payload.ipProxyApiUrl !== undefined && inputIpProxyApiUrl) {
@@ -22951,6 +23151,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           syncLatestState({
             ipProxyService: selectedProxyService,
             ipProxyServiceProfiles: normalizedProxyProfiles,
+            ipProxyPurityCheckEnabled: mergedProxyState.ipProxyPurityCheckEnabled,
+            ipProxyPurityProvider: mergedProxyState.ipProxyPurityProvider,
+            ipProxyPurityApiKey: mergedProxyState.ipProxyPurityApiKey,
+            ipProxyPurityFraudScoreThreshold: mergedProxyState.ipProxyPurityFraudScoreThreshold,
+            ipProxyPurityMaxAttempts: mergedProxyState.ipProxyPurityMaxAttempts,
+            ipProxyPurityBlockSignals: mergedProxyState.ipProxyPurityBlockSignals,
             ...(typeof buildIpProxyStatePatchFromServiceProfile === 'function'
               ? buildIpProxyStatePatchFromServiceProfile(selectedProxyService, activeProxyProfile)
               : {}),
@@ -22959,6 +23165,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           syncLatestState({
             ipProxyService: selectedProxyService,
             ipProxyServiceProfiles: normalizedProxyProfiles,
+            ipProxyPurityCheckEnabled: mergedProxyState.ipProxyPurityCheckEnabled,
+            ipProxyPurityProvider: mergedProxyState.ipProxyPurityProvider,
+            ipProxyPurityApiKey: mergedProxyState.ipProxyPurityApiKey,
+            ipProxyPurityFraudScoreThreshold: mergedProxyState.ipProxyPurityFraudScoreThreshold,
+            ipProxyPurityMaxAttempts: mergedProxyState.ipProxyPurityMaxAttempts,
+            ipProxyPurityBlockSignals: mergedProxyState.ipProxyPurityBlockSignals,
           });
         }
         updateIpProxyUI(latestState);
@@ -23075,6 +23287,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           message.payload.plusCheckoutVerificationFailureStrategy
         );
       }
+      if (message.payload.plusAccountTypePaymentControlEnabled !== undefined && inputPlusAccountTypePaymentControlEnabled) {
+        inputPlusAccountTypePaymentControlEnabled.checked = message.payload.plusAccountTypePaymentControlEnabled !== false;
+      }
       if (message.payload.plusCheckAllowedRegions !== undefined && typeof syncPlusCheckAllowedRegionsControl === 'function') {
         syncPlusCheckAllowedRegionsControl(message.payload.plusCheckAllowedRegions);
       }
@@ -23144,6 +23359,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         || message.payload.plusPaymentMethod !== undefined
         || message.payload.plusAccountAccessStrategy !== undefined
         || message.payload.plusCheckoutVerificationFailureStrategy !== undefined
+        || message.payload.plusAccountTypePaymentControlEnabled !== undefined
         || message.payload.plusCheckAllowedRegions !== undefined
         || message.payload.plusCheckoutCreatePreWaitSeconds !== undefined
         || message.payload.plusCheckoutOpenStableWaitSeconds !== undefined

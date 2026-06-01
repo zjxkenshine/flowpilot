@@ -122,7 +122,10 @@ const PLUS_CHECK_ALLOWED_REGION_SET = new Set(PLUS_CHECK_ALLOWED_REGION_OPTIONS)
 ${extractFunction('normalizePlusCheckAllowedRegionCode')}
 ${extractFunction('normalizePlusCheckAllowedRegions')}
 ${extractFunction('normalizePhonePlusRegistrationExitRegion')}
+${extractFunction('normalizePlusRegistrationExitRegion')}
 ${extractFunction('getPhonePlusRegistrationRegionGateResult')}
+${extractFunction('getPlusRegistrationRegionGateResult')}
+${extractFunction('isPlusAccountTypePaymentControlEnabled')}
 ${extractFunction('runCompletedNodeSideEffects')}
 ${extractFunction('reportCompletedNodeSideEffectError')}
 ${extractFunction('completeNodeFromBackground')}
@@ -473,6 +476,67 @@ test('completeNodeFromBackground skips Phone Plus payment when exit region is no
   const fallbackEvent = events.find((event) => event.type === 'fallback');
   assert.equal(fallbackEvent?.context.reason, 'phone-plus-registration-region-mismatch');
   assert.match(fallbackEvent?.context.detail, /freeStatus=free/);
+  assert.match(fallbackEvent?.context.detail, /exitRegion=JP/);
+  assert.match(fallbackEvent?.context.detail, /allowedRegions=US/);
+});
+
+test('completeNodeFromBackground keeps Plus payment for non-free account when account type control is disabled', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      plusModeEnabled: true,
+      plusAccountTypePaymentControlEnabled: false,
+      plusCheckAllowedRegions: [],
+      currentNodeId: 'wait-registration-success',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'paid',
+    freeStatusDetection: { freeStatus: 'paid', reason: 'paid_upgrade_action_visible' },
+  });
+
+  assert.equal(events.some((event) => event.type === 'fallback'), false);
+  assert.ok(events.some((event) => event.type === 'account-book' && event.state.freeStatus === 'paid'));
+});
+
+test('completeNodeFromBackground still applies PlusCheck region gate when account type control is disabled', async () => {
+  const events = [];
+  const api = createApi(events, 'platform-verify', {
+    state: {
+      plusModeEnabled: true,
+      plusAccountTypePaymentControlEnabled: false,
+      plusCheckAllowedRegions: ['US'],
+      currentNodeId: 'wait-registration-success',
+      ipProxyAppliedExitRegion: 'JP',
+    },
+    nodeIds: [
+      'open-chatgpt',
+      'wait-registration-success',
+      'plus-checkout-create',
+      'oauth-login',
+      'platform-verify',
+    ],
+  });
+
+  await api.completeNodeFromBackground('wait-registration-success', {
+    nodeId: 'wait-registration-success',
+    freeStatus: 'paid',
+    freeStatusDetection: { freeStatus: 'paid', reason: 'paid_upgrade_action_visible' },
+  });
+
+  const fallbackEvent = events.find((event) => event.type === 'fallback');
+  assert.equal(fallbackEvent?.context.reason, 'plus-registration-region-mismatch');
+  assert.match(fallbackEvent?.context.detail, /accountTypeControl=disabled/);
+  assert.match(fallbackEvent?.context.detail, /freeStatus=paid/);
   assert.match(fallbackEvent?.context.detail, /exitRegion=JP/);
   assert.match(fallbackEvent?.context.detail, /allowedRegions=US/);
 });

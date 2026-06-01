@@ -100,6 +100,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
+  'plusAccountTypePaymentControlEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
   'plusCheckoutVerificationFailureStrategy',
@@ -147,6 +148,12 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'ipProxyService',
   'ipProxyMode',
   'ipProxyActivationStep',
+  'ipProxyPurityCheckEnabled',
+  'ipProxyPurityProvider',
+  'ipProxyPurityApiKey',
+  'ipProxyPurityFraudScoreThreshold',
+  'ipProxyPurityMaxAttempts',
+  'ipProxyPurityBlockSignals',
   'kiroRsUrl',
   'kiroRsKey',
   'stepExecutionRangeByFlow',
@@ -191,6 +198,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
+  plusAccountTypePaymentControlEnabled: true,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
   plusCheckoutVerificationFailureStrategy: 'continue',
@@ -270,6 +278,12 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyService: '711proxy',
   ipProxyMode: 'account',
   ipProxyActivationStep: 1,
+  ipProxyPurityCheckEnabled: false,
+  ipProxyPurityProvider: 'ipqualityscore',
+  ipProxyPurityApiKey: '',
+  ipProxyPurityFraudScoreThreshold: 75,
+  ipProxyPurityMaxAttempts: 5,
+  ipProxyPurityBlockSignals: ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'],
   ipProxyServiceProfiles: {},
   ipProxyPoolTargetCount: '20',
   ipProxySwitchIpRoundCount: '1',
@@ -356,6 +370,24 @@ function normalizeStepExecutionRangeByFlow(value) { return value && typeof value
 function normalizeIpProxyProviderValue(value) { return String(value || '711proxy').trim() || '711proxy'; }
 function normalizeIpProxyMode(value) { return String(value || 'account').trim() || 'account'; }
 ${extractFunction('normalizeIpProxyActivationStep')}
+function normalizeIpProxyPurityProvider() { return 'ipqualityscore'; }
+function normalizeIpProxyPurityFraudScoreThreshold(value, fallback = 75) {
+  const numeric = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isInteger(numeric) ? Math.max(0, Math.min(100, numeric)) : fallback;
+}
+function normalizeIpProxyPurityMaxAttempts(value, fallback = 5) {
+  const numeric = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isInteger(numeric) ? Math.max(1, Math.min(50, numeric)) : fallback;
+}
+function normalizeIpProxyPurityBlockSignals(value) {
+  const allowed = ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status', 'active_vpn', 'active_tor'];
+  const source = Array.isArray(value) ? value : String(value || '').split(/[\\s,;|/]+/);
+  const selected = [];
+  source.map((item) => String(item || '').trim().toLowerCase().replace(/-/g, '_')).forEach((signal) => {
+    if (allowed.includes(signal) && !selected.includes(signal)) selected.push(signal);
+  });
+  return selected.length ? selected : ['proxy', 'vpn', 'tor', 'recent_abuse', 'bot_status'];
+}
 function normalizeIpProxySpecialDomainRouteMode(value) {
   const normalized = String(value || 'local_proxy').trim().toLowerCase();
   return ['local_proxy', 'direct', 'provider_proxy'].includes(normalized) ? normalized : 'local_proxy';
@@ -505,6 +537,34 @@ test('buildPersistentSettingsPayload preserves flat proxy round and tail-refresh
   assert.equal(payload.ipProxyPoolTargetCount, '25');
   assert.equal(payload.ipProxySwitchIpRoundCount, '3');
   assert.equal(payload.ipProxyAutoRefreshPoolOnExhausted, true);
+});
+
+test('buildPersistentSettingsPayload persists IP proxy purity settings into schema state', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    ipProxyPurityCheckEnabled: true,
+    ipProxyPurityProvider: 'ipqualityscore',
+    ipProxyPurityApiKey: 'secret-ipqs-key',
+    ipProxyPurityFraudScoreThreshold: '80',
+    ipProxyPurityMaxAttempts: '7',
+    ipProxyPurityBlockSignals: ['proxy', 'vpn', 'bot_status'],
+  }, { fillDefaults: true });
+
+  assert.equal(payload.ipProxyPurityCheckEnabled, true);
+  assert.equal(payload.ipProxyPurityProvider, 'ipqualityscore');
+  assert.equal(payload.ipProxyPurityApiKey, 'secret-ipqs-key');
+  assert.equal(payload.ipProxyPurityFraudScoreThreshold, 80);
+  assert.equal(payload.ipProxyPurityMaxAttempts, 7);
+  assert.deepEqual(payload.ipProxyPurityBlockSignals, ['proxy', 'vpn', 'bot_status']);
+  assert.deepEqual(payload.settingsState.services.proxy.purityCheck, {
+    enabled: true,
+    provider: 'ipqualityscore',
+    apiKey: 'secret-ipqs-key',
+    fraudScoreThreshold: 80,
+    maxAttempts: 7,
+    blockSignals: ['proxy', 'vpn', 'bot_status'],
+  });
 });
 
 test('buildPersistentSettingsPayload normalizes IP proxy activation step from flat and schema input', () => {
@@ -1166,6 +1226,35 @@ test('buildPersistentSettingsPayload persists Plus checkout wait settings into s
   }, { fillDefaults: true });
   assert.equal(invalid.plusCheckoutVerificationFailureStrategy, 'continue');
   assert.equal(invalid.settingsState.flows.openai.plus.plusCheckoutVerificationFailureStrategy, 'continue');
+});
+
+test('buildPersistentSettingsPayload persists Plus account type payment control into settings schema', () => {
+  const api = buildHarness();
+
+  const defaults = api.buildPersistentSettingsPayload({}, { fillDefaults: true });
+  assert.equal(defaults.plusAccountTypePaymentControlEnabled, true);
+  assert.equal(defaults.settingsState.flows.openai.plus.plusAccountTypePaymentControlEnabled, true);
+
+  const flatDisabled = api.buildPersistentSettingsPayload({
+    plusAccountTypePaymentControlEnabled: false,
+  }, { fillDefaults: true });
+  assert.equal(flatDisabled.plusAccountTypePaymentControlEnabled, false);
+  assert.equal(flatDisabled.settingsState.flows.openai.plus.plusAccountTypePaymentControlEnabled, false);
+
+  const nestedDisabled = api.buildPersistentSettingsPayload({
+    settingsSchemaVersion: 4,
+    settingsState: {
+      flows: {
+        openai: {
+          plus: {
+            plusAccountTypePaymentControlEnabled: false,
+          },
+        },
+      },
+    },
+  }, { requireKnownKeys: true });
+  assert.equal(nestedDisabled.plusAccountTypePaymentControlEnabled, false);
+  assert.equal(nestedDisabled.settingsState.flows.openai.plus.plusAccountTypePaymentControlEnabled, false);
 });
 
 test('buildPersistentSettingsPayload normalizes Plus Check allowed regions into settings schema', () => {

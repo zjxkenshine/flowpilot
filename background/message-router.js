@@ -348,6 +348,13 @@
       };
     }
 
+    function isIpProxyPurityCheckRequested(state = {}) {
+      return Boolean(
+        state?.ipProxyPurityCheckEnabled
+        && String(state?.ipProxyPurityApiKey || '').trim()
+      );
+    }
+
     async function appendManualAccountRunRecordIfNeeded(status, stateOverride = null, reason = '') {
       if (typeof appendAccountRunRecord !== 'function') {
         return null;
@@ -1277,19 +1284,50 @@
           await handleStepData(resolvedStep, message.payload);
           let postCompletionState = await getState();
           const registrationFreeStatus = String(postCompletionState?.freeStatus || 'unknown').trim().toLowerCase() || 'unknown';
-          if (
+          const plusAccountTypePaymentControlEnabled = postCompletionState?.plusAccountTypePaymentControlEnabled !== false;
+          const isPlusRegistrationGateState = Boolean(
             nodeId === 'wait-registration-success'
-            && postCompletionState?.phonePlusModeEnabled
-            && registrationFreeStatus !== 'free'
+            && (postCompletionState?.plusModeEnabled || postCompletionState?.phonePlusModeEnabled)
             && typeof handlePhonePlusNonFreeTrialFallback === 'function'
+          );
+          if (
+            isPlusRegistrationGateState
+            && plusAccountTypePaymentControlEnabled
+            && registrationFreeStatus !== 'free'
           ) {
+            const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
             const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
-              reason: 'phone-plus-registration-non-free',
+              reason: isPhonePlusGate ? 'phone-plus-registration-non-free' : 'plus-registration-non-free',
               detail: `freeStatus=${registrationFreeStatus}`,
               nodeId,
             });
             if (fallbackResult?.handled) {
               postCompletionState = await getState();
+            }
+          }
+          if (
+            isPlusRegistrationGateState
+            && (!plusAccountTypePaymentControlEnabled || registrationFreeStatus === 'free')
+          ) {
+            const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
+            const regionGate = typeof getPlusRegistrationRegionGateResult === 'function'
+              ? getPlusRegistrationRegionGateResult(postCompletionState)
+              : (typeof getPhonePlusRegistrationRegionGateResult === 'function'
+                ? getPhonePlusRegistrationRegionGateResult(postCompletionState)
+                : { enabled: false, matched: true, allowedRegions: [] });
+            if (regionGate.enabled && !regionGate.matched) {
+              const allowedLabel = regionGate.allowedRegions.join(',');
+              const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || '未检测到地区';
+              const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
+                reason: isPhonePlusGate ? 'phone-plus-registration-region-mismatch' : 'plus-registration-region-mismatch',
+                detail: plusAccountTypePaymentControlEnabled
+                  ? `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`
+                  : `accountTypeControl=disabled; freeStatus=${registrationFreeStatus}; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`,
+                nodeId,
+              });
+              if (fallbackResult?.handled) {
+                postCompletionState = await getState();
+              }
             }
           }
           const workflowNodeIds = typeof getNodeIdsForState === 'function'
@@ -2497,13 +2535,14 @@
         case 'REFRESH_IP_PROXY_POOL': {
           const currentState = await getState();
           const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
-          if (message.payload?.ensureDifferentExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
-            const mode = typeof normalizeIpProxyMode === 'function'
-              ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
-              : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
-            const provider = typeof normalizeIpProxyProviderValue === 'function'
-              ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
-              : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+          const mode = typeof normalizeIpProxyMode === 'function'
+            ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
+            : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
+          const provider = typeof normalizeIpProxyProviderValue === 'function'
+            ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
+            : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+          const shouldEnsureCheckedExit = Boolean(message.payload?.ensureDifferentExit) || isIpProxyPurityCheckRequested(resolvedState);
+          if (shouldEnsureCheckedExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
             if (mode === 'api' && provider === '711proxy') {
               const result = await switch711ApiProxyUntilExitChanged({
                 maxItems: message.payload?.maxItems,
@@ -2512,16 +2551,31 @@
                 previousExitIp: message.payload?.previousExitIp ?? resolvedState?.ipProxyAppliedExitIp,
                 refreshPoolFirst: true,
                 allowRefreshOnExhausted: true,
+                maxAttempts: isIpProxyPurityCheckRequested(resolvedState) ? resolvedState?.ipProxyPurityMaxAttempts : undefined,
               });
               return { ok: true, ...result };
             }
+          }
+          if (
+            isIpProxyPurityCheckRequested(resolvedState)
+            && typeof switchIpProxyUntilExitRegionMatches === 'function'
+          ) {
+            const result = await switchIpProxyUntilExitRegionMatches({
+              maxItems: message.payload?.maxItems,
+              mode,
+              state: resolvedState,
+              refreshPoolFn: refreshIpProxyPool,
+              allowRefreshOnExhausted: mode === 'api',
+              maxAttempts: resolvedState?.ipProxyPurityMaxAttempts,
+            });
+            return { ok: true, ...result };
           }
           if (typeof refreshIpProxyPool !== 'function') {
             throw new Error('IP 代理池能力尚未接入。');
           }
           const result = await refreshIpProxyPool({
             maxItems: message.payload?.maxItems,
-            mode: message.payload?.mode,
+            mode,
             skipExitProbe: message.payload?.skipExitProbe,
             state: resolvedState,
           });
@@ -2534,13 +2588,14 @@
           }
           const currentState = await getState();
           const resolvedState = buildResolvedIpProxyState(currentState, message.payload || {});
-          if (message.payload?.ensureDifferentExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
-            const mode = typeof normalizeIpProxyMode === 'function'
-              ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
-              : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
-            const provider = typeof normalizeIpProxyProviderValue === 'function'
-              ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
-              : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+          const mode = typeof normalizeIpProxyMode === 'function'
+            ? normalizeIpProxyMode(message.payload?.mode || resolvedState?.ipProxyMode)
+            : String(message.payload?.mode || resolvedState?.ipProxyMode || '').trim().toLowerCase();
+          const provider = typeof normalizeIpProxyProviderValue === 'function'
+            ? normalizeIpProxyProviderValue(resolvedState?.ipProxyService)
+            : String(resolvedState?.ipProxyService || '').trim().toLowerCase();
+          const shouldEnsureCheckedExit = Boolean(message.payload?.ensureDifferentExit) || isIpProxyPurityCheckRequested(resolvedState);
+          if (shouldEnsureCheckedExit && typeof switch711ApiProxyUntilExitChanged === 'function') {
             if (mode === 'api' && provider === '711proxy') {
               const result = await switch711ApiProxyUntilExitChanged({
                 maxItems: message.payload?.maxItems,
@@ -2549,13 +2604,27 @@
                 previousExitIp: message.payload?.previousExitIp ?? resolvedState?.ipProxyAppliedExitIp,
                 refreshPoolFirst: false,
                 allowRefreshOnExhausted: Boolean(resolvedState?.ipProxyAutoRefreshPoolOnExhausted),
+                maxAttempts: isIpProxyPurityCheckRequested(resolvedState) ? resolvedState?.ipProxyPurityMaxAttempts : undefined,
               });
               return { ok: true, ...result };
             }
           }
+          if (
+            isIpProxyPurityCheckRequested(resolvedState)
+            && typeof switchIpProxyUntilExitRegionMatches === 'function'
+          ) {
+            const result = await switchIpProxyUntilExitRegionMatches({
+              maxItems: message.payload?.maxItems,
+              mode,
+              state: resolvedState,
+              maxAttempts: resolvedState?.ipProxyPurityMaxAttempts,
+              allowRefreshOnExhausted: mode === 'api' && Boolean(resolvedState?.ipProxyAutoRefreshPoolOnExhausted),
+            });
+            return { ok: true, ...result };
+          }
           const result = await switchIpProxy(message.payload?.direction || 'next', {
             maxItems: message.payload?.maxItems,
-            mode: message.payload?.mode,
+            mode,
             forceRefresh: message.payload?.forceRefresh,
             skipExitProbe: message.payload?.skipExitProbe,
             state: resolvedState,

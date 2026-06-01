@@ -2084,11 +2084,123 @@ async function submitHostedLogin(payload = {}) {
   };
 }
 
+function buildHostedGuestCheckoutValues(payload = {}) {
+  const generatedCard = buildHostedVisaCard();
+  return {
+    email: normalizeText(payload.email || buildHostedRandomEmail()),
+    phone: normalizeText(payload.phone || ''),
+    cardNumber: String(payload.cardNumber || generatedCard.number).replace(/\s+/g, ''),
+    cardExpiry: normalizeText(payload.cardExpiry || generatedCard.expiry),
+    cardCvv: normalizeText(payload.cardCvv || generatedCard.cvv),
+    password: String(payload.password || buildHostedRandomPassword()),
+    firstName: normalizeText(payload.firstName || 'James'),
+    lastName: normalizeText(payload.lastName || 'Smith'),
+  };
+}
+
+function mergeHostedDocumentFillResult(previous = null, next = null) {
+  if (!previous || next?.filled || (!previous.found && next?.found)) {
+    return next || previous || null;
+  }
+  return previous;
+}
+
+function fillNonPhoneGuestCheckoutFields(payload = {}, address = {}, isBrazil = false, values = null) {
+  const resolvedValues = values || buildHostedGuestCheckoutValues(payload);
+  let documentFillResult = null;
+  fillHostedInputById('email', resolvedValues.email);
+  fillHostedInputById('cardNumber', resolvedValues.cardNumber);
+  fillHostedInputById('cardExpiry', resolvedValues.cardExpiry);
+  fillHostedInputById('cardCvv', resolvedValues.cardCvv);
+  fillHostedInputById('password', resolvedValues.password);
+  fillHostedInputById('firstName', resolvedValues.firstName);
+  fillHostedInputById('lastName', resolvedValues.lastName);
+  fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
+  if (!isBrazil) {
+    fillHostedInputById('billingLine1', address.street || address.address1 || '');
+    fillHostedInputById('billingCity', address.city || '');
+    selectHostedOptionByIdText('billingState', address.state || address.region || '');
+  }
+  documentFillResult = mergeHostedDocumentFillResult(
+    documentFillResult,
+    fillHostedDocumentIfPresent(payload, address)
+  );
+  const brazilFillResult = isBrazil ? fillHostedBrazilGuestFields(payload, address, resolvedValues) : null;
+  documentFillResult = mergeHostedDocumentFillResult(
+    documentFillResult,
+    brazilFillResult?.documentFillResult || null
+  );
+  return {
+    values: resolvedValues,
+    documentFillResult,
+    brazilFillResult,
+  };
+}
+
+async function fillHostedGuestCheckoutPhoneAndSubmit(payload = {}, address = {}, isBrazil = false, values = null) {
+  const resolvedValues = values || buildHostedGuestCheckoutValues(payload);
+  const configuredPhone = normalizeText(resolvedValues.phone || payload.phone || '');
+  if (!normalizeHostedPhoneDigits(configuredPhone)) {
+    throw new Error('PayPal hosted checkout 未收到后台下发的池中手机号/验证码配置，无法继续填写资料页。');
+  }
+  const phonePostFillCheckDelayMs = Math.max(
+    0,
+    Math.floor(Number(payload.phonePostFillCheckDelayMs ?? PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS) || 0)
+  );
+  const phoneEmptyRefillMaxRetries = Math.max(
+    0,
+    Math.floor(Number(payload.phoneEmptyRefillMaxRetries ?? PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES) || 0)
+  );
+  let phoneValueReady = false;
+  let phoneRefillAttempts = 0;
+  let phoneInputDescriptor = '';
+  for (let attempt = 0; attempt <= phoneEmptyRefillMaxRetries; attempt += 1) {
+    const phoneFill = fillHostedPhoneInput(configuredPhone);
+    phoneRefillAttempts += 1;
+    phoneInputDescriptor = phoneFill?.descriptor || phoneInputDescriptor;
+    if (phonePostFillCheckDelayMs > 0) {
+      await sleep(phonePostFillCheckDelayMs);
+    }
+    if (hasHostedPhoneInputValue()) {
+      phoneValueReady = true;
+      break;
+    }
+  }
+  if (!phoneValueReady) {
+    throw new Error(
+      `${PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX}PayPal hosted checkout phone input stayed empty after ${phoneEmptyRefillMaxRetries} refill attempts.`
+    );
+  }
+  const phoneCheck = verifyHostedPhoneBeforeSubmit(configuredPhone);
+  const brazilRequiredResult = isBrazil ? assertHostedBrazilRequiredFieldsBeforeSubmit(payload, address) : null;
+  const clickResult = await clickHostedSubmitButton({
+    stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+    label: 'hosted-paypal-card-submit',
+    maxAttempts: 4,
+  });
+  return {
+    stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+    submitted: true,
+    payloadPhone: configuredPhone,
+    phoneRefillAttempts,
+    phonePostFillCheckDelayMs,
+    phoneInputDescriptor: phoneCheck.phoneInputDescriptor || phoneInputDescriptor,
+    phoneValueReady,
+    ...(brazilRequiredResult || {}),
+    clicked: Boolean(clickResult?.clicked),
+    ...phoneCheck,
+  };
+}
+
 async function fillHostedGuestCheckout(payload = {}) {
   await waitForDocumentComplete();
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
   const countryCode = normalizeHostedCountryCode(address.countryCode || payload.countryCode || payload.generatedFromCountry || 'US') || 'US';
   const isBrazil = isHostedBrazilProfile(payload, address);
+  const earlyValues = buildHostedGuestCheckoutValues(payload);
+  if (payload.phoneOnly === true) {
+    return fillHostedGuestCheckoutPhoneAndSubmit(payload, address, isBrazil, earlyValues);
+  }
   const countryResult = selectHostedCountryById('country', countryCode);
   if (countryResult.missing) {
     throw new Error(`PayPal hosted checkout country dropdown does not contain ${countryCode}.`);
@@ -2134,123 +2246,57 @@ async function fillHostedGuestCheckout(payload = {}) {
       ...addressSuggestionResult,
     };
   }
-  const generatedCard = buildHostedVisaCard();
-  const configuredPhone = normalizeText(payload.phone || '');
-  if (!normalizeHostedPhoneDigits(configuredPhone)) {
-    throw new Error('PayPal hosted checkout 未收到后台下发的池中手机号/验证码配置，无法继续填写资料页。');
-  }
-  const values = {
-    email: normalizeText(payload.email || buildHostedRandomEmail()),
-    phone: configuredPhone,
-    cardNumber: String(payload.cardNumber || generatedCard.number).replace(/\s+/g, ''),
-    cardExpiry: normalizeText(payload.cardExpiry || generatedCard.expiry),
-    cardCvv: normalizeText(payload.cardCvv || generatedCard.cvv),
-    password: String(payload.password || buildHostedRandomPassword()),
-    firstName: normalizeText(payload.firstName || 'James'),
-    lastName: normalizeText(payload.lastName || 'Smith'),
-  };
-  let documentFillResult = null;
-  const fillProfileFields = () => {
-    fillHostedInputById('email', values.email);
-    const phoneFill = fillHostedPhoneInput(values.phone);
-    fillHostedInputById('cardNumber', values.cardNumber);
-    fillHostedInputById('cardExpiry', values.cardExpiry);
-    fillHostedInputById('cardCvv', values.cardCvv);
-    fillHostedInputById('password', values.password);
-    fillHostedInputById('firstName', values.firstName);
-    fillHostedInputById('lastName', values.lastName);
-    fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
-    if (!isBrazil) {
-      fillHostedInputById('billingLine1', address.street || address.address1 || '');
-      fillHostedInputById('billingCity', address.city || '');
-      selectHostedOptionByIdText('billingState', address.state || address.region || '');
-    }
-    const nextDocumentFillResult = fillHostedDocumentIfPresent(payload, address);
-    if (
-      !documentFillResult
-      || nextDocumentFillResult.filled
-      || (!documentFillResult.found && nextDocumentFillResult.found)
-    ) {
-      documentFillResult = nextDocumentFillResult;
-    }
-    return phoneFill;
-  };
-  let brazilFillResult = null;
-  const phonePostFillCheckDelayMs = Math.max(
-    0,
-    Math.floor(Number(payload.phonePostFillCheckDelayMs ?? PAYPAL_HOSTED_PHONE_POST_FILL_CHECK_DELAY_MS) || 0)
-  );
-  const phoneEmptyRefillMaxRetries = Math.max(
-    0,
-    Math.floor(Number(payload.phoneEmptyRefillMaxRetries ?? PAYPAL_HOSTED_PHONE_EMPTY_REFILL_MAX_RETRIES) || 0)
-  );
-  let phoneValueReady = false;
-  let phoneRefillAttempts = 0;
-  let phoneInputDescriptor = '';
-  for (let attempt = 0; attempt <= phoneEmptyRefillMaxRetries; attempt += 1) {
-    const phoneFill = fillProfileFields();
-    if (isBrazil) {
-      brazilFillResult = fillHostedBrazilGuestFields(payload, address, values);
-    }
-    phoneRefillAttempts += 1;
-    phoneInputDescriptor = phoneFill?.descriptor || phoneInputDescriptor;
-    if (phonePostFillCheckDelayMs > 0) {
-      await sleep(phonePostFillCheckDelayMs);
-    }
-    if (hasHostedPhoneInputValue()) {
-      phoneValueReady = true;
-      break;
-    }
-  }
-  if (!phoneValueReady) {
-    throw new Error(
-      `${PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX}PayPal 无卡直绑资料页 phone 输入框在 ${phoneEmptyRefillMaxRetries} 次重填后仍为空。`
-    );
-  }
-  const addressSuggestionResult = payload.useAddressSuggestionFallback === true
-    ? await selectHostedAddressSuggestionFallback()
-    : {
-      addressSuggestionFallbackAttempted: false,
-      addressSuggestionSelected: false,
-      addressSuggestionSelectedText: '',
-      addressSuggestionError: '',
+  {
+    const values = earlyValues;
+    const nonPhoneResult = fillNonPhoneGuestCheckoutFields(payload, address, isBrazil, values);
+    const documentFillResult = nonPhoneResult?.documentFillResult || null;
+    const brazilFillResult = nonPhoneResult?.brazilFillResult || null;
+    const addressSuggestionResult = payload.useAddressSuggestionFallback === true
+      ? await selectHostedAddressSuggestionFallback()
+      : {
+        addressSuggestionFallbackAttempted: false,
+        addressSuggestionSelected: false,
+        addressSuggestionSelectedText: '',
+        addressSuggestionError: '',
+      };
+    const brazilGeneratedAddressResult = isBrazil
+      ? await waitForHostedBrazilGeneratedAddressValues()
+      : null;
+    const commonResult = {
+      stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+      nonPhoneFieldsFilled: true,
+      hostedDocumentInputFound: Boolean(documentFillResult?.found),
+      hostedDocumentFilled: Boolean(documentFillResult?.filled),
+      ...(isBrazil ? {
+        brazilPhoneTypeSelected: Boolean(brazilFillResult?.phoneTypeSelected),
+        brazilCardTypeSelected: Boolean(brazilFillResult?.cardTypeSelected),
+        brazilBirthdayInputFound: Boolean(brazilFillResult?.birthdayInputFound),
+        brazilBirthdayFilled: Boolean(brazilFillResult?.birthdayFilled),
+        brazilTermsFound: Boolean(brazilFillResult?.termsFound),
+        brazilTermsChecked: Boolean(brazilFillResult?.termsChecked),
+        brazilMarketingTermsSkipped: Boolean(brazilFillResult?.marketingTermsSkipped),
+        brazilAddressFillResult: brazilFillResult?.addressFillResult || null,
+        brazilGeneratedAddressReady: Boolean(brazilGeneratedAddressResult?.ready),
+        brazilGeneratedAddressWaitTimedOut: Boolean(brazilGeneratedAddressResult?.timedOut),
+      } : {}),
+      ...addressSuggestionResult,
     };
-  const brazilGeneratedAddressResult = isBrazil
-    ? await waitForHostedBrazilGeneratedAddressValues()
-    : null;
-  const phoneCheck = verifyHostedPhoneBeforeSubmit(values.phone);
-  const brazilRequiredResult = isBrazil ? assertHostedBrazilRequiredFieldsBeforeSubmit(payload, address) : null;
-  const clickResult = await clickHostedSubmitButton({
-    stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-    label: 'hosted-paypal-card-submit',
-    maxAttempts: 4,
-  });
-  return {
-    stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-    submitted: true,
-    payloadPhone: values.phone,
-    phoneRefillAttempts,
-    phonePostFillCheckDelayMs,
-    phoneInputDescriptor: phoneCheck.phoneInputDescriptor || phoneInputDescriptor,
-    phoneValueReady,
-    hostedDocumentInputFound: Boolean(documentFillResult?.found),
-    hostedDocumentFilled: Boolean(documentFillResult?.filled),
-    ...(isBrazil ? {
-      brazilPhoneTypeSelected: Boolean(brazilFillResult?.phoneTypeSelected),
-      brazilCardTypeSelected: Boolean(brazilFillResult?.cardTypeSelected),
-      brazilBirthdayInputFound: Boolean(brazilFillResult?.birthdayInputFound),
-      brazilBirthdayFilled: Boolean(brazilFillResult?.birthdayFilled),
-      brazilTermsFound: Boolean(brazilFillResult?.termsFound),
-      brazilTermsChecked: Boolean(brazilFillResult?.termsChecked),
-      brazilMarketingTermsSkipped: Boolean(brazilFillResult?.marketingTermsSkipped),
-      brazilAddressFillResult: brazilFillResult?.addressFillResult || null,
-      brazilGeneratedAddressReady: Boolean(brazilGeneratedAddressResult?.ready),
-      brazilGeneratedAddressWaitTimedOut: Boolean(brazilGeneratedAddressResult?.timedOut),
-      ...(brazilRequiredResult || {}),
-    } : {}),
-    ...addressSuggestionResult,
-    ...phoneCheck,
-  };
+    if (payload.deferPhoneFill === true) {
+      return {
+        ...commonResult,
+        submitted: false,
+        clicked: false,
+        phoneDeferred: true,
+      };
+    }
+    const phoneResult = await fillHostedGuestCheckoutPhoneAndSubmit(payload, address, isBrazil, values);
+    return {
+      ...phoneResult,
+      ...commonResult,
+      submitted: Boolean(phoneResult?.submitted),
+      clicked: Boolean(phoneResult?.clicked),
+    };
+  }
 }
 
 async function clickHostedReviewConsent() {

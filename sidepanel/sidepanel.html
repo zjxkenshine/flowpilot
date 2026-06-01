@@ -470,6 +470,21 @@
           <span class="setting-caption">最终状态未确认时默认继续后续流程</span>
         </div>
       </div>
+      <div class="data-row" id="row-plus-account-type-payment-control" style="display:none;">
+        <span class="data-label">账号类型控制</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-plus-account-type-payment-control-enabled"
+              title="开启时仅免费账号进入 Plus；关闭时忽略账号类型">
+              <input type="checkbox" id="input-plus-account-type-payment-control-enabled" checked />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <span class="setting-caption">开启时仅免费账号进入 Plus；关闭时忽略账号类型</span>
+        </div>
+      </div>
       <div class="data-row" id="row-plus-check-allowed-regions" style="display:none;">
         <span class="data-label">PlusCheck 地区</span>
         <div class="data-inline plus-check-region-picker" role="group" aria-label="Plus Check 允许地区">
@@ -655,7 +670,7 @@
             <option value="phone_sms">跟随手机接码配置</option>
             <option value="hero_sms_paypal_br">HeroSMS（PayPal/BR）</option>
           </select>
-          <span class="setting-caption">跟随模式会单独取 PayPal 号码，并沿用手机接码服务商、地区和复用配置。</span>
+          <span class="setting-caption">跟随模式会单独取 PayPal 号码；号码配置沿用手机接码，等码与轮询使用下方 PayPal 接码设置。</span>
         </div>
       </div>
       <div class="data-row" id="row-hosted-checkout-verification-url" style="display:none;">
@@ -1995,6 +2010,44 @@
                       <span class="data-unit">分钟</span>
                     </div>
                   </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-purity-check-enabled" style="display:none;">
+                    <span class="data-label">纯净度检测</span>
+                    <div class="data-inline">
+                      <label class="toggle-switch" for="input-ip-proxy-purity-check-enabled" title="切换 IP 后使用 IPQualityScore 检测出口风险">
+                        <input type="checkbox" id="input-ip-proxy-purity-check-enabled" />
+                        <span class="toggle-switch-track" aria-hidden="true">
+                          <span class="toggle-switch-thumb"></span>
+                        </span>
+                      </label>
+                      <span class="data-value">不通过时继续切换下一个 IP</span>
+                    </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-purity-api-key" style="display:none;">
+                    <span class="data-label">IPQS Key</span>
+                    <div class="input-with-icon">
+                      <input type="password" id="input-ip-proxy-purity-api-key" class="data-input data-input-with-icon"
+                        placeholder="IPQualityScore API Key" />
+                      <button id="btn-toggle-ip-proxy-purity-api-key" class="input-icon-btn" type="button"
+                        data-password-toggle="input-ip-proxy-purity-api-key" data-show-label="显示 IPQS Key"
+                        data-hide-label="隐藏 IPQS Key" aria-label="显示 IPQS Key" title="显示 IPQS Key"></button>
+                    </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-purity-threshold" style="display:none;">
+                    <span class="data-label">风险阈值</span>
+                    <div class="data-inline">
+                      <input type="number" id="input-ip-proxy-purity-threshold" class="data-input" min="0" max="100" step="1"
+                        placeholder="75" title="fraud_score 大于等于该值时判定不通过" />
+                      <span class="data-unit">分</span>
+                    </div>
+                  </div>
+                  <div class="data-row ip-proxy-column-row" id="row-ip-proxy-purity-max-attempts" style="display:none;">
+                    <span class="data-label">最多换 IP</span>
+                    <div class="data-inline">
+                      <input type="number" id="input-ip-proxy-purity-max-attempts" class="data-input" min="1" max="50" step="1"
+                        placeholder="5" title="连续不通过时最多尝试切换的 IP 数量" />
+                      <span class="data-unit">次</span>
+                    </div>
+                  </div>
                 </div>
                 <div class="ip-proxy-column ip-proxy-column-api" id="ip-proxy-api-panel">
                   <div class="ip-proxy-column-header">API 模式</div>
@@ -2143,6 +2196,10 @@
                 <div class="ip-proxy-exit-field">
                   <span class="ip-proxy-exit-field-label">地区</span>
                   <span id="display-ip-proxy-exit-region" class="data-value mono ip-proxy-exit-value">未检测</span>
+                </div>
+                <div class="ip-proxy-exit-field">
+                  <span class="ip-proxy-exit-field-label">纯净度</span>
+                  <span id="display-ip-proxy-purity-status" class="data-value mono ip-proxy-exit-value">未检测</span>
                 </div>
                 <button id="btn-ip-proxy-exit-refresh" class="btn btn-outline btn-xs ip-proxy-exit-refresh-btn"
                   type="button">刷新</button>

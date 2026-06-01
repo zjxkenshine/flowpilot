@@ -738,6 +738,16 @@ const IP_PROXY_TARGET_HOST_PATTERNS = [
 const AUTO_RUN_TIMER_ALARM_NAME = 'auto-run-timer';
 const IP_PROXY_AUTO_SYNC_ALARM_NAME = 'ip-proxy-auto-sync';
 const AUTO_RUN_TIMER_KIND_SCHEDULED_START = 'scheduled_start';
+const DEFAULT_IP_PROXY_PURITY_PROVIDER = 'ipqualityscore';
+const DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD = 75;
+const DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS = 5;
+const DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS = Object.freeze([
+  'proxy',
+  'vpn',
+  'tor',
+  'recent_abuse',
+  'bot_status',
+]);
 const AUTO_RUN_TIMER_KIND_BETWEEN_ROUNDS = 'between_rounds';
 const AUTO_RUN_TIMER_KIND_BEFORE_RETRY = 'before_retry';
 const IP_PROXY_AUTO_SYNC_INTERVAL_MIN_MINUTES = 1;
@@ -992,6 +1002,10 @@ function isPhonePlusModeState(state = {}) {
 
 function isPlusModeState(state = {}) {
   return Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
+}
+
+function isPlusAccountTypePaymentControlEnabled(state = {}) {
+  return state?.plusAccountTypePaymentControlEnabled !== false;
 }
 
 function normalizePlusPaymentMethod(value = '') {
@@ -1557,6 +1571,12 @@ const PERSISTED_SETTING_DEFAULTS = {
   ipProxyAutoRefreshPoolOnExhausted: false,
   ipProxyAutoSyncEnabled: false,
   ipProxyAutoSyncIntervalMinutes: IP_PROXY_AUTO_SYNC_DEFAULT_INTERVAL_MINUTES,
+  ipProxyPurityCheckEnabled: false,
+  ipProxyPurityProvider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+  ipProxyPurityApiKey: '',
+  ipProxyPurityFraudScoreThreshold: DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD,
+  ipProxyPurityMaxAttempts: DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS,
+  ipProxyPurityBlockSignals: [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS],
   ipProxyHost: '',
   ipProxyPort: '',
   ipProxyProtocol: DEFAULT_IP_PROXY_PROTOCOL,
@@ -1576,6 +1596,7 @@ const PERSISTED_SETTING_DEFAULTS = {
   webRtcLeakProtectionEnabled: false,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
+  plusAccountTypePaymentControlEnabled: true,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusHostedCheckoutIsFinalStep: true,
   plusAccountAccessStrategy: 'oauth',
@@ -1864,6 +1885,7 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'webRtcLeakProtectionEnabled',
   'plusModeEnabled',
   'phonePlusModeEnabled',
+  'plusAccountTypePaymentControlEnabled',
   'plusPaymentMethod',
   'plusHostedCheckoutIsFinalStep',
   'plusAccountAccessStrategy',
@@ -1918,6 +1940,12 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'ipProxyService',
   'ipProxyMode',
   'ipProxyActivationStep',
+  'ipProxyPurityCheckEnabled',
+  'ipProxyPurityProvider',
+  'ipProxyPurityApiKey',
+  'ipProxyPurityFraudScoreThreshold',
+  'ipProxyPurityMaxAttempts',
+  'ipProxyPurityBlockSignals',
   'kiroRsUrl',
   'kiroRsKey',
   'stepExecutionRangeByFlow',
@@ -2039,6 +2067,13 @@ const DEFAULT_STATE = {
   ipProxyAppliedExitDetecting: false,
   ipProxyAppliedExitError: '',
   ipProxyAppliedExitSource: '',
+  ipProxyAppliedExitEndpoint: '',
+  ipProxyAppliedPurityStatus: '',
+  ipProxyAppliedPurityProvider: '',
+  ipProxyAppliedPurityScore: null,
+  ipProxyAppliedPurityReasons: [],
+  ipProxyAppliedPurityCheckedAt: 0,
+  ipProxyAppliedPurityError: '',
   browserFingerprintProfile: null,
   browserFingerprintAppliedAt: 0,
   browserFingerprintExitIp: '',
@@ -4664,6 +4699,26 @@ function normalizePersistentSettingValue(key, value) {
         value,
         PERSISTED_SETTING_DEFAULTS.ipProxyAutoSyncIntervalMinutes
       );
+    case 'ipProxyPurityCheckEnabled':
+      return Boolean(value);
+    case 'ipProxyPurityProvider':
+      return typeof normalizeIpProxyPurityProvider === 'function'
+        ? normalizeIpProxyPurityProvider(value)
+        : DEFAULT_IP_PROXY_PURITY_PROVIDER;
+    case 'ipProxyPurityApiKey':
+      return String(value || '').trim();
+    case 'ipProxyPurityFraudScoreThreshold':
+      return typeof normalizeIpProxyPurityFraudScoreThreshold === 'function'
+        ? normalizeIpProxyPurityFraudScoreThreshold(value, PERSISTED_SETTING_DEFAULTS.ipProxyPurityFraudScoreThreshold)
+        : Math.min(100, Math.max(0, Math.floor(Number(value) || DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD)));
+    case 'ipProxyPurityMaxAttempts':
+      return typeof normalizeIpProxyPurityMaxAttempts === 'function'
+        ? normalizeIpProxyPurityMaxAttempts(value, PERSISTED_SETTING_DEFAULTS.ipProxyPurityMaxAttempts)
+        : Math.min(50, Math.max(1, Math.floor(Number(value) || DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS)));
+    case 'ipProxyPurityBlockSignals':
+      return typeof normalizeIpProxyPurityBlockSignals === 'function'
+        ? normalizeIpProxyPurityBlockSignals(value)
+        : [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS];
     case 'ipProxyHost':
       return String(value || '').trim();
     case 'ipProxyPort':
@@ -4740,6 +4795,8 @@ function normalizePersistentSettingValue(key, value) {
       return Boolean(value);
     case 'plusPaymentMethod':
       return normalizePlusPaymentMethod(value);
+    case 'plusAccountTypePaymentControlEnabled':
+      return value !== false;
     case 'plusHostedCheckoutIsFinalStep':
       return Boolean(value);
     case 'plusAccountAccessStrategy':
@@ -5617,7 +5674,14 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       });
     }
   }
-  for (const key of HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS) {
+  const hostedCheckoutHeroSmsPayPalCacheKeys = typeof HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS !== 'undefined'
+    ? HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_KEYS
+    : [
+      'hostedCheckoutHeroSmsPayPalActivation',
+      'hostedCheckoutHeroSmsPayPalCachedAt',
+      'hostedCheckoutHeroSmsPayPalExpiresAt',
+    ];
+  for (const key of hostedCheckoutHeroSmsPayPalCacheKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       delete payload[key];
     }
@@ -6163,6 +6227,7 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('webRtcLeakProtectionEnabled', ['flows', 'openai', 'webRtcLeakProtection', 'enabled']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
+  assignIfUpdated('plusAccountTypePaymentControlEnabled', ['flows', 'openai', 'plus', 'plusAccountTypePaymentControlEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusHostedCheckoutIsFinalStep', ['flows', 'openai', 'plus', 'plusHostedCheckoutIsFinalStep']);
   assignIfUpdated('plusAccountAccessStrategy', ['flows', 'openai', 'plus', 'plusAccountAccessStrategy']);
@@ -6218,6 +6283,12 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('ipProxyService', ['services', 'proxy', 'provider']);
   assignIfUpdated('ipProxyMode', ['services', 'proxy', 'mode']);
   assignIfUpdated('ipProxyActivationStep', ['services', 'proxy', 'activationStep']);
+  assignIfUpdated('ipProxyPurityCheckEnabled', ['services', 'proxy', 'purityCheck', 'enabled']);
+  assignIfUpdated('ipProxyPurityProvider', ['services', 'proxy', 'purityCheck', 'provider']);
+  assignIfUpdated('ipProxyPurityApiKey', ['services', 'proxy', 'purityCheck', 'apiKey']);
+  assignIfUpdated('ipProxyPurityFraudScoreThreshold', ['services', 'proxy', 'purityCheck', 'fraudScoreThreshold']);
+  assignIfUpdated('ipProxyPurityMaxAttempts', ['services', 'proxy', 'purityCheck', 'maxAttempts']);
+  assignIfUpdated('ipProxyPurityBlockSignals', ['services', 'proxy', 'purityCheck', 'blockSignals']);
   assignIfUpdated('kiroRsUrl', ['flows', 'kiro', 'targets', 'kiro-rs', 'baseUrl']);
   assignIfUpdated('kiroRsKey', ['flows', 'kiro', 'targets', 'kiro-rs', 'apiKey']);
 
@@ -6452,6 +6523,16 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
         provider: prevState?.ipProxyService,
         mode: prevState?.ipProxyMode,
         activationStep: prevState?.ipProxyActivationStep,
+        purityCheck: {
+          enabled: prevState?.ipProxyPurityCheckEnabled,
+          provider: prevState?.ipProxyPurityProvider,
+          apiKey: prevState?.ipProxyPurityApiKey,
+          fraudScoreThreshold: prevState?.ipProxyPurityFraudScoreThreshold,
+          maxAttempts: prevState?.ipProxyPurityMaxAttempts,
+          blockSignals: Array.isArray(prevState?.ipProxyPurityBlockSignals)
+            ? prevState.ipProxyPurityBlockSignals
+            : undefined,
+        },
       },
     },
     flows: {
@@ -14720,6 +14801,7 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
   await handleNodeData(nodeId, payload);
   let postCompletionState = await getState();
   const registrationFreeStatus = String(postCompletionState?.freeStatus || 'unknown').trim().toLowerCase() || 'unknown';
+  const plusAccountTypePaymentControlEnabled = isPlusAccountTypePaymentControlEnabled(postCompletionState);
   const isPlusRegistrationGateState = Boolean(
     nodeId === 'wait-registration-success'
     && (postCompletionState?.plusModeEnabled || postCompletionState?.phonePlusModeEnabled)
@@ -14727,6 +14809,7 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
   );
   if (
     isPlusRegistrationGateState
+    && plusAccountTypePaymentControlEnabled
     && registrationFreeStatus !== 'free'
   ) {
     const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
@@ -14741,7 +14824,7 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
   }
   if (
     isPlusRegistrationGateState
-    && registrationFreeStatus === 'free'
+    && (!plusAccountTypePaymentControlEnabled || registrationFreeStatus === 'free')
   ) {
     const isPhonePlusGate = Boolean(postCompletionState?.phonePlusModeEnabled);
     const regionGate = typeof getPlusRegistrationRegionGateResult === 'function'
@@ -14752,7 +14835,9 @@ async function runCompletedNodeSideEffects(nodeId, payload, completionState, las
       const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || '未检测到地区';
       const fallbackResult = await handlePhonePlusNonFreeTrialFallback(postCompletionState, {
         reason: isPhonePlusGate ? 'phone-plus-registration-region-mismatch' : 'plus-registration-region-mismatch',
-        detail: `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`,
+        detail: plusAccountTypePaymentControlEnabled
+          ? `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`
+          : `accountTypeControl=disabled; freeStatus=${registrationFreeStatus}; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`,
         nodeId,
       });
       if (fallbackResult?.handled) {

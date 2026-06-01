@@ -321,6 +321,37 @@ return normalizePlusCheckoutVerificationFailureStrategy;
   assert.match(dataUpdatedSnippet, /selectPlusCheckoutVerificationFailureStrategy\.value\s*=\s*normalizePlusCheckoutVerificationFailureStrategy/);
 });
 
+test('sidepanel Plus account type payment control renders and syncs through settings', () => {
+  assert.match(sidepanelHtml, /id="row-plus-account-type-payment-control"/);
+  assert.match(sidepanelHtml, /id="input-plus-account-type-payment-control-enabled"/);
+  assert.match(sidepanelHtml, /账号类型控制/);
+  assert.match(sidepanelHtml, /开启时仅免费账号进入 Plus；关闭时忽略账号类型/);
+
+  const collectSource = extractFunction('collectSettingsPayload');
+  assert.match(collectSource, /plusAccountTypePaymentControlEnabled:/);
+  assert.match(collectSource, /inputPlusAccountTypePaymentControlEnabled\.checked/);
+  assert.match(collectSource, /latestState\?\.plusAccountTypePaymentControlEnabled !== false/);
+
+  const applySource = extractFunction('applySettingsState');
+  assert.match(
+    applySource,
+    /inputPlusAccountTypePaymentControlEnabled\.checked\s*=\s*state\?\.plusAccountTypePaymentControlEnabled !== false/
+  );
+
+  const updateModeSource = extractFunction('updatePlusModeUI');
+  assert.match(updateModeSource, /rowPlusAccountTypePaymentControl/);
+  assert.match(updateModeSource, /rowPlusAccountTypePaymentControl\.style\.display\s*=\s*enabled\s*\?/);
+
+  const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
+  assert.notEqual(dataUpdatedStart, -1);
+  const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 18000);
+  assert.match(dataUpdatedSnippet, /message\.payload\.plusAccountTypePaymentControlEnabled !== undefined/);
+  assert.match(
+    dataUpdatedSnippet,
+    /inputPlusAccountTypePaymentControlEnabled\.checked\s*=\s*message\.payload\.plusAccountTypePaymentControlEnabled !== false/
+  );
+});
+
 test('sidepanel Plus Check allowed regions render and sync through settings', () => {
   assert.match(sidepanelHtml, /id="row-plus-check-allowed-regions"/);
   assert.match(sidepanelHtml, /PlusCheck 地区/);
@@ -392,6 +423,8 @@ test('sidepanel PayPal hosted sms source selector renders and syncs through sett
   assert.match(sidepanelHtml, /<option value="hero_sms_paypal_br">HeroSMS（PayPal\/BR）<\/option>/);
   assert.match(sidepanelHtml, /<option value="fixed_pool">固定接码池（默认）<\/option>/);
   assert.match(sidepanelHtml, /<option value="phone_sms">跟随手机接码配置<\/option>/);
+
+  assert.match(sidepanelHtml, /PayPal[^<]*接码设置/);
 
   const normalizeSource = extractFunction('normalizeHostedCheckoutSmsSourceValue');
   const normalize = new Function(`

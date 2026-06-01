@@ -809,6 +809,10 @@
       return ['free', 'paid', 'plus'].includes(normalized) ? normalized : 'unknown';
     }
 
+    function isPlusAccountTypePaymentControlEnabled(state = {}) {
+      return state?.plusAccountTypePaymentControlEnabled !== false;
+    }
+
     function isPhoneSignupPhonePrefixedEmailEnabled(state = {}) {
       return state?.phoneSignupPhonePrefixedEmailEnabled !== false;
     }
@@ -2304,6 +2308,15 @@
         && error?.hostedCheckoutConfigMeta?.configSource !== 'phone-sms';
     }
 
+    function isHostedCheckoutDynamicSmsConfig(config = {}) {
+      return Boolean(config?.hostedCheckoutUsesPhoneSms)
+        && (
+          config?.configSource === 'phone-sms'
+          || config?.configSource === 'hero-sms-paypal-br'
+          || config?.hostedCheckoutUsesHeroSmsPayPalBr
+        );
+    }
+
     function isPayPalHostedPhoneEmptyAfterFillError(error) {
       return getErrorMessage(error).startsWith(PAYPAL_HOSTED_PHONE_EMPTY_AFTER_FILL_PREFIX);
     }
@@ -2443,11 +2456,78 @@
       );
     }
 
+    function getReusableHostedCheckoutPhoneSmsActivation(state = {}) {
+      const current = normalizeHostedCheckoutPhoneSmsActivation(state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]);
+      if (current && isHostedCheckoutPhoneSmsReusable(state, current)) {
+        return {
+          activation: current,
+          reused: true,
+          requestedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY] || '',
+          resolvedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY] || '',
+        };
+      }
+      return {
+        activation: null,
+        requestedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_REQUESTED_REGION_KEY] || '',
+        resolvedRegion: state?.[HOSTED_CHECKOUT_PHONE_SMS_RESOLVED_REGION_KEY] || '',
+      };
+    }
+
+    function getReusableHostedCheckoutHeroSmsPayPalActivation(state = {}) {
+      const now = Date.now();
+      const cached = normalizeHostedCheckoutPhoneSmsActivation(
+        state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_ACTIVATION_KEY]
+      );
+      const expiresAt = Math.max(
+        0,
+        Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || cached?.expiresAt) || 0
+      );
+      if (
+        cached
+        && isHostedCheckoutHeroSmsPayPalActivation(cached)
+        && cached.phoneNumber
+        && expiresAt > now
+      ) {
+        return {
+          activation: cached,
+          reused: true,
+          requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          regionMatched: true,
+        };
+      }
+      const current = normalizeHostedCheckoutPhoneSmsActivation(
+        state?.[HOSTED_CHECKOUT_PHONE_SMS_ACTIVATION_KEY]
+      );
+      const currentExpiresAt = Math.max(0, Number(current?.expiresAt) || 0);
+      if (
+        current
+        && isHostedCheckoutHeroSmsPayPalActivation(current)
+        && current.phoneNumber
+        && currentExpiresAt <= 0
+      ) {
+        return {
+          activation: current,
+          reused: true,
+          requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+          regionMatched: true,
+        };
+      }
+      return {
+        activation: null,
+        requestedRegion: HERO_SMS_PAYPAL_BR_REGION,
+        resolvedRegion: HERO_SMS_PAYPAL_BR_REGION,
+        regionMatched: false,
+      };
+    }
+
     async function resolveHostedCheckoutRuntimeConfig(state = {}, options = {}) {
       const {
         ensureCurrentSmsEntry = false,
         allowExhaustedCurrentSmsEntry = false,
       } = options || {};
+      const allowPhoneSmsActivationRequest = options?.allowPhoneSmsActivationRequest !== false;
       const latestState = typeof getState === 'function' ? await getState().catch(() => ({})) : {};
       const mergedState = {
         ...(latestState && typeof latestState === 'object' ? latestState : {}),
@@ -2478,11 +2558,13 @@
         ),
       });
       if (hostedSmsSource === HOSTED_CHECKOUT_SMS_SOURCE_PHONE_SMS) {
-        const phoneSmsResult = await ensureHostedCheckoutPhoneSmsActivation(mergedState, {
-          stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
-        });
+        const phoneSmsResult = allowPhoneSmsActivationRequest
+          ? await ensureHostedCheckoutPhoneSmsActivation(mergedState, {
+            stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+          })
+          : getReusableHostedCheckoutPhoneSmsActivation(mergedState);
         const activation = normalizeHostedCheckoutPhoneSmsActivation(phoneSmsResult?.activation);
-        if (!activation?.phoneNumber) {
+        if (allowPhoneSmsActivationRequest && !activation?.phoneNumber) {
           throw buildHostedCheckoutConfigError(
             'PayPal 跟随手机接码配置未获取到有效手机号。',
             {
@@ -2495,7 +2577,7 @@
         return {
           ...commonRuntimeConfig(),
           verificationUrl: '',
-          phone: normalizeHostedPhoneForPayload(activation.phoneNumber),
+          phone: normalizeHostedPhoneForPayload(activation?.phoneNumber || ''),
           hostedCheckoutSmsPoolAutoDisableEnabled: false,
           hostedCheckoutCurrentSmsEntry: null,
           hostedCheckoutUsesSmsPool: false,
@@ -2509,12 +2591,14 @@
         };
       }
       if (hostedSmsSource === HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR) {
-        const phoneSmsResult = await ensureHostedCheckoutHeroSmsPayPalActivation(mergedState, {
-          stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
-        });
+        const phoneSmsResult = allowPhoneSmsActivationRequest
+          ? await ensureHostedCheckoutHeroSmsPayPalActivation(mergedState, {
+            stepKey: options?.stepKey || PAYPAL_HOSTED_STEP_CARD,
+          })
+          : getReusableHostedCheckoutHeroSmsPayPalActivation(mergedState);
         const activation = normalizeHostedCheckoutPhoneSmsActivation(phoneSmsResult?.activation);
         const phone = normalizeBrazilHostedPhoneForPayload(activation?.phoneNumber || '');
-        if (!phone) {
+        if (allowPhoneSmsActivationRequest && !phone) {
           throw buildHostedCheckoutConfigError(
             'PayPal HeroSMS（PayPal/BR）未获取到有效的巴西 +55 手机号。',
             {
@@ -2973,6 +3057,40 @@
       };
     }
 
+    function isHostedCheckoutHeroSmsPollTarget(activation = null, runtimeConfig = {}) {
+      const provider = String(activation?.provider || '').trim().toLowerCase();
+      return provider === 'hero-sms'
+        || Boolean(runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr)
+        || isHostedCheckoutHeroSmsPayPalActivation(activation);
+    }
+
+    function buildHostedCheckoutPhoneSmsPollOptions(runtimeConfig = {}, options = {}) {
+      const pollAttempts = normalizeHostedCheckoutVerificationPollAttempts(
+        runtimeConfig?.verificationPollAttempts
+      );
+      const pollIntervalSeconds = normalizeHostedCheckoutVerificationPollIntervalSeconds(
+        runtimeConfig?.verificationPollIntervalSeconds
+      );
+      const intervalMs = Math.max(
+        1000,
+        Math.floor(Number(options?.phoneSmsPollIntervalMs) || pollIntervalSeconds * 1000)
+      );
+      const configuredTimeoutMs = Math.floor(Number(options?.phoneSmsPollTimeoutMs) || 0);
+      const timeoutMs = Math.max(
+        1000,
+        configuredTimeoutMs > 0 ? configuredTimeoutMs : pollAttempts * intervalMs
+      );
+      const configuredMaxRounds = Math.floor(Number(options?.phoneSmsPollMaxRounds) || 0);
+      const maxRounds = configuredMaxRounds > 0
+        ? Math.max(1, configuredMaxRounds)
+        : pollAttempts;
+      return {
+        timeoutMs,
+        intervalMs,
+        maxRounds,
+      };
+    }
+
     async function requestHostedCheckoutHeroSmsPayPalActivation(state = {}, options = {}) {
       if (typeof phoneVerificationHelpers?.requestPhoneActivationForRegion !== 'function'
         && typeof phoneVerificationHelpers?.requestPhoneActivation !== 'function') {
@@ -3321,6 +3439,7 @@
       const paymentEmailInfo = await resolvePayPalHostedGeneratedEmail();
       const config = await getHostedCheckoutRuntimeConfig(mergedState, {
         ensureCurrentSmsEntry: true,
+        allowPhoneSmsActivationRequest: options?.allowPhoneSmsActivationRequest !== false,
       });
       const profileRegion = await resolveHostedProfileRegionForState(mergedState, {
         context: 'paypal-hosted-profile',
@@ -3330,7 +3449,8 @@
       const nextPhone = countryCode === 'BR'
         ? normalizeBrazilHostedPhoneForPayload(rawNextPhone)
         : normalizeHostedPhoneForPayload(rawNextPhone);
-      if (countryCode === 'BR' && !nextPhone) {
+      const allowMissingPhone = isHostedCheckoutDynamicSmsConfig(config) && options?.allowMissingDynamicPhone !== false;
+      if (countryCode === 'BR' && !nextPhone && !allowMissingPhone) {
         throw buildHostedCheckoutConfigError(
           '需要巴西 +55 接码号码：请导入 PayPal 接码池，或填写手动 PayPal 电话。',
           {
@@ -3382,7 +3502,7 @@
       if (!nextProfile.email) {
         throw new Error('Phone Plus 支付邮箱解析失败：未拿到有效支付邮箱。');
       }
-      if (!nextProfile.phone) {
+      if (!nextProfile.phone && !allowMissingPhone) {
         throw buildHostedCheckoutConfigError(
           'PayPal hosted checkout 未拿到有效手机号配置，无法继续填写 PayPal 资料页。',
           {
@@ -3396,6 +3516,53 @@
       return {
         profile: nextProfile,
         config,
+      };
+    }
+
+    async function ensureHostedGuestProfileWithoutDynamicPhoneRequest(state = {}, options = {}) {
+      return ensureHostedGuestProfile(state, {
+        ...options,
+        allowPhoneSmsActivationRequest: false,
+        allowMissingDynamicPhone: true,
+      });
+    }
+
+    async function ensureHostedGuestProfileDynamicPhone(state = {}, profile = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
+      const runtimeConfig = await getHostedCheckoutRuntimeConfig(state, {
+        ensureCurrentSmsEntry: true,
+        allowPhoneSmsActivationRequest: true,
+        stepKey,
+      });
+      if (!isHostedCheckoutDynamicSmsConfig(runtimeConfig)) {
+        return {
+          profile,
+          config: runtimeConfig,
+          dynamicPhoneFilled: false,
+        };
+      }
+      const activation = normalizeHostedCheckoutPhoneSmsActivation(runtimeConfig?.hostedCheckoutPhoneSmsActivation);
+      const nextPhone = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
+        ? normalizeBrazilHostedPhoneForPayload(activation?.phoneNumber || runtimeConfig.phone || '')
+        : normalizeHostedPhoneForPayload(activation?.phoneNumber || runtimeConfig.phone || '');
+      if (!nextPhone) {
+        throw buildHostedCheckoutConfigError(
+          'PayPal hosted checkout dynamic SMS source did not return a valid phone number for the profile page.',
+          {
+            configSource: runtimeConfig?.configSource || 'unknown',
+            poolSize: runtimeConfig?.poolSize || 0,
+            selectedEntry: runtimeConfig?.hostedCheckoutCurrentSmsEntry || null,
+          }
+        );
+      }
+      const nextProfile = {
+        ...(profile && typeof profile === 'object' ? profile : {}),
+        phone: nextPhone,
+      };
+      await persistHostedGuestProfile(nextProfile);
+      return {
+        profile: nextProfile,
+        config: runtimeConfig,
+        dynamicPhoneFilled: true,
       };
     }
 
@@ -3500,6 +3667,7 @@
         config = await getHostedCheckoutRuntimeConfig(state, {
           ensureCurrentSmsEntry: false,
           allowExhaustedCurrentSmsEntry: true,
+          allowPhoneSmsActivationRequest: false,
         });
       } catch (error) {
         await addHostedStepLog(
@@ -4557,7 +4725,7 @@
       throw lastError || new Error('OpenAI Checkout 验证码轮询失败。');
     }
 
-    async function fetchHostedCheckoutVerificationCode(state = {}) {
+    async function fetchHostedCheckoutVerificationCode(state = {}, options = {}) {
       const runtimeConfig = await getHostedCheckoutRuntimeConfig(state, {
         ensureCurrentSmsEntry: true,
       });
@@ -4571,12 +4739,19 @@
         }
         let code = '';
         try {
-          code = await phoneVerificationHelpers.pollPhoneActivationCode(state, activation, {
-            timeoutMs: Math.max(1, Number(runtimeConfig?.verificationPollAttempts) || 1)
-              * Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5)
-              * 1000,
-            intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
-          });
+          const latestPollState = await getLatestHostedState(state);
+          const pollState = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
+            ? buildHostedCheckoutHeroSmsPayPalState(latestPollState)
+            : latestPollState;
+          const pollOptions = isHostedCheckoutHeroSmsPollTarget(activation, runtimeConfig)
+            ? buildHostedCheckoutPhoneSmsPollOptions(runtimeConfig, options)
+            : {
+              timeoutMs: Math.max(1, Number(runtimeConfig?.verificationPollAttempts) || 1)
+                * Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5)
+                * 1000,
+              intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
+            };
+          code = await phoneVerificationHelpers.pollPhoneActivationCode(pollState, activation, pollOptions);
         } catch (error) {
           await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);
           throw error;
@@ -4688,7 +4863,14 @@
         throwIfStopped();
         attempt += 1;
         try {
-          const code = await fetchHostedCheckoutVerificationCode();
+          const remainingMs = Math.max(0, deadline - Date.now());
+          const code = await fetchHostedCheckoutVerificationCode({}, {
+            phoneSmsPollTimeoutMs: normalizedWaitSeconds > 0
+              ? Math.max(1000, remainingMs || normalizedWaitSeconds * 1000)
+              : pollIntervalMs,
+            phoneSmsPollIntervalMs: pollIntervalMs,
+            phoneSmsPollMaxRounds: 1,
+          });
           if (excludedCodes.has(code)) {
             fallbackExcludedCode = code;
             lastError = new Error(`接口仍返回已试过的旧验证码 ${code}，继续等待新验证码。`);
@@ -5119,6 +5301,67 @@
       });
     }
 
+    async function submitHostedPayPalGuestProfile(tabId, state = {}, profile = {}, options = {}) {
+      const stepKey = String(options?.stepKey || PAYPAL_HOSTED_STEP_CARD).trim() || PAYPAL_HOSTED_STEP_CARD;
+      const stepNumber = getHostedStepNumber(stepKey);
+      const initialConfig = options?.config || await getHostedCheckoutRuntimeConfig(state, {
+        ensureCurrentSmsEntry: true,
+        allowPhoneSmsActivationRequest: false,
+        stepKey,
+      });
+      if (!isHostedCheckoutDynamicSmsConfig(initialConfig)) {
+        const result = await runHostedPayPalStep(tabId, {
+          ...profile,
+          expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+          phone: profile.phone,
+        }, { stepKey });
+        return {
+          result,
+          profile,
+          config: initialConfig,
+        };
+      }
+
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${stepNumber}：正在先填写 PayPal 资料页非手机号字段，随后再取号并填写手机号。`,
+        'info'
+      );
+      const nonPhoneResult = await runHostedPayPalStep(tabId, {
+        ...profile,
+        expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+        phone: '',
+        deferPhoneFill: true,
+      }, { stepKey });
+      if (!nonPhoneResult?.nonPhoneFieldsFilled || !nonPhoneResult?.phoneDeferred) {
+        throw new Error(`步骤 ${stepNumber}：PayPal 资料页非手机号字段未完成，已停止动态取号。`);
+      }
+
+      const latestState = await getLatestHostedState({
+        ...state,
+        plusHostedCheckoutGuestProfile: profile,
+        hostedCheckoutGuestProfile: profile,
+      });
+      const phoneResult = await ensureHostedGuestProfileDynamicPhone(latestState, profile, stepKey);
+      await addHostedStepLog(
+        stepKey,
+        `步骤 ${stepNumber}：PayPal 资料页非手机号字段已完成，动态取号 ${maskHostedPhoneForLog(phoneResult.profile.phone)} 后填写手机号并提交。`,
+        'info'
+      );
+      const submitResult = await runHostedPayPalStep(tabId, {
+        ...phoneResult.profile,
+        expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
+        phone: phoneResult.profile.phone,
+        phoneOnly: true,
+      }, { stepKey });
+      return {
+        result: submitResult,
+        nonPhoneResult,
+        profile: phoneResult.profile,
+        config: phoneResult.config,
+      };
+    }
+
     async function dismissHostedGuestPhoneErrorDialog(tabId, pageState = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
       if (!pageState?.hostedGuestPhoneError) {
         return null;
@@ -5254,52 +5497,50 @@
       return true;
     }
 
-    async function handleHostedGuestPhoneErrorWithSmsPool(tabId, pageState = {}, profile = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
+    async function handleHostedGuestPhoneErrorWithDelayedPhoneFill(tabId, pageState = {}, profile = {}, stepKey = PAYPAL_HOSTED_STEP_CARD) {
       const phoneErrorMessage = String(
         pageState?.hostedGuestPhoneErrorMessage
-        || 'PayPal 提示当前号码不可用，请更换号码。'
+        || 'PayPal reported that the current phone number cannot be used.'
       ).trim();
       await dismissHostedGuestPhoneErrorDialog(tabId, pageState, stepKey);
       const runtimeConfig = await getHostedCheckoutRuntimeConfig({}, {
         ensureCurrentSmsEntry: false,
+        allowPhoneSmsActivationRequest: false,
+        stepKey,
       });
-      if (runtimeConfig?.hostedCheckoutUsesPhoneSms && runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+
+      if (isHostedCheckoutDynamicSmsConfig(runtimeConfig)) {
         const latestState = await getLatestHostedState({});
-        await banHostedCheckoutPhoneSmsActivation(
-          latestState,
-          runtimeConfig.hostedCheckoutPhoneSmsActivation,
-          `PayPal 提示号码不可用：${phoneErrorMessage}`
-        );
-        const nextResult = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
-          ? await requestHostedCheckoutHeroSmsPayPalActivation(latestState, { stepKey })
-          : await requestHostedCheckoutPhoneSmsActivation(latestState, { stepKey });
-        const nextActivation = normalizeHostedCheckoutPhoneSmsActivation(nextResult?.activation);
-        if (!nextActivation?.phoneNumber) {
-          throw new Error(`步骤 ${getHostedStepNumber(stepKey)}：PayPal 提示当前号码不可用，且跟随手机接码配置未获取到新号码：${phoneErrorMessage}`);
+        if (runtimeConfig?.hostedCheckoutPhoneSmsActivation) {
+          await banHostedCheckoutPhoneSmsActivation(
+            latestState,
+            runtimeConfig.hostedCheckoutPhoneSmsActivation,
+            `PayPal reported phone number unavailable: ${phoneErrorMessage}`
+          );
         }
-        const nextProfile = {
+        const clearedProfile = {
           ...profile,
-          phone: runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
-            ? normalizeBrazilHostedPhoneForPayload(nextActivation.phoneNumber)
-            : normalizeHostedPhoneForPayload(nextActivation.phoneNumber),
+          phone: '',
         };
-        await persistHostedGuestProfile(nextProfile);
+        await persistHostedGuestProfile(clearedProfile);
         await addHostedStepLog(
           stepKey,
-          `步骤 ${getHostedStepNumber(stepKey)}：PayPal 已切换到新的手机接码号码 ${maskHostedPhoneForLog(nextProfile.phone)}，准备重新填写资料页。`,
+          `Step ${getHostedStepNumber(stepKey)}: PayPal rejected the dynamic SMS number; old number was cleared. Refilling non-phone fields before acquiring a new number.`,
           'info'
         );
-        await runHostedPayPalStep(tabId, {
-          ...nextProfile,
-          expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-          phone: nextProfile.phone,
+        const submitResult = await submitHostedPayPalGuestProfile(tabId, {}, clearedProfile, {
+          stepKey,
+          config: runtimeConfig,
         });
         return {
           handled: true,
-          profile: nextProfile,
-          phoneSmsActivation: nextActivation,
+          profile: submitResult.profile || clearedProfile,
+          phoneSmsActivation: normalizeHostedCheckoutPhoneSmsActivation(
+            submitResult?.config?.hostedCheckoutPhoneSmsActivation
+          ),
         };
       }
+
       if (
         !runtimeConfig?.hostedCheckoutUsesSmsPool
         || !runtimeConfig?.hostedCheckoutCurrentSmsEntry?.key
@@ -5311,7 +5552,7 @@
         };
       }
 
-      const disableReason = `PayPal 提示号码不可用：${phoneErrorMessage}`;
+      const disableReason = `PayPal reported phone number unavailable: ${phoneErrorMessage}`;
       const disableResult = await disableHostedCheckoutSmsPoolEntry(
         runtimeConfig.hostedCheckoutCurrentSmsEntry,
         disableReason,
@@ -5319,11 +5560,11 @@
       );
       await addHostedStepLog(
         stepKey,
-        `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码池号码 ${runtimeConfig.hostedCheckoutCurrentSmsEntry.phone} 已立即自动禁用。原因：${disableReason}`,
+        `Step ${getHostedStepNumber(stepKey)}: PayPal SMS pool number ${runtimeConfig.hostedCheckoutCurrentSmsEntry.phone} was disabled. Reason: ${disableReason}`,
         'warn'
       );
       if (!disableResult?.nextEntry?.phone) {
-        throw new Error(`步骤 ${getHostedStepNumber(stepKey)}：PayPal 提示当前号码不可用，且接码池已无其他启用号码：${phoneErrorMessage}`);
+        throw new Error(`Step ${getHostedStepNumber(stepKey)}: PayPal rejected the current phone number and the SMS pool has no other enabled number. ${phoneErrorMessage}`);
       }
 
       const nextProfile = {
@@ -5333,14 +5574,14 @@
       await persistHostedGuestProfile(nextProfile);
       await addHostedStepLog(
         stepKey,
-        `步骤 ${getHostedStepNumber(stepKey)}：PayPal 接码池已切换到下一个启用号码 ${disableResult.nextEntry.phone}，准备重新填写资料页。`,
+        `Step ${getHostedStepNumber(stepKey)}: PayPal SMS pool switched to ${disableResult.nextEntry.phone}; refilling the profile page.`,
         'info'
       );
       await runHostedPayPalStep(tabId, {
         ...nextProfile,
         expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
         phone: nextProfile.phone,
-      });
+      }, { stepKey });
       return {
         handled: true,
         profile: nextProfile,
@@ -5749,7 +5990,7 @@
         };
       }
       try {
-        ({ profile, config } = await ensureHostedGuestProfile(state));
+          ({ profile, config } = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(state));
       } catch (error) {
         const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
           nodeId: stepKey,
@@ -6066,7 +6307,7 @@
       let profile = null;
       let config = null;
       try {
-        ({ profile, config } = await ensureHostedGuestProfile(state));
+        ({ profile, config } = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(state));
       } catch (error) {
         const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
           nodeId: 'plus-checkout-create',
@@ -6171,7 +6412,7 @@
       let profile = null;
       let config = null;
       try {
-        ({ profile, config } = await ensureHostedGuestProfile(state));
+        ({ profile, config } = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(state));
       } catch (error) {
         const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
           nodeId: stepKey,
@@ -6212,7 +6453,7 @@
       let profile = null;
       let config = null;
       try {
-        ({ profile, config } = await ensureHostedGuestProfile(state));
+        ({ profile, config } = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(state));
       } catch (error) {
         const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
           nodeId: stepKey,
@@ -6278,7 +6519,7 @@
           ({
             profile: refreshedProfile,
             config: refreshedProfileConfig,
-          } = await ensureHostedGuestProfile(state, { forceRefresh: true }));
+          } = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(state, { forceRefresh: true }));
         } catch (error) {
           const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(state, error, {
             nodeId: stepKey,
@@ -6325,9 +6566,13 @@
         }
         const reviewConfig = refreshedProfileConfig || await getHostedCheckoutRuntimeConfig(refreshedState, {
           ensureCurrentSmsEntry: true,
+          allowPhoneSmsActivationRequest: false,
+          stepKey,
         });
         await logHostedCheckoutRuntimeConfig(stepKey, reviewConfig, {
-          extra: reviewConfig.hostedCheckoutUsesSmsPool
+          extra: isHostedCheckoutDynamicSmsConfig(reviewConfig)
+            ? `Dynamic SMS phone ${maskHostedPhoneForLog(reviewConfig.phone) || '(pending acquisition)'}`
+            : reviewConfig.hostedCheckoutUsesSmsPool
             ? `验证码链接已绑定当前池条目 ${maskHostedPhoneForLog(reviewConfig.hostedCheckoutCurrentSmsEntry?.phone)}`
             : `手动手机号 ${maskHostedPhoneForLog(reviewConfig.phone)}`,
         });
@@ -6336,7 +6581,7 @@
           throw buildHostedCheckoutBlockedError(pageState);
         }
         if (pageState.hostedGuestPhoneError) {
-          const phoneErrorResult = await handleHostedGuestPhoneErrorWithSmsPool(tabId, pageState, profile, stepKey);
+          const phoneErrorResult = await handleHostedGuestPhoneErrorWithDelayedPhoneFill(tabId, pageState, profile, stepKey);
           if (!phoneErrorResult.handled) {
             throw new Error(`步骤 ${stepNumber}：PayPal 提示当前号码不可用：${phoneErrorResult.message || pageState.hostedGuestPhoneErrorMessage || '未知号码错误'}`);
           }
@@ -6446,13 +6691,22 @@
         }
 
         await addHostedStepLog(stepKey, `步骤 ${stepNumber}：正在填写 PayPal 无卡直绑资料，提交前会复查电话是否为 ${profile.phone}。`, 'info');
-        const cardResult = hostedProfileSubmitted
+        const cardSubmit = hostedProfileSubmitted
           ? null
-          : await runHostedPayPalStep(tabId, {
-            ...profile,
-            expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-            phone: profile.phone,
-          }, { stepKey });
+          : await submitHostedPayPalGuestProfile(tabId, refreshedState, profile, {
+            stepKey,
+            config: reviewConfig,
+          });
+        if (cardSubmit?.profile) {
+          profile = cardSubmit.profile;
+          refreshedState = {
+            ...refreshedState,
+            plusHostedCheckoutGuestProfile: profile,
+            hostedCheckoutGuestProfile: profile,
+            plusHostedCheckoutPhoneDigits: profile.phone,
+          };
+        }
+        const cardResult = cardSubmit?.result || null;
         if (cardResult?.phoneMatched) {
           await addHostedStepLog(
             stepKey,
@@ -6492,7 +6746,7 @@
               return false;
             }
             if (stateInfo?.hostedGuestPhoneError) {
-              const phoneErrorResult = await handleHostedGuestPhoneErrorWithSmsPool(tabId, stateInfo, profile, stepKey);
+              const phoneErrorResult = await handleHostedGuestPhoneErrorWithDelayedPhoneFill(tabId, stateInfo, profile, stepKey);
               if (!phoneErrorResult.handled) {
                 throw new Error(`步骤 ${stepNumber}：PayPal 提示当前号码不可用：${phoneErrorResult.message || stateInfo.hostedGuestPhoneErrorMessage || '未知号码错误'}`);
               }
@@ -6517,7 +6771,7 @@
               hostedGuestCardErrorRetries += 1;
               let retryProfileResult = null;
               try {
-                retryProfileResult = await ensureHostedGuestProfile(refreshedState, { forceRefresh: true });
+                retryProfileResult = await ensureHostedGuestProfileWithoutDynamicPhoneRequest(refreshedState, { forceRefresh: true });
               } catch (error) {
                 const fallback = await handleHostedCheckoutSmsPoolExhaustedFallback(refreshedState, error, {
                   nodeId: stepKey,
@@ -6541,11 +6795,16 @@
                 'warn'
               );
               try {
-                await runHostedPayPalStep(tabId, {
-                  ...profile,
-                  expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-                  phone: profile.phone,
-                }, { stepKey });
+                const retrySubmit = await submitHostedPayPalGuestProfile(tabId, refreshedState, profile, { stepKey });
+                if (retrySubmit?.profile) {
+                  profile = retrySubmit.profile;
+                  refreshedState = {
+                    ...refreshedState,
+                    plusHostedCheckoutGuestProfile: profile,
+                    hostedCheckoutGuestProfile: profile,
+                    plusHostedCheckoutPhoneDigits: profile.phone,
+                  };
+                }
               } catch (error) {
                 const fallback = await handlePayPalHostedPhoneEmptyAfterFillFallback(refreshedState, error, {
                   nodeId: stepKey,
@@ -6576,12 +6835,17 @@
                 'warn'
               );
               try {
-                const refillResult = await runHostedPayPalStep(tabId, {
-                  ...profile,
-                  expectedStage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
-                  phone: profile.phone,
-                }, { stepKey });
-                assertHostedPayPalGuestCheckoutSubmitted(refillResult, stepNumber);
+                const refillSubmit = await submitHostedPayPalGuestProfile(tabId, refreshedState, profile, { stepKey });
+                if (refillSubmit?.profile) {
+                  profile = refillSubmit.profile;
+                  refreshedState = {
+                    ...refreshedState,
+                    plusHostedCheckoutGuestProfile: profile,
+                    hostedCheckoutGuestProfile: profile,
+                    plusHostedCheckoutPhoneDigits: profile.phone,
+                  };
+                }
+                assertHostedPayPalGuestCheckoutSubmitted(refillSubmit?.result, stepNumber);
                 hostedProfileSubmitted = true;
               } catch (error) {
                 const fallback = await handlePayPalHostedPhoneEmptyAfterFillFallback(refreshedState, error, {
@@ -7519,7 +7783,8 @@
       }
       const freeStatus = normalizePlusRegistrationFreeStatus(state?.freeStatus);
       const isPhonePlus = isPhonePlusModeState(state);
-      if (freeStatus !== 'free') {
+      const accountTypeControlEnabled = isPlusAccountTypePaymentControlEnabled(state);
+      if (accountTypeControlEnabled && freeStatus !== 'free') {
         const reason = isPhonePlus ? 'phone-plus-registration-non-free' : 'plus-registration-non-free';
         const detail = `freeStatus=${freeStatus}`;
         await addLog(`Plus checkout skipped before create: ${detail}.`, 'warn');
@@ -7541,7 +7806,9 @@
         const reason = isPhonePlus ? 'phone-plus-registration-region-mismatch' : 'plus-registration-region-mismatch';
         const allowedLabel = regionGate.allowedRegions.join(',');
         const exitLabel = regionGate.exitRegion || regionGate.rawExitRegion || 'unknown';
-        const detail = `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`;
+        const detail = accountTypeControlEnabled
+          ? `freeStatus=free; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`
+          : `accountTypeControl=disabled; freeStatus=${freeStatus}; exitRegion=${exitLabel}; allowedRegions=${allowedLabel}`;
         await addLog(`Plus checkout skipped before create: ${detail}.`, 'warn');
         if (typeof deps.handlePhonePlusNonFreeTrialFallback === 'function') {
           const fallbackResult = await deps.handlePhonePlusNonFreeTrialFallback(state, {

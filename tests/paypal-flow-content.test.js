@@ -1784,6 +1784,100 @@ test('PayPal hosted guest checkout blocks submit when rendered phone differs fro
   assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
 });
 
+test('PayPal hosted guest checkout fills phone after non-phone fields in full submit', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      email: 'guest@example.com',
+      phone: '4155551234',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      firstName: 'James',
+      lastName: 'Smith',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.nonPhoneFieldsFilled, true);
+  const fillEvents = harness.events.filter((event) => event.type === 'fill');
+  const phoneIndex = fillEvents.findIndex((event) => event.id === 'phone');
+  assert.notEqual(phoneIndex, -1);
+  assert.ok(fillEvents.findIndex((event) => event.id === 'email') < phoneIndex);
+  assert.ok(fillEvents.findIndex((event) => event.id === 'cardNumber') < phoneIndex);
+  assert.ok(fillEvents.findIndex((event) => event.id === 'billingPostalCode') < phoneIndex);
+});
+
+test('PayPal hosted guest checkout deferPhoneFill fills non-phone fields without phone or submit', async () => {
+  const harness = createHostedPayPalHarness();
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      deferPhoneFill: true,
+      email: 'guest@example.com',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      firstName: 'James',
+      lastName: 'Smith',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, false);
+  assert.equal(result.phoneDeferred, true);
+  assert.equal(result.nonPhoneFieldsFilled, true);
+  assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'phone'), false);
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), false);
+});
+
+test('PayPal hosted guest checkout phoneOnly fills only phone and submits', async () => {
+  const harness = createHostedPayPalHarness({
+    renderPhone: (value) => `+1 ${value}`,
+  });
+  harness.showGuestCheckout();
+
+  const result = await harness.send({
+    type: 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      expectedStage: 'guest_checkout',
+      phoneOnly: true,
+      phone: '4155551234',
+      email: 'guest@example.com',
+      cardNumber: '4147200000000000',
+      cardExpiry: '12 / 29',
+      cardCvv: '123',
+      password: 'Aa1!example',
+      address: { street: '1 Main St', city: 'New York', state: 'New York', zip: '10001' },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.submitted, true);
+  assert.equal(result.phoneMatched, true);
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === 'fill').map((event) => event.id),
+    ['phone']
+  );
+  assert.equal(harness.events.some((event) => event.type === 'click' && event.id === 'hostedSubmit'), true);
+});
+
 test('PayPal hosted guest checkout rejects missing phone payload instead of using default phone', async () => {
   const harness = createHostedPayPalHarness();
   harness.showGuestCheckout();

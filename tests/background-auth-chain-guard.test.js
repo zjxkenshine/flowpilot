@@ -183,6 +183,9 @@ function doesNodeUseCompletionSignal(nodeId, state = {}) {
     ? doesStepUseCompletionSignal(getStepIdByNodeIdForState(nodeId), state)
     : false;
 }
+async function ensureIpProxyActivatedBeforeNode(_nodeId, state = {}) {
+  return state;
+}
 const rawGetStepRegistryForState = getStepRegistryForState;
 getStepRegistryForState = function getNodeAdaptedStepRegistryForState(state = {}) {
   const registry = rawGetStepRegistryForState(state);

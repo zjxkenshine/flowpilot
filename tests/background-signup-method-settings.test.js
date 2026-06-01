@@ -189,6 +189,7 @@ return {
     phonePlusModeEnabled: false,
     plusPaymentMethod: 'gopay',
     plusAccountAccessStrategy: 'oauth',
+    registrationActivationOnlyModeEnabled: false,
     signupMethod: 'phone',
     phoneSignupReloginAfterBindEmailEnabled: false,
   }]);
