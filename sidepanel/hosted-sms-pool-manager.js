@@ -119,7 +119,10 @@
     function buildKey(phone = '', verificationUrl = '') {
       const normalizedPhone = normalizePoolPhone(phone);
       const normalizedUrl = normalizePoolUrl(verificationUrl);
-      return normalizedPhone && normalizedUrl ? `${normalizedPhone}${SEPARATOR}${normalizedUrl}` : '';
+      if (!normalizedPhone) {
+        return '';
+      }
+      return normalizedUrl ? `${normalizedPhone}${SEPARATOR}${normalizedUrl}` : normalizedPhone;
     }
 
     function parseEntries(text = '') {
@@ -133,14 +136,22 @@
         const phone = hasSeparator
           ? normalizePoolPhone(line.slice(0, separatorIndex))
           : normalizePoolPhone(line);
-        const verificationUrl = hasSeparator
+        let verificationUrl = hasSeparator
           ? normalizePoolUrl(line.slice(separatorIndex + SEPARATOR.length))
-          : normalizePoolUrl(lines[index + 1] || '');
+          : '';
+        if (!hasSeparator) {
+          const nextLine = lines[index + 1] || '';
+          const normalizedNextUrl = normalizePoolUrl(nextLine);
+          const nextLinePhone = normalizePoolPhone(nextLine);
+          if (normalizedNextUrl && !nextLinePhone) {
+            verificationUrl = normalizedNextUrl;
+          }
+        }
         if (!hasSeparator && verificationUrl) {
           index += 1;
         }
         const key = buildKey(phone, verificationUrl);
-        if (!phone || !verificationUrl || !key || seen.has(key)) {
+        if (!phone || !key || seen.has(key)) {
           continue;
         }
         seen.add(key);
@@ -155,8 +166,10 @@
     }
 
     function entriesToText(entries = []) {
-      return parseEntries(entries.map((entry) => `${entry.phone}${SEPARATOR}${entry.verificationUrl}`).join('\n'))
-        .map((entry) => `${entry.phone}${SEPARATOR}${entry.verificationUrl}`)
+      return parseEntries(entries.map((entry) => (
+        entry.verificationUrl ? `${entry.phone}${SEPARATOR}${entry.verificationUrl}` : entry.phone
+      )).join('\n'))
+        .map((entry) => (entry.verificationUrl ? `${entry.phone}${SEPARATOR}${entry.verificationUrl}` : entry.phone))
         .join('\n');
     }
 
@@ -209,11 +222,11 @@
       }
       const phone = normalizePoolPhone(entry.phone);
       const verificationUrl = normalizePoolUrl(entry.verificationUrl);
-      if (!phone || !verificationUrl) {
+      if (!phone) {
         return null;
       }
       return {
-        key,
+        key: buildKey(phone, verificationUrl),
         phone,
         verificationUrl,
       };
@@ -239,7 +252,9 @@
         `# exportedAt=${new Date().toISOString()}`,
         `# meta=${JSON.stringify(meta)}`,
         '',
-        ...normalizedEntries.map((entry) => `${entry.phone}${SEPARATOR}${entry.verificationUrl}`),
+        ...normalizedEntries.map((entry) => (
+          entry.verificationUrl ? `${entry.phone}${SEPARATOR}${entry.verificationUrl}` : entry.phone
+        )),
       ].join('\r\n');
     }
 
@@ -446,7 +461,11 @@
                 aria-label="复制号码 ${helpers.escapeHtml?.(entry.phone) || entry.phone}"
               >${copyIcon}</button>
             </div>
-            <div class="luckmail-item-details mono">${helpers.escapeHtml?.(entry.verificationUrl) || entry.verificationUrl}</div>
+            <div class="luckmail-item-details mono">${
+              entry.verificationUrl
+                ? (helpers.escapeHtml?.(entry.verificationUrl) || entry.verificationUrl)
+                : '未配置验证码接口，需人工取码'
+            }</div>
             <div class="luckmail-item-meta">
               ${entry.current ? '<span class="luckmail-tag current">当前</span>' : ''}
               ${entry.enabled ? '<span class="luckmail-tag active">启用中</span>' : '<span class="luckmail-tag fail">已禁用</span>'}

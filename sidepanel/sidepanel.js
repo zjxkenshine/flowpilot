@@ -4124,11 +4124,20 @@ function normalizeHostedCheckoutPhoneValue(value = '') {
   if (digits.length === 11 && digits.startsWith('1')) {
     return digits.slice(1);
   }
-  return digits.length > 10 ? digits.slice(-10) : digits;
+  return digits;
 }
 
 function normalizeHostedCheckoutPoolUrlValue(value = '') {
   return normalizeHostedCheckoutVerificationUrlValue(value);
+}
+
+function buildHostedCheckoutSmsPoolEntryKey(phone = '', verificationUrl = '') {
+  const normalizedPhone = normalizeHostedCheckoutPhoneValue(phone);
+  const normalizedUrl = normalizeHostedCheckoutPoolUrlValue(verificationUrl);
+  if (!normalizedPhone) {
+    return '';
+  }
+  return normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : normalizedPhone;
 }
 
 function parseHostedCheckoutSmsPoolEntries(value = '') {
@@ -4147,18 +4156,27 @@ function parseHostedCheckoutSmsPoolEntries(value = '') {
     const phone = hasSeparator
       ? normalizeHostedCheckoutPhoneValue(line.slice(0, separatorIndex))
       : normalizeHostedCheckoutPhoneValue(line);
-    const verificationUrl = hasSeparator
+    let verificationUrl = hasSeparator
       ? normalizeHostedCheckoutPoolUrlValue(line.slice(separatorIndex + separator.length))
-      : normalizeHostedCheckoutPoolUrlValue(lines[index + 1] || '');
+      : '';
+    if (!hasSeparator) {
+      const nextLine = lines[index + 1] || '';
+      const normalizedNextUrl = normalizeHostedCheckoutPoolUrlValue(nextLine);
+      const nextLinePhone = normalizeHostedCheckoutPhoneValue(nextLine);
+      if (normalizedNextUrl && !nextLinePhone) {
+        verificationUrl = normalizedNextUrl;
+      }
+    }
     if (!hasSeparator && verificationUrl) {
       index += 1;
     }
-    const key = phone && verificationUrl ? `${phone}${separator}${verificationUrl}` : '';
-    if (!phone || !verificationUrl || !key || seen.has(key)) {
+    const key = buildHostedCheckoutSmsPoolEntryKey(phone, verificationUrl);
+    if (!phone || !key || seen.has(key)) {
       continue;
     }
     seen.add(key);
     entries.push({
+      key,
       phone,
       verificationUrl,
     });
@@ -4168,7 +4186,7 @@ function parseHostedCheckoutSmsPoolEntries(value = '') {
 
 function normalizeHostedCheckoutSmsPoolTextValue(value = '') {
   return parseHostedCheckoutSmsPoolEntries(value)
-    .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+    .map((entry) => (entry.verificationUrl ? `${entry.phone}----${entry.verificationUrl}` : entry.phone))
     .join('\n');
 }
 
@@ -4178,34 +4196,33 @@ function normalizeHostedCheckoutCurrentSmsEntryValue(entry = null, entries = nul
   }
   const normalizedEntries = Array.isArray(entries)
     ? parseHostedCheckoutSmsPoolEntries(
-      entries.map((item) => `${item.phone}----${item.verificationUrl}`).join('\n')
+      entries.map((item) => (item.verificationUrl ? `${item.phone}----${item.verificationUrl}` : item.phone)).join('\n')
     )
     : parseHostedCheckoutSmsPoolEntries(latestState?.hostedCheckoutSmsPoolText || '');
   const normalizedPhone = normalizeHostedCheckoutPhoneValue(entry.phone || '');
   const normalizedUrl = normalizeHostedCheckoutPoolUrlValue(entry.verificationUrl || '');
   const normalizedKey = String(
     entry.key
-    || (normalizedPhone && normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : '')
+    || buildHostedCheckoutSmsPoolEntryKey(normalizedPhone, normalizedUrl)
   ).trim();
   if (!normalizedKey) {
     return null;
   }
   const matchedEntry = normalizedEntries.find((candidate) => {
-    const candidateKey = `${candidate.phone}----${candidate.verificationUrl}`;
-    return candidateKey === normalizedKey;
+    return candidate.key === normalizedKey;
   });
   if (matchedEntry) {
     return {
-      key: `${matchedEntry.phone}----${matchedEntry.verificationUrl}`,
+      key: matchedEntry.key,
       phone: matchedEntry.phone,
       verificationUrl: matchedEntry.verificationUrl,
     };
   }
-  if (!normalizedPhone || !normalizedUrl) {
+  if (!normalizedPhone) {
     return null;
   }
   return {
-    key: normalizedKey,
+    key: buildHostedCheckoutSmsPoolEntryKey(normalizedPhone, normalizedUrl),
     phone: normalizedPhone,
     verificationUrl: normalizedUrl,
   };

@@ -2082,7 +2082,10 @@
     function buildHostedCheckoutPoolKey(phone = '', verificationUrl = '') {
       const normalizedPhone = normalizeHostedCheckoutPoolPhone(phone);
       const normalizedUrl = normalizeHostedCheckoutPoolUrl(verificationUrl);
-      return normalizedPhone && normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : '';
+      if (!normalizedPhone) {
+        return '';
+      }
+      return normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : normalizedPhone;
     }
 
     function parseHostedCheckoutSmsPoolEntries(value = '') {
@@ -2100,14 +2103,22 @@
         const phone = hasSeparator
           ? normalizeHostedCheckoutPoolPhone(line.slice(0, separatorIndex))
           : normalizeHostedCheckoutPoolPhone(line);
-        const verificationUrl = hasSeparator
+        let verificationUrl = hasSeparator
           ? normalizeHostedCheckoutPoolUrl(line.slice(separatorIndex + 4))
-          : normalizeHostedCheckoutPoolUrl(lines[index + 1] || '');
+          : '';
+        if (!hasSeparator) {
+          const nextLine = lines[index + 1] || '';
+          const normalizedNextUrl = normalizeHostedCheckoutPoolUrl(nextLine);
+          const nextLinePhone = normalizeHostedCheckoutPoolPhone(nextLine);
+          if (normalizedNextUrl && !nextLinePhone) {
+            verificationUrl = normalizedNextUrl;
+          }
+        }
         if (!hasSeparator && verificationUrl) {
           index += 1;
         }
         const key = buildHostedCheckoutPoolKey(phone, verificationUrl);
-        if (!phone || !verificationUrl || !key || seen.has(key)) {
+        if (!phone || !key || seen.has(key)) {
           continue;
         }
         seen.add(key);
@@ -2165,11 +2176,11 @@
       }
       const phone = normalizeHostedCheckoutPoolPhone(entry.phone);
       const verificationUrl = normalizeHostedCheckoutPoolUrl(entry.verificationUrl);
-      if (!phone || !verificationUrl) {
+      if (!phone) {
         return null;
       }
       return {
-        key,
+        key: buildHostedCheckoutPoolKey(phone, verificationUrl),
         phone,
         verificationUrl,
       };
@@ -2440,7 +2451,7 @@
       }
 
       if (poolEntries.length > 0) {
-        if (!selectedSmsEntry?.phone || !selectedSmsEntry?.verificationUrl) {
+        if (!selectedSmsEntry?.phone) {
           const enabledEntries = poolEntries.filter((entry) => isHostedCheckoutSmsPoolEntryEnabled(poolUsage[entry.key] || {}));
           const exhausted = enabledEntries.length > 0 && enabledEntries.every((entry) => {
             const itemUsage = poolUsage[entry.key] || {};
@@ -4112,6 +4123,10 @@
         return code;
       }
       const verificationUrl = runtimeConfig.verificationUrl;
+      if (runtimeConfig?.hostedCheckoutUsesSmsPool && !verificationUrl) {
+        const phone = runtimeConfig?.hostedCheckoutCurrentSmsEntry?.phone || runtimeConfig?.phone || '';
+        throw new Error(`PayPal 接码池条目 ${maskHostedPhoneForLog(phone)} 只有手机号，没有验证码接口；请人工取码，或为该号码补充验证码接口后重试。`);
+      }
       await addLog(`步骤 6：当前 hosted checkout 验证码接口配置为 ${verificationUrl || '(空)'}。`, 'info');
       const fetcher = typeof fetchImpl === 'function'
         ? fetchImpl

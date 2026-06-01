@@ -96,6 +96,7 @@ test('hosted sms pool manager exports utf8 txt payload with meta and restores fr
         querySelector() {
           return { addEventListener() {} };
         },
+        appendChild() {},
       };
     },
   };
@@ -217,6 +218,100 @@ test('hosted sms pool manager exports utf8 txt payload with meta and restores fr
   assert.equal(latest.usage['1234567890----https://example.com/api/verify-1'].lastError, 'timeout');
   assert.equal(latest.text.includes('0987654321----https://example.com/api/verify-2'), true);
   assert.match(toasts.findLast((item) => /已导入/.test(item.message))?.message || '', /已导入 2 个号码/);
+});
+
+test('hosted sms pool manager supports phone-only entries', async () => {
+  const source = fs.readFileSync('sidepanel/hosted-sms-pool-manager.js', 'utf8');
+  const documentObject = {
+    createElement() {
+      return {
+        className: '',
+        innerHTML: '',
+        querySelector() {
+          return { addEventListener() {} };
+        },
+      };
+    },
+  };
+  const windowObject = { document: documentObject };
+  const api = new Function('window', 'document', `${source}; return window.SidepanelHostedSmsPoolManager;`)(windowObject, documentObject);
+
+  let latest = {
+    text: '5511987654321\n4155555678----https://example.com/api/verify',
+    usage: {
+      '5511987654321': { useCount: 1, lastError: 'manual' },
+      '4155555678----https://example.com/api/verify': { useCount: 2 },
+    },
+    currentEntry: {
+      key: '5511987654321',
+      phone: '5511987654321',
+      verificationUrl: '',
+    },
+  };
+  const downloads = [];
+  const dom = {
+    hostedSmsPoolSummary: createNode(),
+    hostedSmsPoolList: createNode(),
+    btnHostedSmsPoolRefresh: createNode(),
+    btnHostedSmsPoolExport: createNode(),
+    btnHostedSmsPoolClearUsed: createNode(),
+    btnHostedSmsPoolDeleteAll: createNode(),
+    btnHostedSmsPoolImport: createNode(),
+    inputHostedSmsPoolImport: createNode(),
+    inputHostedSmsPoolSearch: createNode(),
+    selectHostedSmsPoolFilter: createNode({ value: 'all' }),
+  };
+
+  const manager = api.createHostedSmsPoolManager({
+    dom,
+    helpers: {
+      copyTextToClipboard: async () => {},
+      downloadTextFile(content) {
+        downloads.push(content);
+      },
+      escapeHtml: (value) => String(value || ''),
+      openConfirmModal: async () => true,
+      showToast() {},
+    },
+    state: {
+      getText: () => latest.text,
+      setText: (text) => { latest.text = String(text || ''); },
+      getUsage: () => latest.usage,
+      setUsage: (usage) => { latest.usage = usage; },
+      getCurrentEntry: () => latest.currentEntry,
+      setCurrentEntry: (entry) => { latest.currentEntry = entry; },
+      isVisible: () => true,
+    },
+    actions: {
+      persistPool: async () => {},
+    },
+    constants: {
+      copyIcon: '',
+    },
+  });
+
+  manager.bindEvents();
+  manager.render();
+
+  assert.match(dom.hostedSmsPoolList.children[0].innerHTML, /5511987654321/);
+  assert.match(dom.hostedSmsPoolList.children[0].innerHTML, /未配置验证码接口/);
+
+  await dom.btnHostedSmsPoolExport.listeners.click();
+  assert.match(downloads[0], /\r\n\r\n5511987654321\r\n4155555678----https:\/\/example\.com\/api\/verify$/);
+  const metaLine = downloads[0].split('\r\n').find((line) => line.startsWith('# meta='));
+  const meta = JSON.parse(metaLine.slice('# meta='.length));
+  assert.equal(meta.currentKey, '5511987654321');
+  assert.equal(meta.usage['5511987654321'].lastError, 'manual');
+
+  dom.inputHostedSmsPoolImport.value = '+55 11 98765-4321\n+81 90-1234-5678';
+  await dom.btnHostedSmsPoolImport.listeners.click();
+
+  assert.equal(
+    latest.text,
+    '5511987654321\n4155555678----https://example.com/api/verify\n819012345678'
+  );
+  assert.equal(latest.usage['5511987654321'].lastError, 'manual');
+  assert.equal(latest.currentEntry.key, '5511987654321');
 });
 
 test('hosted sms pool manager imports legacy txt without meta and clears usage/current', async () => {

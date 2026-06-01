@@ -5835,6 +5835,97 @@ test('Phone Plus hosted card refresh uses Brazil address source and normalizes +
   assert.equal(submitEvent.message.payload.cnpj, profileState.cnpj);
 });
 
+test('Phone Plus hosted card refresh uses Brazil phone-only sms pool entry', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  let latestState = createHostedRuntimeState({
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    paypalProfileCountryCode: 'BR',
+    hostedCheckoutPhoneNumber: '',
+    hostedCheckoutVerificationUrl: '',
+    hostedCheckoutSmsPoolText: '+55 11 98765-4321',
+    hostedCheckoutSmsPoolUsage: {},
+    plusPaymentEmailState: {
+      current: 'saved-payment@example.com',
+      source: 'runtime:test',
+      updatedAt: 100,
+    },
+  });
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        cep: '01414-003',
+        state: 'SP',
+        city: 'Sao Paulo',
+        neighborhood: 'Jardins',
+        street: 'Rua Haddock Lobo 1307',
+      }),
+    }),
+    getPlusPaymentEmailState: () => latestState.plusPaymentEmailState,
+    getState: async () => latestState,
+    registerTab: async () => {},
+    resolvePlusCheckoutProfileRegion: async () => ({
+      countryCode: 'BR',
+      exitRegion: 'Brazil [BR]',
+    }),
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+        return {
+          submitted: true,
+          phoneMatched: true,
+        };
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        return currentUrl.includes('/create-account')
+          ? { hostedStage: 'create_account' }
+          : { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setPlusPaymentEmailState: async () => {},
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async () => {},
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 456,
+    phonePlusModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+  });
+
+  const currentEntryUpdate = events.find((event) => (
+    event.type === 'set-state'
+    && event.payload.hostedCheckoutCurrentSmsEntry
+  ));
+  const profileState = events.filter((event) => event.type === 'set-state' && event.payload.plusHostedCheckoutGuestProfile).at(-1)
+    ?.payload
+    ?.plusHostedCheckoutGuestProfile;
+
+  assert.equal(currentEntryUpdate.payload.hostedCheckoutCurrentSmsEntry.key, '5511987654321');
+  assert.equal(currentEntryUpdate.payload.hostedCheckoutCurrentSmsEntry.phone, '5511987654321');
+  assert.equal(currentEntryUpdate.payload.hostedCheckoutCurrentSmsEntry.verificationUrl, '');
+  assert.equal(profileState.countryCode, 'BR');
+  assert.equal(profileState.phone, '+5511987654321');
+  assert.equal(latestState.plusHostedCheckoutGuestProfile.phone, '+5511987654321');
+});
+
 test('Phone Plus hosted card rejects Brazil profile without a +55 phone', async () => {
   const events = [];
   let latestState = createHostedRuntimeState({
@@ -8597,6 +8688,33 @@ test('hosted checkout runtime prefers per-run state over stale persisted state w
 
   assert.equal(result.verificationUrl, 'http://fresh.test/api/sms');
   assert.equal(events.find((event) => event.type === 'fetch')?.url?.startsWith('http://fresh.test/api/sms'), true);
+});
+
+test('hosted checkout phone-only sms pool entry prompts manual code handling', async () => {
+  const events = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    fetch: async () => {
+      throw new Error('fetch should not run without a verification URL');
+    },
+    getState: async () => ({
+      hostedCheckoutSmsPoolText: '5511987654321',
+      hostedCheckoutSmsPoolUsage: {},
+      hostedCheckoutCurrentSmsEntry: {
+        key: '5511987654321',
+        phone: '5511987654321',
+        verificationUrl: '',
+      },
+    }),
+    setState: async (payload) => events.push({ type: 'set-state', payload }),
+  });
+
+  await assert.rejects(
+    () => executor.fetchHostedCheckoutVerificationCodeManually({ state: {} }),
+    /只有手机号，没有验证码接口|人工取码/
+  );
+
+  assert.equal(events.some((event) => event.type === 'set-state' && event.payload.hostedCheckoutCurrentSmsEntry?.key === '5511987654321'), false);
 });
 
 test('hosted checkout strict pool mode rejects unparsable non-empty sms pool text', async () => {

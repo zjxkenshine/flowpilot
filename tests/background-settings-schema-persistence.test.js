@@ -1457,6 +1457,43 @@ test('buildPersistentSettingsPayload roundtrips flat Phone Plus settings with fo
   assert.equal(payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolMaxUses, 4);
 });
 
+test('buildPersistentSettingsPayload keeps PayPal hosted phone-only sms pool entries', () => {
+  const api = buildHarness();
+
+  const payload = api.buildPersistentSettingsPayload({
+    hostedCheckoutSmsPoolText: [
+      '+55 11 98765-4321',
+      '4155555678----https://example.com/verify?t=1',
+      '+81 90-1234-5678',
+    ].join('\n'),
+    hostedCheckoutSmsPoolUsage: {
+      '5511987654321': { useCount: 1, lastError: 'manual' },
+      '4155555678----https://example.com/verify': { useCount: 2 },
+      stale: { useCount: 9 },
+    },
+    hostedCheckoutCurrentSmsEntry: {
+      phone: '+55 11 98765-4321',
+    },
+  }, { fillDefaults: true });
+
+  assert.equal(
+    payload.hostedCheckoutSmsPoolText,
+    '5511987654321\n4155555678----https://example.com/verify\n819012345678'
+  );
+  assert.deepEqual(payload.hostedCheckoutCurrentSmsEntry, {
+    key: '5511987654321',
+    phone: '5511987654321',
+    verificationUrl: '',
+  });
+  assert.equal(payload.hostedCheckoutSmsPoolUsage['5511987654321'].useCount, 1);
+  assert.equal(payload.hostedCheckoutSmsPoolUsage['4155555678----https://example.com/verify'].useCount, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.hostedCheckoutSmsPoolUsage, 'stale'), false);
+  assert.equal(
+    payload.settingsState.flows.openai.plus.hostedCheckoutSmsPoolText,
+    '5511987654321\n4155555678----https://example.com/verify\n819012345678'
+  );
+});
+
 test('buildPersistentSettingsPayload forces SUB2API relogin runtime settings and disables proxies', () => {
   const api = buildHarness();
 

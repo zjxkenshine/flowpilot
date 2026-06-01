@@ -387,6 +387,14 @@
           .replace(/[?&]$/g, '');
       }
     };
+    const buildHostedCheckoutPoolKey = (phone = '', verificationUrl = '') => {
+      const normalizedPhone = normalizeHostedCheckoutPhone(phone);
+      const normalizedUrl = normalizeHostedCheckoutPoolUrl(verificationUrl);
+      if (!normalizedPhone) {
+        return '';
+      }
+      return normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : normalizedPhone;
+    };
     const parseHostedCheckoutSmsPoolEntries = (value = '') => {
       const lines = String(value || '')
         .replace(/\r/g, '')
@@ -402,14 +410,22 @@
         const phone = normalizeHostedCheckoutPhone(
           hasSeparator ? line.slice(0, separatorIndex) : line
         );
-        const verificationUrl = normalizeHostedCheckoutPoolUrl(
-          hasSeparator ? line.slice(separatorIndex + 4) : lines[index + 1] || ''
-        );
+        let verificationUrl = hasSeparator
+          ? normalizeHostedCheckoutPoolUrl(line.slice(separatorIndex + 4))
+          : '';
+        if (!hasSeparator) {
+          const nextLine = lines[index + 1] || '';
+          const normalizedNextUrl = normalizeHostedCheckoutPoolUrl(nextLine);
+          const nextLinePhone = normalizeHostedCheckoutPhone(nextLine);
+          if (normalizedNextUrl && !nextLinePhone) {
+            verificationUrl = normalizedNextUrl;
+          }
+        }
         if (!hasSeparator && verificationUrl) {
           index += 1;
         }
-        const key = phone && verificationUrl ? `${phone}----${verificationUrl}` : '';
-        if (!key || seen.has(key)) {
+        const key = buildHostedCheckoutPoolKey(phone, verificationUrl);
+        if (!phone || !key || seen.has(key)) {
           continue;
         }
         seen.add(key);
@@ -418,7 +434,7 @@
       return entries;
     };
     const normalizeHostedCheckoutSmsPoolText = (value = '') => parseHostedCheckoutSmsPoolEntries(value)
-      .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+      .map((entry) => (entry.verificationUrl ? `${entry.phone}----${entry.verificationUrl}` : entry.phone))
       .join('\n');
     const normalizeHostedCheckoutSmsPoolUsage = (value = {}, allowedKeys = null) => {
       if (!isPlainObject(value)) {
@@ -449,18 +465,16 @@
       if (!isPlainObject(value)) {
         return null;
       }
-      const normalizedKeyFromFields = value.phone && value.verificationUrl
-        ? `${normalizeHostedCheckoutPhone(value.phone)}----${normalizeHostedCheckoutPoolUrl(value.verificationUrl)}`
-        : '';
+      const normalizedKeyFromFields = buildHostedCheckoutPoolKey(value.phone, value.verificationUrl);
       const rawKey = String(value.key || '').trim();
       const normalizedKeyFromRaw = (() => {
         const separatorIndex = rawKey.indexOf('----');
         if (separatorIndex <= 0) {
-          return rawKey;
+          return buildHostedCheckoutPoolKey(rawKey, '');
         }
         const phone = normalizeHostedCheckoutPhone(rawKey.slice(0, separatorIndex));
         const verificationUrl = normalizeHostedCheckoutPoolUrl(rawKey.slice(separatorIndex + 4));
-        return phone && verificationUrl ? `${phone}----${verificationUrl}` : rawKey;
+        return buildHostedCheckoutPoolKey(phone, verificationUrl);
       })();
       const candidateKeys = [rawKey, normalizedKeyFromRaw, normalizedKeyFromFields].filter(Boolean);
       if (!candidateKeys.length) {

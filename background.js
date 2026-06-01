@@ -4837,8 +4837,69 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
       return String(value || '').trim();
-    case 'hostedCheckoutSmsPoolText':
-      return String(value || '').replace(/\r/g, '').trim();
+    case 'hostedCheckoutSmsPoolText': {
+      const normalizePoolPhone = (input = '') => {
+        const digits = String(input || '').trim().replace(/\D+/g, '');
+        return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+      };
+      const normalizePoolUrl = (input = '') => {
+        const rawValue = String(input || '').trim();
+        if (!rawValue) {
+          return '';
+        }
+        try {
+          const parsed = new URL(rawValue);
+          parsed.searchParams.delete('t');
+          return parsed.toString();
+        } catch {
+          return rawValue
+            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+            .replace(/[?&]$/g, '');
+        }
+      };
+      const buildPoolKey = (phone = '', verificationUrl = '') => {
+        const normalizedPhone = normalizePoolPhone(phone);
+        const normalizedUrl = normalizePoolUrl(verificationUrl);
+        if (!normalizedPhone) {
+          return '';
+        }
+        return normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : normalizedPhone;
+      };
+      const lines = String(value || '')
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line) => String(line || '').trim())
+        .filter(Boolean);
+      const seen = new Set();
+      const entries = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const separatorIndex = line.indexOf('----');
+        const hasSeparator = separatorIndex > 0;
+        const phone = normalizePoolPhone(hasSeparator ? line.slice(0, separatorIndex) : line);
+        let verificationUrl = hasSeparator ? normalizePoolUrl(line.slice(separatorIndex + 4)) : '';
+        if (!hasSeparator) {
+          const nextLine = lines[index + 1] || '';
+          const normalizedNextUrl = normalizePoolUrl(nextLine);
+          const nextLinePhone = normalizePoolPhone(nextLine);
+          if (normalizedNextUrl && !nextLinePhone) {
+            verificationUrl = normalizedNextUrl;
+          }
+        }
+        if (!hasSeparator && verificationUrl) {
+          index += 1;
+        }
+        const key = buildPoolKey(phone, verificationUrl);
+        if (!phone || !key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        entries.push({ phone, verificationUrl });
+      }
+      return entries
+        .map((entry) => (entry.verificationUrl ? `${entry.phone}----${entry.verificationUrl}` : entry.phone))
+        .join('\n');
+    }
     case 'hostedCheckoutSmsPoolMaxUses': {
       const numeric = Number(value);
       return Math.min(99, Math.max(1, Math.floor(Number.isFinite(numeric) ? numeric : 3)));
@@ -4871,29 +4932,41 @@ function normalizePersistentSettingValue(key, value) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null;
       }
-      const normalizedPhone = String(value.phone || '').trim().replace(/\D+/g, '');
-      const phone = normalizedPhone.length === 11 && normalizedPhone.startsWith('1')
-        ? normalizedPhone.slice(1)
-        : normalizedPhone;
-      const rawUrl = String(value.verificationUrl || '').trim();
-      let verificationUrl = rawUrl;
-      if (rawUrl) {
+      const normalizePoolPhone = (input = '') => {
+        const digits = String(input || '').trim().replace(/\D+/g, '');
+        return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+      };
+      const normalizePoolUrl = (input = '') => {
+        const rawValue = String(input || '').trim();
+        if (!rawValue) {
+          return '';
+        }
         try {
-          const parsed = new URL(rawUrl);
+          const parsed = new URL(rawValue);
           parsed.searchParams.delete('t');
-          verificationUrl = parsed.toString();
+          return parsed.toString();
         } catch {
-          verificationUrl = rawUrl
+          return rawValue
             .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
             .replace(/[?&]$/g, '');
         }
-      }
-      const key = String(value.key || (phone && verificationUrl ? `${phone}----${verificationUrl}` : '')).trim();
-      if (!phone || !verificationUrl || !key) {
+      };
+      const buildPoolKey = (phone = '', verificationUrl = '') => {
+        const normalizedPhone = normalizePoolPhone(phone);
+        const normalizedUrl = normalizePoolUrl(verificationUrl);
+        if (!normalizedPhone) {
+          return '';
+        }
+        return normalizedUrl ? `${normalizedPhone}----${normalizedUrl}` : normalizedPhone;
+      };
+      const phone = normalizePoolPhone(value.phone);
+      const verificationUrl = normalizePoolUrl(value.verificationUrl);
+      const key = String(value.key || buildPoolKey(phone, verificationUrl)).trim();
+      if (!phone || !key) {
         return null;
       }
       return {
-        key,
+        key: buildPoolKey(phone, verificationUrl),
         phone,
         verificationUrl,
       };
@@ -5557,39 +5630,38 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       .filter(Boolean)
       .map((line) => {
         const separatorIndex = line.indexOf('----');
-        if (separatorIndex <= 0) {
-          return null;
-        }
-        const phoneDigits = String(line.slice(0, separatorIndex) || '').trim().replace(/\D+/g, '');
+        const hasSeparator = separatorIndex > 0;
+        const phoneDigits = String(
+          hasSeparator ? line.slice(0, separatorIndex) : line
+        ).trim().replace(/\D+/g, '');
         const phone = phoneDigits.length === 11 && phoneDigits.startsWith('1')
           ? phoneDigits.slice(1)
           : phoneDigits;
-        const rawUrl = String(line.slice(separatorIndex + 4) || '').trim();
-        if (!phone || !rawUrl) {
+        const rawUrl = hasSeparator ? String(line.slice(separatorIndex + 4) || '').trim() : '';
+        if (!phone) {
           return null;
         }
         let verificationUrl = rawUrl;
-        try {
-          const parsed = new URL(rawUrl);
-          parsed.searchParams.delete('t');
-          verificationUrl = parsed.toString();
-        } catch {
-          verificationUrl = rawUrl
-            .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
-            .replace(/[?&]$/g, '');
-        }
-        if (!verificationUrl) {
-          return null;
+        if (rawUrl) {
+          try {
+            const parsed = new URL(rawUrl);
+            parsed.searchParams.delete('t');
+            verificationUrl = parsed.toString();
+          } catch {
+            verificationUrl = rawUrl
+              .replace(/([?&])t=\d+(?=(&|$))/i, '$1')
+              .replace(/[?&]$/g, '');
+          }
         }
         return {
-          key: `${phone}----${verificationUrl}`,
+          key: verificationUrl ? `${phone}----${verificationUrl}` : phone,
           phone,
           verificationUrl,
         };
       })
       .filter(Boolean);
     payload.hostedCheckoutSmsPoolText = poolEntries
-      .map((entry) => `${entry.phone}----${entry.verificationUrl}`)
+      .map((entry) => (entry.verificationUrl ? `${entry.phone}----${entry.verificationUrl}` : entry.phone))
       .join('\n');
     const allowedKeys = new Set(poolEntries.map((entry) => entry.key));
     if (Object.prototype.hasOwnProperty.call(payload, 'hostedCheckoutSmsPoolUsage')) {
@@ -5602,8 +5674,8 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       const currentKey = String(
         currentEntry?.key
         || (
-          currentEntry?.phone && currentEntry?.verificationUrl
-            ? `${currentEntry.phone}----${currentEntry.verificationUrl}`
+          currentEntry?.phone
+            ? (currentEntry.verificationUrl ? `${currentEntry.phone}----${currentEntry.verificationUrl}` : currentEntry.phone)
             : ''
         )
       ).trim();
