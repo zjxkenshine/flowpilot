@@ -69,4 +69,22 @@ assert.strictEqual(
   'Failed to fetch 应进入可重试传输错误分支'
 );
 
+assert.strictEqual(
+  api.isRetryableContentScriptTransportError(new Error('Frame with ID 0 is showing error page')),
+  true,
+  'Chrome 错误页 frame 失败应进入可重试传输错误分支'
+);
+
+assert.strictEqual(
+  api.isRetryableContentScriptTransportError(new Error('Cannot access contents of url "chrome-error://chromewebdata/".')),
+  true,
+  'chrome-error://chromewebdata 注入失败应进入可重试传输错误分支'
+);
+
+assert.strictEqual(
+  api.isRetryableContentScriptTransportError(new Error('navigation failed: net::ERR_TUNNEL_CONNECTION_FAILED')),
+  true,
+  'net::ERR_* 导航错误应进入可重试传输错误分支'
+);
+
 console.log('step8 state timeout retry tests passed');

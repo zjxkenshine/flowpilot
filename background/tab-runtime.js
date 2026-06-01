@@ -22,6 +22,8 @@
     } = deps;
 
     const pendingCommands = new Map();
+    const AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS = 2;
+    const AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS = 15000;
 
     function resolveCanonicalSource(source) {
       if (sourceRegistry?.resolveCanonicalSource) {
@@ -86,6 +88,210 @@
         return false;
       }
       return !isStaticAuthContentScriptUrl(source, rawUrl);
+    }
+
+    function isOpenAiAuthSource(source = '') {
+      const canonicalSource = resolveCanonicalSource(source);
+      return canonicalSource === 'openai-auth'
+        || String(source || '').trim() === 'openai-auth'
+        || String(source || '').trim() === 'signup-page';
+    }
+
+    function getErrorLikeMessage(value) {
+      if (!value) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'object') {
+        const parts = [value.message, value.url, value.pendingUrl, value.title]
+          .map((item) => String(item || '').trim())
+          .filter(Boolean);
+        if (parts.length) {
+          return parts.join(' ');
+        }
+      }
+      return String(value || '');
+    }
+
+    function getNetErrorCode(value) {
+      return getErrorLikeMessage(value).match(/net::ERR_[A-Z_]+/i)?.[0] || '';
+    }
+
+    function isBrowserErrorPageUrl(rawUrl = '') {
+      return /^chrome-error:\/\/chromewebdata\/?/i.test(String(rawUrl || '').trim());
+    }
+
+    function isAuthErrorPageExecutionError(error) {
+      const message = getErrorLikeMessage(error);
+      return /Frame with ID \d+ is showing error page|Cannot access contents of (?:url|the page)|chrome-error:\/\/chromewebdata|net::ERR_[A-Z_]+/i.test(message);
+    }
+
+    function isAuthErrorPageTab(tab = {}) {
+      if (!tab || typeof tab !== 'object') {
+        return false;
+      }
+      return isBrowserErrorPageUrl(tab.url) || isBrowserErrorPageUrl(tab.pendingUrl);
+    }
+
+    function getAuthErrorPageDiagnostic(signal = null) {
+      const message = getErrorLikeMessage(signal);
+      const netErrorCode = getNetErrorCode(signal);
+      if (netErrorCode) return netErrorCode;
+      if (/Frame with ID \d+ is showing error page/i.test(message)) {
+        return message.match(/Frame with ID \d+ is showing error page\.?/i)?.[0] || 'Frame is showing error page';
+      }
+      if (/Cannot access contents of (?:url|the page)/i.test(message)) {
+        return message.match(/Cannot access contents of (?:url|the page)[^.]*/i)?.[0] || 'Cannot access contents of the page';
+      }
+      if (/chrome-error:\/\/chromewebdata\/?/i.test(message)) {
+        return 'chrome-error://chromewebdata';
+      }
+      return message.trim();
+    }
+
+    function shouldRecoverAuthErrorPage(source, targetUrl = '', signal = null) {
+      if (!isOpenAiAuthSource(source) || !isAuthPageUrl(targetUrl)) {
+        return false;
+      }
+      return isAuthErrorPageExecutionError(signal) || isAuthErrorPageTab(signal);
+    }
+
+    function buildAuthErrorPageRecoveryFailedError(source, targetUrl = '', signal = null, attempts = AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS) {
+      const diagnostic = getAuthErrorPageDiagnostic(signal);
+      const error = new Error(
+        `${getSourceLabel(source)}进入浏览器错误页，已尝试刷新恢复 ${attempts} 次仍未恢复。${diagnostic ? `原因：${diagnostic}` : `URL: ${targetUrl || 'unknown'}`}`
+      );
+      error.code = 'AUTH_ERROR_PAGE_RECOVERY_FAILED';
+      error.authErrorPage = true;
+      error.causeMessage = getErrorLikeMessage(signal);
+      return error;
+    }
+
+    async function resolveAuthErrorPageRecoveryTargetUrl(source, candidateUrl = '') {
+      if (isAuthPageUrl(candidateUrl)) {
+        return candidateUrl;
+      }
+      const state = await getState().catch(() => ({}));
+      const lastUrl = getSourceMapValue(state?.sourceLastUrls, source);
+      return isAuthPageUrl(lastUrl) ? lastUrl : '';
+    }
+
+    async function markSourceTabNotReady(source, tabId) {
+      let registry = await getTabRegistry();
+      const sourceEntry = getSourceMapValue(registry, source);
+      if (!sourceEntry || Number(sourceEntry.tabId) !== Number(tabId)) {
+        return;
+      }
+      registry = setSourceMapValue(registry, source, {
+        ...sourceEntry,
+        ready: false,
+      });
+      await setState({ tabRegistry: registry });
+    }
+
+    async function recoverAuthErrorPageAttempt(source, tabId, targetUrl, signal = null, options = {}) {
+      const attempt = Math.max(1, Math.floor(Number(options.attempt) || 1));
+      const total = Math.max(attempt, Math.floor(Number(options.totalAttempts) || AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS));
+      const loadTimeoutMs = Math.max(1000, Math.floor(Number(options.loadTimeoutMs) || AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS));
+      const diagnostic = getAuthErrorPageDiagnostic(signal);
+      if (typeof addLog === 'function') {
+        await addLog(
+          `${getSourceLabel(source)}进入浏览器错误页${diagnostic ? `（${diagnostic}）` : ''}，正在刷新恢复（${attempt}/${total}）...`,
+          'warn'
+        );
+      }
+
+      await markSourceTabNotReady(source, tabId);
+
+      const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+      const shouldNavigateToTarget = Boolean(targetUrl && (!currentTab || isAuthErrorPageTab(currentTab)));
+      if (shouldNavigateToTarget && typeof chrome?.tabs?.update === 'function') {
+        await chrome.tabs.update(tabId, { url: targetUrl, active: true });
+      } else if (typeof chrome?.tabs?.reload === 'function') {
+        await chrome.tabs.reload(tabId);
+      } else if (targetUrl && typeof chrome?.tabs?.update === 'function') {
+        await chrome.tabs.update(tabId, { url: targetUrl, active: true });
+      }
+
+      await waitForTabComplete(tabId, {
+        timeoutMs: loadTimeoutMs,
+        retryDelayMs: 250,
+      });
+      await sleepOrStop(250);
+      return chrome.tabs.get(tabId).catch(() => null);
+    }
+
+    async function runWithAuthErrorPageRecovery(source, tabId, targetUrl, operation, options = {}) {
+      const recoveryTargetUrl = await resolveAuthErrorPageRecoveryTargetUrl(source, targetUrl);
+      const maxAttempts = Math.max(0, Math.floor(Number(options.maxAttempts) || AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS));
+      if (!isOpenAiAuthSource(source) || !isAuthPageUrl(recoveryTargetUrl)) {
+        return operation();
+      }
+
+      let lastSignal = null;
+      for (let recoveryCount = 0; recoveryCount <= maxAttempts; recoveryCount += 1) {
+        const beforeTab = await chrome.tabs.get(tabId).catch(() => null);
+        if (shouldRecoverAuthErrorPage(source, recoveryTargetUrl, beforeTab)) {
+          lastSignal = beforeTab;
+          if (recoveryCount >= maxAttempts) {
+            break;
+          }
+          await recoverAuthErrorPageAttempt(source, tabId, recoveryTargetUrl, beforeTab, {
+            ...options,
+            attempt: recoveryCount + 1,
+            totalAttempts: maxAttempts,
+          });
+          continue;
+        }
+
+        try {
+          const result = await operation();
+          if (shouldRecoverAuthErrorPage(source, recoveryTargetUrl, result)) {
+            lastSignal = result;
+            if (recoveryCount >= maxAttempts) {
+              break;
+            }
+            await recoverAuthErrorPageAttempt(source, tabId, recoveryTargetUrl, result, {
+              ...options,
+              attempt: recoveryCount + 1,
+              totalAttempts: maxAttempts,
+            });
+            continue;
+          }
+          return result;
+        } catch (error) {
+          if (!shouldRecoverAuthErrorPage(source, recoveryTargetUrl, error)) {
+            throw error;
+          }
+          lastSignal = error;
+          if (recoveryCount >= maxAttempts) {
+            break;
+          }
+          await recoverAuthErrorPageAttempt(source, tabId, recoveryTargetUrl, error, {
+            ...options,
+            attempt: recoveryCount + 1,
+            totalAttempts: maxAttempts,
+          });
+        }
+      }
+
+      throw buildAuthErrorPageRecoveryFailedError(source, recoveryTargetUrl, lastSignal, maxAttempts);
+    }
+
+    async function injectContentScriptsOnTab(source, tabId, targetUrl, inject, injectSource) {
+      return runWithAuthErrorPageRecovery(source, tabId, targetUrl, async () => {
+        if (injectSource) {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: (injectedSource) => {
+              window.__MULTIPAGE_SOURCE = injectedSource;
+            },
+            args: [injectSource],
+          });
+        }
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: inject,
+        });
+      });
     }
 
     function sourcesMatch(leftSource, rightSource) {
@@ -208,13 +414,27 @@
           });
           await chrome.tabs.update(tab.id, { url: initialUrl, active: creationProperties.active !== false });
         }
-        await applyBrowserFingerprintForSource(fingerprintSource, tab?.id, {
-          phase: 'created',
-          url: initialUrl || properties.url || tab?.url || '',
-          allowGenericSource: Boolean(options.applyBrowserFingerprint),
-        });
+        const createdFingerprintUrl = initialUrl || properties.url || tab?.url || '';
+        if (Number.isInteger(tab?.id) && isAuthPageUrl(createdFingerprintUrl)) {
+          await runWithAuthErrorPageRecovery(fingerprintSource, tab.id, createdFingerprintUrl, () => (
+            applyBrowserFingerprintForSource(fingerprintSource, tab.id, {
+              phase: 'created',
+              url: createdFingerprintUrl,
+              allowGenericSource: Boolean(options.applyBrowserFingerprint),
+            })
+          ));
+        } else {
+          await applyBrowserFingerprintForSource(fingerprintSource, tab?.id, {
+            phase: 'created',
+            url: createdFingerprintUrl,
+            allowGenericSource: Boolean(options.applyBrowserFingerprint),
+          });
+        }
         return tab;
       } catch (error) {
+        if (error?.authErrorPage || isAuthErrorPageExecutionError(error)) {
+          throw error;
+        }
         if (windowId !== null) {
           throw buildAutomationWindowUnavailableError(error);
         }
@@ -315,6 +535,9 @@
           url: options.url || '',
         });
       } catch (error) {
+        if (shouldRecoverAuthErrorPage(source, options.url || '', error)) {
+          throw error;
+        }
         const message = error?.message || String(error || '未知错误');
         if (typeof addLog === 'function') {
           await addLog(`浏览器指纹应用失败：${message}`, 'error');
@@ -651,7 +874,7 @@
       while (Date.now() - start < timeoutMs) {
         try {
           const tab = await chrome.tabs.get(tabId);
-          if (tab?.status === 'complete') {
+          if (!tab || !Object.prototype.hasOwnProperty.call(tab, 'status') || tab.status === 'complete') {
             return tab;
           }
         } catch {
@@ -729,6 +952,7 @@
       let lastError = null;
       let logged = false;
       let attempt = 0;
+      let authErrorPageRecoveries = 0;
 
       console.log(
         LOG_PREFIX,
@@ -744,6 +968,25 @@
           currentTab = null;
         }
         const currentUrl = String(currentTab?.url || '');
+        const authRecoveryTargetUrl = await resolveAuthErrorPageRecoveryTargetUrl(source, currentUrl);
+        if (shouldRecoverAuthErrorPage(source, authRecoveryTargetUrl, currentTab)) {
+          lastError = currentTab;
+          if (authErrorPageRecoveries < AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS) {
+            authErrorPageRecoveries += 1;
+            await recoverAuthErrorPageAttempt(source, tabId, authRecoveryTargetUrl, currentTab, {
+              attempt: authErrorPageRecoveries,
+              totalAttempts: AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS,
+            });
+            await sleepOrStop(retryDelayMs);
+            continue;
+          }
+          throw buildAuthErrorPageRecoveryFailedError(
+            source,
+            authRecoveryTargetUrl,
+            currentTab,
+            AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS
+          );
+        }
         const preferStaticAuthReady = isStaticAuthContentScriptUrl(source, currentUrl);
         const pong = await pingContentScriptOnTab(tabId);
         if (pong?.ok && (!pong.source || sourcesMatch(pong.source, source))) {
@@ -777,24 +1020,29 @@
 
         try {
           if (shouldInjectContentScriptForUrl(source, currentUrl, inject)) {
-            if (injectSource) {
-              await chrome.scripting.executeScript({
-                target: { tabId },
-                func: (injectedSource) => {
-                  window.__MULTIPAGE_SOURCE = injectedSource;
-                },
-                args: [injectSource],
-              });
-            }
-
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: inject,
-            });
+            await injectContentScriptsOnTab(source, tabId, currentUrl, inject, injectSource);
           }
         } catch (err) {
           lastError = err;
           console.warn(LOG_PREFIX, `[ensureContentScriptReadyOnTab] inject attempt ${attempt} failed for ${source} tab=${tabId}: ${err?.message || err}`);
+          const latestTargetUrl = await resolveAuthErrorPageRecoveryTargetUrl(source, currentUrl);
+          if (shouldRecoverAuthErrorPage(source, latestTargetUrl, err)) {
+            if (authErrorPageRecoveries < AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS) {
+              authErrorPageRecoveries += 1;
+              await recoverAuthErrorPageAttempt(source, tabId, latestTargetUrl, err, {
+                attempt: authErrorPageRecoveries,
+                totalAttempts: AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS,
+              });
+              await sleepOrStop(retryDelayMs);
+              continue;
+            }
+            throw buildAuthErrorPageRecoveryFailedError(
+              source,
+              latestTargetUrl,
+              err,
+              AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS
+            );
+          }
         }
 
         const pongAfterInject = await pingContentScriptOnTab(tabId);
@@ -816,6 +1064,14 @@
         await sleepOrStop(retryDelayMs);
       }
 
+      if (shouldRecoverAuthErrorPage(source, await resolveAuthErrorPageRecoveryTargetUrl(source), lastError)) {
+        throw buildAuthErrorPageRecoveryFailedError(
+          source,
+          await resolveAuthErrorPageRecoveryTargetUrl(source),
+          lastError,
+          AUTH_ERROR_PAGE_RECOVERY_MAX_ATTEMPTS
+        );
+      }
       throw lastError || new Error(`${getSourceLabel(source)} 内容脚本长时间未就绪。`);
     }
 
@@ -936,18 +1192,28 @@
     }
 
     async function applyBrowserFingerprintAfterAuthStaticLoad(source, tabId, url, phase) {
-      const result = await applyBrowserFingerprintForSource(source, tabId, {
-        phase,
-        url,
-      });
+      const result = await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+        applyBrowserFingerprintForSource(source, tabId, {
+          phase,
+          url,
+        })
+      ));
       if (!result) {
         return result;
       }
-      await waitForTabUpdateComplete(tabId);
-      return applyBrowserFingerprintForSource(source, tabId, {
-        phase,
-        url,
+      await runWithAuthErrorPageRecovery(source, tabId, url, async () => {
+        await waitForTabComplete(tabId, {
+          timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+          retryDelayMs: 250,
+        });
+        return chrome.tabs.get(tabId).catch(() => null);
       });
+      return runWithAuthErrorPageRecovery(source, tabId, url, () => (
+        applyBrowserFingerprintForSource(source, tabId, {
+          phase,
+          url,
+        })
+      ));
     }
 
     function flushCommand(source, tabId) {
@@ -986,30 +1252,34 @@
         });
 
         if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
-          await waitForTabUpdateComplete(tab.id);
-          await applyBrowserFingerprintForSource(source, tab.id, {
-            phase: 'force-new-after-load',
-            url,
-          });
-          if (options.injectSource) {
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              func: (injectedSource) => {
-                window.__MULTIPAGE_SOURCE = injectedSource;
-              },
-              args: [options.injectSource],
+          await runWithAuthErrorPageRecovery(source, tab.id, url, async () => {
+            await waitForTabComplete(tab.id, {
+              timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+              retryDelayMs: 250,
             });
-          }
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: options.inject,
+            return chrome.tabs.get(tab.id).catch(() => null);
           });
-          await applyBrowserFingerprintForSource(source, tab.id, {
-            phase: 'force-new-ready',
-            url,
+          await runWithAuthErrorPageRecovery(source, tab.id, url, () => (
+            applyBrowserFingerprintForSource(source, tab.id, {
+              phase: 'force-new-after-load',
+              url,
+            })
+          ));
+          await injectContentScriptsOnTab(source, tab.id, url, options.inject, options.injectSource);
+          await runWithAuthErrorPageRecovery(source, tab.id, url, () => (
+            applyBrowserFingerprintForSource(source, tab.id, {
+              phase: 'force-new-ready',
+              url,
+            })
+          ));
+        } else if (isAuthPageUrl(url)) {
+          await runWithAuthErrorPageRecovery(source, tab.id, url, async () => {
+            await waitForTabComplete(tab.id, {
+              timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+              retryDelayMs: 250,
+            });
+            return chrome.tabs.get(tab.id).catch(() => null);
           });
-        }
-        if (!shouldInjectContentScriptForUrl(source, url, options.inject) && isAuthPageUrl(url)) {
           await applyBrowserFingerprintAfterAuthStaticLoad(source, tab.id, url, 'force-new-after-load');
         }
 
@@ -1044,17 +1314,27 @@
               });
             }
             await setState({ tabRegistry: registry });
-            await applyBrowserFingerprintForSource(source, tabId, {
-              phase: 'reuse-before-reload',
-              url,
-              nextDocument: true,
+            await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+              applyBrowserFingerprintForSource(source, tabId, {
+                phase: 'reuse-before-reload',
+                url,
+                nextDocument: true,
+              })
+            ));
+            await runWithAuthErrorPageRecovery(source, tabId, url, async () => {
+              await chrome.tabs.reload(tabId);
+              await waitForTabComplete(tabId, {
+                timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+                retryDelayMs: 250,
+              });
+              return chrome.tabs.get(tabId).catch(() => null);
             });
-            await chrome.tabs.reload(tabId);
-            await waitForTabUpdateComplete(tabId);
-            await applyBrowserFingerprintForSource(source, tabId, {
-              phase: 'reuse-after-reload',
-              url,
-            });
+            await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+              applyBrowserFingerprintForSource(source, tabId, {
+                phase: 'reuse-after-reload',
+                url,
+              })
+            ));
           }
 
           if (shouldInjectContentScriptForUrl(source, currentTab.url, options.inject)) {
@@ -1065,23 +1345,13 @@
               });
             }
             await setState({ tabRegistry: registry });
-            if (options.injectSource) {
-              await chrome.scripting.executeScript({
-                target: { tabId },
-                func: (injectedSource) => {
-                  window.__MULTIPAGE_SOURCE = injectedSource;
-                },
-                args: [options.injectSource],
-              });
-            }
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: options.inject,
-            });
-            await applyBrowserFingerprintForSource(source, tabId, {
-              phase: 'reuse-after-inject',
-              url,
-            });
+            await injectContentScriptsOnTab(source, tabId, currentTab.url || url, options.inject, options.injectSource);
+            await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+              applyBrowserFingerprintForSource(source, tabId, {
+                phase: 'reuse-after-inject',
+                url,
+              })
+            ));
             await sleepOrStop(500);
           }
 
@@ -1096,37 +1366,36 @@
           });
         }
         await setState({ tabRegistry: registry });
-        await applyBrowserFingerprintForSource(source, tabId, {
-          phase: 'reuse-before-navigate',
-          url,
-          nextDocument: true,
+        await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+          applyBrowserFingerprintForSource(source, tabId, {
+            phase: 'reuse-before-navigate',
+            url,
+            nextDocument: true,
+          })
+        ));
+        await runWithAuthErrorPageRecovery(source, tabId, url, async () => {
+          await chrome.tabs.update(tabId, { url, active: true });
+          await waitForTabComplete(tabId, {
+            timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+            retryDelayMs: 250,
+          });
+          return chrome.tabs.get(tabId).catch(() => null);
         });
-        await chrome.tabs.update(tabId, { url, active: true });
-
-        await waitForTabUpdateComplete(tabId);
-        await applyBrowserFingerprintForSource(source, tabId, {
-          phase: 'reuse-after-navigate',
-          url,
-        });
+        await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+          applyBrowserFingerprintForSource(source, tabId, {
+            phase: 'reuse-after-navigate',
+            url,
+          })
+        ));
 
         if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
-          if (options.injectSource) {
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              func: (injectedSource) => {
-                window.__MULTIPAGE_SOURCE = injectedSource;
-              },
-              args: [options.injectSource],
-            });
-          }
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            files: options.inject,
-          });
-          await applyBrowserFingerprintForSource(source, tabId, {
-            phase: 'reuse-after-navigate-inject',
-            url,
-          });
+          await injectContentScriptsOnTab(source, tabId, url, options.inject, options.injectSource);
+          await runWithAuthErrorPageRecovery(source, tabId, url, () => (
+            applyBrowserFingerprintForSource(source, tabId, {
+              phase: 'reuse-after-navigate-inject',
+              url,
+            })
+          ));
         }
 
         await sleepOrStop(500);
@@ -1144,30 +1413,34 @@
       });
 
       if (shouldInjectContentScriptForUrl(source, url, options.inject)) {
-        await waitForTabUpdateComplete(tab.id);
-        await applyBrowserFingerprintForSource(source, tab.id, {
-          phase: 'new-after-load',
-          url,
-        });
-        if (options.injectSource) {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: (injectedSource) => {
-              window.__MULTIPAGE_SOURCE = injectedSource;
-            },
-            args: [options.injectSource],
+        await runWithAuthErrorPageRecovery(source, tab.id, url, async () => {
+          await waitForTabComplete(tab.id, {
+            timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+            retryDelayMs: 250,
           });
-        }
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: options.inject,
+          return chrome.tabs.get(tab.id).catch(() => null);
         });
-        await applyBrowserFingerprintForSource(source, tab.id, {
-          phase: 'new-after-inject',
-          url,
+        await runWithAuthErrorPageRecovery(source, tab.id, url, () => (
+          applyBrowserFingerprintForSource(source, tab.id, {
+            phase: 'new-after-load',
+            url,
+          })
+        ));
+        await injectContentScriptsOnTab(source, tab.id, url, options.inject, options.injectSource);
+        await runWithAuthErrorPageRecovery(source, tab.id, url, () => (
+          applyBrowserFingerprintForSource(source, tab.id, {
+            phase: 'new-after-inject',
+            url,
+          })
+        ));
+      } else if (isAuthPageUrl(url)) {
+        await runWithAuthErrorPageRecovery(source, tab.id, url, async () => {
+          await waitForTabComplete(tab.id, {
+            timeoutMs: AUTH_ERROR_PAGE_RECOVERY_LOAD_TIMEOUT_MS,
+            retryDelayMs: 250,
+          });
+          return chrome.tabs.get(tab.id).catch(() => null);
         });
-      }
-      if (!shouldInjectContentScriptForUrl(source, url, options.inject) && isAuthPageUrl(url)) {
         await applyBrowserFingerprintAfterAuthStaticLoad(source, tab.id, url, 'new-after-load');
       }
 
@@ -1348,13 +1621,17 @@
       ensureContentScriptReadyOnTab,
       flushCommand,
       getAutomationWindowId,
+      getAuthErrorPageDiagnostic,
       getContentScriptResponseTimeoutMs,
       getMessageDebugLabel,
       getTabId,
       getTabRegistry,
+      isAuthErrorPageExecutionError,
+      isAuthErrorPageTab,
       isLocalhostOAuthCallbackTabMatch,
       isTabAlive,
       isTabInAutomationWindow,
+      shouldRecoverAuthErrorPage,
       maybeApplyBrowserFingerprintForCompletedAuthNavigation,
       pingContentScriptOnTab,
       queueCommand,

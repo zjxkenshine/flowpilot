@@ -12138,7 +12138,7 @@ function isStopError(error) {
 
 function isRetryableContentScriptTransportError(error) {
   const message = String(typeof error === 'string' ? error : error?.message || '');
-  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed|页面刚完成跳转或刷新，内容脚本还没有重新接回|页面未能重新就绪|页面通信异常/i.test(message);
+  return /back\/forward cache|message channel is closed|Receiving end does not exist|port closed before a response was received|A listener indicated an asynchronous response|内容脚本\s+\d+(?:\.\d+)?\s*秒内未响应|did not respond in \d+s|failed to fetch|networkerror|network error|fetch failed|load failed|Frame with ID \d+ is showing error page|Cannot access contents of (?:url|the page)|chrome-error:\/\/chromewebdata|net::ERR_[A-Z_]+|页面刚完成跳转或刷新，内容脚本还没有重新接回|页面未能重新就绪|页面通信异常|浏览器错误页/i.test(message);
 }
 
 function isStepFetchNetworkRetryableError(error) {

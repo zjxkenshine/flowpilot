@@ -154,6 +154,211 @@ test('tab runtime waits for static auth content script readiness before attempti
   assert.deepEqual(currentState.tabRegistry['openai-auth'], { tabId: 77, ready: true, windowId: 1 });
 });
 
+test('tab runtime recovers static auth tabs that initially land on Chrome error pages', async () => {
+  const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const runtimeApi = new Function('self', `${runtimeSource}; return self.MultiPageBackgroundTabRuntime;`)({});
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+
+  const logs = [];
+  let reloads = 0;
+  let getCalls = 0;
+  let currentUrl = 'chrome-error://chromewebdata/';
+  let currentState = {
+    tabRegistry: {
+      'openai-auth': { tabId: 77, ready: true, windowId: 1 },
+    },
+    sourceLastUrls: {
+      'openai-auth': 'https://auth.openai.com/authorize',
+    },
+  };
+
+  const runtime = runtimeApi.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async (message, level) => {
+      logs.push({ message, level });
+    },
+    chrome: {
+      tabs: {
+        get: async (tabId) => {
+          getCalls += 1;
+          return {
+            id: tabId,
+            windowId: 1,
+            url: currentUrl,
+            status: 'complete',
+          };
+        },
+        query: async () => [],
+        reload: async () => {
+          reloads += 1;
+          currentUrl = 'https://auth.openai.com/authorize';
+        },
+        sendMessage: async (_tabId, message) => {
+          if (message.type === 'PING' && currentUrl.startsWith('https://auth.openai.com/')) {
+            return { ok: true, source: 'openai-auth' };
+          }
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        },
+      },
+    },
+    getSourceLabel: () => '认证页',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (source, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(source, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await runtime.ensureContentScriptReadyOnTab('signup-page', 77, {
+    inject: ['content/utils.js', 'content/signup-page.js'],
+    injectSource: 'signup-page',
+    timeoutMs: 1000,
+    retryDelayMs: 1,
+    staticReadyGraceMs: 0,
+  });
+
+  assert.equal(reloads, 1);
+  assert.equal(getCalls > 1, true);
+  assert.equal(logs.some(({ message }) => /认证页进入浏览器错误页/.test(message)), true);
+  assert.deepEqual(currentState.tabRegistry['openai-auth'], { tabId: 77, ready: true, windowId: 1 });
+});
+
+test('tab runtime recovers force-new auth tab when fingerprint injection sees an error page', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+
+  const logs = [];
+  let fingerprintCalls = 0;
+  let reloads = 0;
+  let currentUrl = 'https://auth.openai.com/authorize';
+  let currentState = {
+    automationWindowId: 100,
+    browserFingerprintProfile: { profileId: 'fp-auth', userAgent: 'ua' },
+    sourceLastUrls: {},
+    tabRegistry: {},
+  };
+
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async (message, level) => {
+      logs.push({ message, level });
+    },
+    applyBrowserFingerprintToTab: async () => {
+      fingerprintCalls += 1;
+      if (fingerprintCalls === 1) {
+        throw new Error('Frame with ID 0 is showing error page');
+      }
+      return { applied: true };
+    },
+    chrome: {
+      tabs: {
+        create: async (payload) => ({ id: 31, windowId: payload.windowId, url: payload.url, status: 'complete', active: true }),
+        get: async () => ({ id: 31, windowId: 100, url: currentUrl, status: 'complete', active: true }),
+        query: async () => [],
+        reload: async () => {
+          reloads += 1;
+          currentUrl = 'https://auth.openai.com/authorize';
+        },
+        remove: async () => {},
+      },
+    },
+    getSourceLabel: () => '认证页',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (sourceName, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(sourceName, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    shouldApplyBrowserFingerprintToSource: (_sourceName, options) => ['openai-auth', 'signup-page'].includes(options.canonicalSource),
+    sleepWithStop: async () => {},
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  const tabId = await runtime.reuseOrCreateTab('signup-page', 'https://auth.openai.com/authorize', {
+    forceNew: true,
+  });
+
+  assert.equal(tabId, 31);
+  assert.equal(reloads, 1);
+  assert.equal(fingerprintCalls >= 2, true);
+  assert.equal(logs.some(({ message }) => /Frame with ID 0 is showing error page/.test(message)), true);
+});
+
+test('tab runtime surfaces localized auth error-page failure after limited recovery attempts', async () => {
+  const runtimeSource = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const registrySource = fs.readFileSync('shared/source-registry.js', 'utf8');
+  const runtimeApi = new Function('self', `${runtimeSource}; return self.MultiPageBackgroundTabRuntime;`)({});
+  const registryApi = new Function('self', `${registrySource}; return self.MultiPageSourceRegistry;`)({});
+  const sourceRegistry = registryApi.createSourceRegistry();
+
+  let reloads = 0;
+  let currentState = {
+    tabRegistry: {},
+    sourceLastUrls: {
+      'openai-auth': 'https://auth.openai.com/authorize',
+    },
+  };
+
+  const runtime = runtimeApi.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({
+          id: tabId,
+          windowId: 1,
+          url: 'chrome-error://chromewebdata/',
+          title: 'net::ERR_TUNNEL_CONNECTION_FAILED',
+          status: 'complete',
+        }),
+        query: async () => [],
+        reload: async () => {
+          reloads += 1;
+        },
+        sendMessage: async () => {
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        },
+      },
+    },
+    getSourceLabel: () => '认证页',
+    getState: async () => currentState,
+    matchesSourceUrlFamily: (source, candidateUrl, referenceUrl) => (
+      sourceRegistry.matchesSourceUrlFamily(source, candidateUrl, referenceUrl)
+    ),
+    setState: async (updates) => {
+      currentState = { ...currentState, ...updates };
+    },
+    sleepWithStop: async () => {},
+    sourceRegistry,
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    runtime.ensureContentScriptReadyOnTab('signup-page', 77, {
+      inject: ['content/utils.js', 'content/signup-page.js'],
+      injectSource: 'signup-page',
+      timeoutMs: 1000,
+      retryDelayMs: 1,
+      staticReadyGraceMs: 0,
+    }),
+    /认证页进入浏览器错误页，已尝试刷新恢复 2 次仍未恢复。原因：net::ERR_TUNNEL_CONNECTION_FAILED/
+  );
+  assert.equal(reloads, 2);
+});
+
 test('tab runtime caps per-attempt response timeout to the remaining resilient timeout budget', () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};
