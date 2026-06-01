@@ -2,6 +2,54 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
+function collectTopLevelDeclarationNames(source) {
+  const declarationPattern = /^\s*(?:const|let|var|function|async\s+function|class)\s+([A-Za-z_$][\w$]*)/;
+  const names = new Set();
+  let depth = 0;
+  let inBlockComment = false;
+
+  for (const line of source.split(/\r?\n/)) {
+    let cleaned = '';
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      const next = line[index + 1];
+      if (inBlockComment) {
+        if (char === '*' && next === '/') {
+          inBlockComment = false;
+          index += 1;
+        }
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        inBlockComment = true;
+        index += 1;
+        continue;
+      }
+      if (char === '/' && next === '/') {
+        break;
+      }
+      cleaned += char;
+    }
+
+    if (depth === 0) {
+      const match = cleaned.match(declarationPattern);
+      if (match) {
+        names.add(match[1]);
+      }
+    }
+
+    for (const char of cleaned) {
+      if (char === '{') {
+        depth += 1;
+      } else if (char === '}') {
+        depth = Math.max(0, depth - 1);
+      }
+    }
+  }
+
+  return names;
+}
+
 function loadIpProxyCore({ accountListEnabled = true } = {}) {
   const providerSource = fs.readFileSync('background/ip-proxy-provider-711proxy.js', 'utf8');
   const coreSource = fs.readFileSync('background/ip-proxy-core.js', 'utf8');
@@ -80,6 +128,25 @@ return {
 };
 `)();
 }
+
+test('IP proxy core avoids service worker top-level default constant collisions', () => {
+  const backgroundDeclarations = collectTopLevelDeclarationNames(fs.readFileSync('background.js', 'utf8'));
+  const coreDeclarations = collectTopLevelDeclarationNames(fs.readFileSync('background/ip-proxy-core.js', 'utf8'));
+  const formerlyCollidingNames = [
+    'DEFAULT_IP_PROXY_PURITY_PROVIDER',
+    'DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD',
+    'DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS',
+    'DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS',
+  ];
+
+  for (const name of formerlyCollidingNames) {
+    assert.equal(
+      backgroundDeclarations.has(name) && coreDeclarations.has(name),
+      false,
+      `${name} must not be declared by both background.js and background/ip-proxy-core.js`
+    );
+  }
+});
 
 test('IP proxy parser ignores disabled lines and normalizes proxy entries', () => {
   const api = loadIpProxyCore();

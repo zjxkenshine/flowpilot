@@ -122,9 +122,9 @@ const IP_PROXY_PAGE_CONTEXT_BASELINE_TIMEOUT_MS = 6000;
 const IP_PROXY_DIAGNOSTICS_SUMMARY_MAX_ITEMS = 8;
 const IP_PROXY_GUARD_BLOCK_RULE_ID = 10991;
 const IP_PROXY_GUARD_REGEX = '^https?:\\/\\/([^\\/]+\\.)?(chatgpt\\.com|openai\\.com)(\\/|$)';
-const DEFAULT_IP_PROXY_PURITY_PROVIDER = 'ipqualityscore';
-const DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD = 75;
-const DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS = 5;
+const IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER = 'ipqualityscore';
+const IP_PROXY_CORE_DEFAULT_PURITY_FRAUD_SCORE_THRESHOLD = 75;
+const IP_PROXY_CORE_DEFAULT_PURITY_MAX_ATTEMPTS = 5;
 const IP_PROXY_PURITY_MIN_SCORE_THRESHOLD = 0;
 const IP_PROXY_PURITY_MAX_SCORE_THRESHOLD = 100;
 const IP_PROXY_PURITY_MIN_ATTEMPTS = 1;
@@ -140,7 +140,7 @@ const IP_PROXY_PURITY_BLOCK_SIGNAL_VALUES = Object.freeze([
   'active_vpn',
   'active_tor',
 ]);
-const DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS = Object.freeze([
+const IP_PROXY_CORE_DEFAULT_PURITY_BLOCK_SIGNALS = Object.freeze([
   'proxy',
   'vpn',
   'tor',
@@ -568,16 +568,16 @@ function normalizeIpProxySwitchIpRoundCount(value = '', fallback = 1) {
 
 function normalizeIpProxyPurityProvider(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
-  return normalized === DEFAULT_IP_PROXY_PURITY_PROVIDER
-    ? DEFAULT_IP_PROXY_PURITY_PROVIDER
-    : DEFAULT_IP_PROXY_PURITY_PROVIDER;
+  return normalized === IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER
+    ? IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER
+    : IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER;
 }
 
-function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD) {
+function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = IP_PROXY_CORE_DEFAULT_PURITY_FRAUD_SCORE_THRESHOLD) {
   const rawValue = String(value ?? '').trim();
   const fallbackValue = Math.max(
     IP_PROXY_PURITY_MIN_SCORE_THRESHOLD,
-    Math.min(IP_PROXY_PURITY_MAX_SCORE_THRESHOLD, Number(fallback) || DEFAULT_IP_PROXY_PURITY_FRAUD_SCORE_THRESHOLD)
+    Math.min(IP_PROXY_PURITY_MAX_SCORE_THRESHOLD, Number(fallback) || IP_PROXY_CORE_DEFAULT_PURITY_FRAUD_SCORE_THRESHOLD)
   );
   if (!rawValue) {
     return fallbackValue;
@@ -589,11 +589,11 @@ function normalizeIpProxyPurityFraudScoreThreshold(value = '', fallback = DEFAUL
   return Math.max(IP_PROXY_PURITY_MIN_SCORE_THRESHOLD, Math.min(IP_PROXY_PURITY_MAX_SCORE_THRESHOLD, numeric));
 }
 
-function normalizeIpProxyPurityMaxAttempts(value = '', fallback = DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS) {
+function normalizeIpProxyPurityMaxAttempts(value = '', fallback = IP_PROXY_CORE_DEFAULT_PURITY_MAX_ATTEMPTS) {
   const rawValue = String(value ?? '').trim();
   const fallbackValue = Math.max(
     IP_PROXY_PURITY_MIN_ATTEMPTS,
-    Math.min(IP_PROXY_PURITY_MAX_ATTEMPTS, Number(fallback) || DEFAULT_IP_PROXY_PURITY_MAX_ATTEMPTS)
+    Math.min(IP_PROXY_PURITY_MAX_ATTEMPTS, Number(fallback) || IP_PROXY_CORE_DEFAULT_PURITY_MAX_ATTEMPTS)
   );
   if (!rawValue) {
     return fallbackValue;
@@ -605,7 +605,7 @@ function normalizeIpProxyPurityMaxAttempts(value = '', fallback = DEFAULT_IP_PRO
   return Math.max(IP_PROXY_PURITY_MIN_ATTEMPTS, Math.min(IP_PROXY_PURITY_MAX_ATTEMPTS, numeric));
 }
 
-function normalizeIpProxyPurityBlockSignals(value = DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS) {
+function normalizeIpProxyPurityBlockSignals(value = IP_PROXY_CORE_DEFAULT_PURITY_BLOCK_SIGNALS) {
   const source = Array.isArray(value)
     ? value
     : String(value || '')
@@ -619,7 +619,7 @@ function normalizeIpProxyPurityBlockSignals(value = DEFAULT_IP_PROXY_PURITY_BLOC
       }
       selected.push(signal);
     });
-  return selected.length ? selected : [...DEFAULT_IP_PROXY_PURITY_BLOCK_SIGNALS];
+  return selected.length ? selected : [...IP_PROXY_CORE_DEFAULT_PURITY_BLOCK_SIGNALS];
 }
 
 function normalizeIpProxyAccountLifeMinutes(value = '') {
@@ -1604,7 +1604,7 @@ function normalizeIpProxyPurityResultForState(result = null) {
       error: '',
     };
   }
-  const provider = normalizeIpProxyPurityProvider(result.provider || DEFAULT_IP_PROXY_PURITY_PROVIDER);
+  const provider = normalizeIpProxyPurityProvider(result.provider || IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER);
   const checkedAt = Math.max(0, Number(result.checkedAt || result.at || Date.now()) || 0);
   const rawScore = result.score ?? result.fraudScore ?? result.fraud_score;
   const numericScore = Number(rawScore);
@@ -1706,13 +1706,13 @@ function isIpProxyPurityCheckConfigured(state = {}) {
   );
 }
 
-function getIpProxyPurityCacheKey(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '') {
+function getIpProxyPurityCacheKey(provider = IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER, ip = '') {
   const normalizedProvider = normalizeIpProxyPurityProvider(provider);
   const normalizedIp = String(ip || '').trim();
   return normalizedProvider && normalizedIp ? `${normalizedProvider}:${normalizedIp}` : '';
 }
 
-function readCachedIpProxyPurityResult(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '') {
+function readCachedIpProxyPurityResult(provider = IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER, ip = '') {
   const key = getIpProxyPurityCacheKey(provider, ip);
   if (!key) {
     return null;
@@ -1725,7 +1725,7 @@ function readCachedIpProxyPurityResult(provider = DEFAULT_IP_PROXY_PURITY_PROVID
   return cached.result || null;
 }
 
-function writeCachedIpProxyPurityResult(provider = DEFAULT_IP_PROXY_PURITY_PROVIDER, ip = '', result = null) {
+function writeCachedIpProxyPurityResult(provider = IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER, ip = '', result = null) {
   const key = getIpProxyPurityCacheKey(provider, ip);
   if (!key || !result) {
     return;
@@ -1756,7 +1756,7 @@ function normalizeIpqsPurityResponse(payload = {}, options = {}) {
     return {
       ok: false,
       status: 'error',
-      provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+      provider: IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER,
       score: null,
       reasons: ['invalid_response'],
       checkedAt: Date.now(),
@@ -1771,7 +1771,7 @@ function normalizeIpqsPurityResponse(payload = {}, options = {}) {
     return {
       ok: false,
       status: 'error',
-      provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+      provider: IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER,
       score: null,
       reasons: ['api_error'],
       checkedAt: Date.now(),
@@ -1797,7 +1797,7 @@ function normalizeIpqsPurityResponse(payload = {}, options = {}) {
   return {
     ok: reasons.length === 0,
     status: reasons.length === 0 ? 'passed' : 'failed',
-    provider: DEFAULT_IP_PROXY_PURITY_PROVIDER,
+    provider: IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER,
     score,
     reasons,
     checkedAt: Date.now(),
@@ -1808,7 +1808,7 @@ function normalizeIpqsPurityResponse(payload = {}, options = {}) {
 
 async function checkIpProxyPurity(exitIp = '', state = {}, options = {}) {
   const ip = String(exitIp || '').trim();
-  const provider = normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || DEFAULT_IP_PROXY_PURITY_PROVIDER);
+  const provider = normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER);
   if (!ip) {
     return {
       ok: false,
@@ -1929,7 +1929,7 @@ async function maybeApplyIpProxyPurityExpectation(status = {}, state = {}, optio
   const purity = await checkIpProxyPurity(exitIp, state, options).catch((error) => ({
     ok: false,
     status: 'error',
-    provider: normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || DEFAULT_IP_PROXY_PURITY_PROVIDER),
+    provider: normalizeIpProxyPurityProvider(state?.ipProxyPurityProvider || IP_PROXY_CORE_DEFAULT_PURITY_PROVIDER),
     score: null,
     reasons: ['request_failed'],
     checkedAt: Date.now(),
