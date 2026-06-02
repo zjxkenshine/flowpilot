@@ -3180,41 +3180,49 @@
     }
 
     function buildHostedCheckoutHeroSmsPayPalState(state = {}) {
+      const sourceState = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+      const {
+        phoneCodeWaitSeconds: _phoneCodeWaitSeconds,
+        phoneCodeTimeoutWindows: _phoneCodeTimeoutWindows,
+        phoneCodePollIntervalSeconds: _phoneCodePollIntervalSeconds,
+        phoneCodePollMaxRounds: _phoneCodePollMaxRounds,
+        ...baseState
+      } = sourceState;
       const operatorOrder = normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(
-        state?.hostedCheckoutHeroSmsPayPalOperatorOrder
+        sourceState?.hostedCheckoutHeroSmsPayPalOperatorOrder
       );
       const fallbackOperator = String(
-        state?.heroSmsOperatorByCountry?.[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]
-        || state?.heroSmsOperatorByCountry?.[HERO_SMS_PAYPAL_BR_COUNTRY_ID]
+        sourceState?.heroSmsOperatorByCountry?.[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]
+        || sourceState?.heroSmsOperatorByCountry?.[HERO_SMS_PAYPAL_BR_COUNTRY_ID]
         || ''
       ).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
       const effectiveOperatorOrder = operatorOrder.length
         ? operatorOrder
         : (fallbackOperator ? [fallbackOperator] : []);
       const heroSmsOperatorByCountry = {
-        ...(state?.heroSmsOperatorByCountry && typeof state.heroSmsOperatorByCountry === 'object'
-          ? state.heroSmsOperatorByCountry
+        ...(sourceState?.heroSmsOperatorByCountry && typeof sourceState.heroSmsOperatorByCountry === 'object'
+          ? sourceState.heroSmsOperatorByCountry
           : {}),
       };
       if (effectiveOperatorOrder[0]) {
         heroSmsOperatorByCountry[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)] = effectiveOperatorOrder[0];
       }
       return {
-        ...state,
+        ...baseState,
         phoneSmsProvider: 'hero-sms',
         heroSmsCountryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
         heroSmsCountryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
         heroSmsCountryFallback: [],
         heroSmsOperatorByCountry,
         heroSmsOperatorOrderByCountry: {
-          ...(state?.heroSmsOperatorOrderByCountry && typeof state.heroSmsOperatorOrderByCountry === 'object'
-            ? state.heroSmsOperatorOrderByCountry
+          ...(sourceState?.heroSmsOperatorOrderByCountry && typeof sourceState.heroSmsOperatorOrderByCountry === 'object'
+            ? sourceState.heroSmsOperatorOrderByCountry
             : {}),
           [String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]: effectiveOperatorOrder,
         },
         heroSmsServiceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
-        heroSmsMinPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(state?.hostedCheckoutHeroSmsPayPalMinPrice),
-        heroSmsMaxPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(state?.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1'),
+        heroSmsMinPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(sourceState?.hostedCheckoutHeroSmsPayPalMinPrice),
+        heroSmsMaxPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(sourceState?.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1'),
         heroSmsPreferredPrice: '',
         phoneActivationRetryRounds: 5,
         heroSmsAcquirePriority: 'price',
@@ -3253,6 +3261,19 @@
         timeoutMs,
         intervalMs,
         maxRounds,
+      };
+    }
+
+    function buildHostedCheckoutHeroSmsPayPalPollState(state = {}, pollOptions = {}) {
+      const timeoutMs = Math.max(1000, Math.floor(Number(pollOptions?.timeoutMs) || 0));
+      const intervalMs = Math.max(1000, Math.floor(Number(pollOptions?.intervalMs) || 0));
+      const maxRounds = Math.max(1, Math.floor(Number(pollOptions?.maxRounds) || 1));
+      return {
+        ...buildHostedCheckoutHeroSmsPayPalState(state),
+        phoneCodeWaitSeconds: Math.max(1, Math.ceil(timeoutMs / 1000)),
+        phoneCodeTimeoutWindows: 1,
+        phoneCodePollIntervalSeconds: Math.max(1, Math.ceil(intervalMs / 1000)),
+        phoneCodePollMaxRounds: maxRounds,
       };
     }
 
@@ -4905,9 +4926,6 @@
         let code = '';
         try {
           const latestPollState = await getLatestHostedState(state);
-          const pollState = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
-            ? buildHostedCheckoutHeroSmsPayPalState(latestPollState)
-            : latestPollState;
           const pollOptions = isHostedCheckoutHeroSmsPollTarget(activation, runtimeConfig)
             ? buildHostedCheckoutPhoneSmsPollOptions(runtimeConfig, options)
             : {
@@ -4916,6 +4934,9 @@
                 * 1000,
               intervalMs: Math.max(1, Number(runtimeConfig?.verificationPollIntervalSeconds) || 5) * 1000,
             };
+          const pollState = runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr
+            ? buildHostedCheckoutHeroSmsPayPalPollState(latestPollState, pollOptions)
+            : latestPollState;
           code = await phoneVerificationHelpers.pollPhoneActivationCode(pollState, activation, pollOptions);
         } catch (error) {
           await cleanupHostedCheckoutPhoneSmsActivationAfterNumberError(error, state);

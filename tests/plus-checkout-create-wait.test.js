@@ -7764,6 +7764,130 @@ test('PayPal hosted verification window caps HeroSMS phone poll timeout to curre
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '135790'), true);
 });
 
+test('PayPal hosted HeroSMS PayPal/BR verification window uses PayPal timing instead of phone timings', async () => {
+  const events = [];
+  let currentUrl = 'https://www.paypal.com/checkoutweb/signup?ba_token=BA-test';
+  const activation = {
+    activationId: 'pp-br-window-1',
+    phoneNumber: '+5511987654321',
+    provider: 'hero-sms',
+    serviceCode: 'paypal',
+    countryId: 73,
+    countryLabel: 'Brazil',
+    successfulUses: 0,
+    maxUses: 999,
+  };
+  let latestState = createHostedRuntimeState({
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutVerificationUrl: '',
+    hostedCheckoutPhoneNumber: '',
+    hostedCheckoutFirstResendWaitSeconds: 18,
+    hostedCheckoutVerificationPollAttempts: 9,
+    hostedCheckoutVerificationPollIntervalSeconds: 4,
+    phoneSmsProvider: '5sim',
+    heroSmsApiKey: 'hero-key',
+    heroSmsServiceCode: 'dr',
+    heroSmsCountryId: 151,
+    heroSmsCountryLabel: 'Japan',
+    heroSmsMaxPrice: '0.9',
+    phoneCodeWaitSeconds: 300,
+    phoneCodeTimeoutWindows: 8,
+    phoneCodePollIntervalSeconds: 30,
+    phoneCodePollMaxRounds: 80,
+    plusHostedCheckoutGuestProfile: {
+      email: 'guest@example.com',
+      phone: '11987654321',
+      address: { street: 'Avenida Paulista 1578', city: 'Sao Paulo', state: 'Sao Paulo', zip: '01310-200' },
+    },
+    hostedCheckoutPhoneSmsActivation: activation,
+    hostedCheckoutHeroSmsPayPalActivation: activation,
+    hostedCheckoutPhoneSmsRequestedRegion: 'BR',
+    hostedCheckoutPhoneSmsResolvedRegion: 'BR',
+  });
+  const phoneCalls = [];
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info', options = {}) => events.push({ type: 'log', message, level, options }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => ({ id: tabId, url: currentUrl, status: 'complete' }),
+      },
+    },
+    completeNodeFromBackground: async (step, payload) => events.push({ type: 'complete', step, payload }),
+    ensureContentScriptReadyOnTabUntilStopped: async () => {},
+    getState: async () => latestState,
+    phoneVerificationHelpers: {
+      normalizeActivation: normalizeTestPhoneActivation,
+      requestPhoneActivationForRegion: async () => {
+        throw new Error('should reuse existing PayPal HeroSMS PayPal/BR activation');
+      },
+      pollPhoneActivationCode: async (state, item, options) => {
+        phoneCalls.push({ type: 'poll', state, activation: item, options });
+        return '246810';
+      },
+    },
+    registerTab: async () => {},
+    sendTabMessageUntilStopped: async (_tabId, _source, message) => {
+      events.push({ type: 'tab-message', message });
+      if (message.type === 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP') {
+        if (message.payload?.expectedStage === 'guest_checkout') {
+          if (message.payload?.deferPhoneFill) {
+            return {
+              nonPhoneFieldsFilled: true,
+              phoneDeferred: true,
+            };
+          }
+          currentUrl = 'https://www.paypal.com/checkoutweb/verification';
+          return { submitted: true, phoneMatched: true };
+        }
+        if (message.payload?.verificationCode === '246810') {
+          currentUrl = 'https://www.paypal.com/checkoutweb/create-account';
+          return { codeSubmitted: true };
+        }
+      }
+      if (message.type === 'PAYPAL_HOSTED_GET_STATE') {
+        if (currentUrl.includes('/verification')) {
+          return {
+            hostedStage: 'verification',
+            verificationInputsVisible: true,
+          };
+        }
+        if (currentUrl.includes('/create-account')) {
+          return { hostedStage: 'create_account' };
+        }
+        return { hostedStage: 'guest_checkout' };
+      }
+      throw new Error(`unexpected message type ${message.type}`);
+    },
+    setState: async (payload) => {
+      events.push({ type: 'set-state', payload });
+      latestState = { ...latestState, ...payload };
+    },
+    sleepWithStop: async (ms) => events.push({ type: 'sleep', ms }),
+    waitForTabCompleteUntilStopped: async () => {},
+  });
+
+  await executor.executePayPalHostedCard({
+    plusCheckoutTabId: 123,
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutFirstResendWaitSeconds: 18,
+    hostedCheckoutVerificationPollAttempts: 9,
+    hostedCheckoutVerificationPollIntervalSeconds: 4,
+  });
+
+  const pollCall = phoneCalls.find((call) => call.type === 'poll');
+  assert.equal(pollCall?.state?.phoneSmsProvider, 'hero-sms');
+  assert.equal(pollCall?.state?.heroSmsServiceCode, 'paypal');
+  assert.equal(pollCall?.state?.heroSmsCountryId, 73);
+  assert.equal(pollCall?.options?.timeoutMs <= 18_000, true);
+  assert.equal(pollCall?.options?.intervalMs, 4_000);
+  assert.equal(pollCall?.options?.maxRounds, 1);
+  assert.notEqual(pollCall?.state?.phoneCodeWaitSeconds, 300);
+  assert.equal(pollCall?.state?.phoneCodeTimeoutWindows, 1);
+  assert.equal(pollCall?.state?.phoneCodePollIntervalSeconds, 4);
+  assert.equal(pollCall?.state?.phoneCodePollMaxRounds, 1);
+  assert.equal(events.some((event) => event.type === 'tab-message' && event.message.payload?.verificationCode === '246810'), true);
+});
+
 test('PayPal hosted card node throws resend-limit error after repeated invalid verification code', async () => {
   const events = [];
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -9508,6 +9632,10 @@ test('PayPal hosted HeroSMS PayPal/BR polls with dedicated HeroSMS PayPal Brazil
     heroSmsCountryId: 151,
     heroSmsCountryLabel: 'Japan',
     heroSmsMaxPrice: '0.9',
+    phoneCodeWaitSeconds: 300,
+    phoneCodeTimeoutWindows: 8,
+    phoneCodePollIntervalSeconds: 30,
+    phoneCodePollMaxRounds: 80,
   });
   const phoneCalls = [];
   const executor = api.createPlusCheckoutCreateExecutor({
@@ -9557,6 +9685,10 @@ test('PayPal hosted HeroSMS PayPal/BR polls with dedicated HeroSMS PayPal Brazil
   assert.equal(pollCall?.options?.timeoutMs, 30_000);
   assert.equal(pollCall?.options?.intervalMs, 6_000);
   assert.equal(pollCall?.options?.maxRounds, 5);
+  assert.equal(pollCall?.state?.phoneCodeWaitSeconds, 30);
+  assert.equal(pollCall?.state?.phoneCodeTimeoutWindows, 1);
+  assert.equal(pollCall?.state?.phoneCodePollIntervalSeconds, 6);
+  assert.equal(pollCall?.state?.phoneCodePollMaxRounds, 5);
 });
 
 test('PayPal hosted email falls back to OAuth tail when Phone Plus sms pool is exhausted', async () => {
