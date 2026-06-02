@@ -1752,11 +1752,14 @@
     async function waitForPaymentRedirectAfterSubmit(
       tabId,
       paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
-      timeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS
+      timeoutMs = PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS,
+      options = {}
     ) {
       const paymentConfig = getPaymentMethodConfig(paymentMethod);
       const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || PLUS_CHECKOUT_PAYPAL_REDIRECT_TIMEOUT_MS);
+      const onPoll = typeof options?.onPoll === 'function' ? options.onPoll : null;
       const startedAt = Date.now();
+      let pollCount = 0;
       while (Date.now() - startedAt < effectiveTimeoutMs) {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         if (!tab) {
@@ -1771,6 +1774,22 @@
         if (url && !isPlusCheckoutUrl(url)) {
           await addLog(`步骤 7：点击订阅后页面跳转到非 ${paymentConfig.label} 识别地址：${url}`, 'warn');
           return false;
+        }
+        if (onPoll) {
+          pollCount += 1;
+          const elapsedMs = Date.now() - startedAt;
+          const pollResult = await onPoll({
+            elapsedMs,
+            paymentConfig,
+            paymentMethod,
+            pollCount,
+            remainingMs: Math.max(0, effectiveTimeoutMs - elapsedMs),
+            tab,
+            url,
+          });
+          if (pollResult) {
+            return pollResult;
+          }
         }
         await sleepWithStop(500);
       }
@@ -2109,6 +2128,71 @@
       return result;
     }
 
+    async function maybeRefillEmptyBillingAddressAfterSubmit(options = {}) {
+      const {
+        tabId,
+        paymentMethod = PLUS_PAYMENT_METHOD_PAYPAL,
+        subscribeResult = null,
+        subscribeClicked = false,
+        subscribeButtonText = '',
+        subscribeButtonStatus = '',
+        addressEmptyRetryContext = null,
+        billingFrame = null,
+        fullName = '',
+        state = {},
+        inspections = [],
+        timeoutSeconds = 0,
+      } = options;
+      if (!addressEmptyRetryContext || !billingFrame || !fullName || !Array.isArray(inspections)) {
+        return null;
+      }
+
+      const emptyAddressInspection = findEmptyBillingAddressInspection(inspections);
+      if (!emptyAddressInspection) {
+        return null;
+      }
+
+      const retryCount = Math.max(0, Math.floor(Number(addressEmptyRetryContext.count) || 0));
+      if (retryCount >= PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS) {
+        return {
+          redirectedToPayment: false,
+          subscribeResult,
+          subscribeClicked,
+          subscribeButtonText,
+          subscribeButtonStatus,
+          addressEmptyRetryExhausted: true,
+          addressEmptyRetryCount: retryCount,
+          lastSubmitError: `billing address line 1 stayed empty after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries`,
+          timeoutSeconds,
+        };
+      }
+
+      const nextRetryCount = retryCount + 1;
+      await addLog(`Step 7: checkout cleared the billing address after subscribe; regenerating and refilling address (${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}).`, 'warn');
+      const freshSeed = await resolveBillingAddressSeed(state, emptyAddressInspection.result?.countryText || '', { paymentMethod });
+      const retryBillingFrame = {
+        ...billingFrame,
+        frameId: emptyAddressInspection.frame.frameId,
+        frameUrl: emptyAddressInspection.frame.url || billingFrame.frameUrl || '',
+        countryText: emptyAddressInspection.result?.countryText || billingFrame.countryText || '',
+        ready: emptyAddressInspection.frame.ready !== false,
+      };
+      const refillResult = await fillBillingAddressForCheckout(tabId, retryBillingFrame, fullName, freshSeed);
+      addressEmptyRetryContext.count = nextRetryCount;
+      return {
+        redirectedToPayment: false,
+        subscribeResult,
+        subscribeClicked,
+        subscribeButtonText,
+        subscribeButtonStatus,
+        addressEmptyRetried: true,
+        addressEmptyRetryCount: nextRetryCount,
+        addressEmptyRetryResult: refillResult,
+        lastSubmitError: `billing address was empty after subscribe; refilled with a fresh address ${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}`,
+        timeoutSeconds,
+      };
+    }
+
     async function attemptCheckoutSubscribeAndWaitForRedirect(options = {}) {
       const {
         tabId,
@@ -2161,7 +2245,43 @@
         await addLog(`步骤 7：订阅按钮当前为「${buttonStateLabel}」，本轮未点击，正在等待页面是否跳转到 ${paymentConfig.label}（${attempt}/${totalAttempts}）...`, 'warn');
       }
 
-      let redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, effectiveRedirectTimeoutMs);
+      const inspectCurrentCheckoutFrames = async () => {
+        const frames = await getReadyCheckoutFrames(tabId);
+        return inspectCheckoutFrames(tabId, frames);
+      };
+      const handleEmptyBillingAddressInspection = async (inspections) => (
+        maybeRefillEmptyBillingAddressAfterSubmit({
+          tabId,
+          paymentMethod,
+          subscribeResult,
+          subscribeClicked,
+          subscribeButtonText,
+          subscribeButtonStatus,
+          addressEmptyRetryContext,
+          billingFrame,
+          fullName,
+          state,
+          inspections,
+          timeoutSeconds,
+        })
+      );
+      const redirectWaitOptions = addressEmptyRetryContext && billingFrame && fullName
+        ? {
+          onPoll: async () => handleEmptyBillingAddressInspection(
+            await inspectCurrentCheckoutFrames()
+          ),
+        }
+        : {};
+      const initialRedirectWaitResult = await waitForPaymentRedirectAfterSubmit(
+        tabId,
+        paymentMethod,
+        effectiveRedirectTimeoutMs,
+        redirectWaitOptions
+      );
+      if (initialRedirectWaitResult && typeof initialRedirectWaitResult === 'object') {
+        return initialRedirectWaitResult;
+      }
+      let redirectedToPayment = initialRedirectWaitResult === true;
       if (redirectedToPayment) {
         return {
           redirectedToPayment,
@@ -2177,55 +2297,16 @@
       let inspectionsAfterInitialWait = null;
       const getInspectionsAfterInitialWait = async () => {
         if (!inspectionsAfterInitialWait) {
-          const frames = await getReadyCheckoutFrames(tabId);
-          inspectionsAfterInitialWait = await inspectCheckoutFrames(tabId, frames);
+          inspectionsAfterInitialWait = await inspectCurrentCheckoutFrames();
         }
         return inspectionsAfterInitialWait;
       };
 
       if (addressEmptyRetryContext && billingFrame && fullName) {
         const inspections = await getInspectionsAfterInitialWait();
-        const emptyAddressInspection = findEmptyBillingAddressInspection(inspections);
-        if (emptyAddressInspection) {
-          const retryCount = Math.max(0, Math.floor(Number(addressEmptyRetryContext.count) || 0));
-          if (retryCount >= PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS) {
-            return {
-              redirectedToPayment: false,
-              subscribeResult,
-              subscribeClicked,
-              subscribeButtonText,
-              subscribeButtonStatus,
-              addressEmptyRetryExhausted: true,
-              addressEmptyRetryCount: retryCount,
-              lastSubmitError: `billing address line 1 stayed empty after ${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS} retries`,
-              timeoutSeconds,
-            };
-          }
-
-          const nextRetryCount = retryCount + 1;
-          await addLog(`Step 7: checkout cleared the billing address after subscribe; regenerating and refilling address (${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}).`, 'warn');
-          const freshSeed = await resolveBillingAddressSeed(state, emptyAddressInspection.result?.countryText || '', { paymentMethod });
-          const retryBillingFrame = {
-            ...billingFrame,
-            frameId: emptyAddressInspection.frame.frameId,
-            frameUrl: emptyAddressInspection.frame.url || billingFrame.frameUrl || '',
-            countryText: emptyAddressInspection.result?.countryText || billingFrame.countryText || '',
-            ready: emptyAddressInspection.frame.ready !== false,
-          };
-          const refillResult = await fillBillingAddressForCheckout(tabId, retryBillingFrame, fullName, freshSeed);
-          addressEmptyRetryContext.count = nextRetryCount;
-          return {
-            redirectedToPayment: false,
-            subscribeResult,
-            subscribeClicked,
-            subscribeButtonText,
-            subscribeButtonStatus,
-            addressEmptyRetried: true,
-            addressEmptyRetryCount: nextRetryCount,
-            addressEmptyRetryResult: refillResult,
-            lastSubmitError: `billing address was empty after subscribe; refilled with a fresh address ${nextRetryCount}/${PLUS_CHECKOUT_ADDRESS_TAX_RETRY_MAX_ATTEMPTS}`,
-            timeoutSeconds,
-          };
+        const emptyAddressRetryResult = await handleEmptyBillingAddressInspection(inspections);
+        if (emptyAddressRetryResult) {
+          return emptyAddressRetryResult;
         }
       }
 
@@ -2318,7 +2399,16 @@
       }
 
       if (postAddressCheckRedirectWaitMs > 0) {
-        redirectedToPayment = await waitForPaymentRedirectAfterSubmit(tabId, paymentMethod, postAddressCheckRedirectWaitMs);
+        const postAddressCheckWaitResult = await waitForPaymentRedirectAfterSubmit(
+          tabId,
+          paymentMethod,
+          postAddressCheckRedirectWaitMs,
+          redirectWaitOptions
+        );
+        if (postAddressCheckWaitResult && typeof postAddressCheckWaitResult === 'object') {
+          return postAddressCheckWaitResult;
+        }
+        redirectedToPayment = postAddressCheckWaitResult === true;
       }
       const lastSubmitError = subscribeClicked
         ? `点击订阅后 ${timeoutSeconds} 秒内未跳转到 ${paymentConfig.label}`

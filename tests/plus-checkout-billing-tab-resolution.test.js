@@ -719,7 +719,8 @@ test('Classic PayPal billing refills a fresh address when subscribe clears addre
     assert.equal(subscribeMessages.length, 2);
     assert.equal(fillMessages.length, 2);
     assert.equal(fillMessages[1].frameId, 3);
-    assert.equal(fillMessages[1].atMs - subscribeMessages[0].atMs >= 10000, true);
+    assert.equal(fillMessages[1].atMs - subscribeMessages[0].atMs < 10000, true);
+    assert.equal(fillMessages[1].atMs - subscribeMessages[0].atMs <= 500, true);
     assert.equal(fillMessages[1].message.payload.addressSeed.fallback.address1, '1600 Pennsylvania Ave NW');
     assert.equal(events.logs.some((entry) => /billing address is empty|cleared the billing address/i.test(entry.message)), true);
     assert.equal(events.completed[0].step, 'plus-checkout-billing');
@@ -768,6 +769,89 @@ test('Classic PayPal billing stops after two address tax autocomplete retries', 
 
     assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_RETRY_ADDRESS_TAX_AUTOCOMPLETE').length, 2);
     assert.equal(events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE').length, 3);
+    assert.equal(events.completed.length, 0);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('Classic PayPal billing stops after two empty address poll refills', async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let clickCalls = 0;
+  Date.now = () => now;
+  try {
+    const { events, executor } = createExecutorHarness({
+      frames: [
+        { frameId: 0, url: 'https://chatgpt.com/checkout/openai_ie/cs_test' },
+        { frameId: 3, url: 'https://checkout.stripe.com/elements-inner-address' },
+      ],
+      stateByFrame: {
+        0: {
+          hasPayPal: true,
+          paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+          hasSubscribeButton: true,
+        },
+        3: {
+          billingFieldsVisible: true,
+          countryText: 'United States',
+          addressFieldValues: {
+            address1: '3450 Broadway',
+            city: 'New York',
+            region: 'New York',
+            postalCode: '10031',
+          },
+        },
+      },
+      onGetState: async ({ frameId }) => {
+        if (frameId === 0) {
+          return {
+            hasPayPal: true,
+            paypalCandidates: [{ tag: 'button', text: 'PayPal' }],
+            hasSubscribeButton: true,
+          };
+        }
+        return {
+          billingFieldsVisible: true,
+          countryText: 'United States',
+          addressFieldValues: {
+            address1: clickCalls >= 1 ? '' : '3450 Broadway',
+            city: 'New York',
+            region: 'New York',
+            postalCode: '10031',
+          },
+        };
+      },
+      onClickSubscribe: async () => {
+        clickCalls += 1;
+        return {
+          clicked: true,
+          subscribeButtonStatus: 'clicked',
+          subscribeButtonText: 'Subscribe',
+        };
+      },
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => createRandomUserUsPayload(),
+      }),
+      sleepWithStop: async (ms) => {
+        events.sleeps.push(ms);
+        now += ms;
+      },
+    });
+
+    await assert.rejects(
+      () => executor.executePlusCheckoutBilling({ plusPaymentMethod: 'paypal' }),
+      /PLUS_CHECKOUT_ADDRESS_EMPTY_RETRY_EXHAUSTED::/
+    );
+
+    const subscribeMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_CLICK_SUBSCRIBE');
+    const fillMessages = events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
+    assert.equal(subscribeMessages.length, 3);
+    assert.equal(fillMessages.length, 3);
+    assert.equal(fillMessages[1].atMs - subscribeMessages[0].atMs <= 500, true);
+    assert.equal(fillMessages[2].atMs - subscribeMessages[1].atMs <= 500, true);
     assert.equal(events.completed.length, 0);
   } finally {
     Date.now = originalNow;
@@ -868,9 +952,11 @@ test('Classic PayPal billing keeps waiting after the 10 second address check whe
       entry.message.type === 'PLUS_CHECKOUT_GET_STATE'
       && entry.atMs > subscribeMessages[0].atMs
     ));
+    const refillMessages = harness.events.messages.filter((entry) => entry.message.type === 'PLUS_CHECKOUT_FILL_BILLING_ADDRESS');
     assert.equal(subscribeMessages.length, 1);
     assert.equal(postSubscribeStateMessages.length > 0, true);
-    assert.equal(postSubscribeStateMessages[0].atMs - subscribeMessages[0].atMs >= 10000, true);
+    assert.equal(postSubscribeStateMessages[0].atMs - subscribeMessages[0].atMs < 10000, true);
+    assert.equal(refillMessages.length, 1);
     assert.equal(harness.events.completed[0].step, 'plus-checkout-billing');
   } finally {
     Date.now = originalNow;
