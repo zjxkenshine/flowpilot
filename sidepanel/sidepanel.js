@@ -324,6 +324,10 @@ const btnHostedCheckoutManualFetch = document.getElementById('btn-hosted-checkou
 const displayHostedCheckoutManualCode = document.getElementById('display-hosted-checkout-manual-code');
 const rowHostedCheckoutSmsSource = document.getElementById('row-hosted-checkout-sms-source');
 const selectHostedCheckoutSmsSource = document.getElementById('select-hosted-checkout-sms-source');
+const rowHostedCheckoutHeroSmsPayPalSettings = document.getElementById('row-hosted-checkout-hero-sms-paypal-settings');
+const inputHostedCheckoutHeroSmsPayPalMinPrice = document.getElementById('input-hosted-checkout-hero-sms-paypal-min-price');
+const inputHostedCheckoutHeroSmsPayPalMaxPrice = document.getElementById('input-hosted-checkout-hero-sms-paypal-max-price');
+const inputHostedCheckoutHeroSmsPayPalOperatorOrder = document.getElementById('input-hosted-checkout-hero-sms-paypal-operator-order');
 const rowHostedCheckoutSecurityChallenge = document.getElementById('row-hosted-checkout-security-challenge');
 const inputHostedCheckoutSecurityChallengeEnabled = document.getElementById('input-hosted-checkout-security-challenge-enabled');
 const rowHostedCheckoutVerificationPopupDelay = document.getElementById('row-hosted-checkout-verification-popup-delay');
@@ -4015,6 +4019,38 @@ function normalizeHostedCheckoutSmsSourceValue(value = '') {
   return HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
 }
 
+function normalizeHostedCheckoutHeroSmsPayPalPriceValue(value = '', fallback = '') {
+  const rawValue = String(value ?? '').trim();
+  if (!rawValue) {
+    return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+  }
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+  }
+  return String(Math.round(numeric * 10000) / 10000);
+}
+
+function normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue(value = []) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[\r\n,，、;|/]+/)
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+  const normalized = [];
+  const seen = new Set();
+  source.forEach((entry) => {
+    const operator = String(entry || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+    if (!operator || operator === 'any' || seen.has(operator)) {
+      return;
+    }
+    seen.add(operator);
+    normalized.push(operator);
+  });
+  return normalized.slice(0, 20);
+}
+
 function normalizePayPalProfileCountryCodeValue(value, fallback = 'US') {
   if (value === undefined || value === null) {
     return normalizePayPalProfileCountryCodeValue(fallback, 'US') || 'US';
@@ -5595,6 +5631,32 @@ function collectSettingsPayload() {
   const normalizeHostedCheckoutSmsSourceInput = typeof normalizeHostedCheckoutSmsSourceValue === 'function'
     ? normalizeHostedCheckoutSmsSourceValue
     : ((value = '') => (String(value || '').trim().toLowerCase().replace(/-/g, '_') === 'phone_sms' ? 'phone_sms' : 'fixed_pool'));
+  const normalizeHostedCheckoutHeroSmsPayPalPriceInput = typeof normalizeHostedCheckoutHeroSmsPayPalPriceValue === 'function'
+    ? normalizeHostedCheckoutHeroSmsPayPalPriceValue
+    : ((value = '', fallback = '') => {
+      const rawValue = String(value ?? '').trim();
+      if (!rawValue) return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+      const numeric = Number(rawValue);
+      return Number.isFinite(numeric) && numeric > 0
+        ? String(Math.round(numeric * 10000) / 10000)
+        : (fallback === undefined || fallback === null ? '' : String(fallback).trim());
+    });
+  const normalizeHostedCheckoutHeroSmsPayPalOperatorOrderInput = typeof normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue === 'function'
+    ? normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue
+    : ((value = []) => {
+      const source = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\r\n,，、;|/]+/).map((entry) => String(entry || '').trim()).filter(Boolean);
+      const normalized = [];
+      const seen = new Set();
+      source.forEach((entry) => {
+        const operator = String(entry || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+        if (!operator || operator === 'any' || seen.has(operator)) return;
+        seen.add(operator);
+        normalized.push(operator);
+      });
+      return normalized.slice(0, 20);
+    });
   const normalizePayPalProfileCountryCodeInput = typeof normalizePayPalProfileCountryCodeValue === 'function'
     ? normalizePayPalProfileCountryCodeValue
     : ((value, fallback = 'US') => {
@@ -6647,6 +6709,15 @@ function collectSettingsPayload() {
     hostedCheckoutSmsSource: typeof selectHostedCheckoutSmsSource !== 'undefined' && selectHostedCheckoutSmsSource
       ? normalizeHostedCheckoutSmsSourceInput(selectHostedCheckoutSmsSource.value)
       : normalizeHostedCheckoutSmsSourceInput(latestState?.hostedCheckoutSmsSource),
+    hostedCheckoutHeroSmsPayPalMinPrice: typeof inputHostedCheckoutHeroSmsPayPalMinPrice !== 'undefined' && inputHostedCheckoutHeroSmsPayPalMinPrice
+      ? normalizeHostedCheckoutHeroSmsPayPalPriceInput(inputHostedCheckoutHeroSmsPayPalMinPrice.value)
+      : normalizeHostedCheckoutHeroSmsPayPalPriceInput(latestState?.hostedCheckoutHeroSmsPayPalMinPrice),
+    hostedCheckoutHeroSmsPayPalMaxPrice: typeof inputHostedCheckoutHeroSmsPayPalMaxPrice !== 'undefined' && inputHostedCheckoutHeroSmsPayPalMaxPrice
+      ? normalizeHostedCheckoutHeroSmsPayPalPriceInput(inputHostedCheckoutHeroSmsPayPalMaxPrice.value, '0.1')
+      : normalizeHostedCheckoutHeroSmsPayPalPriceInput(latestState?.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1'),
+    hostedCheckoutHeroSmsPayPalOperatorOrder: typeof inputHostedCheckoutHeroSmsPayPalOperatorOrder !== 'undefined' && inputHostedCheckoutHeroSmsPayPalOperatorOrder
+      ? normalizeHostedCheckoutHeroSmsPayPalOperatorOrderInput(inputHostedCheckoutHeroSmsPayPalOperatorOrder.value)
+      : normalizeHostedCheckoutHeroSmsPayPalOperatorOrderInput(latestState?.hostedCheckoutHeroSmsPayPalOperatorOrder || []),
     hostedCheckoutSmsPoolAutoDisableEnabled: typeof inputHostedCheckoutSmsPoolAutoDisableEnabled !== 'undefined' && inputHostedCheckoutSmsPoolAutoDisableEnabled
       ? Boolean(inputHostedCheckoutSmsPoolAutoDisableEnabled.checked)
       : Boolean(latestState?.hostedCheckoutSmsPoolAutoDisableEnabled),
@@ -12438,6 +12509,10 @@ function updatePlusModeUI() {
     && hostedCheckoutSmsSource === (typeof HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL !== 'undefined'
       ? HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL
       : 'fixed_pool');
+  const hostedCheckoutHeroSmsPayPalRowsVisible = hostedRowsVisible
+    && hostedCheckoutSmsSource === (typeof HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR !== 'undefined'
+      ? HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR
+      : 'hero_sms_paypal_br');
   [
     typeof rowHostedCheckoutVerificationUrl !== 'undefined' ? rowHostedCheckoutVerificationUrl : null,
     typeof rowHostedCheckoutManualFetch !== 'undefined' ? rowHostedCheckoutManualFetch : null,
@@ -12448,6 +12523,14 @@ function updatePlusModeUI() {
       return;
     }
     row.style.display = hostedCheckoutFixedSmsRowsVisible ? '' : 'none';
+  });
+  [
+    typeof rowHostedCheckoutHeroSmsPayPalSettings !== 'undefined' ? rowHostedCheckoutHeroSmsPayPalSettings : null,
+  ].forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.style.display = hostedCheckoutHeroSmsPayPalRowsVisible ? '' : 'none';
   });
   [
     typeof rowHostedCheckoutSecurityChallenge !== 'undefined' ? rowHostedCheckoutSecurityChallenge : null,
@@ -13763,6 +13846,22 @@ function applySettingsState(state) {
   }
   if (typeof selectHostedCheckoutSmsSource !== 'undefined' && selectHostedCheckoutSmsSource) {
     selectHostedCheckoutSmsSource.value = normalizeHostedCheckoutSmsSourceValue(state?.hostedCheckoutSmsSource);
+  }
+  if (typeof inputHostedCheckoutHeroSmsPayPalMinPrice !== 'undefined' && inputHostedCheckoutHeroSmsPayPalMinPrice) {
+    inputHostedCheckoutHeroSmsPayPalMinPrice.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(
+      state?.hostedCheckoutHeroSmsPayPalMinPrice
+    );
+  }
+  if (typeof inputHostedCheckoutHeroSmsPayPalMaxPrice !== 'undefined' && inputHostedCheckoutHeroSmsPayPalMaxPrice) {
+    inputHostedCheckoutHeroSmsPayPalMaxPrice.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(
+      state?.hostedCheckoutHeroSmsPayPalMaxPrice,
+      '0.1'
+    );
+  }
+  if (typeof inputHostedCheckoutHeroSmsPayPalOperatorOrder !== 'undefined' && inputHostedCheckoutHeroSmsPayPalOperatorOrder) {
+    inputHostedCheckoutHeroSmsPayPalOperatorOrder.value = normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue(
+      state?.hostedCheckoutHeroSmsPayPalOperatorOrder || []
+    ).join(', ');
   }
   if (typeof selectPayPalProfileCountryCode !== 'undefined' && selectPayPalProfileCountryCode) {
     selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(state?.paypalProfileCountryCode);
@@ -19583,6 +19682,27 @@ selectHostedCheckoutSmsSource?.addEventListener('change', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+[
+  inputHostedCheckoutHeroSmsPayPalMinPrice,
+  inputHostedCheckoutHeroSmsPayPalMaxPrice,
+  inputHostedCheckoutHeroSmsPayPalOperatorOrder,
+].filter(Boolean).forEach((input) => {
+  input.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input.addEventListener('blur', () => {
+    if (input === inputHostedCheckoutHeroSmsPayPalOperatorOrder) {
+      input.value = normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue(input.value).join(', ');
+    } else if (input === inputHostedCheckoutHeroSmsPayPalMaxPrice) {
+      input.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(input.value, '0.1');
+    } else {
+      input.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(input.value);
+    }
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 selectPayPalProfileCountryCode?.addEventListener('change', () => {
   selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(selectPayPalProfileCountryCode.value);
   syncLatestState({ paypalProfileCountryCode: selectPayPalProfileCountryCode.value });
@@ -22815,6 +22935,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (typeof updatePlusModeUI === 'function') {
           updatePlusModeUI();
         }
+      }
+      if (message.payload.hostedCheckoutHeroSmsPayPalMinPrice !== undefined && inputHostedCheckoutHeroSmsPayPalMinPrice) {
+        inputHostedCheckoutHeroSmsPayPalMinPrice.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(
+          message.payload.hostedCheckoutHeroSmsPayPalMinPrice
+        );
+      }
+      if (message.payload.hostedCheckoutHeroSmsPayPalMaxPrice !== undefined && inputHostedCheckoutHeroSmsPayPalMaxPrice) {
+        inputHostedCheckoutHeroSmsPayPalMaxPrice.value = normalizeHostedCheckoutHeroSmsPayPalPriceValue(
+          message.payload.hostedCheckoutHeroSmsPayPalMaxPrice,
+          '0.1'
+        );
+      }
+      if (message.payload.hostedCheckoutHeroSmsPayPalOperatorOrder !== undefined && inputHostedCheckoutHeroSmsPayPalOperatorOrder) {
+        inputHostedCheckoutHeroSmsPayPalOperatorOrder.value = normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue(
+          message.payload.hostedCheckoutHeroSmsPayPalOperatorOrder
+        ).join(', ');
       }
       if (message.payload.paypalProfileCountryCode !== undefined && selectPayPalProfileCountryCode) {
         selectPayPalProfileCountryCode.value = normalizePayPalProfileCountryCodeValue(message.payload.paypalProfileCountryCode);

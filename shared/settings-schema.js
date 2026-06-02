@@ -428,6 +428,39 @@
       1,
       99
     );
+    const normalizeHostedCheckoutHeroSmsPayPalPrice = (value = '', fallback = '') => {
+      const rawValue = value === undefined || value === null ? '' : String(value).trim();
+      if (!rawValue) {
+        return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+      }
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+      }
+      return String(Math.round(numeric * 10000) / 10000);
+    };
+    const normalizeHostedCheckoutHeroSmsPayPalOperatorOrder = (value = []) => {
+      const source = Array.isArray(value)
+        ? value
+        : String(value || '')
+          .split(/[\r\n,，、;|/]+/)
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean);
+      const normalized = [];
+      const seen = new Set();
+      source.forEach((entry) => {
+        const operator = String(entry || '')
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, '');
+        if (!operator || operator === 'any' || seen.has(operator)) {
+          return;
+        }
+        seen.add(operator);
+        normalized.push(operator);
+      });
+      return normalized.slice(0, 20);
+    };
     const normalizeHostedCheckoutPhone = (value = '') => {
       const digits = String(value || '').trim().replace(/\D+/g, '');
       return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
@@ -652,6 +685,9 @@
               hostedCheckoutVerificationPollIntervalSeconds: 5,
               hostedCheckoutVerificationResendMaxAttempts: 1,
               hostedCheckoutSmsSource: 'fixed_pool',
+              hostedCheckoutHeroSmsPayPalMinPrice: '',
+              hostedCheckoutHeroSmsPayPalMaxPrice: '0.1',
+              hostedCheckoutHeroSmsPayPalOperatorOrder: [],
               hostedCheckoutVerificationUrl: '',
               hostedCheckoutPhoneNumber: '',
               hostedCheckoutSmsPoolText: '',
@@ -1211,6 +1247,23 @@
                 }
                 return 'fixed_pool';
               })(),
+              hostedCheckoutHeroSmsPayPalMinPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(
+                input?.hostedCheckoutHeroSmsPayPalMinPrice
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutHeroSmsPayPalMinPrice
+                  ?? defaults.flows.openai.plus.hostedCheckoutHeroSmsPayPalMinPrice,
+                defaults.flows.openai.plus.hostedCheckoutHeroSmsPayPalMinPrice
+              ),
+              hostedCheckoutHeroSmsPayPalMaxPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(
+                input?.hostedCheckoutHeroSmsPayPalMaxPrice
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutHeroSmsPayPalMaxPrice
+                  ?? defaults.flows.openai.plus.hostedCheckoutHeroSmsPayPalMaxPrice,
+                defaults.flows.openai.plus.hostedCheckoutHeroSmsPayPalMaxPrice
+              ),
+              hostedCheckoutHeroSmsPayPalOperatorOrder: normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(
+                input?.hostedCheckoutHeroSmsPayPalOperatorOrder
+                  ?? nested?.flows?.openai?.plus?.hostedCheckoutHeroSmsPayPalOperatorOrder
+                  ?? defaults.flows.openai.plus.hostedCheckoutHeroSmsPayPalOperatorOrder
+              ),
               hostedCheckoutVerificationUrl: String(
                 input?.hostedCheckoutVerificationUrl
                 ?? nested?.flows?.openai?.plus?.hostedCheckoutVerificationUrl
@@ -1544,6 +1597,9 @@
       next.hostedCheckoutVerificationPollIntervalSeconds = openaiState.plus.hostedCheckoutVerificationPollIntervalSeconds;
       next.hostedCheckoutVerificationResendMaxAttempts = openaiState.plus.hostedCheckoutVerificationResendMaxAttempts;
       next.hostedCheckoutSmsSource = openaiState.plus.hostedCheckoutSmsSource;
+      next.hostedCheckoutHeroSmsPayPalMinPrice = openaiState.plus.hostedCheckoutHeroSmsPayPalMinPrice;
+      next.hostedCheckoutHeroSmsPayPalMaxPrice = openaiState.plus.hostedCheckoutHeroSmsPayPalMaxPrice;
+      next.hostedCheckoutHeroSmsPayPalOperatorOrder = cloneValue(openaiState.plus.hostedCheckoutHeroSmsPayPalOperatorOrder);
       next.hostedCheckoutVerificationUrl = openaiState.plus.hostedCheckoutVerificationUrl;
       next.hostedCheckoutPhoneNumber = openaiState.plus.hostedCheckoutPhoneNumber;
       next.hostedCheckoutSmsPoolText = openaiState.plus.hostedCheckoutSmsPoolText;

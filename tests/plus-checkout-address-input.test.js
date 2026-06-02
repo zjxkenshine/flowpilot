@@ -1255,6 +1255,76 @@ return { fillIfEmpty };
   assert.deepEqual(writes, ['100-0005']);
 });
 
+test('Brazil hosted number selector accepts No fields and rejects unrelated number fields', () => {
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getActionText'),
+    extractFunction('getSearchText'),
+    extractFunction('getFieldText'),
+    extractFunction('getCombinedSearchText'),
+    extractFunction('getVisibleControls'),
+    extractFunction('isEnabledControl'),
+    extractFunction('getVisibleTextInputs'),
+    extractFunction('isHostedBrazilNumberInputCandidate'),
+    extractFunction('findHostedBrazilNumberInput'),
+  ].join('\n');
+  const noInput = createInput({
+    id: 'billingStreetNumber',
+    name: 'streetNumber',
+    placeholder: 'No',
+    containerText: 'Billing address No',
+  });
+  const numeroInput = createInput({
+    id: 'numero',
+    name: 'address[number]',
+    placeholder: 'Numero',
+    containerText: 'Endereco Numero',
+  });
+  const cardNumberInput = createInput({
+    id: 'cardNumber',
+    name: 'cardNumber',
+    placeholder: 'Card number',
+    containerText: 'Card number',
+  });
+  const phoneInput = createInput({
+    id: 'phone',
+    name: 'phoneNumber',
+    placeholder: 'Phone number',
+    containerText: 'Phone number',
+  });
+  const cpfInput = createInput({
+    id: 'cpf',
+    name: 'cpf',
+    placeholder: 'CPF number',
+    containerText: 'CPF document number',
+  });
+  const inputs = [cardNumberInput, phoneInput, cpfInput, noInput, numeroInput];
+  const documentMock = {
+    querySelectorAll: (selector) => {
+      if (String(selector || '').includes('label[for=')) return [];
+      return inputs;
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  const cssMock = {
+    escape: (value) => String(value),
+  };
+  const api = new Function('window', 'document', 'CSS', `
+${bundle}
+return { isHostedBrazilNumberInputCandidate, findHostedBrazilNumberInput };
+`)(windowMock, documentMock, cssMock);
+
+  assert.equal(api.isHostedBrazilNumberInputCandidate(noInput), true);
+  assert.equal(api.isHostedBrazilNumberInputCandidate(numeroInput), true);
+  assert.equal(api.isHostedBrazilNumberInputCandidate(cardNumberInput), false);
+  assert.equal(api.isHostedBrazilNumberInputCandidate(phoneInput), false);
+  assert.equal(api.isHostedBrazilNumberInputCandidate(cpfInput), false);
+  assert.equal(api.findHostedBrazilNumberInput(), noInput);
+});
+
 test('Brazil document filler only writes explicit CPF/CNPJ or tax document fields', () => {
   const bundle = [
     extractFunction('isVisibleElement'),

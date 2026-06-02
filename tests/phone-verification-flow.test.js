@@ -246,7 +246,7 @@ test('phone verification helper maps PayPal region override to HeroSMS countries
   }
 });
 
-test('phone verification helper requests HeroSMS PayPal Brazil without operator override', async () => {
+test('phone verification helper requests HeroSMS PayPal Brazil with configured operator override', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
     addLog: async () => {},
@@ -261,6 +261,12 @@ test('phone verification helper requests HeroSMS PayPal Brazil without operator 
         return {
           ok: true,
           text: async () => buildHeroSmsPricesPayload({ country, service, cost: 0.08 }),
+        };
+      }
+      if (action === 'getOperators') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({ countryOperators: { 73: ['vivo', 'tim'] } }),
         };
       }
       if (action === 'getNumber') {
@@ -291,6 +297,9 @@ test('phone verification helper requests HeroSMS PayPal Brazil without operator 
     heroSmsCountryLabel: 'Thailand',
     heroSmsCountryFallback: [{ id: 73, label: 'France' }],
     heroSmsOperatorByCountry: { 73: 'vivo' },
+    heroSmsOperatorOrderByCountry: { 73: ['vivo'] },
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    heroSmsMaxPrice: '0.1',
     phoneActivationRetryRounds: 1,
   }, { regionCode: 'BR', providerId: 'hero-sms' });
 
@@ -303,13 +312,115 @@ test('phone verification helper requests HeroSMS PayPal Brazil without operator 
   assert.equal(result.activation.serviceCode, 'paypal');
   assert.equal(result.activation.countryId, 73);
   assert.equal(result.activation.countryLabel, 'Brazil');
-  assert.equal(result.activation.operator, undefined);
+  assert.equal(result.activation.operator, 'vivo');
   assert.equal(getPricesRequest.searchParams.get('service'), 'paypal');
   assert.equal(getPricesRequest.searchParams.get('country'), '73');
   assert.equal(getPricesRequest.searchParams.get('operator'), null);
   assert.equal(getNumberRequest.searchParams.get('service'), 'paypal');
   assert.equal(getNumberRequest.searchParams.get('country'), '73');
-  assert.equal(getNumberRequest.searchParams.get('operator'), null);
+  assert.equal(getNumberRequest.searchParams.get('operator'), 'vivo');
+  assert.equal(getNumberRequest.searchParams.get('maxPrice'), '0.08');
+  assert.equal(getNumberRequest.searchParams.get('fixedPrice'), 'true');
+});
+
+test('phone verification helper tries PayPal Brazil operators five times per price tier before raising price', async () => {
+  const requests = [];
+  const helpers = api.createPhoneVerificationHelpers({
+    addLog: async () => {},
+    ensureStep8SignupPageReady: async () => {},
+    fetchImpl: async (url) => {
+      const parsedUrl = new URL(url);
+      requests.push(parsedUrl);
+      const action = parsedUrl.searchParams.get('action');
+      const country = parsedUrl.searchParams.get('country');
+      const service = parsedUrl.searchParams.get('service');
+      const operator = parsedUrl.searchParams.get('operator');
+      const maxPrice = parsedUrl.searchParams.get('maxPrice');
+      if (action === 'getPrices') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            [country]: {
+              [service]: {
+                low: { cost: 0.08, count: 100, physicalCount: 100 },
+                high: { cost: 0.12, count: 100, physicalCount: 100 },
+              },
+            },
+          }),
+        };
+      }
+      if (action === 'getOperators') {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({ countryOperators: { 73: ['tim', 'claro'] } }),
+        };
+      }
+      if (action === 'getNumber') {
+        if (operator === 'tim' && maxPrice === '0.08') {
+          return {
+            ok: true,
+            text: async () => 'ACCESS_NUMBER:paypalbr-tim-1:5511987654321',
+          };
+        }
+        return {
+          ok: true,
+          text: async () => 'NO_NUMBERS',
+        };
+      }
+      throw new Error(`Unexpected HeroSMS action: ${action}`);
+    },
+    getState: async () => ({
+      heroSmsApiKey: 'demo-key',
+      phoneSmsProvider: 'hero-sms',
+      heroSmsServiceCode: 'paypal',
+      heroSmsCountryId: 73,
+      heroSmsCountryLabel: 'Brazil',
+      heroSmsOperatorByCountry: { 73: 'vivo' },
+      heroSmsOperatorOrderByCountry: { 73: ['vivo'] },
+      hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+      heroSmsMaxPrice: '0.2',
+    }),
+    sendToContentScriptResilient: async () => ({}),
+    setState: async () => {},
+    sleepWithStop: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const activation = await helpers.requestPhoneActivation({
+    heroSmsApiKey: 'demo-key',
+    phoneSmsProvider: 'hero-sms',
+    heroSmsServiceCode: 'paypal',
+    heroSmsCountryId: 73,
+    heroSmsCountryLabel: 'Brazil',
+    heroSmsOperatorByCountry: { 73: 'vivo' },
+    heroSmsOperatorOrderByCountry: { 73: ['vivo'] },
+    hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    heroSmsMaxPrice: '0.2',
+    phoneActivationRetryRounds: 1,
+    phoneActivationTierUpgradeLimit: 0,
+  });
+
+  const getNumberCalls = requests.filter((entry) => entry.searchParams.get('action') === 'getNumber');
+  assert.equal(activation.activationId, 'paypalbr-tim-1');
+  assert.equal(activation.operator, 'tim');
+  assert.equal(getNumberCalls.length, 6);
+  assert.deepStrictEqual(getNumberCalls.map((entry) => entry.searchParams.get('operator')), [
+    'vivo',
+    'vivo',
+    'vivo',
+    'vivo',
+    'vivo',
+    'tim',
+  ]);
+  assert.deepStrictEqual(getNumberCalls.map((entry) => entry.searchParams.get('maxPrice')), [
+    '0.08',
+    '0.08',
+    '0.08',
+    '0.08',
+    '0.08',
+    '0.08',
+  ]);
+  assert.equal(getNumberCalls.every((entry) => entry.searchParams.get('fixedPrice') === 'true'), true);
 });
 
 test('phone verification helper sends HeroSMS operator for the selected country and records it on activation', async () => {
@@ -926,7 +1037,7 @@ test('signup phone helper completes signup SMS verification without touching add
   });
 
   assert.deepStrictEqual(result, { success: true });
-  assert.deepStrictEqual(statusActions, ['6']);
+  assert.deepStrictEqual(statusActions, []);
   assert.deepStrictEqual(contentMessages.map((message) => ({
     type: message.type,
     step: message.step,
@@ -1188,6 +1299,7 @@ test('signup phone helper writes account book entry immediately after phone veri
     countryId: 52,
     successfulUses: 1,
     maxUses: 3,
+    phoneCodeEverReceived: true,
   });
 });
 
@@ -2324,7 +2436,7 @@ test('signup phone helper completes login SMS verification by reusing the comple
   });
 
   assert.deepStrictEqual(result, { success: true });
-  assert.deepStrictEqual(statusActions, ['6']);
+  assert.deepStrictEqual(statusActions, []);
   assert.deepStrictEqual(contentMessages.map((message) => ({
     type: message.type,
     step: message.step,
@@ -2350,6 +2462,7 @@ test('signup phone helper completes login SMS verification by reusing the comple
     countryLabel: 'Thailand',
     successfulUses: 2,
     maxUses: 3,
+    phoneCodeEverReceived: true,
   });
   assert.equal(currentState.currentPhoneActivation.activationId, 'add-phone-activation');
   assert.ok(setStateCalls.some((updates) => updates.signupPhoneVerificationPurpose === 'login'));
@@ -2982,7 +3095,6 @@ test('phone verification helper uses HeroSMS getStatusV2 after acquiring a numbe
     'getNumberV2',
     'getStatusV2',
     'getStatusV2',
-    'setStatus',
   ]);
 });
 
@@ -5419,7 +5531,7 @@ test('phone verification helper completes add-phone flow, clears current activat
   );
 
   const actions = requests.map((url) => url.searchParams.get('action'));
-  assert.deepStrictEqual(actions, ['getPrices', 'getNumber', 'getStatus', 'setStatus']);
+  assert.deepStrictEqual(actions, ['getPrices', 'getNumber', 'getStatus']);
 });
 
 test('phone verification helper forwards signup profile payload when submitting the phone verification code', async () => {
@@ -5987,11 +6099,9 @@ test('phone verification helper respects configured number replacement limit', a
     'getPrices',
     'getNumber',
     'getStatus',
-    'setStatus',
     'getPrices',
     'getNumber',
     'getStatus',
-    'setStatus',
   ]);
 });
 
@@ -6112,7 +6222,6 @@ test('phone verification helper reuses the current number first when code submis
     'getNumber:',
     'getStatus:111111',
     'getStatus:111111',
-    'setStatus:111111',
   ]);
   assert.deepStrictEqual(currentState.currentPhoneActivation, null);
   assert.deepStrictEqual(currentState.reusablePhoneActivation, {
@@ -6124,6 +6233,7 @@ test('phone verification helper reuses the current number first when code submis
     countryLabel: 'Thailand',
     successfulUses: 1,
     maxUses: 3,
+    phoneCodeEverReceived: true,
   });
 });
 
@@ -7087,7 +7197,7 @@ test('phone verification helper keeps maxUses behavior for reused V2 activations
     url: 'https://auth.openai.com/authorize',
   });
   const actions = requests.map((url) => url.searchParams.get('action'));
-  assert.deepStrictEqual(actions, ['reactivate', 'getStatusV2', 'setStatus']);
+  assert.deepStrictEqual(actions, ['reactivate', 'getStatusV2']);
   assert.deepStrictEqual(currentState.reusablePhoneActivation, null);
 });
 
@@ -7280,7 +7390,7 @@ test('phone verification helper ignores reuse entries for phone signup identity'
   });
   assert.deepStrictEqual(
     requests.map((requestUrl) => requestUrl.searchParams.get('action')),
-    ['getPrices', 'getNumber', 'getStatus', 'setStatus']
+    ['getPrices', 'getNumber', 'getStatus']
   );
   assert.equal(currentState.freeReusablePhoneActivation.activationId, 'free-priority');
   assert.equal(currentState.reusablePhoneActivation.activationId, 'paid-reuse');
@@ -10819,7 +10929,6 @@ test('phone verification helper routes 5sim buy, check, and finish by current ac
       '/v1/guest/prices',
       '/v1/user/buy/activation/vietnam/any/openai',
       '/v1/user/check/5001',
-      '/v1/user/finish/5001',
     ]
   );
 });

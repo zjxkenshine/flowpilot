@@ -747,6 +747,38 @@
       return HOSTED_CHECKOUT_SMS_SOURCE_FIXED_POOL;
     }
 
+    function normalizeHostedCheckoutHeroSmsPayPalPrice(value = '', fallback = '') {
+      const rawValue = value === undefined || value === null ? '' : String(value).trim();
+      if (!rawValue) {
+        return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+      }
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+      }
+      return String(Math.round(numeric * 10000) / 10000);
+    }
+
+    function normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(value = []) {
+      const source = Array.isArray(value)
+        ? value
+        : String(value || '')
+          .split(/[\r\n,，、;|/]+/)
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean);
+      const normalized = [];
+      const seen = new Set();
+      source.forEach((entry) => {
+        const operator = String(entry || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+        if (!operator || operator === 'any' || seen.has(operator)) {
+          return;
+        }
+        seen.add(operator);
+        normalized.push(operator);
+      });
+      return normalized.slice(0, 20);
+    }
+
     function normalizeHostedCheckoutPhoneSmsActivation(record = null) {
       if (phoneVerificationHelpers?.normalizeActivation) {
         return phoneVerificationHelpers.normalizeActivation(record);
@@ -766,7 +798,18 @@
         provider: String(record.provider || '').trim(),
         successfulUses: Math.max(0, Math.floor(Number(record.successfulUses) || 0)),
         maxUses: Math.max(1, Math.floor(Number(record.maxUses) || 3)),
+        ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+        ...(record.phoneCodeEverReceived || record.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
+        ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: Math.max(0, Number(record.phoneCodeReceivedAt) || 0) } : {}),
       };
+    }
+
+    function hasHostedCheckoutPhoneSmsActivationEverReceivedCode(activation = null) {
+      const normalizedActivation = normalizeHostedCheckoutPhoneSmsActivation(activation);
+      return Boolean(
+        normalizedActivation
+        && (normalizedActivation.phoneCodeEverReceived || normalizedActivation.phoneCodeReceived)
+      );
     }
 
     function normalizeHostedPhoneSmsRegionCode(value = '') {
@@ -2983,7 +3026,7 @@
         return null;
       }
       if (isHostedCheckoutHeroSmsPayPalActivation(normalizedActivation)) {
-        if (!normalizedActivation.phoneCodeReceived) {
+        if (!hasHostedCheckoutPhoneSmsActivationEverReceivedCode(normalizedActivation)) {
           const cachedAt = Math.max(
             0,
             Number(state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHED_AT_KEY] || normalizedActivation.cachedAt) || 0
@@ -3017,10 +3060,7 @@
           expiresAt: state?.[HOSTED_CHECKOUT_HERO_SMS_PAYPAL_EXPIRES_AT_KEY] || normalizedActivation.expiresAt || (codeReceivedAt + HOSTED_CHECKOUT_HERO_SMS_PAYPAL_CACHE_TTL_MS),
         });
       }
-      if (typeof phoneVerificationHelpers?.completePhoneActivation === 'function') {
-        await phoneVerificationHelpers.completePhoneActivation(state, normalizedActivation).catch(() => {});
-      }
-      if (!normalizedActivation.phoneCodeReceived) {
+      if (!hasHostedCheckoutPhoneSmsActivationEverReceivedCode(normalizedActivation)) {
         await clearHostedCheckoutPhoneSmsActivation();
         return null;
       }
@@ -3140,18 +3180,45 @@
     }
 
     function buildHostedCheckoutHeroSmsPayPalState(state = {}) {
+      const operatorOrder = normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(
+        state?.hostedCheckoutHeroSmsPayPalOperatorOrder
+      );
+      const fallbackOperator = String(
+        state?.heroSmsOperatorByCountry?.[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]
+        || state?.heroSmsOperatorByCountry?.[HERO_SMS_PAYPAL_BR_COUNTRY_ID]
+        || ''
+      ).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+      const effectiveOperatorOrder = operatorOrder.length
+        ? operatorOrder
+        : (fallbackOperator ? [fallbackOperator] : []);
+      const heroSmsOperatorByCountry = {
+        ...(state?.heroSmsOperatorByCountry && typeof state.heroSmsOperatorByCountry === 'object'
+          ? state.heroSmsOperatorByCountry
+          : {}),
+      };
+      if (effectiveOperatorOrder[0]) {
+        heroSmsOperatorByCountry[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)] = effectiveOperatorOrder[0];
+      }
       return {
         ...state,
         phoneSmsProvider: 'hero-sms',
         heroSmsCountryId: HERO_SMS_PAYPAL_BR_COUNTRY_ID,
         heroSmsCountryLabel: HERO_SMS_PAYPAL_BR_COUNTRY_LABEL,
         heroSmsCountryFallback: [],
-        heroSmsOperatorByCountry: {},
+        heroSmsOperatorByCountry,
+        heroSmsOperatorOrderByCountry: {
+          ...(state?.heroSmsOperatorOrderByCountry && typeof state.heroSmsOperatorOrderByCountry === 'object'
+            ? state.heroSmsOperatorOrderByCountry
+            : {}),
+          [String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]: effectiveOperatorOrder,
+        },
         heroSmsServiceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
-        heroSmsMinPrice: '',
-        heroSmsMaxPrice: '0.1',
+        heroSmsMinPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(state?.hostedCheckoutHeroSmsPayPalMinPrice),
+        heroSmsMaxPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(state?.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1'),
         heroSmsPreferredPrice: '',
-        heroSmsAcquirePriority: 'country',
+        phoneActivationRetryRounds: 5,
+        heroSmsAcquirePriority: 'price',
+        hostedCheckoutSmsSource: HOSTED_CHECKOUT_SMS_SOURCE_HERO_SMS_PAYPAL_BR,
       };
     }
 
@@ -4859,6 +4926,7 @@
           const nextActivation = {
             ...activation,
             phoneCodeReceived: true,
+            phoneCodeEverReceived: true,
             phoneCodeReceivedAt: codeReceivedAt,
           };
           if (runtimeConfig?.hostedCheckoutUsesHeroSmsPayPalBr || isHostedCheckoutHeroSmsPayPalActivation(nextActivation)) {

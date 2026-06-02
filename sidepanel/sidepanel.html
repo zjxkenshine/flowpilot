@@ -673,6 +673,37 @@
           <span class="setting-caption">跟随模式会单独取 PayPal 号码；号码配置沿用手机接码，等码与轮询使用下方 PayPal 接码设置。</span>
         </div>
       </div>
+      <div class="data-row" id="row-hosted-checkout-hero-sms-paypal-settings" style="display:none;">
+        <span class="data-label">PayPal HeroSMS</span>
+        <div class="data-inline hero-sms-price-preview-stack">
+          <div class="hero-sms-price-controls-grid">
+            <div class="hero-sms-price-control">
+              <span class="hero-sms-settings-caption">最低购买价</span>
+              <div class="setting-controls">
+                <input type="number" id="input-hosted-checkout-hero-sms-paypal-min-price"
+                  class="data-input auto-delay-input mono hero-sms-max-price-input" placeholder="可空" min="0" step="0.0001"
+                  title="PayPal/BR 专用最低购买价；可空（空=不设下限）" />
+              </div>
+            </div>
+            <div class="hero-sms-price-control">
+              <span class="hero-sms-settings-caption">价格上限</span>
+              <div class="setting-controls">
+                <input type="number" id="input-hosted-checkout-hero-sms-paypal-max-price"
+                  class="data-input auto-delay-input mono hero-sms-max-price-input" placeholder="0.1" min="0" step="0.0001"
+                  title="PayPal/BR 专用价格上限；默认 0.1，可按需要调高" />
+              </div>
+            </div>
+            <div class="hero-sms-price-control hero-sms-price-control-span2">
+              <span class="hero-sms-settings-caption">运营商优先级</span>
+              <div class="setting-controls">
+                <input type="text" id="input-hosted-checkout-hero-sms-paypal-operator-order"
+                  class="data-input mono" placeholder="correios_celular, vivo" autocomplete="off"
+                  title="PayPal/BR 专用 HeroSMS 运营商顺序，用逗号或换行分隔；空=自动尝试 Brazil 可用运营商" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="data-row" id="row-hosted-checkout-verification-url" style="display:none;">
         <span class="data-label">直绑验证码</span>
         <input type="text" id="input-hosted-checkout-verification-url" class="data-input"

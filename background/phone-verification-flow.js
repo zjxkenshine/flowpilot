@@ -736,6 +736,44 @@
       return normalized;
     }
 
+    function normalizeHeroSmsOperatorOrder(value = []) {
+      const source = Array.isArray(value)
+        ? value
+        : String(value || '')
+          .split(/[\r\n,，、;|/]+/)
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean);
+      const normalized = [];
+      const seen = new Set();
+      source.forEach((entry) => {
+        const operator = String(entry || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+        if (!operator || operator === 'any' || seen.has(operator)) {
+          return;
+        }
+        seen.add(operator);
+        normalized.push(operator);
+      });
+      return normalized.slice(0, 50);
+    }
+
+    function normalizeHeroSmsOperatorOrderByCountry(value = {}) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+      }
+      const normalized = {};
+      Object.entries(value).forEach(([rawCountryId, rawOrder]) => {
+        const countryId = normalizeCountryId(rawCountryId, 0);
+        if (countryId <= 0) {
+          return;
+        }
+        const order = normalizeHeroSmsOperatorOrder(rawOrder);
+        if (order.length) {
+          normalized[String(countryId)] = order;
+        }
+      });
+      return normalized;
+    }
+
     function inferHeroSmsCountryFromPhoneNumber(phoneNumber = '') {
       const digits = String(phoneNumber || '').replace(/\D+/g, '');
       if (!digits) {
@@ -981,6 +1019,7 @@
         getCountryId = (attempt) => attempt?.countryConfig?.id,
         getCountryLabel = (attempt) => String(attempt?.countryConfig?.label || getCountryId(attempt) || '').trim(),
         getPrices = () => [],
+        getOperators = () => [null],
         acquirePriority = HERO_SMS_ACQUIRE_PRIORITY_COUNTRY,
         preferredPrice = null,
       } = options;
@@ -1011,6 +1050,9 @@
         if (left.priceOrderIndex !== right.priceOrderIndex) {
           return left.priceOrderIndex - right.priceOrderIndex;
         }
+        if ((left.operatorOrderIndex || 0) !== (right.operatorOrderIndex || 0)) {
+          return (left.operatorOrderIndex || 0) - (right.operatorOrderIndex || 0);
+        }
         return 0;
       };
       const comparePricedAvailability = (left, right) => {
@@ -1033,20 +1075,28 @@
       };
       const pushTier = (attempt, price, source, countryOrderIndex, priceOrderIndex) => {
         const countryId = getCountryId(attempt);
-        const key = buildPhoneActivationTierKey(provider, countryId, price);
-        if (seenKeys.has(key)) {
-          return;
-        }
-        seenKeys.add(key);
-        tiers.push({
-          attempt,
-          price,
-          source,
-          key,
-          countryId,
-          countryLabel: getCountryLabel(attempt),
-          countryOrderIndex,
-          priceOrderIndex,
+        const rawOperators = getOperators(attempt, price);
+        const operators = Array.isArray(rawOperators) && rawOperators.length ? rawOperators : [null];
+        operators.forEach((rawOperator, operatorOrderIndex) => {
+          const operator = String(rawOperator || '').trim();
+          const operatorKey = operator || 'any';
+          const key = `${buildPhoneActivationTierKey(provider, countryId, price)}::${operatorKey}`;
+          if (seenKeys.has(key)) {
+            return;
+          }
+          seenKeys.add(key);
+          tiers.push({
+            attempt,
+            price,
+            source,
+            key,
+            countryId,
+            countryLabel: getCountryLabel(attempt),
+            countryOrderIndex,
+            priceOrderIndex,
+            operator,
+            operatorOrderIndex,
+          });
         });
       };
 
@@ -1288,6 +1338,49 @@
         resultsByAction,
         errors,
       };
+    }
+
+    function collectHeroSmsOperatorValues(rawOperators) {
+      const values = [];
+      if (Array.isArray(rawOperators)) {
+        rawOperators.forEach((entry) => {
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            values.push(entry.operator ?? entry.name ?? entry.value ?? entry.code ?? entry.id ?? '');
+            return;
+          }
+          values.push(entry);
+        });
+        return normalizeHeroSmsOperatorOrder(values);
+      }
+      if (rawOperators && typeof rawOperators === 'object') {
+        Object.entries(rawOperators).forEach(([key, value]) => {
+          values.push(key);
+          if (typeof value === 'string') {
+            values.push(value);
+          } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+            values.push(value.operator ?? value.name ?? value.value ?? value.code ?? value.id ?? '');
+          }
+        });
+        return normalizeHeroSmsOperatorOrder(values);
+      }
+      return normalizeHeroSmsOperatorOrder(rawOperators);
+    }
+
+    function extractHeroSmsOperatorsForCountry(payload, countryId) {
+      const normalizedCountryId = String(normalizeCountryId(countryId, 0));
+      if (!normalizedCountryId || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return [];
+      }
+      const countryOperators = payload.countryOperators && typeof payload.countryOperators === 'object' && !Array.isArray(payload.countryOperators)
+        ? payload.countryOperators
+        : payload;
+      const rawOperators = countryOperators[normalizedCountryId] ?? countryOperators[Number(normalizedCountryId)];
+      return collectHeroSmsOperatorValues(rawOperators);
+    }
+
+    async function fetchHeroSmsOperatorsForCountry(config, countryId) {
+      const payload = await fetchHeroSmsPayload(config, { action: 'getOperators' }, 'HeroSMS getOperators');
+      return extractHeroSmsOperatorsForCountry(payload, countryId);
     }
 
     function collectHeroSmsPriceCandidatesIncludingZeroStock(payload, candidates = []) {
@@ -1981,6 +2074,7 @@
         ...(statusAction ? { statusAction } : {}),
         ...(record.source ? { source: String(record.source || '').trim() } : {}),
         ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+        ...(record.phoneCodeEverReceived || record.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
         ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: Math.max(0, Number(record.phoneCodeReceivedAt) || 0) } : {}),
         ...(ignoredPhoneCodeKeys.length ? { ignoredPhoneCodeKeys } : {}),
       };
@@ -2040,6 +2134,14 @@
       return reusableActivation;
     }
 
+    function hasActivationEverReceivedPhoneCode(activation) {
+      const normalizedActivation = normalizeActivation(activation);
+      return Boolean(
+        normalizedActivation
+        && (normalizedActivation.phoneCodeEverReceived || normalizedActivation.phoneCodeReceived)
+      );
+    }
+
     function markActivationPhoneCodeReceived(activation) {
       const normalizedActivation = normalizeActivation(activation);
       if (!normalizedActivation) {
@@ -2048,6 +2150,7 @@
       return {
         ...normalizedActivation,
         phoneCodeReceived: true,
+        phoneCodeEverReceived: true,
         phoneCodeReceivedAt: normalizedActivation.phoneCodeReceivedAt || Date.now(),
       };
     }
@@ -2223,6 +2326,9 @@
       }
       if (operator) {
         fallback.operator = operator;
+      }
+      if (record.phoneCodeEverReceived || record.phoneCodeReceived) {
+        fallback.phoneCodeEverReceived = true;
       }
 
       return Object.keys(fallback).length ? fallback : null;
@@ -3086,6 +3192,7 @@
             successfulUses: normalizedFallback?.successfulUses ?? directActivation.successfulUses,
             maxUses: normalizedFallback?.maxUses ?? directActivation.maxUses,
             ...(statusAction ? { statusAction } : {}),
+            ...(normalizedFallback?.phoneCodeEverReceived || directActivation.phoneCodeEverReceived ? { phoneCodeEverReceived: true } : {}),
           };
         }
 
@@ -3103,6 +3210,7 @@
             successfulUses: normalizedFallback?.successfulUses ?? 0,
             maxUses: normalizedFallback?.maxUses ?? DEFAULT_PHONE_NUMBER_MAX_USES,
             ...(normalizedFallback?.statusAction ? { statusAction: normalizedFallback.statusAction } : {}),
+            ...(normalizedFallback?.phoneCodeEverReceived ? { phoneCodeEverReceived: true } : {}),
           };
         }
 
@@ -3843,6 +3951,7 @@
         countryLabel: countryLabel || countryCode,
         successfulUses: normalizeUseCount(payload.successfulUses ?? fallback.successfulUses ?? 0),
         maxUses: Math.max(1, Math.floor(Number(payload.maxUses ?? fallback.maxUses) || DEFAULT_PHONE_NUMBER_MAX_USES)),
+        ...(fallback.phoneCodeEverReceived || fallback.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
         ...(() => {
           const expiresAt = normalizeTimestampMs(
             payload.expiresAt
@@ -4343,6 +4452,7 @@
         countryLabel,
         successfulUses: normalizeUseCount(fallback.successfulUses ?? 0),
         maxUses: 1,
+        ...(fallback.phoneCodeEverReceived || fallback.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
       };
     }
 
@@ -4701,15 +4811,27 @@
       const maxPriceLimit = priceRange.maxPriceLimit;
       const hasPriceBounds = priceRange.hasMinPriceLimit || priceRange.hasMaxPriceLimit;
       const preferredPriceTier = getPhoneProviderPriceSettings(state, config.provider).preferredPrice;
+      const isHeroSmsPayPalBrazilMode = (
+        config.provider === PHONE_SMS_PROVIDER_HERO
+        && String(resolveHeroSmsServiceCode(config) || '').trim().toLowerCase() === 'paypal'
+        && (
+          String(state?.hostedCheckoutSmsSource || '').trim().toLowerCase().replace(/-/g, '_') === 'hero_sms_paypal_br'
+          || Boolean(state?.heroSmsOperatorOrderByCountry)
+          || options?.providerId === PHONE_SMS_PROVIDER_HERO
+        )
+        && countryCandidates.some((entry) => normalizeCountryId(entry?.id, 0) === 73)
+      );
       const countryPriceFloorByCountryId = normalizeCountryPriceFloorMap(
         options?.countryPriceFloorByCountryId,
         (value) => String(normalizeCountryId(value, 0))
       );
-      const requestActions = ['getNumber', 'getNumberV2'];
+      const requestActions = isHeroSmsPayPalBrazilMode ? ['getNumber'] : ['getNumber', 'getNumberV2'];
       const configuredAcquireRounds = resolvePhoneActivationRetryRounds(state);
-      const maxAcquireRounds = configuredAcquireRounds;
+      const maxAcquireRounds = isHeroSmsPayPalBrazilMode ? 5 : configuredAcquireRounds;
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
-      const tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
+      let tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
+      const configuredOperatorOrderByCountry = normalizeHeroSmsOperatorOrderByCountry(state?.heroSmsOperatorOrderByCountry);
+      const fallbackOperatorByCountry = normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry);
 
       const countryAttempts = countryCandidates.map((countryConfig, index) => ({
         index,
@@ -4720,6 +4842,7 @@
         orderingPrice: Number.POSITIVE_INFINITY,
         pricesToTry: [],
         preferredOperator: String(config?.heroSmsOperatorByCountry?.[String(normalizeCountryId(countryConfig?.id, 0))] || '').trim(),
+        operatorOrder: [],
       }));
 
       if (
@@ -4901,6 +5024,45 @@
           continue;
         }
         attempt.pricesToTry = pricesToTry;
+        if (isHeroSmsPayPalBrazilMode && countryIdKey === '73') {
+          const configuredOrder = normalizeHeroSmsOperatorOrder([
+            ...(configuredOperatorOrderByCountry[countryIdKey] || []),
+            fallbackOperatorByCountry[countryIdKey] || '',
+          ]);
+          let loadedOrder = [];
+          let loadedOperatorsOk = false;
+          try {
+            loadedOrder = await fetchHeroSmsOperatorsForCountry(config, countryConfig.id);
+            loadedOperatorsOk = true;
+          } catch (error) {
+            await addLog(
+              `步骤 9：HeroSMS ${countryLabel} getOperators 失败，PayPal/BR 降级为配置运营商${configuredOrder.length ? ` ${configuredOrder.join(', ')}` : ''}${configuredOrder.length ? ' + 不带运营商' : '不带运营商'}尝试：${error?.message || String(error || 'unknown error')}`,
+              'warn'
+            );
+          }
+          if (loadedOperatorsOk) {
+            const mergedOperators = normalizeHeroSmsOperatorOrder([...configuredOrder, ...loadedOrder]);
+            attempt.operatorOrder = mergedOperators.length ? mergedOperators : [''];
+          } else {
+            attempt.operatorOrder = configuredOrder.length ? [...configuredOrder, ''] : [''];
+          }
+          await addLog(
+            `步骤 9：HeroSMS ${countryLabel} PayPal/BR 运营商队列：${attempt.operatorOrder.map((operator) => operator || 'any').join(', ')}。`,
+            'info'
+          );
+        }
+      }
+
+      if (isHeroSmsPayPalBrazilMode) {
+        const paypalTierCount = countryAttempts
+          .filter((attempt) => Array.isArray(attempt.pricesToTry) && attempt.pricesToTry.length)
+          .reduce((total, attempt) => {
+            const operatorCount = Array.isArray(attempt.operatorOrder) && attempt.operatorOrder.length
+              ? attempt.operatorOrder.length
+              : 1;
+            return total + (attempt.pricesToTry.length * operatorCount);
+          }, 0);
+        tierUpgradeLimit = Math.max(tierUpgradeLimit, Math.max(0, paypalTierCount - 1));
       }
 
       const tierQueue = createPhoneActivationTierQueue({
@@ -4909,6 +5071,9 @@
         getCountryId: (attempt) => attempt?.countryIdKey,
         getCountryLabel: (attempt) => attempt?.countryLabel,
         getPrices: (attempt) => attempt?.pricesToTry,
+        getOperators: (attempt) => (isHeroSmsPayPalBrazilMode
+          ? (Array.isArray(attempt?.operatorOrder) && attempt.operatorOrder.length ? attempt.operatorOrder : [''])
+          : [null]),
         acquirePriority,
         preferredPrice: preferredPriceTier,
       });
@@ -4919,7 +5084,7 @@
         maxAcquireRounds,
         retryDelayMs,
         tierUpgradeLimit,
-        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}`,
+        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}${isHeroSmsPayPalBrazilMode ? ` / operator ${tier.operator || 'any'}` : ''}`,
         attemptTier: async (tier) => {
           const attempt = tier.attempt;
           const countryConfig = attempt.countryConfig;
@@ -4937,7 +5102,10 @@
             preserveUnboundedFallback: !hasPriceBounds,
             allowSingleCountryFloorFallback: !hasAlternativeCountries,
           });
-          const preferredOperator = attempt.preferredOperator || String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim();
+          const preferredOperator = isHeroSmsPayPalBrazilMode
+            ? String(tier.operator || '').trim()
+            : (attempt.preferredOperator || String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim());
+          const allowOperatorFallback = Boolean(preferredOperator) && !isHeroSmsPayPalBrazilMode;
           const buildFallbackActivation = (requestAction) => ({
             provider: config.provider || PHONE_SMS_PROVIDER_HERO,
             serviceCode: String(config.serviceCode || HERO_SMS_SERVICE_CODE).trim() || HERO_SMS_SERVICE_CODE,
@@ -5072,7 +5240,7 @@
                   failureText: describeHeroSmsWrongMaxPriceFailure(payloadText, payloadText || '价格档位低于平台要求'),
                 };
               }
-              if (preferredOperator && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
+              if (allowOperatorFallback && (isHeroSmsNoNumbersPayload(payload) || isHeroSmsOperatorUnavailablePayload(payload))) {
                 const operatorFallbackResult = await tryWithoutPreferredOperator(requestAction);
                 if (operatorFallbackResult.activation) {
                   return {
@@ -5128,7 +5296,7 @@
                   terminalError: createHeroSmsActionFailureError(requestAction, payloadOrMessage || 'empty response'),
                 };
               }
-              if (preferredOperator && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
+              if (allowOperatorFallback && (isHeroSmsNoNumbersPayload(payloadOrMessage) || isHeroSmsOperatorUnavailablePayload(payloadOrMessage))) {
                 const operatorFallbackResult = await tryWithoutPreferredOperator(requestAction);
                 if (operatorFallbackResult.activation) {
                   return {
@@ -5247,6 +5415,17 @@
       const normalizedStatus = Math.floor(Number(status) || 0);
       if (
         (normalizedStatus === 6 || normalizedStatus === 8)
+        && hasActivationEverReceivedPhoneCode(normalizedActivation)
+      ) {
+        const identifier = normalizedActivation.phoneNumber || normalizedActivation.activationId || 'current activation';
+        await addLog(
+          `手机号 ${identifier} 已收到过短信验证码，跳过接码平台终止状态 setStatus(${normalizedStatus})，等待平台订单自动过期。`,
+          'info'
+        );
+        return `phone code received setStatus(${normalizedStatus}) skipped`;
+      }
+      if (
+        (normalizedStatus === 6 || normalizedStatus === 8)
         && shouldSkipTerminalStatusForFreeReuse(state, normalizedActivation)
       ) {
         const identifier = normalizedActivation.phoneNumber || normalizedActivation.activationId || 'current activation';
@@ -5293,6 +5472,15 @@
     }
 
     async function completePhoneActivation(state = {}, activation) {
+      if (hasActivationEverReceivedPhoneCode(activation)) {
+        const normalizedActivation = normalizeActivation(activation);
+        const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
+        await addLog(
+          `手机号 ${identifier} 已收到过短信验证码，跳过接码平台完成状态，等待平台订单自动过期。`,
+          'info'
+        );
+        return;
+      }
       if (shouldSkipTerminalStatusForFreeReuse(state, activation)) {
         const normalizedActivation = normalizeActivation(activation);
         const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
@@ -5350,6 +5538,14 @@
     async function cancelPhoneActivation(state = {}, activation) {
       try {
         const normalizedActivation = normalizeActivation(activation);
+        if (hasActivationEverReceivedPhoneCode(normalizedActivation)) {
+          const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
+          await addLog(
+            `手机号 ${identifier} 已收到过短信验证码，跳过接码平台取消状态，等待平台订单自动过期。`,
+            'info'
+          );
+          return;
+        }
         if (shouldSkipTerminalStatusForFreeReuse(state, activation)) {
           const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
           await addLog(
@@ -5465,7 +5661,7 @@
       if (!normalizedActivation) {
         return false;
       }
-      if (normalizedActivation.phoneCodeReceived) {
+      if (hasActivationEverReceivedPhoneCode(normalizedActivation)) {
         return false;
       }
       if (isFreeAutoReuseActivation(normalizedActivation)) {
@@ -5485,8 +5681,16 @@
 
     async function banPhoneActivation(state = {}, activation) {
       try {
+        const normalizedActivation = normalizeActivation(activation);
+        if (hasActivationEverReceivedPhoneCode(normalizedActivation)) {
+          const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
+          await addLog(
+            `手机号 ${identifier} 已收到过短信验证码，跳过接码平台封禁/取消状态，等待平台订单自动过期。`,
+            'info'
+          );
+          return;
+        }
         if (shouldSkipTerminalStatusForFreeReuse(state, activation)) {
-          const normalizedActivation = normalizeActivation(activation);
           const identifier = normalizedActivation?.phoneNumber || normalizedActivation?.activationId || 'current activation';
           await addLog(
             `步骤 9：白嫖复用模式仅请求短信，跳过 ${identifier} 的接码封禁状态。`,
@@ -6117,7 +6321,6 @@
             heroSmsCountryId: 73,
             heroSmsCountryLabel: 'Brazil',
             heroSmsCountryFallback: [],
-            heroSmsOperatorByCountry: {},
             heroSmsServiceCode: 'paypal',
           },
           requestedRegion: normalizedRegion,
@@ -7025,7 +7228,7 @@
           )
           || normalizedActivation.provider === PHONE_SMS_PROVIDER_5SIM
         )
-        && normalizedActivation.phoneCodeReceived
+        && hasActivationEverReceivedPhoneCode(normalizedActivation)
       );
     }
 
@@ -7088,7 +7291,7 @@
           normalizedActivation.provider !== PHONE_SMS_PROVIDER_HERO
           && normalizedActivation.provider !== PHONE_SMS_PROVIDER_5SIM
         )
-        || !normalizedActivation.phoneCodeReceived
+        || !hasActivationEverReceivedPhoneCode(normalizedActivation)
         || isFreeAutoReuseActivation(normalizedActivation)
       ) {
         return;
@@ -7463,10 +7666,13 @@
       if (!normalizedActivation) {
         return null;
       }
-      return {
+      const snapshot = {
         ...normalizedActivation,
         successfulUses: normalizedActivation.successfulUses + 1,
       };
+      delete snapshot.phoneCodeReceived;
+      delete snapshot.phoneCodeReceivedAt;
+      return snapshot;
     }
 
     async function waitForScopedPhoneCode(state = {}, activation, options = {}) {
@@ -7667,6 +7873,7 @@
 
         const prefetchOnly = isSignupPhoneCodePrefetchMode(state, options);
         const formalPrefetch = isSignupPhonePrefetchFormalState(state, activation);
+        let currentSignupActivation = activation;
 
         const recoverSignupContactVerificationServerErrorOnce = async (phaseLabel, error = null) => {
           if (signupContactVerificationServerErrorRecoveryUsed) {
@@ -7779,11 +7986,17 @@
             });
 
             await assertSignupPhoneStillApplicable('before submitting SMS code');
+            const codeReceivedActivation = markActivationPhoneCodeReceived(activation) || activation;
+            currentSignupActivation = codeReceivedActivation;
 
             await setPhoneRuntimeState({
               [PHONE_VERIFICATION_CODE_STATE_KEY]: String(code || '').trim(),
+              signupPhoneNumber: codeReceivedActivation.phoneNumber,
+              signupPhoneActivation: codeReceivedActivation,
               signupPhoneVerificationRequestedAt: Date.now(),
               signupPhoneVerificationPurpose: 'signup',
+              accountIdentifierType: 'phone',
+              accountIdentifier: codeReceivedActivation.phoneNumber,
             });
             await addLog(`步骤 4：已获取手机验证码 ${code}。`, 'info', {
               step: 4,
@@ -7795,15 +8008,15 @@
               await setPhoneRuntimeState({
                 signupPhoneCodePrefetchEnabled: true,
                 signupPhonePrefetchPhase: 'prefetch',
-                signupPhonePrefetchActivation: activation,
-                signupPhonePrefetchNumber: activation.phoneNumber,
+                signupPhonePrefetchActivation: codeReceivedActivation,
+                signupPhonePrefetchNumber: codeReceivedActivation.phoneNumber,
                 signupPhonePrefetchCode: String(code || '').trim(),
                 signupPhonePrefetchCodeFetchedAt: Date.now(),
                 signupPhonePrefetchLastError: '',
-                signupPhoneNumber: activation.phoneNumber,
-                signupPhoneActivation: activation,
+                signupPhoneNumber: codeReceivedActivation.phoneNumber,
+                signupPhoneActivation: codeReceivedActivation,
                 accountIdentifierType: 'phone',
-                accountIdentifier: activation.phoneNumber,
+                accountIdentifier: codeReceivedActivation.phoneNumber,
                 signupPhoneVerificationRequestedAt: Date.now(),
                 signupPhoneVerificationPurpose: 'signup_prefetch',
               });
@@ -7814,8 +8027,8 @@
               return {
                 prefetched: true,
                 code: String(code || '').trim(),
-                activation,
-                phoneNumber: activation.phoneNumber,
+                activation: codeReceivedActivation,
+                phoneNumber: codeReceivedActivation.phoneNumber,
               };
             }
 
@@ -7842,7 +8055,7 @@
                 throw new Error(`步骤 4：手机验证码连续 ${DEFAULT_PHONE_SUBMIT_ATTEMPTS} 次被拒绝：${invalidErrorText}`);
               }
 
-              await requestAdditionalPhoneSms(state, activation);
+              await requestAdditionalPhoneSms(state, codeReceivedActivation);
               try {
                 pendingSignupContactVerificationRecovery = true;
                 await resendSignupPhoneVerificationCode(tabId);
@@ -7873,7 +8086,7 @@
             }
 
             shouldCancelActivation = false;
-            await finalizeSignupPhoneActivationAfterSuccess(state, activation);
+            await finalizeSignupPhoneActivationAfterSuccess(state, codeReceivedActivation);
             await setPhoneRuntimeState({
               [PHONE_VERIFICATION_CODE_STATE_KEY]: '',
               signupPhoneVerificationRequestedAt: null,
@@ -7889,18 +8102,18 @@
 
           throw new Error('步骤 4：手机验证码未能成功提交。');
         } catch (error) {
-          const shouldPreserveFailedSignupReuse = shouldPreserveSignupPhoneActivationForRetry(error, activation);
+          const shouldPreserveFailedSignupReuse = shouldPreserveSignupPhoneActivationForRetry(error, currentSignupActivation);
           if (shouldPreserveFailedSignupReuse) {
-            await persistFailedSignupPhoneReuseActivation(activation, error).catch(() => {});
+            await persistFailedSignupPhoneReuseActivation(currentSignupActivation, error).catch(() => {});
           }
-          if (shouldCancelActivation && activation && !shouldPreserveFailedSignupReuse) {
-            await cancelSignupPhoneActivation(state, activation).catch(() => {});
+          if (shouldCancelActivation && currentSignupActivation && !shouldPreserveFailedSignupReuse) {
+            await cancelSignupPhoneActivation(state, currentSignupActivation).catch(() => {});
           }
           const shouldClearFailedReuseCache = !shouldPreserveFailedSignupReuse && (
             isPhoneCodeTimeoutError(error)
             || isPhoneResendBannedNumberError(error)
             || isPhoneMaxUsageExceededFlowError(error)
-            || isPhoneActivationOrderMissingError(error, activation?.provider)
+            || isPhoneActivationOrderMissingError(error, currentSignupActivation?.provider)
             || isStaleSignupPhoneEmailVerificationError(error)
             || isSignupPhoneInvalidCodeFailure(error)
             || isSignupPhonePasswordMismatchFailure(error)
@@ -8097,11 +8310,16 @@
                 }
               },
             });
+            activation = markActivationPhoneCodeReceived(activation) || activation;
 
             await setPhoneRuntimeState({
               [PHONE_VERIFICATION_CODE_STATE_KEY]: String(code || '').trim(),
+              signupPhoneActivation: activation,
+              signupPhoneNumber: activation.phoneNumber,
               signupPhoneVerificationRequestedAt: Date.now(),
               signupPhoneVerificationPurpose: 'login',
+              accountIdentifierType: 'phone',
+              accountIdentifier: activation.phoneNumber,
             });
             await addLog(`步骤 ${visibleStep}：已获取登录手机验证码 ${code}。`, 'info', {
               step: visibleStep,

@@ -121,6 +121,10 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationPollAttempts',
   'hostedCheckoutVerificationPollIntervalSeconds',
   'hostedCheckoutVerificationResendMaxAttempts',
+  'hostedCheckoutSmsSource',
+  'hostedCheckoutHeroSmsPayPalMinPrice',
+  'hostedCheckoutHeroSmsPayPalMaxPrice',
+  'hostedCheckoutHeroSmsPayPalOperatorOrder',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
@@ -220,6 +224,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationPollIntervalSeconds: 5,
   hostedCheckoutVerificationResendMaxAttempts: 1,
   hostedCheckoutSmsSource: 'fixed_pool',
+  hostedCheckoutHeroSmsPayPalMinPrice: '',
+  hostedCheckoutHeroSmsPayPalMaxPrice: '0.1',
+  hostedCheckoutHeroSmsPayPalOperatorOrder: [],
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
@@ -471,6 +478,9 @@ ${extractFunction('normalizeStep5ProfileSubmitResultMaxRounds')}
 ${extractFunction('normalizeStep5ProfileSubmitResultRoundWaitSeconds')}
 ${extractFunction('getAuthContentScriptRecoveryTimeoutMsForState')}
 ${extractFunction('getSignupVerificationReadyConfigForState')}
+${extractFunction('normalizeHeroSmsMaxPrice')}
+${extractFunction('normalizeHostedCheckoutHeroSmsPayPalPrice')}
+${extractFunction('normalizeHostedCheckoutHeroSmsPayPalOperatorOrder')}
 ${extractFunction('normalizePersistentSettingValue')}
 ${extractFunction('getSettingsSchemaApi')}
 ${extractFunction('projectSettingsSchemaView')}
@@ -1358,9 +1368,18 @@ test('buildPersistentSettingsPayload persists PayPal HeroSMS hosted checkout sms
 
   const flat = api.buildPersistentSettingsPayload({
     hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+    hostedCheckoutHeroSmsPayPalMinPrice: '0.06',
+    hostedCheckoutHeroSmsPayPalMaxPrice: '0.18',
+    hostedCheckoutHeroSmsPayPalOperatorOrder: 'correios_celular, vivo, vivo',
   }, { fillDefaults: true });
   assert.equal(flat.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(flat.hostedCheckoutHeroSmsPayPalMinPrice, '0.06');
+  assert.equal(flat.hostedCheckoutHeroSmsPayPalMaxPrice, '0.18');
+  assert.deepEqual(flat.hostedCheckoutHeroSmsPayPalOperatorOrder, ['correios_celular', 'vivo']);
   assert.equal(flat.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(flat.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalMinPrice, '0.06');
+  assert.equal(flat.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalMaxPrice, '0.18');
+  assert.deepEqual(flat.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalOperatorOrder, ['correios_celular', 'vivo']);
 
   const hyphenAlias = api.buildPersistentSettingsPayload({
     hostedCheckoutSmsSource: 'hero-sms-paypal-br',
@@ -1375,19 +1394,31 @@ test('buildPersistentSettingsPayload persists PayPal HeroSMS hosted checkout sms
         openai: {
           plus: {
             hostedCheckoutSmsSource: 'hero_sms_paypal_br',
+            hostedCheckoutHeroSmsPayPalMinPrice: '0.04',
+            hostedCheckoutHeroSmsPayPalMaxPrice: '0.2',
+            hostedCheckoutHeroSmsPayPalOperatorOrder: ['tim', 'claro', 'tim'],
           },
         },
       },
     },
   }, { requireKnownKeys: true });
   assert.equal(nested.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(nested.hostedCheckoutHeroSmsPayPalMinPrice, '0.04');
+  assert.equal(nested.hostedCheckoutHeroSmsPayPalMaxPrice, '0.2');
+  assert.deepEqual(nested.hostedCheckoutHeroSmsPayPalOperatorOrder, ['tim', 'claro']);
   assert.equal(nested.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
+  assert.equal(nested.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalMinPrice, '0.04');
+  assert.equal(nested.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalMaxPrice, '0.2');
+  assert.deepEqual(nested.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalOperatorOrder, ['tim', 'claro']);
 
   const invalid = api.buildPersistentSettingsPayload({
     hostedCheckoutSmsSource: 'unknown-source',
+    hostedCheckoutHeroSmsPayPalMaxPrice: '',
   }, { fillDefaults: true });
   assert.equal(invalid.hostedCheckoutSmsSource, 'fixed_pool');
+  assert.equal(invalid.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1');
   assert.equal(invalid.settingsState.flows.openai.plus.hostedCheckoutSmsSource, 'fixed_pool');
+  assert.equal(invalid.settingsState.flows.openai.plus.hostedCheckoutHeroSmsPayPalMaxPrice, '0.1');
 });
 
 test('buildPersistentSettingsPayload persists PayPal hosted security challenge switch into settings schema', () => {

@@ -1624,6 +1624,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   hostedCheckoutVerificationPollIntervalSeconds: 5,
   hostedCheckoutVerificationResendMaxAttempts: 1,
   hostedCheckoutSmsSource: 'fixed_pool',
+  hostedCheckoutHeroSmsPayPalMinPrice: '',
+  hostedCheckoutHeroSmsPayPalMaxPrice: '0.1',
+  hostedCheckoutHeroSmsPayPalOperatorOrder: [],
   hostedCheckoutVerificationUrl: '',
   hostedCheckoutPhoneNumber: '',
   hostedCheckoutSmsPoolText: '',
@@ -1908,6 +1911,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'hostedCheckoutVerificationPollIntervalSeconds',
   'hostedCheckoutVerificationResendMaxAttempts',
   'hostedCheckoutSmsSource',
+  'hostedCheckoutHeroSmsPayPalMinPrice',
+  'hostedCheckoutHeroSmsPayPalMaxPrice',
+  'hostedCheckoutHeroSmsPayPalOperatorOrder',
   'hostedCheckoutVerificationUrl',
   'hostedCheckoutPhoneNumber',
   'hostedCheckoutSmsPoolText',
@@ -2755,6 +2761,34 @@ function normalizePhoneSmsPriceLimit(value = '') {
   }
   const maxPrice = Math.round(PHONE_SMS_PRICE_INPUT_MAX * 10000) / 10000;
   return String(Math.min(Number(normalized), maxPrice));
+}
+
+function normalizeHostedCheckoutHeroSmsPayPalPrice(value = '', fallback = '') {
+  const normalized = normalizeHeroSmsMaxPrice(value);
+  if (normalized) {
+    return normalized;
+  }
+  return fallback === undefined || fallback === null ? '' : String(fallback).trim();
+}
+
+function normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(value = []) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[\r\n,，、;|/]+/)
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+  const normalized = [];
+  const seen = new Set();
+  source.forEach((entry) => {
+    const operator = String(entry || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+    if (!operator || operator === 'any' || seen.has(operator)) {
+      return;
+    }
+    seen.add(operator);
+    normalized.push(operator);
+  });
+  return normalized.slice(0, 20);
 }
 
 function normalizeHeroSmsAcquirePriority(value = '') {
@@ -4913,6 +4947,12 @@ function normalizePersistentSettingValue(key, value) {
       }
       return 'fixed_pool';
     }
+    case 'hostedCheckoutHeroSmsPayPalMinPrice':
+      return normalizeHostedCheckoutHeroSmsPayPalPrice(value);
+    case 'hostedCheckoutHeroSmsPayPalMaxPrice':
+      return normalizeHostedCheckoutHeroSmsPayPalPrice(value, '0.1');
+    case 'hostedCheckoutHeroSmsPayPalOperatorOrder':
+      return normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(value);
     case 'hostedCheckoutVerificationUrl':
       return String(value || '').trim();
     case 'hostedCheckoutPhoneNumber':
@@ -6251,6 +6291,9 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('hostedCheckoutVerificationPollIntervalSeconds', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationPollIntervalSeconds']);
   assignIfUpdated('hostedCheckoutVerificationResendMaxAttempts', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationResendMaxAttempts']);
   assignIfUpdated('hostedCheckoutSmsSource', ['flows', 'openai', 'plus', 'hostedCheckoutSmsSource']);
+  assignIfUpdated('hostedCheckoutHeroSmsPayPalMinPrice', ['flows', 'openai', 'plus', 'hostedCheckoutHeroSmsPayPalMinPrice']);
+  assignIfUpdated('hostedCheckoutHeroSmsPayPalMaxPrice', ['flows', 'openai', 'plus', 'hostedCheckoutHeroSmsPayPalMaxPrice']);
+  assignIfUpdated('hostedCheckoutHeroSmsPayPalOperatorOrder', ['flows', 'openai', 'plus', 'hostedCheckoutHeroSmsPayPalOperatorOrder']);
   assignIfUpdated('hostedCheckoutVerificationUrl', ['flows', 'openai', 'plus', 'hostedCheckoutVerificationUrl']);
   assignIfUpdated('hostedCheckoutPhoneNumber', ['flows', 'openai', 'plus', 'hostedCheckoutPhoneNumber']);
   assignIfUpdated('hostedCheckoutSmsPoolText', ['flows', 'openai', 'plus', 'hostedCheckoutSmsPoolText']);

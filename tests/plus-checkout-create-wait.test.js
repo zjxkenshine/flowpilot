@@ -275,7 +275,30 @@ function createCheckoutContentHarness(options = {}) {
         return null;
       },
       scrollIntoView() {},
-      focus() {},
+      focus() {
+        checkoutEvents.push({
+          type: 'focus',
+          id: this.id || '',
+          value: this.value,
+        });
+      },
+      blur() {
+        checkoutEvents.push({
+          type: 'blur',
+          id: this.id || '',
+          value: this.value,
+        });
+        if (this.id === 'billingPostalCode' && typeof options.onHostedPostalBlur === 'function') {
+          options.onHostedPostalBlur({
+            elements,
+            checkoutEvents,
+            hostedAddressInput,
+            hostedBrazilNumberInput,
+            hostedCityInput,
+            hostedStateSelect,
+          });
+        }
+      },
       dispatchEvent(event) {
         checkoutEvents.push({
           type: 'dispatch',
@@ -318,11 +341,18 @@ function createCheckoutContentHarness(options = {}) {
   const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', value: options.hostedAddressValue || '', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
   const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
+  const hostedBrazilNumberInput = createElement({
+    tagName: 'INPUT',
+    id: 'billingStreetNumber',
+    type: 'text',
+    attrs: { name: 'streetNumber', placeholder: 'No' },
+  });
   const hostedCountrySelect = {
     ...createElement({ tagName: 'SELECT', id: 'billingCountry', attrs: { name: 'billingCountry' } }),
     options: [
       { value: 'DE', textContent: 'Germany', label: 'Germany' },
       { value: 'US', textContent: 'United States', label: 'United States' },
+      { value: 'BR', textContent: 'Brazil', label: 'Brazil' },
     ],
     value: 'DE',
   };
@@ -388,6 +418,9 @@ function createCheckoutContentHarness(options = {}) {
   }
   if (options.hostedErrorText || options.hostedSubmitErrorText) {
     elements.push(hostedErrorAlert);
+  }
+  if (options.includeHostedBrazilNumberInputInitially) {
+    elements.push(hostedBrazilNumberInput);
   }
 
   const context = {
@@ -632,6 +665,7 @@ function normalizeTestPhoneActivation(record) {
     successfulUses: Number(record.successfulUses) || 0,
     maxUses: Number(record.maxUses) || 3,
     ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+    ...(record.phoneCodeEverReceived || record.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
     ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: record.phoneCodeReceivedAt } : {}),
   };
 }
@@ -6380,6 +6414,84 @@ test('OpenAI hosted checkout fills email before selecting PayPal and address', a
   assert.equal(checkoutEvents.some((event) => event.type === 'dispatch' && event.id === 'billingCountry' && event.event === 'change' && event.value === 'US'), true);
 });
 
+test('OpenAI hosted BR checkout triggers CEP lookup before filling random No field', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedSubmitVerificationAfterClickCount: 1,
+    onHostedPostalBlur: ({
+      elements,
+      checkoutEvents: events,
+      hostedAddressInput,
+      hostedBrazilNumberInput,
+      hostedCityInput,
+      hostedStateSelect,
+    }) => {
+      hostedAddressInput.value = 'Rua Haddock Lobo';
+      hostedCityInput.value = 'Sao Paulo';
+      hostedStateSelect.options = [
+        ...hostedStateSelect.options,
+        { value: 'SP', textContent: 'SP', label: 'SP', selected: true },
+      ];
+      hostedStateSelect.value = 'SP';
+      if (!elements.includes(hostedBrazilNumberInput)) {
+        elements.push(hostedBrazilNumberInput);
+      }
+      events.push({ type: 'cep-autofill', id: hostedBrazilNumberInput.id });
+    },
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        countryCode: 'BR',
+        street: 'Rua Haddock Lobo 1307',
+        streetName: 'Rua Haddock Lobo',
+        city: 'Sao Paulo',
+        state: 'SP',
+        stateCode: 'SP',
+        zip: '01414-003',
+        number: '1307',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.hostedBrazilCepTriggered, true);
+  assert.equal(result.hostedBrazilAddressAutofillWaited, true);
+  assert.equal(result.hostedBrazilAddressAutofillTimedOut, false);
+  assert.equal(result.hostedBrazilNumberInputFound, true);
+  assert.equal(result.hostedBrazilNumberFilled, true);
+  assert.match(result.hostedBrazilNumberValue, /^\d+$/);
+  assert.ok(Number(result.hostedBrazilNumberValue) >= 1);
+  assert.ok(Number(result.hostedBrazilNumberValue) <= 200);
+
+  const postalFillIndex = checkoutEvents.findIndex((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '01414-003');
+  const postalFocusIndex = checkoutEvents.findIndex((event) => event.type === 'focus' && event.id === 'billingPostalCode');
+  const postalNativeClickIndex = checkoutEvents.findIndex((event) => event.type === 'native-click' && event.id === 'billingPostalCode');
+  const postalBlurIndex = checkoutEvents.findIndex((event) => event.type === 'blur' && event.id === 'billingPostalCode');
+  const autofillIndex = checkoutEvents.findIndex((event) => event.type === 'cep-autofill');
+  const noFillEvent = checkoutEvents.find((event) => event.type === 'fill' && event.id === 'billingStreetNumber');
+  const noFillIndex = checkoutEvents.indexOf(noFillEvent);
+  const addressFallbackFillIndex = checkoutEvents.findIndex((event) => event.type === 'fill' && event.id === 'billingAddressLine1');
+  const submitIndex = checkoutEvents.findIndex((event) => event.type === 'click' && event.target === 'subscribe');
+
+  assert.ok(postalFillIndex > -1);
+  assert.ok(postalFocusIndex > postalFillIndex);
+  assert.ok(postalNativeClickIndex > postalFocusIndex);
+  assert.ok(postalBlurIndex > postalNativeClickIndex);
+  assert.ok(autofillIndex > postalBlurIndex);
+  assert.ok(noFillIndex > autofillIndex);
+  assert.ok(submitIndex > noFillIndex);
+  assert.equal(addressFallbackFillIndex, -1);
+  assert.match(noFillEvent.value, /^\d+$/);
+  assert.ok(Number(noFillEvent.value) >= 1);
+  assert.ok(Number(noFillEvent.value) <= 200);
+  assert.notEqual(noFillEvent.value, '1307');
+});
+
 test('OpenAI hosted checkout does not retry submit when verification appears after first click', async () => {
   const { checkoutEvents, send } = createCheckoutContentHarness({
     locationHref: 'https://pay.openai.com/c/pay/cs_test',
@@ -8389,6 +8501,7 @@ test('PayPal hosted phone-sms mode follows configured 711 region and reuses rece
         successfulUses: Number(record.successfulUses) || 0,
         maxUses: Number(record.maxUses) || 3,
         ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+        ...(record.phoneCodeEverReceived || record.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
         ...(record.phoneCodeReceivedAt ? { phoneCodeReceivedAt: record.phoneCodeReceivedAt } : {}),
       }),
       requestPhoneActivationForRegion: async (_state, options) => {
@@ -8420,6 +8533,7 @@ test('PayPal hosted phone-sms mode follows configured 711 region and reuses rece
     hostedCheckoutPhoneSmsActivation: {
       ...activation,
       phoneCodeReceived: true,
+      phoneCodeEverReceived: true,
       phoneCodeReceivedAt: 100,
     },
   });
@@ -8431,7 +8545,8 @@ test('PayPal hosted phone-sms mode follows configured 711 region and reuses rece
     .filter(Boolean);
   assert.equal(activationUpdates.at(-1).phoneNumber, '+819012345678');
   assert.equal(activationUpdates.at(-1).successfulUses, 1);
-  assert.equal(phoneCalls.some((call) => call.type === 'complete'), true);
+  assert.equal(activationUpdates.at(-1).phoneCodeEverReceived, true);
+  assert.equal(phoneCalls.some((call) => call.type === 'complete'), false);
 });
 
 test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number', async () => {
@@ -8455,6 +8570,9 @@ test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number',
     heroSmsMaxPrice: '0.03',
     heroSmsPreferredPrice: '0.09',
     heroSmsAcquirePriority: 'price_high',
+    hostedCheckoutHeroSmsPayPalMinPrice: '0.06',
+    hostedCheckoutHeroSmsPayPalMaxPrice: '0.18',
+    hostedCheckoutHeroSmsPayPalOperatorOrder: ['correios_celular', 'vivo'],
   });
   const activation = {
     activationId: 'pp-br-activation-1',
@@ -8500,11 +8618,14 @@ test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number',
   assert.equal(requestCall.state.heroSmsCountryId, 73);
   assert.equal(requestCall.state.heroSmsCountryLabel, 'Brazil');
   assert.deepEqual(requestCall.state.heroSmsCountryFallback, []);
-  assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, {});
-  assert.equal(requestCall.state.heroSmsMinPrice, '');
-  assert.equal(requestCall.state.heroSmsMaxPrice, '0.1');
+  assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, { 73: 'correios_celular', 151: 'docomo' });
+  assert.deepEqual(requestCall.state.heroSmsOperatorOrderByCountry, { 73: ['correios_celular', 'vivo'] });
+  assert.equal(requestCall.state.heroSmsMinPrice, '0.06');
+  assert.equal(requestCall.state.heroSmsMaxPrice, '0.18');
   assert.equal(requestCall.state.heroSmsPreferredPrice, '');
-  assert.equal(requestCall.state.heroSmsAcquirePriority, 'country');
+  assert.equal(requestCall.state.heroSmsAcquirePriority, 'price');
+  assert.equal(requestCall.state.phoneActivationRetryRounds, 5);
+  assert.equal(requestCall.state.hostedCheckoutSmsSource, 'hero_sms_paypal_br');
   assert.equal(config.configSource, 'hero-sms-paypal-br');
   assert.equal(config.verificationUrl, '');
   assert.equal(config.phone, '+5511987654321');
@@ -9260,6 +9381,7 @@ test('PayPal hosted phone-sms mode polls phone provider code without manual veri
         successfulUses: Number(record.successfulUses) || 0,
         maxUses: Number(record.maxUses) || 3,
         ...(record.phoneCodeReceived ? { phoneCodeReceived: true } : {}),
+        ...(record.phoneCodeEverReceived || record.phoneCodeReceived ? { phoneCodeEverReceived: true } : {}),
       }),
       requestPhoneActivationForRegion: async (_state, options) => {
         phoneCalls.push({ type: 'request', options });

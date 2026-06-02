@@ -351,6 +351,200 @@ function getHostedAddressFieldValues() {
   };
 }
 
+function isHostedBrazilAddress(address = {}) {
+  const countryCode = normalizeText(address.countryCode || address.country || '').toUpperCase();
+  return countryCode === 'BR' || /\b(?:brazil|brasil)\b/i.test(countryCode);
+}
+
+function getHostedPostalCodeInput() {
+  const direct = document.querySelector('#billingPostalCode')
+    || document.querySelector('input[name="billingPostalCode"]')
+    || document.querySelector('input[name="postalCode"]')
+    || document.querySelector('input[autocomplete="billing postal-code"]')
+    || document.querySelector('input[autocomplete="postal-code"]');
+  if (direct && isVisibleElement(direct) && isEnabledControl(direct)) {
+    return direct;
+  }
+  return getVisibleTextInputs().find((input) => /postal|zip|postcode|cep/i.test(getFieldText(input))) || null;
+}
+
+function isHostedBrazilNumberInputCandidate(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || input.type || '').trim().toLowerCase();
+  if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password', 'email'].includes(type)) {
+    return false;
+  }
+  const text = getCombinedSearchText(input);
+  const raw = normalizeText(text).toLowerCase();
+  const compact = raw.replace(/[^a-z0-9\u00ba\u00b0\u00fa]+/g, ' ');
+  const positive = /address\s*\[\s*(?:street[_-]?)?number\s*\]/i.test(text)
+    || /\b(?:street|house|address)\s*(?:no|number)\b/i.test(raw)
+    || /(?:^|\s)(?:no|n[\u00ba\u00b0]|numero|n[u\u00fa]mero|num|number)(?:\s|$)/i.test(compact);
+  if (!positive) {
+    return false;
+  }
+  return !/card|cvv|cvc|security\s*code|expiry|expiration|postal|zip|postcode|cep|city|state|province|region|country|phone|mobile|tel|cpf|cnpj|tax|document|identity|email|password/i.test(raw);
+}
+
+function findHostedBrazilNumberInput() {
+  return getVisibleTextInputs().find(isHostedBrazilNumberInputCandidate) || null;
+}
+
+function getRandomHostedBrazilAddressNumber() {
+  return String(Math.floor(Math.random() * 200) + 1);
+}
+
+async function triggerHostedBrazilCepLookup(postalInput) {
+  if (!postalInput) {
+    return false;
+  }
+  postalInput.scrollIntoView?.({ block: 'center', inline: 'center', behavior: 'instant' });
+  if (typeof postalInput.focus === 'function') {
+    postalInput.focus({ preventScroll: true });
+  }
+  postalInput.dispatchEvent?.(new Event('focusin', { bubbles: true }));
+  await sleep(100);
+  if (typeof postalInput.click === 'function') {
+    postalInput.click();
+  } else {
+    postalInput.dispatchEvent?.(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  await sleep(150);
+  if (typeof postalInput.blur === 'function') {
+    postalInput.blur();
+  } else {
+    postalInput.dispatchEvent?.(new Event('blur', { bubbles: false }));
+  }
+  postalInput.dispatchEvent?.(new Event('focusout', { bubbles: true }));
+  await sleep(500);
+  return true;
+}
+
+function getHostedBrazilAddressAutofillState() {
+  const values = getHostedAddressFieldValues();
+  const numberInput = findHostedBrazilNumberInput();
+  const populated = Boolean(
+    normalizeText(values.address1)
+    || normalizeText(values.city)
+    || normalizeText(values.region)
+  );
+  return {
+    ...values,
+    numberInput,
+    numberInputFound: Boolean(numberInput),
+    populated,
+  };
+}
+
+async function waitForHostedBrazilAddressAfterCep() {
+  const timeoutMs = Math.max(
+    500,
+    Math.floor(Number(window.__PAYPAL_HOSTED_BR_CEP_LOOKUP_TIMEOUT_MS__) || 6000)
+  );
+  try {
+    const state = await waitUntil(() => {
+      const current = getHostedBrazilAddressAutofillState();
+      return current.populated || current.numberInputFound ? current : null;
+    }, {
+      label: 'hosted checkout Brazil CEP address fields',
+      intervalMs: 250,
+      timeoutMs,
+    });
+    return {
+      ...state,
+      timedOut: false,
+    };
+  } catch (error) {
+    if (typeof isStopError === 'function' && isStopError(error)) {
+      throw error;
+    }
+    return {
+      ...getHostedBrazilAddressAutofillState(),
+      timedOut: true,
+    };
+  }
+}
+
+async function waitForHostedBrazilNumberInputIfNeeded(existingInput = null) {
+  if (existingInput) {
+    return existingInput;
+  }
+  const timeoutMs = Math.max(
+    250,
+    Math.floor(Number(window.__PAYPAL_HOSTED_BR_NUMBER_INPUT_TIMEOUT_MS__) || 3000)
+  );
+  try {
+    return await waitUntil(() => findHostedBrazilNumberInput(), {
+      label: 'hosted checkout Brazil No field',
+      intervalMs: 250,
+      timeoutMs,
+    });
+  } catch (error) {
+    if (typeof isStopError === 'function' && isStopError(error)) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+function fillHostedBrazilFallbackAddressIfNeeded(address = {}) {
+  const values = getHostedAddressFieldValues();
+  const streetFallback = address.streetName || address.street || address.address1 || '';
+  if (!normalizeText(values.address1)) {
+    fillHostedInput('#billingAddressLine1', streetFallback);
+  }
+  if (!normalizeText(values.city)) {
+    fillHostedInput('#billingLocality', address.city || '');
+  }
+  if (!normalizeText(values.region)) {
+    selectHostedOptionByText(
+      '#billingAdministrativeArea',
+      address.stateCode || address.state || address.region || ''
+    );
+  }
+}
+
+async function fillHostedBrazilAddressFromCep(address = {}) {
+  const result = {
+    hostedBrazilCepTriggered: false,
+    hostedBrazilAddressAutofillWaited: false,
+    hostedBrazilAddressAutofillTimedOut: false,
+    hostedBrazilNumberInputFound: false,
+    hostedBrazilNumberFilled: false,
+    hostedBrazilNumberValue: '',
+  };
+  const postalCode = normalizeText(address.zip || address.postalCode || address.cep || '');
+  const postalInput = getHostedPostalCodeInput();
+  if (postalInput && postalCode) {
+    fillInput(postalInput, postalCode);
+    result.hostedBrazilCepTriggered = await triggerHostedBrazilCepLookup(postalInput);
+  } else {
+    fillHostedInput('#billingPostalCode', postalCode);
+  }
+
+  result.hostedBrazilAddressAutofillWaited = Boolean(result.hostedBrazilCepTriggered);
+  const autofillState = result.hostedBrazilCepTriggered
+    ? await waitForHostedBrazilAddressAfterCep()
+    : getHostedBrazilAddressAutofillState();
+  result.hostedBrazilAddressAutofillTimedOut = Boolean(autofillState.timedOut);
+
+  const numberInput = await waitForHostedBrazilNumberInputIfNeeded(
+    autofillState.numberInput || findHostedBrazilNumberInput()
+  );
+  result.hostedBrazilNumberInputFound = Boolean(numberInput);
+  if (numberInput) {
+    const numberValue = getRandomHostedBrazilAddressNumber();
+    fillInput(numberInput, numberValue);
+    result.hostedBrazilNumberFilled = true;
+    result.hostedBrazilNumberValue = numberValue;
+  }
+
+  fillHostedBrazilFallbackAddressIfNeeded(address);
+  return result;
+}
+
 function hasHostedAttribute(el = null, name = '') {
   if (!el || !name) {
     return false;
@@ -945,10 +1139,23 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
 
   const address = payload.address && typeof payload.address === 'object' ? payload.address : {};
   await ensureHostedCountrySelected(address.countryCode || 'US');
-  fillHostedInput('#billingAddressLine1', address.street || address.address1 || '');
-  fillHostedInput('#billingLocality', address.city || '');
-  fillHostedInput('#billingPostalCode', address.zip || address.postalCode || '');
-  selectHostedOptionByText('#billingAdministrativeArea', address.state || address.region || '');
+  const isBrazilAddress = isHostedBrazilAddress(address);
+  const hostedBrazilAddressResult = isBrazilAddress
+    ? await fillHostedBrazilAddressFromCep(address)
+    : {
+      hostedBrazilCepTriggered: false,
+      hostedBrazilAddressAutofillWaited: false,
+      hostedBrazilAddressAutofillTimedOut: false,
+      hostedBrazilNumberInputFound: false,
+      hostedBrazilNumberFilled: false,
+      hostedBrazilNumberValue: '',
+    };
+  if (!isBrazilAddress) {
+    fillHostedInput('#billingAddressLine1', address.street || address.address1 || '');
+    fillHostedInput('#billingLocality', address.city || '');
+    fillHostedInput('#billingPostalCode', address.zip || address.postalCode || '');
+    selectHostedOptionByText('#billingAdministrativeArea', address.state || address.region || '');
+  }
   const documentFillResult = fillHostedOpenAiDocumentIfPresent(payload);
 
   const consent = document.getElementById('termsOfServiceConsentCheckbox');
@@ -973,6 +1180,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
     hostedDocumentInputFound: Boolean(documentFillResult.found),
     hostedDocumentFilled: Boolean(documentFillResult.filled),
+    ...hostedBrazilAddressResult,
   };
 }
 
@@ -2297,6 +2505,7 @@ function getCountryCandidates(value = '') {
   const aliases = {
     AR: ['Argentina', '阿根廷'],
     AU: ['Australia', '澳大利亚'],
+    BR: ['Brazil', 'Brasil'],
     CA: ['Canada', '加拿大'],
     CN: ['China', '中国'],
     DE: ['Germany', 'Deutschland', '德国'],

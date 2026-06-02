@@ -420,6 +420,10 @@ test('sidepanel PayPal hosted sms pool max uses renders and syncs through settin
 test('sidepanel PayPal hosted sms source selector renders and syncs through settings', () => {
   assert.match(sidepanelHtml, /id="row-hosted-checkout-sms-source"/);
   assert.match(sidepanelHtml, /id="select-hosted-checkout-sms-source"/);
+  assert.match(sidepanelHtml, /id="row-hosted-checkout-hero-sms-paypal-settings"/);
+  assert.match(sidepanelHtml, /id="input-hosted-checkout-hero-sms-paypal-min-price"/);
+  assert.match(sidepanelHtml, /id="input-hosted-checkout-hero-sms-paypal-max-price"/);
+  assert.match(sidepanelHtml, /id="input-hosted-checkout-hero-sms-paypal-operator-order"/);
   assert.match(sidepanelHtml, /<option value="hero_sms_paypal_br">HeroSMS（PayPal\/BR）<\/option>/);
   assert.match(sidepanelHtml, /<option value="fixed_pool">固定接码池（默认）<\/option>/);
   assert.match(sidepanelHtml, /<option value="phone_sms">跟随手机接码配置<\/option>/);
@@ -444,19 +448,30 @@ return normalizeHostedCheckoutSmsSourceValue;
   const collectSource = extractFunction('collectSettingsPayload');
   assert.match(collectSource, /hostedCheckoutSmsSource:/);
   assert.match(collectSource, /selectHostedCheckoutSmsSource\.value/);
+  assert.match(collectSource, /hostedCheckoutHeroSmsPayPalMinPrice:/);
+  assert.match(collectSource, /hostedCheckoutHeroSmsPayPalMaxPrice:/);
+  assert.match(collectSource, /hostedCheckoutHeroSmsPayPalOperatorOrder:/);
 
   const applySource = extractFunction('applySettingsState');
   assert.match(applySource, /selectHostedCheckoutSmsSource\.value\s*=\s*normalizeHostedCheckoutSmsSourceValue/);
+  assert.match(applySource, /inputHostedCheckoutHeroSmsPayPalMinPrice\.value\s*=\s*normalizeHostedCheckoutHeroSmsPayPalPriceValue/);
+  assert.match(applySource, /inputHostedCheckoutHeroSmsPayPalMaxPrice\.value\s*=\s*normalizeHostedCheckoutHeroSmsPayPalPriceValue/);
+  assert.match(applySource, /inputHostedCheckoutHeroSmsPayPalOperatorOrder\.value\s*=\s*normalizeHostedCheckoutHeroSmsPayPalOperatorOrderValue/);
 
   const updateModeSource = extractFunction('updatePlusModeUI');
   assert.match(updateModeSource, /hostedCheckoutSmsSource/);
   assert.match(updateModeSource, /hostedCheckoutFixedSmsRowsVisible/);
+  assert.match(updateModeSource, /hostedCheckoutHeroSmsPayPalRowsVisible/);
+  assert.match(updateModeSource, /rowHostedCheckoutHeroSmsPayPalSettings/);
 
   const dataUpdatedStart = sidepanelSource.indexOf("case 'DATA_UPDATED':");
   assert.notEqual(dataUpdatedStart, -1);
   const dataUpdatedSnippet = sidepanelSource.slice(dataUpdatedStart, dataUpdatedStart + 12000);
   assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutSmsSource !== undefined/);
   assert.match(dataUpdatedSnippet, /selectHostedCheckoutSmsSource\.value\s*=\s*normalizeHostedCheckoutSmsSourceValue/);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutHeroSmsPayPalMinPrice !== undefined/);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutHeroSmsPayPalMaxPrice !== undefined/);
+  assert.match(dataUpdatedSnippet, /message\.payload\.hostedCheckoutHeroSmsPayPalOperatorOrder !== undefined/);
 });
 
 test('sidepanel checkout region dropdown renders and syncs through settings', () => {
