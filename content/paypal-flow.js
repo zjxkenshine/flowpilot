@@ -3,7 +3,7 @@
 console.log('[MultiPage:paypal-flow] Content script loaded on', location.href);
 
 const PAYPAL_FLOW_LISTENER_SENTINEL = 'data-multipage-paypal-flow-listener';
-const PAYPAL_FLOW_SCRIPT_VERSION = '2026-06-01-hosted-phone-error-pt-v1';
+const PAYPAL_FLOW_SCRIPT_VERSION = '2026-06-03-hosted-brazil-cep-no-v1';
 const PAYPAL_HOSTED_GET_STATE_MESSAGE_V2 = 'PAYPAL_HOSTED_GET_STATE_V2';
 const PAYPAL_RUN_HOSTED_CHECKOUT_STEP_MESSAGE_V2 = 'PAYPAL_RUN_HOSTED_CHECKOUT_STEP_V2';
 const PAYPAL_HOSTED_DISMISS_PHONE_ERROR_MESSAGE_V2 = 'PAYPAL_HOSTED_DISMISS_PHONE_ERROR_V2';
@@ -993,6 +993,21 @@ function fillFirstHostedInputByIds(ids = [], value = '') {
   return false;
 }
 
+function triggerHostedInputCommit(input = null) {
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return false;
+  }
+  if (typeof input.focus === 'function') {
+    input.focus();
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  if (typeof input.blur === 'function') {
+    input.blur();
+  }
+  return true;
+}
+
 function getVisibleHostedInputs() {
   return getVisibleControls('input, textarea')
     .filter((input) => {
@@ -1337,25 +1352,105 @@ function getHostedBrazilAddressValues(address = {}) {
   };
 }
 
+function fillHostedBrazilPostalCodeAndCommit(value = '') {
+  const normalizedValue = normalizeText(value);
+  if (!normalizedValue) {
+    return {
+      found: false,
+      filled: false,
+      committed: false,
+      descriptor: '',
+    };
+  }
+  const byId = document.getElementById('billingPostalCode');
+  const input = byId && isVisibleElement(byId) && isEnabledControl(byId)
+    ? byId
+    : findHostedInputByText([/\bcep\b|postal|zip/i]);
+  if (!input || !isVisibleElement(input) || !isEnabledControl(input)) {
+    return {
+      found: false,
+      filled: false,
+      committed: false,
+      descriptor: '',
+    };
+  }
+  fillInput(input, normalizedValue);
+  return {
+    found: true,
+    filled: true,
+    committed: triggerHostedInputCommit(input),
+    descriptor: getHostedInputDescriptor(input),
+  };
+}
+
+function fillHostedBrazilHouseNumber(value = '') {
+  const normalizedValue = normalizeText(value);
+  if (!normalizedValue) {
+    return {
+      found: false,
+      filled: false,
+      descriptor: '',
+    };
+  }
+  const input = getHostedBrazilRequiredNumberInput();
+  if (!input) {
+    return {
+      found: false,
+      filled: false,
+      descriptor: '',
+    };
+  }
+  fillInput(input, normalizedValue);
+  return {
+    found: true,
+    filled: true,
+    descriptor: getHostedInputDescriptor(input),
+  };
+}
+
 function fillHostedBrazilAddressFields(address = {}) {
   const values = getHostedBrazilAddressValues(address);
-  const zipFilled = values.zip
-    ? fillFirstHostedInputByIds(['billingPostalCode'], values.zip)
-      || fillHostedInputByText([/\bcep\b|postal|zip/i], values.zip).filled
-    : false;
-  const numberInput = getHostedBrazilRequiredNumberInput();
-  const numberFilled = numberInput && values.number
-    ? Boolean(fillInput(numberInput, values.number) || true)
-    : false;
+  const zipResult = fillHostedBrazilPostalCodeAndCommit(values.zip);
+  const numberResult = fillHostedBrazilHouseNumber(values.number);
   return {
     attempted: Boolean(values.zip || values.number),
-    filledAny: Boolean(zipFilled || numberFilled),
-    zip: zipFilled,
-    number: numberFilled,
+    filledAny: Boolean(zipResult.filled || numberResult.filled),
+    zip: Boolean(zipResult.filled),
+    number: Boolean(numberResult.filled),
+    zipCommitted: Boolean(zipResult.committed),
+    zipDescriptor: zipResult.descriptor || '',
+    numberInputFound: Boolean(numberResult.found),
+    numberDescriptor: numberResult.descriptor || '',
     street: false,
     neighborhood: false,
     city: false,
     state: false,
+  };
+}
+
+function refillHostedBrazilHouseNumberAfterGeneratedAddress(address = {}, previousResult = null) {
+  const values = getHostedBrazilAddressValues(address);
+  const numberResult = fillHostedBrazilHouseNumber(values.number);
+  if (!previousResult) {
+    return {
+      attempted: Boolean(values.number),
+      filledAny: Boolean(numberResult.filled),
+      zip: false,
+      number: Boolean(numberResult.filled),
+      numberInputFound: Boolean(numberResult.found),
+      numberDescriptor: numberResult.descriptor || '',
+      street: false,
+      neighborhood: false,
+      city: false,
+      state: false,
+    };
+  }
+  return {
+    ...previousResult,
+    filledAny: Boolean(previousResult.filledAny || numberResult.filled),
+    number: Boolean(previousResult.number || numberResult.filled),
+    numberInputFound: Boolean(previousResult.numberInputFound || numberResult.found),
+    numberDescriptor: numberResult.descriptor || previousResult.numberDescriptor || '',
   };
 }
 
@@ -2115,8 +2210,8 @@ function fillNonPhoneGuestCheckoutFields(payload = {}, address = {}, isBrazil = 
   fillHostedInputById('password', resolvedValues.password);
   fillHostedInputById('firstName', resolvedValues.firstName);
   fillHostedInputById('lastName', resolvedValues.lastName);
-  fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
   if (!isBrazil) {
+    fillHostedInputById('billingPostalCode', address.zip || address.postalCode || '');
     fillHostedInputById('billingLine1', address.street || address.address1 || '');
     fillHostedInputById('billingCity', address.city || '');
     selectHostedOptionByIdText('billingState', address.state || address.region || '');
@@ -2209,12 +2304,15 @@ async function fillHostedGuestCheckout(payload = {}) {
     await sleep(1000);
   }
   if (payload.addressOnly === true) {
-    const addressFillResult = fillHostedAddressFields(address);
+    let addressFillResult = fillHostedAddressFields(address);
     const documentFillResult = fillHostedDocumentIfPresent(payload, address);
     const brazilTermsResult = isBrazil ? checkHostedBrazilRequiredTerms() : null;
     const brazilGeneratedAddressResult = isBrazil
       ? await waitForHostedBrazilGeneratedAddressValues()
       : null;
+    if (isBrazil) {
+      addressFillResult = refillHostedBrazilHouseNumberAfterGeneratedAddress(address, addressFillResult);
+    }
     const addressSuggestionResult = payload.useAddressSuggestionFallback === true
       ? await selectHostedAddressSuggestionFallback()
       : {
@@ -2262,6 +2360,9 @@ async function fillHostedGuestCheckout(payload = {}) {
     const brazilGeneratedAddressResult = isBrazil
       ? await waitForHostedBrazilGeneratedAddressValues()
       : null;
+    const brazilAddressFillResult = isBrazil
+      ? refillHostedBrazilHouseNumberAfterGeneratedAddress(address, brazilFillResult?.addressFillResult || null)
+      : null;
     const commonResult = {
       stage: PAYPAL_HOSTED_STAGE_GUEST_CHECKOUT,
       nonPhoneFieldsFilled: true,
@@ -2275,7 +2376,7 @@ async function fillHostedGuestCheckout(payload = {}) {
         brazilTermsFound: Boolean(brazilFillResult?.termsFound),
         brazilTermsChecked: Boolean(brazilFillResult?.termsChecked),
         brazilMarketingTermsSkipped: Boolean(brazilFillResult?.marketingTermsSkipped),
-        brazilAddressFillResult: brazilFillResult?.addressFillResult || null,
+        brazilAddressFillResult,
         brazilGeneratedAddressReady: Boolean(brazilGeneratedAddressResult?.ready),
         brazilGeneratedAddressWaitTimedOut: Boolean(brazilGeneratedAddressResult?.timedOut),
       } : {}),

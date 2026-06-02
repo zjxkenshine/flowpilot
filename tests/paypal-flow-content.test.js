@@ -375,6 +375,8 @@ function createHostedPayPalHarness(options = {}) {
   let sleepCount = 0;
   let delayedReadOnlyEmailField = null;
   let pendingBrazilGeneratedAddress = null;
+  let brazilNumberInputDelayedUntilCepBlur = false;
+  let delayedBrazilNumberInput = null;
   const body = { innerText: '', textContent: '' };
   const location = {
     href: 'https://www.paypal.com/checkoutweb/signup',
@@ -438,8 +440,24 @@ function createHostedPayPalHarness(options = {}) {
         });
         return true;
       },
-      focus() {},
-      blur() {},
+      focus() {
+        events.push({ type: 'focus', id: this.id, value: this.value });
+      },
+      blur() {
+        events.push({ type: 'blur', id: this.id, value: this.value });
+        if (
+          brazilNumberInputDelayedUntilCepBlur
+          && delayedBrazilNumberInput
+          && (this === brazilBillingCepInput || this === brazilCepInput)
+          && !elements.includes(delayedBrazilNumberInput)
+        ) {
+          const insertIndex = elements.indexOf(brazilAddressInput);
+          const nextElements = elements.slice();
+          nextElements.splice(insertIndex >= 0 ? insertIndex + 1 : nextElements.length, 0, delayedBrazilNumberInput);
+          setElements(nextElements);
+          events.push({ type: 'brazil-number-attached-after-cep-blur', id: delayedBrazilNumberInput.id });
+        }
+      },
       click() {
         events.push({ type: 'native-click', id: this.id, text: this.textContent });
         if (this.type === 'checkbox') {
@@ -707,6 +725,8 @@ function createHostedPayPalHarness(options = {}) {
     if (options.brazil) {
       const cepInput = options.useBillingAddressIds ? brazilBillingCepInput : brazilCepInput;
       const numberInput = options.useBillingAddressIds ? brazilBillingHouseNumberInput : brazilNumberInput;
+      brazilNumberInputDelayedUntilCepBlur = Boolean(options.delayNumberInputUntilCepBlur);
+      delayedBrazilNumberInput = brazilNumberInputDelayedUntilCepBlur ? numberInput : null;
       pendingBrazilGeneratedAddress = options.generatedAddress || null;
       [
         brazilCepInput,
@@ -737,7 +757,7 @@ function createHostedPayPalHarness(options = {}) {
         lastNameInput,
         cepInput,
         brazilAddressInput,
-        numberInput,
+        ...(brazilNumberInputDelayedUntilCepBlur ? [] : [numberInput]),
         brazilNeighborhoodInput,
         brazilCityInput,
         brazilStateSelect,
@@ -1574,6 +1594,7 @@ test('PayPal hosted Brazil address fill uses CEP and billingHouseNumber only', a
   harness.showGuestCheckout({
     brazil: true,
     useBillingAddressIds: true,
+    delayNumberInputUntilCepBlur: true,
     generatedAddress: {
       address: 'Praca Maua, 1',
       neighborhood: 'Centro',
@@ -1622,8 +1643,22 @@ test('PayPal hosted Brazil address fill uses CEP and billingHouseNumber only', a
   assert.equal(result.submitted, true);
   assert.equal(result.brazilRequiredFieldsReady, true);
   assert.equal(result.brazilGeneratedAddressReady, true);
+  assert.equal(result.brazilAddressFillResult.zipCommitted, true);
+  assert.equal(result.brazilAddressFillResult.number, true);
   assert.equal(harness.brazil.billingCepInput.value, '20081-240');
   assert.equal(harness.brazil.billingHouseNumberInput.value, '15');
+  const cepFocusIndex = harness.events.findIndex((event) => event.type === 'focus' && event.id === 'billingPostalCode');
+  const cepInputIndex = harness.events.findIndex((event) => event.type === 'dispatch' && event.id === 'billingPostalCode' && event.event === 'input');
+  const cepChangeIndex = harness.events.findIndex((event) => event.type === 'dispatch' && event.id === 'billingPostalCode' && event.event === 'change');
+  const cepBlurIndex = harness.events.findIndex((event) => event.type === 'blur' && event.id === 'billingPostalCode');
+  const numberAttachedIndex = harness.events.findIndex((event) => event.type === 'brazil-number-attached-after-cep-blur' && event.id === 'billingHouseNumber');
+  const numberFillIndex = harness.events.findIndex((event) => event.type === 'fill' && event.id === 'billingHouseNumber' && event.value === '15');
+  assert.ok(cepFocusIndex >= 0);
+  assert.ok(cepFocusIndex < cepInputIndex);
+  assert.ok(cepInputIndex < cepChangeIndex);
+  assert.ok(cepChangeIndex < cepBlurIndex);
+  assert.ok(cepBlurIndex < numberAttachedIndex);
+  assert.ok(numberAttachedIndex < numberFillIndex);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'address-br'), false);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'bairro-br'), false);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'city-br'), false);
@@ -1687,6 +1722,7 @@ test('PayPal hosted Brazil address-only retry waits for generated address values
   harness.showGuestCheckout({
     brazil: true,
     useBillingAddressIds: true,
+    delayNumberInputUntilCepBlur: true,
     generatedAddress: {
       address: 'Praca Maua, 1',
       city: 'Rio de Janeiro',
@@ -1717,8 +1753,18 @@ test('PayPal hosted Brazil address-only retry waits for generated address values
   assert.equal(result.addressOnly, true);
   assert.equal(result.brazilGeneratedAddressReady, true);
   assert.equal(result.brazilGeneratedAddressWaitTimedOut, false);
+  assert.equal(result.addressFillResult.zipCommitted, true);
+  assert.equal(result.addressFillResult.number, true);
   assert.equal(harness.brazil.billingCepInput.value, '20081-240');
   assert.equal(harness.brazil.billingHouseNumberInput.value, '15');
+  const cepFocusIndex = harness.events.findIndex((event) => event.type === 'focus' && event.id === 'billingPostalCode');
+  const cepBlurIndex = harness.events.findIndex((event) => event.type === 'blur' && event.id === 'billingPostalCode');
+  const numberAttachedIndex = harness.events.findIndex((event) => event.type === 'brazil-number-attached-after-cep-blur' && event.id === 'billingHouseNumber');
+  const numberFillIndex = harness.events.findIndex((event) => event.type === 'fill' && event.id === 'billingHouseNumber' && event.value === '15');
+  assert.ok(cepFocusIndex >= 0);
+  assert.ok(cepFocusIndex < cepBlurIndex);
+  assert.ok(cepBlurIndex < numberAttachedIndex);
+  assert.ok(numberAttachedIndex < numberFillIndex);
   assert.equal(harness.events.some((event) => event.type === 'brazil-generated-address'), true);
   assert.equal(harness.events.some((event) => event.type === 'fill' && event.id === 'address-br'), false);
   assert.equal(harness.brazil.addressInput.value, 'Praca Maua, 1');
