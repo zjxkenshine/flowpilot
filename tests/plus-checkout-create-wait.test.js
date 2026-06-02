@@ -8742,8 +8742,8 @@ test('PayPal hosted HeroSMS PayPal/BR mode requests fixed PayPal Brazil number',
   assert.equal(requestCall.state.heroSmsCountryId, 73);
   assert.equal(requestCall.state.heroSmsCountryLabel, 'Brazil');
   assert.deepEqual(requestCall.state.heroSmsCountryFallback, []);
-  assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, { 73: 'correios_celular', 151: 'docomo' });
-  assert.deepEqual(requestCall.state.heroSmsOperatorOrderByCountry, { 73: ['correios_celular', 'vivo'] });
+  assert.deepEqual(requestCall.state.heroSmsOperatorByCountry, { 151: 'docomo' });
+  assert.deepEqual(requestCall.state.heroSmsOperatorOrderByCountry, { 73: [] });
   assert.equal(requestCall.state.heroSmsMinPrice, '0.06');
   assert.equal(requestCall.state.heroSmsMaxPrice, '0.18');
   assert.equal(requestCall.state.heroSmsPreferredPrice, '');

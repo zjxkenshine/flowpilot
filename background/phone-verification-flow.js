@@ -4800,7 +4800,7 @@
           );
         }
       }
-      const acquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
+      const rawAcquirePriority = normalizeHeroSmsAcquirePriority(state?.heroSmsAcquirePriority);
       const priceRange = resolvePhonePriceRange(state, config.provider);
       if (priceRange.invalidRange) {
         throw new Error(
@@ -4816,11 +4816,13 @@
         && String(resolveHeroSmsServiceCode(config) || '').trim().toLowerCase() === 'paypal'
         && (
           String(state?.hostedCheckoutSmsSource || '').trim().toLowerCase().replace(/-/g, '_') === 'hero_sms_paypal_br'
-          || Boolean(state?.heroSmsOperatorOrderByCountry)
           || options?.providerId === PHONE_SMS_PROVIDER_HERO
         )
         && countryCandidates.some((entry) => normalizeCountryId(entry?.id, 0) === 73)
       );
+      const acquirePriority = isHeroSmsPayPalBrazilMode
+        ? HERO_SMS_ACQUIRE_PRIORITY_PRICE
+        : rawAcquirePriority;
       const countryPriceFloorByCountryId = normalizeCountryPriceFloorMap(
         options?.countryPriceFloorByCountryId,
         (value) => String(normalizeCountryId(value, 0))
@@ -4830,9 +4832,6 @@
       const maxAcquireRounds = isHeroSmsPayPalBrazilMode ? 5 : configuredAcquireRounds;
       const retryDelayMs = normalizePhoneActivationRetryDelayMs(state?.heroSmsActivationRetryDelayMs);
       let tierUpgradeLimit = normalizePhoneActivationTierUpgradeLimit(state?.phoneActivationTierUpgradeLimit);
-      const configuredOperatorOrderByCountry = normalizeHeroSmsOperatorOrderByCountry(state?.heroSmsOperatorOrderByCountry);
-      const fallbackOperatorByCountry = normalizeHeroSmsOperatorByCountry(state?.heroSmsOperatorByCountry);
-
       const countryAttempts = countryCandidates.map((countryConfig, index) => ({
         index,
         countryConfig,
@@ -5025,29 +5024,9 @@
         }
         attempt.pricesToTry = pricesToTry;
         if (isHeroSmsPayPalBrazilMode && countryIdKey === '73') {
-          const configuredOrder = normalizeHeroSmsOperatorOrder([
-            ...(configuredOperatorOrderByCountry[countryIdKey] || []),
-            fallbackOperatorByCountry[countryIdKey] || '',
-          ]);
-          let loadedOrder = [];
-          let loadedOperatorsOk = false;
-          try {
-            loadedOrder = await fetchHeroSmsOperatorsForCountry(config, countryConfig.id);
-            loadedOperatorsOk = true;
-          } catch (error) {
-            await addLog(
-              `步骤 9：HeroSMS ${countryLabel} getOperators 失败，PayPal/BR 降级为配置运营商${configuredOrder.length ? ` ${configuredOrder.join(', ')}` : ''}${configuredOrder.length ? ' + 不带运营商' : '不带运营商'}尝试：${error?.message || String(error || 'unknown error')}`,
-              'warn'
-            );
-          }
-          if (loadedOperatorsOk) {
-            const mergedOperators = normalizeHeroSmsOperatorOrder([...configuredOrder, ...loadedOrder]);
-            attempt.operatorOrder = mergedOperators.length ? mergedOperators : [''];
-          } else {
-            attempt.operatorOrder = configuredOrder.length ? [...configuredOrder, ''] : [''];
-          }
+          attempt.operatorOrder = [''];
           await addLog(
-            `步骤 9：HeroSMS ${countryLabel} PayPal/BR 运营商队列：${attempt.operatorOrder.map((operator) => operator || 'any').join(', ')}。`,
+            `步骤 9：HeroSMS ${countryLabel} PayPal/BR 默认不限制运营商，仅按价格档位从低到高尝试。`,
             'info'
           );
         }
@@ -5057,10 +5036,7 @@
         const paypalTierCount = countryAttempts
           .filter((attempt) => Array.isArray(attempt.pricesToTry) && attempt.pricesToTry.length)
           .reduce((total, attempt) => {
-            const operatorCount = Array.isArray(attempt.operatorOrder) && attempt.operatorOrder.length
-              ? attempt.operatorOrder.length
-              : 1;
-            return total + (attempt.pricesToTry.length * operatorCount);
+            return total + attempt.pricesToTry.length;
           }, 0);
         tierUpgradeLimit = Math.max(tierUpgradeLimit, Math.max(0, paypalTierCount - 1));
       }
@@ -5072,7 +5048,7 @@
         getCountryLabel: (attempt) => attempt?.countryLabel,
         getPrices: (attempt) => attempt?.pricesToTry,
         getOperators: (attempt) => (isHeroSmsPayPalBrazilMode
-          ? (Array.isArray(attempt?.operatorOrder) && attempt.operatorOrder.length ? attempt.operatorOrder : [''])
+          ? ['']
           : [null]),
         acquirePriority,
         preferredPrice: preferredPriceTier,
@@ -5084,7 +5060,7 @@
         maxAcquireRounds,
         retryDelayMs,
         tierUpgradeLimit,
-        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}${isHeroSmsPayPalBrazilMode ? ` / operator ${tier.operator || 'any'}` : ''}`,
+        getTierLabel: (tier) => `${tier.countryLabel}: 价格档位 ${formatPhoneActivationTierPrice(tier.price)}`,
         attemptTier: async (tier) => {
           const attempt = tier.attempt;
           const countryConfig = attempt.countryConfig;
@@ -5103,7 +5079,7 @@
             allowSingleCountryFloorFallback: !hasAlternativeCountries,
           });
           const preferredOperator = isHeroSmsPayPalBrazilMode
-            ? String(tier.operator || '').trim()
+            ? ''
             : (attempt.preferredOperator || String(config?.heroSmsOperatorByCountry?.[countryIdKey] || '').trim());
           const allowOperatorFallback = Boolean(preferredOperator) && !isHeroSmsPayPalBrazilMode;
           const buildFallbackActivation = (requestAction) => ({

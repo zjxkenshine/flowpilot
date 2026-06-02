@@ -246,7 +246,7 @@ test('phone verification helper maps PayPal region override to HeroSMS countries
   }
 });
 
-test('phone verification helper requests HeroSMS PayPal Brazil with configured operator override', async () => {
+test('phone verification helper requests HeroSMS PayPal Brazil without operator override', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
     addLog: async () => {},
@@ -263,12 +263,7 @@ test('phone verification helper requests HeroSMS PayPal Brazil with configured o
           text: async () => buildHeroSmsPricesPayload({ country, service, cost: 0.08 }),
         };
       }
-      if (action === 'getOperators') {
-        return {
-          ok: true,
-          text: async () => JSON.stringify({ countryOperators: { 73: ['vivo', 'tim'] } }),
-        };
-      }
+      assert.notEqual(action, 'getOperators');
       if (action === 'getNumber') {
         return {
           ok: true,
@@ -312,18 +307,18 @@ test('phone verification helper requests HeroSMS PayPal Brazil with configured o
   assert.equal(result.activation.serviceCode, 'paypal');
   assert.equal(result.activation.countryId, 73);
   assert.equal(result.activation.countryLabel, 'Brazil');
-  assert.equal(result.activation.operator, 'vivo');
+  assert.equal(result.activation.operator, undefined);
   assert.equal(getPricesRequest.searchParams.get('service'), 'paypal');
   assert.equal(getPricesRequest.searchParams.get('country'), '73');
   assert.equal(getPricesRequest.searchParams.get('operator'), null);
   assert.equal(getNumberRequest.searchParams.get('service'), 'paypal');
   assert.equal(getNumberRequest.searchParams.get('country'), '73');
-  assert.equal(getNumberRequest.searchParams.get('operator'), 'vivo');
+  assert.equal(getNumberRequest.searchParams.get('operator'), null);
   assert.equal(getNumberRequest.searchParams.get('maxPrice'), '0.08');
   assert.equal(getNumberRequest.searchParams.get('fixedPrice'), 'true');
 });
 
-test('phone verification helper tries PayPal Brazil operators five times per price tier before raising price', async () => {
+test('phone verification helper tries PayPal Brazil price tiers from lowest to highest with any operator', async () => {
   const requests = [];
   const helpers = api.createPhoneVerificationHelpers({
     addLog: async () => {},
@@ -334,7 +329,6 @@ test('phone verification helper tries PayPal Brazil operators five times per pri
       const action = parsedUrl.searchParams.get('action');
       const country = parsedUrl.searchParams.get('country');
       const service = parsedUrl.searchParams.get('service');
-      const operator = parsedUrl.searchParams.get('operator');
       const maxPrice = parsedUrl.searchParams.get('maxPrice');
       if (action === 'getPrices') {
         return {
@@ -342,24 +336,21 @@ test('phone verification helper tries PayPal Brazil operators five times per pri
           text: async () => JSON.stringify({
             [country]: {
               [service]: {
+                belowMin: { cost: 0.05, count: 100, physicalCount: 100 },
                 low: { cost: 0.08, count: 100, physicalCount: 100 },
-                high: { cost: 0.12, count: 100, physicalCount: 100 },
+                mid: { cost: 0.12, count: 100, physicalCount: 100 },
+                overMax: { cost: 0.2, count: 100, physicalCount: 100 },
               },
             },
           }),
         };
       }
-      if (action === 'getOperators') {
-        return {
-          ok: true,
-          text: async () => JSON.stringify({ countryOperators: { 73: ['tim', 'claro'] } }),
-        };
-      }
+      assert.notEqual(action, 'getOperators');
       if (action === 'getNumber') {
-        if (operator === 'tim' && maxPrice === '0.08') {
+        if (maxPrice === '0.12') {
           return {
             ok: true,
-            text: async () => 'ACCESS_NUMBER:paypalbr-tim-1:5511987654321',
+            text: async () => 'ACCESS_NUMBER:paypalbr-any-1:5511987654321',
           };
         }
         return {
@@ -378,7 +369,8 @@ test('phone verification helper tries PayPal Brazil operators five times per pri
       heroSmsOperatorByCountry: { 73: 'vivo' },
       heroSmsOperatorOrderByCountry: { 73: ['vivo'] },
       hostedCheckoutSmsSource: 'hero_sms_paypal_br',
-      heroSmsMaxPrice: '0.2',
+      heroSmsMinPrice: '0.06',
+      heroSmsMaxPrice: '0.18',
     }),
     sendToContentScriptResilient: async () => ({}),
     setState: async () => {},
@@ -395,22 +387,25 @@ test('phone verification helper tries PayPal Brazil operators five times per pri
     heroSmsOperatorByCountry: { 73: 'vivo' },
     heroSmsOperatorOrderByCountry: { 73: ['vivo'] },
     hostedCheckoutSmsSource: 'hero_sms_paypal_br',
-    heroSmsMaxPrice: '0.2',
+    heroSmsMinPrice: '0.06',
+    heroSmsMaxPrice: '0.18',
     phoneActivationRetryRounds: 1,
     phoneActivationTierUpgradeLimit: 0,
   });
 
   const getNumberCalls = requests.filter((entry) => entry.searchParams.get('action') === 'getNumber');
-  assert.equal(activation.activationId, 'paypalbr-tim-1');
-  assert.equal(activation.operator, 'tim');
+  const getOperatorsCalls = requests.filter((entry) => entry.searchParams.get('action') === 'getOperators');
+  assert.equal(activation.activationId, 'paypalbr-any-1');
+  assert.equal(activation.operator, undefined);
+  assert.equal(getOperatorsCalls.length, 0);
   assert.equal(getNumberCalls.length, 6);
   assert.deepStrictEqual(getNumberCalls.map((entry) => entry.searchParams.get('operator')), [
-    'vivo',
-    'vivo',
-    'vivo',
-    'vivo',
-    'vivo',
-    'tim',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
   assert.deepStrictEqual(getNumberCalls.map((entry) => entry.searchParams.get('maxPrice')), [
     '0.08',
@@ -418,8 +413,10 @@ test('phone verification helper tries PayPal Brazil operators five times per pri
     '0.08',
     '0.08',
     '0.08',
-    '0.08',
+    '0.12',
   ]);
+  assert.equal(getNumberCalls.some((entry) => entry.searchParams.get('maxPrice') === '0.05'), false);
+  assert.equal(getNumberCalls.some((entry) => entry.searchParams.get('maxPrice') === '0.2'), false);
   assert.equal(getNumberCalls.every((entry) => entry.searchParams.get('fixedPrice') === 'true'), true);
 });
 

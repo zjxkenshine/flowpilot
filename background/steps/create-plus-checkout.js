@@ -3188,25 +3188,13 @@
         phoneCodePollMaxRounds: _phoneCodePollMaxRounds,
         ...baseState
       } = sourceState;
-      const operatorOrder = normalizeHostedCheckoutHeroSmsPayPalOperatorOrder(
-        sourceState?.hostedCheckoutHeroSmsPayPalOperatorOrder
-      );
-      const fallbackOperator = String(
-        sourceState?.heroSmsOperatorByCountry?.[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]
-        || sourceState?.heroSmsOperatorByCountry?.[HERO_SMS_PAYPAL_BR_COUNTRY_ID]
-        || ''
-      ).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '');
-      const effectiveOperatorOrder = operatorOrder.length
-        ? operatorOrder
-        : (fallbackOperator ? [fallbackOperator] : []);
       const heroSmsOperatorByCountry = {
         ...(sourceState?.heroSmsOperatorByCountry && typeof sourceState.heroSmsOperatorByCountry === 'object'
           ? sourceState.heroSmsOperatorByCountry
           : {}),
       };
-      if (effectiveOperatorOrder[0]) {
-        heroSmsOperatorByCountry[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)] = effectiveOperatorOrder[0];
-      }
+      delete heroSmsOperatorByCountry[String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)];
+      delete heroSmsOperatorByCountry[HERO_SMS_PAYPAL_BR_COUNTRY_ID];
       return {
         ...baseState,
         phoneSmsProvider: 'hero-sms',
@@ -3218,7 +3206,7 @@
           ...(sourceState?.heroSmsOperatorOrderByCountry && typeof sourceState.heroSmsOperatorOrderByCountry === 'object'
             ? sourceState.heroSmsOperatorOrderByCountry
             : {}),
-          [String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]: effectiveOperatorOrder,
+          [String(HERO_SMS_PAYPAL_BR_COUNTRY_ID)]: [],
         },
         heroSmsServiceCode: HERO_SMS_PAYPAL_SERVICE_CODE,
         heroSmsMinPrice: normalizeHostedCheckoutHeroSmsPayPalPrice(sourceState?.hostedCheckoutHeroSmsPayPalMinPrice),
