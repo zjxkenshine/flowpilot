@@ -606,6 +606,7 @@ const inputAutoSkipFailures = document.getElementById('input-auto-skip-failures'
 const inputAutoRunRetryPaypalCallback = document.getElementById('input-auto-run-retry-paypal-callback');
 const inputAutoRunPreserveIssueLogsOnRestart = document.getElementById('input-auto-run-preserve-issue-logs-on-restart');
 const inputPhoneVerificationCodePrefetchEnabled = document.getElementById('input-phone-verification-code-prefetch-enabled');
+const inputPhonePlusOauthOnlyModeEnabled = document.getElementById('input-phone-plus-oauth-only-mode-enabled');
 const inputRegistrationOnlyModeEnabled = document.getElementById('input-registration-only-mode-enabled');
 const inputRegistrationActivationOnlyModeEnabled = document.getElementById('input-registration-activation-only-mode-enabled');
 const inputAutoSkipFailuresThreadIntervalMinutes = document.getElementById('input-auto-skip-failures-thread-interval-minutes');
@@ -5279,6 +5280,28 @@ function updateFallbackThreadIntervalInputState() {
   inputAutoSkipFailuresThreadIntervalMinutes.disabled = Boolean(inputAutoSkipFailures.disabled);
 }
 
+function syncPhonePlusOauthOnlyControls(options = {}) {
+  const oauthOnlyEnabled = Boolean(
+    options.enabled
+    ?? (typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+      ? inputPhonePlusOauthOnlyModeEnabled.checked
+      : latestState?.phonePlusOauthOnlyModeEnabled)
+  );
+  if (typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled) {
+    inputPhonePlusOauthOnlyModeEnabled.checked = oauthOnlyEnabled;
+  }
+  [inputRegistrationOnlyModeEnabled, inputRegistrationActivationOnlyModeEnabled].forEach((input) => {
+    if (!input) {
+      return;
+    }
+    if (oauthOnlyEnabled) {
+      input.checked = false;
+    }
+    input.disabled = oauthOnlyEnabled;
+  });
+  return oauthOnlyEnabled;
+}
+
 function updateAutoDelayInputState() {
   const scheduled = isAutoRunScheduledPhase();
   inputAutoDelayEnabled.disabled = scheduled;
@@ -6962,7 +6985,14 @@ function collectSettingsPayload() {
     phoneVerificationCodePrefetchEnabled: typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
       ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
       : false,
+    phonePlusOauthOnlyModeEnabled: typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+      ? Boolean(inputPhonePlusOauthOnlyModeEnabled.checked)
+      : Boolean(latestState?.phonePlusOauthOnlyModeEnabled),
     registrationOnlyModeEnabled: !(
+      typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+        ? Boolean(inputPhonePlusOauthOnlyModeEnabled.checked)
+        : Boolean(latestState?.phonePlusOauthOnlyModeEnabled)
+    ) && !(
       typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
         ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
         : false
@@ -6971,7 +7001,11 @@ function collectSettingsPayload() {
         ? Boolean(inputRegistrationOnlyModeEnabled.checked)
         : false
     ),
-    registrationActivationOnlyModeEnabled: typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
+    registrationActivationOnlyModeEnabled: !(
+      typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+        ? Boolean(inputPhonePlusOauthOnlyModeEnabled.checked)
+        : Boolean(latestState?.phonePlusOauthOnlyModeEnabled)
+    ) && typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
       ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
       : false,
     autoRunFallbackThreadIntervalMinutes: normalizeAutoRunThreadIntervalMinutes(inputAutoSkipFailuresThreadIntervalMinutes.value),
@@ -11629,6 +11663,9 @@ function resolveStepDefinitionCapabilityState(state = latestState, options = {})
     phonePlusModeEnabled: capabilityState
       ? Boolean(capabilityState.runtimeLocks?.phonePlusModeEnabled)
       : Boolean(nextState?.phonePlusModeEnabled),
+    phonePlusOauthOnlyModeEnabled: capabilityState
+      ? Boolean(capabilityState.runtimeLocks?.phonePlusOauthOnlyModeEnabled)
+      : Boolean(nextState?.phonePlusOauthOnlyModeEnabled),
     plusModeEnabled: capabilityState
       ? Boolean(capabilityState.runtimeLocks?.plusModeEnabled)
       : (Boolean(nextState?.plusModeEnabled) && !Boolean(nextState?.phonePlusModeEnabled)),
@@ -13469,7 +13506,14 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   const previousPhonePlusModeEnabled = typeof currentPhonePlusModeEnabled !== 'undefined'
     ? currentPhonePlusModeEnabled
     : false;
-  const nextPhonePlusModeEnabled = Boolean(options.phonePlusModeEnabled ?? previousPhonePlusModeEnabled);
+  const nextPhonePlusOauthOnlyModeEnabled = Boolean(
+    options.phonePlusOauthOnlyModeEnabled
+    ?? (typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+      ? inputPhonePlusOauthOnlyModeEnabled.checked
+      : currentState?.phonePlusOauthOnlyModeEnabled)
+  );
+  const nextPhonePlusModeEnabled = nextPhonePlusOauthOnlyModeEnabled
+    || Boolean(options.phonePlusModeEnabled ?? previousPhonePlusModeEnabled);
   const nextPlusModeEnabled = Boolean(plusModeEnabled) && !nextPhonePlusModeEnabled;
   const rawPaymentMethod = typeof plusPaymentMethodOrOptions === 'string'
     ? plusPaymentMethodOrOptions
@@ -13523,6 +13567,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     activeFlowId: nextActiveFlowId,
     plusModeEnabled: nextPlusModeEnabled,
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: nextPhonePlusOauthOnlyModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
     ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep } : {}),
@@ -13536,6 +13581,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
     activeFlowId: nextActiveFlowId,
     plusModeEnabled: nextPlusModeEnabled,
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: nextPhonePlusOauthOnlyModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
     plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep,
@@ -13562,6 +13608,7 @@ function syncStepDefinitionsForMode(plusModeEnabled = false, plusPaymentMethodOr
   rebuildStepDefinitionState(nextPlusModeEnabled, {
     activeFlowId: nextActiveFlowId,
     phonePlusModeEnabled: nextPhonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: nextPhonePlusOauthOnlyModeEnabled,
     plusPaymentMethod: nextPaymentMethod,
     plusAccountAccessStrategy: nextPlusAccountAccessStrategy,
     ...(hasExplicitHostedCheckoutIsFinalStep ? { plusHostedCheckoutIsFinalStep: nextHostedCheckoutIsFinalStep } : {}),
@@ -13599,6 +13646,7 @@ function syncStepDefinitionsFromUiState(stateOverrides = {}) {
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     activeFlowId: nextState?.activeFlowId || nextState?.flowId || DEFAULT_ACTIVE_FLOW_ID,
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: Boolean(nextState?.phonePlusOauthOnlyModeEnabled),
     plusPaymentMethod: getSelectedPlusPaymentMethod(nextState),
     plusAccountAccessStrategy: stepDefinitionState.plusAccountAccessStrategy,
     openaiIntegrationTargetId: nextState?.openaiIntegrationTargetId || nextState?.panelMode,
@@ -13629,6 +13677,7 @@ function applySettingsState(state) {
     syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
       activeFlowId: state?.activeFlowId || state?.flowId,
       phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+      phonePlusOauthOnlyModeEnabled: Boolean(state?.phonePlusOauthOnlyModeEnabled),
       plusPaymentMethod: state?.plusPaymentMethod,
       plusAccountAccessStrategy: stepDefinitionState.plusAccountAccessStrategy,
       openaiIntegrationTargetId: state?.openaiIntegrationTargetId || state?.panelMode,
@@ -14335,13 +14384,18 @@ function applySettingsState(state) {
   if (typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled) {
     inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(state?.phoneVerificationCodePrefetchEnabled);
   }
-  const registrationActivationOnlyModeEnabled = Boolean(state?.registrationActivationOnlyModeEnabled);
+  const phonePlusOauthOnlyModeEnabled = Boolean(state?.phonePlusOauthOnlyModeEnabled);
+  if (typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled) {
+    inputPhonePlusOauthOnlyModeEnabled.checked = phonePlusOauthOnlyModeEnabled;
+  }
+  const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && Boolean(state?.registrationActivationOnlyModeEnabled);
   if (typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled) {
-    inputRegistrationOnlyModeEnabled.checked = !registrationActivationOnlyModeEnabled && Boolean(state?.registrationOnlyModeEnabled);
+    inputRegistrationOnlyModeEnabled.checked = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && Boolean(state?.registrationOnlyModeEnabled);
   }
   if (typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled) {
     inputRegistrationActivationOnlyModeEnabled.checked = registrationActivationOnlyModeEnabled;
   }
+  syncPhonePlusOauthOnlyControls({ enabled: phonePlusOauthOnlyModeEnabled });
   inputAutoSkipFailuresThreadIntervalMinutes.value = String(normalizeAutoRunThreadIntervalMinutes(state?.autoRunFallbackThreadIntervalMinutes));
   if (typeof inputStep6CookieCleanupEnabled !== 'undefined' && inputStep6CookieCleanupEnabled) {
     inputStep6CookieCleanupEnabled.checked = Boolean(state?.step6CookieCleanupEnabled);
@@ -18597,6 +18651,9 @@ async function startAutoRunFromCurrentSettings() {
       phonePlusModeEnabled: typeof inputPhonePlusModeEnabled !== 'undefined' && inputPhonePlusModeEnabled
         ? Boolean(inputPhonePlusModeEnabled.checked)
         : Boolean(latestState?.phonePlusModeEnabled),
+      phonePlusOauthOnlyModeEnabled: typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+        ? Boolean(inputPhonePlusOauthOnlyModeEnabled.checked)
+        : Boolean(latestState?.phonePlusOauthOnlyModeEnabled),
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
     };
     return registry.validateAutoRunStart({
@@ -18639,10 +18696,13 @@ async function startAutoRunFromCurrentSettings() {
   const phoneVerificationCodePrefetchEnabled = typeof inputPhoneVerificationCodePrefetchEnabled !== 'undefined' && inputPhoneVerificationCodePrefetchEnabled
     ? Boolean(inputPhoneVerificationCodePrefetchEnabled.checked)
     : false;
-  const registrationActivationOnlyModeEnabled = typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
+  const phonePlusOauthOnlyModeEnabled = typeof inputPhonePlusOauthOnlyModeEnabled !== 'undefined' && inputPhonePlusOauthOnlyModeEnabled
+    ? Boolean(inputPhonePlusOauthOnlyModeEnabled.checked)
+    : Boolean(latestState?.phonePlusOauthOnlyModeEnabled);
+  const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined' && inputRegistrationActivationOnlyModeEnabled
     ? Boolean(inputRegistrationActivationOnlyModeEnabled.checked)
     : false;
-  const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
+  const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && typeof inputRegistrationOnlyModeEnabled !== 'undefined' && inputRegistrationOnlyModeEnabled
     ? Boolean(inputRegistrationOnlyModeEnabled.checked)
     : false;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
@@ -18705,6 +18765,7 @@ async function startAutoRunFromCurrentSettings() {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled,
       accountContributionEnabled: Boolean(latestState?.accountContributionEnabled),
@@ -19951,6 +20012,7 @@ inputPlusModeEnabled?.addEventListener('change', () => {
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, getSelectedPlusPaymentMethod(), {
     render: true,
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
     signupMethod: stepDefinitionState.signupMethod,
   });
   markSettingsDirty(true);
@@ -19981,6 +20043,7 @@ inputPhonePlusModeEnabled?.addEventListener('change', () => {
       ...(latestState || {}),
       plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
       phonePlusModeEnabled: Boolean(inputPhonePlusModeEnabled.checked),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       phoneVerificationEnabled: Boolean(inputPhoneVerificationEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
     }, {
@@ -19989,12 +20052,49 @@ inputPhonePlusModeEnabled?.addEventListener('change', () => {
     : {
       plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
       phonePlusModeEnabled: Boolean(inputPhonePlusModeEnabled.checked),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
     };
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, getSelectedPlusPaymentMethod(), {
     render: true,
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
     signupMethod: stepDefinitionState.signupMethod,
+  });
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+inputPhonePlusOauthOnlyModeEnabled?.addEventListener('change', () => {
+  const enabled = syncPhonePlusOauthOnlyControls();
+  if (enabled) {
+    if (inputPlusModeEnabled) {
+      inputPlusModeEnabled.checked = false;
+    }
+    if (inputPhonePlusModeEnabled) {
+      inputPhonePlusModeEnabled.checked = true;
+    }
+    if (inputPhoneVerificationEnabled) {
+      inputPhoneVerificationEnabled.checked = true;
+    }
+    setPhoneVerificationSectionExpanded(true);
+    setSignupMethod(SIGNUP_METHOD_PHONE);
+    currentPlusAccountAccessStrategy = DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
+    if (selectPlusAccountAccessStrategy) {
+      selectPlusAccountAccessStrategy.dataset.requestedValue = DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY;
+      selectPlusAccountAccessStrategy.value = normalizePlusAccountAccessStrategyUiValue(DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY);
+    }
+  }
+  updatePlusModeUI();
+  updateSignupMethodUI({ notify: true });
+  updatePhoneVerificationSettingsUI();
+  syncStepDefinitionsForMode(false, {
+    render: true,
+    phonePlusModeEnabled: enabled || Boolean(inputPhonePlusModeEnabled?.checked),
+    phonePlusOauthOnlyModeEnabled: enabled,
+    plusPaymentMethod: getSelectedPlusPaymentMethod(),
+    plusAccountAccessStrategy: DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY,
+    signupMethod: SIGNUP_METHOD_PHONE,
   });
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
@@ -20173,6 +20273,7 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
       ...(latestState || {}),
       plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
       phonePlusModeEnabled: Boolean(inputPhonePlusModeEnabled?.checked),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
     }, {
       signupMethod: getSelectedSignupMethod(),
@@ -20180,11 +20281,13 @@ selectPlusPaymentMethod?.addEventListener('change', () => {
     : {
       plusModeEnabled: Boolean(inputPlusModeEnabled?.checked),
       phonePlusModeEnabled: Boolean(inputPhonePlusModeEnabled?.checked),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
     };
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     render: true,
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
     plusPaymentMethod: selectPlusPaymentMethod.value,
     signupMethod: stepDefinitionState.signupMethod,
   });
@@ -20424,6 +20527,7 @@ selectPanelMode.addEventListener('change', async () => {
       phonePlusModeEnabled: typeof inputPhonePlusModeEnabled !== 'undefined' && inputPhonePlusModeEnabled
         ? Boolean(inputPhonePlusModeEnabled.checked)
         : Boolean(latestState?.phonePlusModeEnabled),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
       phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
         ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
@@ -21531,6 +21635,12 @@ inputPhoneVerificationCodePrefetchEnabled?.addEventListener('change', () => {
 });
 
 inputRegistrationOnlyModeEnabled?.addEventListener('change', () => {
+  if (Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked)) {
+    syncPhonePlusOauthOnlyControls({ enabled: true });
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+    return;
+  }
   if (inputRegistrationOnlyModeEnabled.checked && inputRegistrationActivationOnlyModeEnabled) {
     inputRegistrationActivationOnlyModeEnabled.checked = false;
   }
@@ -21539,6 +21649,12 @@ inputRegistrationOnlyModeEnabled?.addEventListener('change', () => {
 });
 
 inputRegistrationActivationOnlyModeEnabled?.addEventListener('change', () => {
+  if (Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked)) {
+    syncPhonePlusOauthOnlyControls({ enabled: true });
+    markSettingsDirty(true);
+    saveSettings({ silent: true }).catch(() => { });
+    return;
+  }
   if (inputRegistrationActivationOnlyModeEnabled.checked && inputRegistrationOnlyModeEnabled) {
     inputRegistrationOnlyModeEnabled.checked = false;
   }
@@ -21656,6 +21772,7 @@ selectFlow?.addEventListener('change', () => {
       phonePlusModeEnabled: typeof inputPhonePlusModeEnabled !== 'undefined' && inputPhonePlusModeEnabled
         ? Boolean(inputPhonePlusModeEnabled.checked)
         : Boolean(latestState?.phonePlusModeEnabled),
+      phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
       signupMethod: getSelectedSignupMethod(),
       phoneSignupReloginAfterBindEmailEnabled: typeof inputPhoneSignupReloginAfterBindEmail !== 'undefined' && inputPhoneSignupReloginAfterBindEmail
         ? Boolean(inputPhoneSignupReloginAfterBindEmail.checked)
@@ -22021,6 +22138,7 @@ inputPhoneSignupReloginAfterBindEmail?.addEventListener('change', () => {
     };
   syncStepDefinitionsForMode(stepDefinitionState.plusModeEnabled, {
     phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+    phonePlusOauthOnlyModeEnabled: Boolean(inputPhonePlusOauthOnlyModeEnabled?.checked),
     plusPaymentMethod: getSelectedPlusPaymentMethod(latestState),
     signupMethod: stepDefinitionState.signupMethod,
     phoneSignupReloginAfterBindEmailEnabled: Boolean(inputPhoneSignupReloginAfterBindEmail.checked),
@@ -23369,6 +23487,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.payload.phonePlusModeEnabled !== undefined && inputPhonePlusModeEnabled) {
         inputPhonePlusModeEnabled.checked = Boolean(message.payload.phonePlusModeEnabled);
       }
+      if (message.payload.phonePlusOauthOnlyModeEnabled !== undefined && inputPhonePlusOauthOnlyModeEnabled) {
+        inputPhonePlusOauthOnlyModeEnabled.checked = Boolean(message.payload.phonePlusOauthOnlyModeEnabled);
+        syncPhonePlusOauthOnlyControls({ enabled: Boolean(message.payload.phonePlusOauthOnlyModeEnabled) });
+      }
       if (message.payload.plusPaymentMethod !== undefined && selectPlusPaymentMethod) {
         selectPlusPaymentMethod.value = normalizePlusPaymentMethod(message.payload.plusPaymentMethod);
       }
@@ -23492,6 +23614,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (
         message.payload.plusModeEnabled !== undefined
         || message.payload.phonePlusModeEnabled !== undefined
+        || message.payload.phonePlusOauthOnlyModeEnabled !== undefined
         || message.payload.plusPaymentMethod !== undefined
         || message.payload.plusAccountAccessStrategy !== undefined
         || message.payload.plusCheckoutVerificationFailureStrategy !== undefined
@@ -23516,6 +23639,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           : {
             plusModeEnabled: Boolean(latestState?.plusModeEnabled) && !Boolean(latestState?.phonePlusModeEnabled),
             phonePlusModeEnabled: Boolean(latestState?.phonePlusModeEnabled),
+            phonePlusOauthOnlyModeEnabled: Boolean(latestState?.phonePlusOauthOnlyModeEnabled),
             plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(latestState?.plusAccountAccessStrategy || DEFAULT_PLUS_ACCOUNT_ACCESS_STRATEGY),
             signupMethod: normalizeSignupMethod(latestState?.signupMethod || DEFAULT_SIGNUP_METHOD),
           };
@@ -23523,6 +23647,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           stepDefinitionState.plusModeEnabled,
           {
             phonePlusModeEnabled: stepDefinitionState.phonePlusModeEnabled,
+            phonePlusOauthOnlyModeEnabled: Boolean(latestState?.phonePlusOauthOnlyModeEnabled),
             render: true,
             plusPaymentMethod: latestState?.plusPaymentMethod,
             plusAccountAccessStrategy: stepDefinitionState.plusAccountAccessStrategy,
@@ -23652,21 +23777,44 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         inputPhoneVerificationCodePrefetchEnabled.checked = Boolean(message.payload.phoneVerificationCodePrefetchEnabled);
       }
       if (
+        message.payload.phonePlusOauthOnlyModeEnabled !== undefined
+        || message.payload.registrationOnlyModeEnabled !== undefined
+        || message.payload.registrationActivationOnlyModeEnabled !== undefined
+      ) {
+        const oauthOnlyEnabled = Boolean(
+          message.payload.phonePlusOauthOnlyModeEnabled
+          ?? latestState?.phonePlusOauthOnlyModeEnabled
+        );
+        syncPhonePlusOauthOnlyControls({ enabled: oauthOnlyEnabled });
+      }
+      if (
         message.payload.registrationOnlyModeEnabled !== undefined
         && typeof inputRegistrationOnlyModeEnabled !== 'undefined'
         && inputRegistrationOnlyModeEnabled
       ) {
-        inputRegistrationOnlyModeEnabled.checked = !Boolean(message.payload.registrationActivationOnlyModeEnabled) && Boolean(message.payload.registrationOnlyModeEnabled);
+        inputRegistrationOnlyModeEnabled.checked = !Boolean(message.payload.phonePlusOauthOnlyModeEnabled ?? latestState?.phonePlusOauthOnlyModeEnabled)
+          && !Boolean(message.payload.registrationActivationOnlyModeEnabled)
+          && Boolean(message.payload.registrationOnlyModeEnabled);
       }
       if (
         message.payload.registrationActivationOnlyModeEnabled !== undefined
         && typeof inputRegistrationActivationOnlyModeEnabled !== 'undefined'
         && inputRegistrationActivationOnlyModeEnabled
       ) {
-        inputRegistrationActivationOnlyModeEnabled.checked = Boolean(message.payload.registrationActivationOnlyModeEnabled);
+        inputRegistrationActivationOnlyModeEnabled.checked = !Boolean(message.payload.phonePlusOauthOnlyModeEnabled ?? latestState?.phonePlusOauthOnlyModeEnabled)
+          && Boolean(message.payload.registrationActivationOnlyModeEnabled);
         if (inputRegistrationActivationOnlyModeEnabled.checked && inputRegistrationOnlyModeEnabled) {
           inputRegistrationOnlyModeEnabled.checked = false;
         }
+      }
+      if (
+        message.payload.phonePlusOauthOnlyModeEnabled !== undefined
+        || message.payload.registrationOnlyModeEnabled !== undefined
+        || message.payload.registrationActivationOnlyModeEnabled !== undefined
+      ) {
+        syncPhonePlusOauthOnlyControls({
+          enabled: Boolean(message.payload.phonePlusOauthOnlyModeEnabled ?? latestState?.phonePlusOauthOnlyModeEnabled),
+        });
       }
       if (message.payload.autoRunDelayEnabled !== undefined) {
         inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);

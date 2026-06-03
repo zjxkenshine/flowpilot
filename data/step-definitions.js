@@ -216,6 +216,14 @@
     ];
   }
 
+  function createPhonePlusOauthOnlySteps() {
+    return [
+      { id: 1, order: 10, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+      { id: 2, order: 20, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+      { id: 3, order: 30, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
+    ];
+  }
+
   function createHostedCheckoutSteps(prefixSteps, startId, startOrder, signupMethod = SIGNUP_METHOD_EMAIL, options = {}) {
     const sessionTailFactory = resolvePlusSessionImportTail(options, signupMethod);
     const tailSteps = sessionTailFactory
@@ -372,6 +380,7 @@
   const PHONE_PLUS_GPC_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS);
   const PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS = createPhonePlusSteps(PLUS_GPC_PREFIX_STEP_DEFINITIONS, { phoneSignupReloginAfterBindEmailEnabled: true });
   const SUB2API_RELOGIN_STEP_DEFINITIONS = createSub2ApiReloginSteps();
+  const PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS = createPhonePlusOauthOnlySteps();
   const KIRO_STEP_DEFINITIONS = [
     {
       id: 1,
@@ -551,6 +560,9 @@
     });
     const activationOnlyModeEnabled = isRegistrationActivationOnlyModeEnabled(options);
     if (isPhonePlusModeEnabled(options)) {
+      if (Boolean(options?.phonePlusOauthOnlyModeEnabled)) {
+        return PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS;
+      }
       if (activationOnlyModeEnabled) {
         if (useHostedCheckoutFinalStep) {
           return createPhonePlusSteps(PLUS_PAYPAL_HOSTED_CHECKOUT_PREFIX_STEP_DEFINITIONS, {
@@ -746,6 +758,7 @@
           ...PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
           ...PHONE_PLUS_GPC_STEP_DEFINITIONS,
           ...PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+          ...PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS,
           ...SUB2API_RELOGIN_STEP_DEFINITIONS,
         ]) {
           keyed.set(`${step.id}:${step.key}`, step);
@@ -964,6 +977,7 @@
     PHONE_PLUS_GOPAY_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
     PHONE_PLUS_GPC_STEP_DEFINITIONS,
     PHONE_PLUS_GPC_BOUND_EMAIL_RELOGIN_STEP_DEFINITIONS,
+    PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS,
     SIGNUP_METHOD_EMAIL,
     SIGNUP_METHOD_PHONE,
     getAllSteps,

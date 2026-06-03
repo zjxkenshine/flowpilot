@@ -5,6 +5,130 @@ const fs = require('node:fs');
 const source = fs.readFileSync('background/steps/fetch-login-code.js', 'utf8');
 const globalScope = {};
 const api = new Function('self', `${source}; return self.MultiPageBackgroundStep8;`)(globalScope);
+const step7Source = fs.readFileSync('background/steps/oauth-login.js', 'utf8');
+const step7Api = new Function('self', `${step7Source}; return self.MultiPageBackgroundStep7;`)({});
+
+function createPhonePlusOauthOnlyStep7Harness(result) {
+  const events = {
+    completions: [],
+    contentPayloads: [],
+    tabReuses: [],
+  };
+  const state = {
+    activeFlowId: 'openai',
+    nodeId: 'oauth-login',
+    visibleStep: 1,
+    phonePlusModeEnabled: true,
+    phonePlusOauthOnlyModeEnabled: true,
+    plusModeEnabled: false,
+    signupMethod: 'phone',
+    resolvedSignupMethod: 'phone',
+    phoneVerificationEnabled: true,
+    accountIdentifierType: 'phone',
+    accountIdentifier: '+662222',
+    signupPhoneNumber: '+662222',
+    password: 'secret',
+    customPassword: 'secret',
+  };
+  const executor = step7Api.createStep7Executor({
+    addLog: async () => {},
+    completeNodeFromBackground: async (step, payload) => {
+      events.completions.push({ step, payload });
+    },
+    getErrorMessage: (error) => String(error?.message || error || '').trim(),
+    getLoginAuthStateLabel: (pageState) => ({
+      oauth_consent_page: 'OAuth 授权页',
+      phone_verification_page: '手机号验证码页',
+      verification_page: '登录验证码页',
+      add_email_page: '添加邮箱页',
+      add_phone_page: '添加手机号页',
+    }[pageState] || '未知页面'),
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getState: async () => state,
+    isStep6RecoverableResult: () => false,
+    isStep6SuccessResult: () => true,
+    refreshOAuthUrlBeforeStep6: async () => 'https://oauth.example/latest',
+    reuseOrCreateTab: async (sourceName, url, options) => {
+      events.tabReuses.push({ sourceName, url, options });
+    },
+    sendToContentScriptResilient: async (_sourceName, message) => {
+      events.contentPayloads.push(message.payload);
+      return result;
+    },
+    STEP6_MAX_ATTEMPTS: 1,
+    throwIfStopped: () => {},
+  });
+  return { executor, state, events };
+}
+
+test('step 7 Phone Plus OAuth-only completes direct OAuth consent after phone password login', async () => {
+  const { executor, state, events } = createPhonePlusOauthOnlyStep7Harness({
+    state: 'oauth_consent_page',
+    directOAuthConsentPage: true,
+    url: 'https://auth.openai.com/oauth/authorize',
+  });
+
+  await executor.executeStep7(state);
+
+  assert.deepStrictEqual(events.contentPayloads, [
+    {
+      email: '',
+      phoneNumber: '+662222',
+      countryId: null,
+      countryLabel: '',
+      accountIdentifier: '+662222',
+      loginIdentifierType: 'phone',
+      password: 'secret',
+      visibleStep: 1,
+    },
+  ]);
+  assert.deepStrictEqual(events.completions, [
+    {
+      step: 'oauth-login',
+      payload: {
+        loginVerificationRequestedAt: null,
+        accountIdentifierType: 'phone',
+        accountIdentifier: '+662222',
+        signupPhoneNumber: '+662222',
+        signupPhoneCompletedActivation: null,
+        signupPhoneActivation: null,
+        skipLoginVerificationStep: true,
+        directOAuthConsentPage: true,
+      },
+    },
+  ]);
+});
+
+test('step 7 Phone Plus OAuth-only rejects verification, add-email, add-phone, and unknown pages', async () => {
+  const cases = [
+    {
+      result: { state: 'phone_verification_page', phoneVerificationPage: true, url: 'https://auth.openai.com/phone-verification' },
+      pattern: /Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了手机号验证码页/,
+    },
+    {
+      result: { state: 'verification_page', url: 'https://auth.openai.com/email-verification' },
+      pattern: /Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了登录验证码页/,
+    },
+    {
+      result: { state: 'add_email_page', addEmailPage: true, url: 'https://auth.openai.com/add-email' },
+      pattern: /Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了添加邮箱页/,
+    },
+    {
+      result: { state: 'add_phone_page', addPhonePage: true, url: 'https://auth.openai.com/add-phone' },
+      pattern: /Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了添加手机号页/,
+    },
+    {
+      result: { state: 'unexpected_page', url: 'https://auth.openai.com/unexpected' },
+      pattern: /Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了未知页面/,
+    },
+  ];
+
+  for (const entry of cases) {
+    const { executor, state, events } = createPhonePlusOauthOnlyStep7Harness(entry.result);
+    await assert.rejects(() => executor.executeStep7(state), entry.pattern);
+    assert.deepStrictEqual(events.completions, []);
+  }
+});
 
 test('step 8 submits login verification directly without replaying step 7', async () => {
   const calls = {

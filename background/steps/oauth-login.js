@@ -93,9 +93,14 @@
       return Boolean(state?.sub2apiReloginEnabled) && activeFlowId === 'openai' && targetId === 'sub2api';
     }
 
+    function isPhonePlusOauthOnlyModeForStep7(state = {}) {
+      const activeFlowId = String(state?.activeFlowId || state?.flowId || 'openai').trim().toLowerCase();
+      return activeFlowId === 'openai' && Boolean(state?.phonePlusOauthOnlyModeEnabled);
+    }
+
     function canUseConfiguredPhoneSignup(state = {}) {
       return isPhoneSignupMethodForStep7(state)
-        && (Boolean(state?.phoneVerificationEnabled) || isSub2ApiReloginModeForStep7(state))
+        && (Boolean(state?.phoneVerificationEnabled) || isSub2ApiReloginModeForStep7(state) || isPhonePlusOauthOnlyModeForStep7(state))
         && !Boolean(state?.plusModeEnabled)
         && !Boolean(state?.accountContributionEnabled);
     }
@@ -179,11 +184,44 @@
       return String(result?.lastAuthClickKind || '').trim();
     }
 
+    function describePhonePlusOauthOnlyBlockedResult(result = {}) {
+      if (isStep7PhoneVerificationResult(result)) {
+        return '手机号验证码页';
+      }
+      if (isStep7PlainVerificationResult(result)) {
+        return '登录验证码页';
+      }
+      if (isStep7AddEmailResult(result)) {
+        return '添加邮箱页';
+      }
+      if (isStep7AddPhoneResult(result)) {
+        return '添加手机号页';
+      }
+      return getLoginAuthStateLabel(result?.state) || '未知页面';
+    }
+
+    function assertPhonePlusOauthOnlyDirectConsentResult(result = {}, currentState = {}) {
+      if (!isPhonePlusOauthOnlyModeForStep7(currentState) || isStep7OauthConsentResult(result)) {
+        return;
+      }
+      const error = new Error(
+        `步骤 ${completionStepForState(currentState)}：Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了${describePhonePlusOauthOnlyBlockedResult(result)}。URL: ${result?.url || ''}`.trim()
+      );
+      error.phonePlusOauthOnlyBlockedResult = true;
+      throw error;
+    }
+
+    function isPhonePlusOauthOnlyBlockedResultError(error) {
+      return Boolean(error?.phonePlusOauthOnlyBlockedResult);
+    }
+
     function buildStep7CompletionPayload(result = {}, currentState = {}, currentIdentifierType = '', currentPhoneNumber = '') {
       const phoneSignupMode = currentIdentifierType === 'phone';
       const payload = {
         loginVerificationRequestedAt: result.loginVerificationRequestedAt || null,
       };
+
+      assertPhonePlusOauthOnlyDirectConsentResult(result, currentState);
 
       if (currentIdentifierType === 'phone') {
         payload.accountIdentifierType = 'phone';
@@ -247,6 +285,11 @@
     }
 
     async function completeStep7PostLoginPhoneHandoff(state = {}, err, completionStep) {
+      if (isPhonePlusOauthOnlyModeForStep7(state)) {
+        throw new Error(
+          `步骤 ${completionStep}：Phone Plus 仅 OAuth 模式只接受手机号密码登录后直接进入 OAuth 授权页，当前进入了添加手机号页。URL: ${extractAddPhoneUrl(err)}`
+        );
+      }
       if (normalizeStep7SignupMethod(state?.resolvedSignupMethod || state?.signupMethod) === 'phone') {
         throw new Error(
           `步骤 ${completionStep}：手机号注册模式 OAuth 登录进入了添加手机号页，当前流程不允许在手机号注册模式补手机号。URL: ${extractAddPhoneUrl(err)}`
@@ -407,6 +450,11 @@
             throw new Error(result.error);
           }
 
+          assertPhonePlusOauthOnlyDirectConsentResult(
+            result,
+            { ...(currentState || {}), visibleStep: completionStep }
+          );
+
           if (isStep6SuccessResult(result)) {
             const completionPayload = buildStep7CompletionPayload(
               result,
@@ -445,6 +493,9 @@
               'error',
               { step: completionStep, stepKey: 'oauth-login' }
             );
+            throw err;
+          }
+          if (isPhonePlusOauthOnlyBlockedResultError(err)) {
             throw err;
           }
           lastError = err;

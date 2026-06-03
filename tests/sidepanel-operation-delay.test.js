@@ -89,22 +89,33 @@ test('sidepanel exposes and wires auto-run issue log preservation switch', () =>
 });
 
 test('sidepanel exposes and wires registration-only mode switch', () => {
+  assert.match(html, /id="input-phone-plus-oauth-only-mode-enabled"/);
   assert.match(html, /id="input-registration-only-mode-enabled"/);
   assert.match(html, /id="input-registration-activation-only-mode-enabled"/);
   assert.match(html, /id="row-auto-retry-settings"/);
+  assert.match(html, /仅 OAuth/);
   assert.match(html, /仅注册/);
   assert.match(html, /仅注册激活/);
+  assert.match(html, /仅从账号簿选择已注册成功的手机号密码账号执行 OAuth/);
   assert.match(html, /确认账号注册成功后停止后续阶段/);
+  assert.match(source, /const inputPhonePlusOauthOnlyModeEnabled = document\.getElementById\('input-phone-plus-oauth-only-mode-enabled'\);/);
   assert.match(source, /const inputRegistrationOnlyModeEnabled = document\.getElementById\('input-registration-only-mode-enabled'\);/);
   assert.match(source, /const inputRegistrationActivationOnlyModeEnabled = document\.getElementById\('input-registration-activation-only-mode-enabled'\);/);
-  assert.match(source, /registrationActivationOnlyModeEnabled:\s*typeof inputRegistrationActivationOnlyModeEnabled/);
-  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = !registrationActivationOnlyModeEnabled && Boolean\(state\?\.registrationOnlyModeEnabled\);/);
+  assert.match(source, /function syncPhonePlusOauthOnlyControls\(options = \{\}\)/);
+  assert.match(source, /phonePlusOauthOnlyModeEnabled:\s*typeof inputPhonePlusOauthOnlyModeEnabled/);
+  assert.match(source, /registrationActivationOnlyModeEnabled:\s*!\([\s\S]*?inputPhonePlusOauthOnlyModeEnabled[\s\S]*?inputRegistrationActivationOnlyModeEnabled/);
+  assert.match(source, /const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && typeof inputRegistrationActivationOnlyModeEnabled/);
+  assert.match(source, /const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && typeof inputRegistrationOnlyModeEnabled/);
+  assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && Boolean\(state\?\.registrationOnlyModeEnabled\);/);
   assert.match(source, /inputRegistrationActivationOnlyModeEnabled\.checked = registrationActivationOnlyModeEnabled;/);
+  assert.match(source, /message\.payload\.phonePlusOauthOnlyModeEnabled !== undefined/);
   assert.match(source, /message\.payload\.registrationOnlyModeEnabled !== undefined/);
   assert.match(source, /message\.payload\.registrationActivationOnlyModeEnabled !== undefined/);
+  assert.match(source, /inputPhonePlusOauthOnlyModeEnabled\?\.addEventListener\('change'/);
   assert.match(source, /inputRegistrationOnlyModeEnabled\?\.addEventListener\('change'/);
   assert.match(source, /inputRegistrationActivationOnlyModeEnabled\?\.addEventListener\('change'/);
   assert.match(source, /inputRegistrationOnlyModeEnabled\.checked = false;/);
+  assert.match(source, /input\.disabled = oauthOnlyEnabled;/);
 });
 
 test('sidepanel places thread interval inside auto retry settings grid', () => {

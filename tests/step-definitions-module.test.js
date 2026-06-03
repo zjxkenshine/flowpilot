@@ -564,6 +564,52 @@ test('Phone Plus inserts payment steps after full phone registration for each pa
   });
 });
 
+test('Phone Plus OAuth-only mode uses direct OAuth graph and skips registration/payment tails', () => {
+  const source = fs.readFileSync('data/step-definitions.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageStepDefinitions;`)(globalScope);
+  const steps = api.getSteps({
+    phonePlusModeEnabled: true,
+    phonePlusOauthOnlyModeEnabled: true,
+    plusPaymentMethod: 'gpc-helper',
+    registrationActivationOnlyModeEnabled: true,
+    phoneSignupReloginAfterBindEmailEnabled: true,
+  });
+  const nodes = api.getNodes({
+    phonePlusModeEnabled: true,
+    phonePlusOauthOnlyModeEnabled: true,
+    plusPaymentMethod: 'paypal-hosted',
+    registrationActivationOnlyModeEnabled: true,
+    phoneSignupReloginAfterBindEmailEnabled: true,
+  });
+  const stepKeys = steps.map((step) => step.key);
+  const nodeIds = nodes.map((node) => node.nodeId);
+  const forbiddenKeys = [
+    'open-chatgpt',
+    'submit-signup-email',
+    'fetch-signup-code',
+    'wait-registration-success',
+    'plus-checkout-create',
+    'paypal-hosted-card',
+    'plus-check',
+    'fetch-login-code',
+    'bind-email',
+    'fetch-bind-email-code',
+  ];
+
+  assert.deepStrictEqual(stepKeys, ['oauth-login', 'confirm-oauth', 'platform-verify']);
+  assert.deepStrictEqual(nodeIds, ['oauth-login', 'confirm-oauth', 'platform-verify']);
+  assert.deepStrictEqual(api.getStepIds({ phonePlusModeEnabled: true, phonePlusOauthOnlyModeEnabled: true }), [1, 2, 3]);
+  assert.equal(api.getLastStepId({ phonePlusModeEnabled: true, phonePlusOauthOnlyModeEnabled: true }), 3);
+  forbiddenKeys.forEach((key) => {
+    assert.equal(stepKeys.includes(key), false, `OAuth-only steps should not include ${key}`);
+    assert.equal(nodeIds.includes(key), false, `OAuth-only nodes should not include ${key}`);
+  });
+  assert.deepStrictEqual(nodes[0].next, ['confirm-oauth']);
+  assert.deepStrictEqual(nodes[1].next, ['platform-verify']);
+  assert.deepStrictEqual(nodes[2].next, []);
+});
+
 test('Phone Plus always uses OAuth tail even when a session import strategy is requested', () => {
   const source = fs.readFileSync('data/step-definitions.js', 'utf8');
   const globalScope = {};

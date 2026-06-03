@@ -662,6 +662,9 @@
             plus: {
               plusModeEnabled: false,
               phonePlusModeEnabled: false,
+              phonePlusOauthOnlyModeEnabled: false,
+              phonePlusOauthOnlyAccountUsage: {},
+              phonePlusOauthOnlyCurrentAccount: null,
               plusAccountTypePaymentControlEnabled: true,
               plusPaymentMethod: 'paypal',
               plusHostedCheckoutIsFinalStep: true,
@@ -815,18 +818,23 @@
         baseInputHasReadyRoundWaitSetting ? readyMaxRounds * readyRoundWaitSeconds : legacyReadyTimeoutSeconds,
         defaults.flows.openai.autoRun.signupVerificationReadyTimeoutSeconds
       );
-      const registrationActivationOnlyModeEnabled = Boolean(
+      const phonePlusOauthOnlyModeEnabled = Boolean(
+        input?.phonePlusOauthOnlyModeEnabled
+        ?? nested?.flows?.openai?.plus?.phonePlusOauthOnlyModeEnabled
+        ?? defaults.flows.openai.plus.phonePlusOauthOnlyModeEnabled
+      );
+      const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && Boolean(
         input?.registrationActivationOnlyModeEnabled
         ?? nested?.flows?.openai?.autoRun?.registrationActivationOnlyModeEnabled
         ?? defaults.flows.openai.autoRun.registrationActivationOnlyModeEnabled
       );
-      const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(
+      const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && Boolean(
         input?.registrationOnlyModeEnabled
         ?? nested?.flows?.openai?.autoRun?.registrationOnlyModeEnabled
         ?? defaults.flows.openai.autoRun.registrationOnlyModeEnabled
       );
 
-      return {
+      const normalizedState = {
         schemaVersion: Number(input?.settingsSchemaVersion || nested?.schemaVersion || defaults.schemaVersion) || defaults.schemaVersion,
         activeFlowId,
         services: {
@@ -1079,6 +1087,21 @@
                 ?? nested?.flows?.openai?.plus?.phonePlusModeEnabled
                 ?? defaults.flows.openai.plus.phonePlusModeEnabled
               ),
+              phonePlusOauthOnlyModeEnabled,
+              phonePlusOauthOnlyAccountUsage: isPlainObject(
+                input?.phonePlusOauthOnlyAccountUsage
+                ?? nested?.flows?.openai?.plus?.phonePlusOauthOnlyAccountUsage
+              )
+                ? cloneValue(input?.phonePlusOauthOnlyAccountUsage
+                  ?? nested?.flows?.openai?.plus?.phonePlusOauthOnlyAccountUsage)
+                : cloneValue(defaults.flows.openai.plus.phonePlusOauthOnlyAccountUsage),
+              phonePlusOauthOnlyCurrentAccount: isPlainObject(
+                input?.phonePlusOauthOnlyCurrentAccount
+                ?? nested?.flows?.openai?.plus?.phonePlusOauthOnlyCurrentAccount
+              )
+                ? cloneValue(input?.phonePlusOauthOnlyCurrentAccount
+                  ?? nested?.flows?.openai?.plus?.phonePlusOauthOnlyCurrentAccount)
+                : null,
               plusAccountTypePaymentControlEnabled: (
                 input?.plusAccountTypePaymentControlEnabled
                 ?? nested?.flows?.openai?.plus?.plusAccountTypePaymentControlEnabled
@@ -1463,6 +1486,17 @@
           },
         },
       };
+      if (phonePlusOauthOnlyModeEnabled) {
+        normalizedState.flows.openai.signup.signupMethod = 'phone';
+        normalizedState.flows.openai.signup.phoneVerificationEnabled = true;
+        normalizedState.flows.openai.plus.plusModeEnabled = false;
+        normalizedState.flows.openai.plus.phonePlusModeEnabled = true;
+        normalizedState.flows.openai.plus.phonePlusOauthOnlyModeEnabled = true;
+        normalizedState.flows.openai.plus.plusAccountAccessStrategy = 'oauth';
+        normalizedState.flows.openai.autoRun.registrationOnlyModeEnabled = false;
+        normalizedState.flows.openai.autoRun.registrationActivationOnlyModeEnabled = false;
+      }
+      return normalizedState;
     }
 
     function mergeSettingsState(baseValue = {}, patchValue = {}) {
@@ -1574,6 +1608,9 @@
       next.oauthOpenAfterRefreshWaitSeconds = openaiState.oauth.oauthOpenAfterRefreshWaitSeconds;
       next.plusModeEnabled = openaiState.plus.plusModeEnabled;
       next.phonePlusModeEnabled = openaiState.plus.phonePlusModeEnabled;
+      next.phonePlusOauthOnlyModeEnabled = openaiState.plus.phonePlusOauthOnlyModeEnabled;
+      next.phonePlusOauthOnlyAccountUsage = cloneValue(openaiState.plus.phonePlusOauthOnlyAccountUsage);
+      next.phonePlusOauthOnlyCurrentAccount = cloneValue(openaiState.plus.phonePlusOauthOnlyCurrentAccount);
       next.plusAccountTypePaymentControlEnabled = openaiState.plus.plusAccountTypePaymentControlEnabled;
       next.plusPaymentMethod = openaiState.plus.plusPaymentMethod;
       next.plusHostedCheckoutIsFinalStep = openaiState.plus.plusHostedCheckoutIsFinalStep;

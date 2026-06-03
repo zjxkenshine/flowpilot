@@ -100,6 +100,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'oauthOpenAfterRefreshWaitSeconds',
   'plusModeEnabled',
   'phonePlusModeEnabled',
+  'phonePlusOauthOnlyModeEnabled',
+  'phonePlusOauthOnlyAccountUsage',
+  'phonePlusOauthOnlyCurrentAccount',
   'plusAccountTypePaymentControlEnabled',
   'plusPaymentMethod',
   'plusAccountAccessStrategy',
@@ -202,6 +205,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   oauthOpenAfterRefreshWaitSeconds: 5,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
+  phonePlusOauthOnlyModeEnabled: false,
+  phonePlusOauthOnlyAccountUsage: {},
+  phonePlusOauthOnlyCurrentAccount: null,
   plusAccountTypePaymentControlEnabled: true,
   plusPaymentMethod: 'paypal',
   plusAccountAccessStrategy: 'oauth',
@@ -369,6 +375,9 @@ ${extractFunction('parseSub2ApiReloginAccountPoolEntries')}
 ${extractFunction('normalizeSub2ApiReloginAccountPoolText')}
 ${extractFunction('normalizeSub2ApiReloginAccountPoolUsage')}
 ${extractFunction('normalizeSub2ApiReloginCurrentAccount')}
+${extractFunction('normalizePhonePlusOauthOnlyAccountBookEntries')}
+${extractFunction('normalizePhonePlusOauthOnlyAccountUsage')}
+${extractFunction('normalizePhonePlusOauthOnlyCurrentAccount')}
 function normalizeCloudflareDomains(value) { return Array.isArray(value) ? value : []; }
 function normalizeCloudflareTempEmailDomains(value) { return Array.isArray(value) ? value : []; }
 function normalizeCloudMailDomains(value) { return Array.isArray(value) ? value : []; }
@@ -2215,6 +2224,126 @@ function getPersistedWrites() {
   assert.equal(readBack.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
   assert.equal(write.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, true);
   assert.equal(write.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+});
+
+test('Phone Plus OAuth-only settings roundtrip and force exclusive Phone Plus OAuth mode', async () => {
+  const api = buildHarness(`
+const persistedWrites = [];
+let storageState = {
+  settingsSchemaVersion: 4,
+  settingsState: self.MultiPageSettingsSchema.createSettingsSchema({
+    flowRegistry: self.MultiPageFlowRegistry,
+    defaultFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  }).buildDefaultSettingsState(),
+};
+const chrome = {
+  storage: {
+    local: {
+      async get() {
+        return JSON.parse(JSON.stringify(storageState));
+      },
+      async remove() {},
+      async set(payload) {
+        const clone = JSON.parse(JSON.stringify(payload));
+        storageState = { ...storageState, ...clone };
+        persistedWrites.push(clone);
+      },
+    },
+  },
+};
+function getPersistedWrites() {
+  return persistedWrites;
+}
+`);
+
+  const usage = {
+    'phone:+6612345': {
+      enabled: true,
+      usedAt: 0,
+      lastAttemptAt: 123,
+      lastError: '',
+      failureCount: 1,
+    },
+  };
+  const currentAccount = {
+    key: 'phone:+6612345',
+    recordId: 'phone:+6612345',
+    phoneNumber: '+6612345',
+    password: 'secret',
+    email: 'user@example.com',
+  };
+
+  const flat = await api.setPersistentSettings({
+    phonePlusOauthOnlyModeEnabled: true,
+    phonePlusOauthOnlyAccountUsage: usage,
+    phonePlusOauthOnlyCurrentAccount: currentAccount,
+    registrationOnlyModeEnabled: true,
+    registrationActivationOnlyModeEnabled: true,
+    plusModeEnabled: true,
+    phonePlusModeEnabled: false,
+    signupMethod: 'email',
+    plusAccountAccessStrategy: 'cpa_codex_session',
+  });
+
+  assert.equal(flat.phonePlusOauthOnlyModeEnabled, true);
+  assert.deepEqual(flat.phonePlusOauthOnlyAccountUsage, usage);
+  assert.deepEqual(flat.phonePlusOauthOnlyCurrentAccount, currentAccount);
+  assert.equal(flat.phonePlusModeEnabled, true);
+  assert.equal(flat.plusModeEnabled, false);
+  assert.equal(flat.signupMethod, 'phone');
+  assert.equal(flat.phoneVerificationEnabled, true);
+  assert.equal(flat.plusAccountAccessStrategy, 'oauth');
+  assert.equal(flat.registrationOnlyModeEnabled, false);
+  assert.equal(flat.registrationActivationOnlyModeEnabled, false);
+  assert.equal(flat.settingsState.flows.openai.plus.phonePlusOauthOnlyModeEnabled, true);
+  assert.deepEqual(flat.settingsState.flows.openai.plus.phonePlusOauthOnlyAccountUsage, usage);
+  assert.deepEqual(flat.settingsState.flows.openai.plus.phonePlusOauthOnlyCurrentAccount, currentAccount);
+  assert.equal(flat.settingsState.flows.openai.plus.phonePlusModeEnabled, true);
+  assert.equal(flat.settingsState.flows.openai.plus.plusModeEnabled, false);
+  assert.equal(flat.settingsState.flows.openai.signup.signupMethod, 'phone');
+  assert.equal(flat.settingsState.flows.openai.plus.plusAccountAccessStrategy, 'oauth');
+  assert.equal(flat.settingsState.flows.openai.autoRun.registrationOnlyModeEnabled, false);
+  assert.equal(flat.settingsState.flows.openai.autoRun.registrationActivationOnlyModeEnabled, false);
+
+  const nested = await api.setPersistentSettings({
+    settingsState: {
+      activeFlowId: 'openai',
+      services: {
+        account: { customPassword: '' },
+        email: { provider: '163' },
+        proxy: { enabled: false, provider: '711proxy', mode: 'account' },
+      },
+      flows: {
+        openai: {
+          plus: {
+            phonePlusOauthOnlyModeEnabled: true,
+            phonePlusOauthOnlyAccountUsage: usage,
+            phonePlusOauthOnlyCurrentAccount: currentAccount,
+            plusModeEnabled: true,
+            phonePlusModeEnabled: false,
+            plusAccountAccessStrategy: 'sub2api_codex_session',
+          },
+          signup: {
+            signupMethod: 'email',
+            phoneVerificationEnabled: false,
+          },
+          autoRun: {
+            registrationOnlyModeEnabled: true,
+            registrationActivationOnlyModeEnabled: true,
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(nested.phonePlusOauthOnlyModeEnabled, true);
+  assert.equal(nested.phonePlusModeEnabled, true);
+  assert.equal(nested.plusModeEnabled, false);
+  assert.equal(nested.signupMethod, 'phone');
+  assert.equal(nested.plusAccountAccessStrategy, 'oauth');
+  assert.equal(nested.registrationOnlyModeEnabled, false);
+  assert.equal(nested.registrationActivationOnlyModeEnabled, false);
+  assert.deepEqual(api.getPersistedWrites().at(-1).settingsState.flows.openai.plus.phonePlusOauthOnlyAccountUsage, usage);
 });
 
 test('setPersistentSettings mirrors flat mail provider updates into canonical settingsState', async () => {

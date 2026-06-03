@@ -261,6 +261,16 @@ const PHONE_PLUS_GPC_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?
   plusPaymentMethod: 'gpc-helper',
   signupMethod: 'phone',
 }) || PHONE_PLUS_GOPAY_STEP_DEFINITIONS;
+const PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({
+  activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+  phonePlusModeEnabled: true,
+  phonePlusOauthOnlyModeEnabled: true,
+  signupMethod: 'phone',
+}) || [
+  { id: 1, order: 10, key: 'oauth-login', title: '刷新 OAuth 并登录', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'oauth-login' },
+  { id: 2, order: 20, key: 'confirm-oauth', title: '自动确认 OAuth', sourceId: 'openai-auth', driverId: 'content/signup-page', command: 'confirm-oauth' },
+  { id: 3, order: 30, key: 'platform-verify', title: '平台回调验证', sourceId: 'platform-panel', driverId: 'content/platform-panel', command: 'platform-verify' },
+];
 const PLUS_STEP_DEFINITIONS = PLUS_PAYPAL_STEP_DEFINITIONS;
 const REGISTERED_STEP_FLOW_IDS = self.MultiPageStepDefinitions?.getRegisteredFlowIds?.() || [DEFAULT_ACTIVE_FLOW_ID];
 const ALL_STEP_DEFINITIONS = (() => {
@@ -306,6 +316,7 @@ const ALL_STEP_DEFINITIONS = (() => {
     ...PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_DEFINITIONS,
     ...PHONE_PLUS_GOPAY_STEP_DEFINITIONS,
     ...PHONE_PLUS_GPC_STEP_DEFINITIONS,
+    ...PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS,
   ];
 })();
 const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
@@ -353,6 +364,10 @@ const PHONE_PLUS_GPC_STEP_IDS = PHONE_PLUS_GPC_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
+const PHONE_PLUS_OAUTH_ONLY_STEP_IDS = PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
 const PLUS_STEP_IDS = PLUS_PAYPAL_STEP_IDS;
 const LAST_STEP_ID = Math.max(
   NORMAL_STEP_IDS[NORMAL_STEP_IDS.length - 1] || 10,
@@ -363,7 +378,8 @@ const LAST_STEP_ID = Math.max(
   PHONE_PLUS_PAYPAL_STEP_IDS[PHONE_PLUS_PAYPAL_STEP_IDS.length - 1] || 10,
   PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS[PHONE_PLUS_PAYPAL_HOSTED_CHECKOUT_STEP_IDS.length - 1] || 10,
   PHONE_PLUS_GOPAY_STEP_IDS[PHONE_PLUS_GOPAY_STEP_IDS.length - 1] || 10,
-  PHONE_PLUS_GPC_STEP_IDS[PHONE_PLUS_GPC_STEP_IDS.length - 1] || 10
+  PHONE_PLUS_GPC_STEP_IDS[PHONE_PLUS_GPC_STEP_IDS.length - 1] || 10,
+  PHONE_PLUS_OAUTH_ONLY_STEP_IDS[PHONE_PLUS_OAUTH_ONLY_STEP_IDS.length - 1] || 10
 );
 const FINAL_OAUTH_CHAIN_START_STEP = 7;
 
@@ -1000,6 +1016,13 @@ function isPhonePlusModeState(state = {}) {
   return Boolean(state?.phonePlusModeEnabled);
 }
 
+function isPhonePlusOauthOnlyModeState(state = {}) {
+  const activeFlowId = String(state?.activeFlowId || state?.flowId || DEFAULT_ACTIVE_FLOW_ID).trim().toLowerCase();
+  return activeFlowId === DEFAULT_ACTIVE_FLOW_ID
+    && Boolean(state?.phonePlusModeEnabled || state?.phonePlusOauthOnlyModeEnabled)
+    && Boolean(state?.phonePlusOauthOnlyModeEnabled);
+}
+
 function isPlusModeState(state = {}) {
   return Boolean(state?.plusModeEnabled || state?.phonePlusModeEnabled);
 }
@@ -1087,6 +1110,9 @@ function buildResolvedStepDefinitionState(state = {}) {
   const phonePlusModeEnabled = typeof isPhonePlusModeState === 'function'
     ? isPhonePlusModeState(state)
     : Boolean(state?.phonePlusModeEnabled);
+  const phonePlusOauthOnlyModeEnabled = typeof isPhonePlusOauthOnlyModeState === 'function'
+    ? isPhonePlusOauthOnlyModeState(state)
+    : Boolean(state?.phonePlusOauthOnlyModeEnabled);
   const plusModeEnabled = Boolean(state?.plusModeEnabled) && !phonePlusModeEnabled;
   const plusPaymentMethod = normalizePlusPaymentMethod(state?.plusPaymentMethod);
   const capabilityState = typeof resolveCurrentFlowCapabilities === 'function'
@@ -1096,6 +1122,7 @@ function buildResolvedStepDefinitionState(state = {}) {
       flowId: requestedActiveFlowId,
       plusModeEnabled,
       phonePlusModeEnabled,
+      phonePlusOauthOnlyModeEnabled,
       plusPaymentMethod,
       signupMethod: requestedSignupMethod,
     }, {
@@ -1124,6 +1151,9 @@ function buildResolvedStepDefinitionState(state = {}) {
     phonePlusModeEnabled: stepDefinitionOptions.phonePlusModeEnabled === undefined
       ? phonePlusModeEnabled
       : Boolean(stepDefinitionOptions.phonePlusModeEnabled),
+    phonePlusOauthOnlyModeEnabled: stepDefinitionOptions.phonePlusOauthOnlyModeEnabled === undefined
+      ? phonePlusOauthOnlyModeEnabled
+      : Boolean(stepDefinitionOptions.phonePlusOauthOnlyModeEnabled),
     plusPaymentMethod,
     plusHostedCheckoutIsFinalStep: stepDefinitionOptions.plusHostedCheckoutIsFinalStep === undefined
       ? Boolean(state?.plusHostedCheckoutIsFinalStep !== false)
@@ -1168,6 +1198,7 @@ function getStepDefinitionsForState(state = {}) {
       activeFlowId,
       plusModeEnabled: Boolean(resolvedState?.plusModeEnabled),
       phonePlusModeEnabled: Boolean(resolvedState?.phonePlusModeEnabled),
+      phonePlusOauthOnlyModeEnabled: Boolean(resolvedState?.phonePlusOauthOnlyModeEnabled),
       plusPaymentMethod: resolvedPlusPaymentMethod,
       plusAccountAccessStrategy: normalizePlusAccountAccessStrategy(resolvedState?.plusAccountAccessStrategy),
       registrationActivationOnlyModeEnabled: Boolean(resolvedState?.registrationActivationOnlyModeEnabled),
@@ -1214,6 +1245,9 @@ function getStepDefinitionsForState(state = {}) {
     }) || NORMAL_STEP_DEFINITIONS;
   }
   if (Boolean(resolvedState?.phonePlusModeEnabled)) {
+    if (Boolean(resolvedState?.phonePlusOauthOnlyModeEnabled)) {
+      return PHONE_PLUS_OAUTH_ONLY_STEP_DEFINITIONS;
+    }
     const paymentMethod = normalizePlusPaymentMethod(resolvedState?.plusPaymentMethod);
     if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
       return PHONE_PLUS_GPC_STEP_DEFINITIONS;
@@ -1308,6 +1342,9 @@ function getStepIdsForState(state = {}) {
     ? isPhonePlusModeState(state)
     : Boolean(state?.phonePlusModeEnabled);
   if (phonePlusModeEnabled) {
+    if (Boolean(state?.phonePlusOauthOnlyModeEnabled)) {
+      return PHONE_PLUS_OAUTH_ONLY_STEP_IDS;
+    }
     if (paymentMethod === PLUS_PAYMENT_METHOD_GPC_HELPER) {
       return PHONE_PLUS_GPC_STEP_IDS;
     }
@@ -1596,6 +1633,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   webRtcLeakProtectionEnabled: false,
   plusModeEnabled: false,
   phonePlusModeEnabled: false,
+  phonePlusOauthOnlyModeEnabled: false,
+  phonePlusOauthOnlyAccountUsage: {},
+  phonePlusOauthOnlyCurrentAccount: null,
   plusAccountTypePaymentControlEnabled: true,
   plusPaymentMethod: DEFAULT_PLUS_PAYMENT_METHOD,
   plusHostedCheckoutIsFinalStep: true,
@@ -1888,6 +1928,9 @@ const SETTINGS_SCHEMA_VIEW_KEYS = Object.freeze([
   'webRtcLeakProtectionEnabled',
   'plusModeEnabled',
   'phonePlusModeEnabled',
+  'phonePlusOauthOnlyModeEnabled',
+  'phonePlusOauthOnlyAccountUsage',
+  'phonePlusOauthOnlyCurrentAccount',
   'plusAccountTypePaymentControlEnabled',
   'plusPaymentMethod',
   'plusHostedCheckoutIsFinalStep',
@@ -2618,6 +2661,168 @@ async function updateSub2ApiReloginAccountUsageForNodeResult(nodeId, ok, error =
   await setPersistentSettings({ sub2apiReloginAccountPoolUsage: nextUsage });
   await setState({ sub2apiReloginAccountPoolUsage: nextUsage });
   broadcastDataUpdate({ sub2apiReloginAccountPoolUsage: nextUsage });
+}
+
+function isPhonePlusOauthOnlyState(state = {}) {
+  return isPhonePlusOauthOnlyModeState(state);
+}
+
+function pickPhonePlusOauthOnlyAccount(state = {}) {
+  const entries = normalizePhonePlusOauthOnlyAccountBookEntries(state?.accountBookEntries || []);
+  const usage = normalizePhonePlusOauthOnlyAccountUsage(
+    state?.phonePlusOauthOnlyAccountUsage,
+    new Set(entries.map((entry) => entry.key))
+  );
+  return entries.find((entry) => {
+    const entryUsage = usage[entry.key] || {};
+    return entryUsage.enabled !== false && !Number(entryUsage.usedAt);
+  }) || null;
+}
+
+function buildPhonePlusOauthOnlyRuntimePatch(account = {}) {
+  const key = String(account.key || account.recordId || '').trim().toLowerCase();
+  const recordId = String(account.recordId || key).trim().toLowerCase();
+  const phoneNumber = String(account.phoneNumber || account.phone || '').trim();
+  const password = String(account.password || '');
+  const email = String(account.email || '').trim().toLowerCase();
+  const now = Date.now();
+  return {
+    activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+    flowId: DEFAULT_ACTIVE_FLOW_ID,
+    plusModeEnabled: false,
+    phonePlusModeEnabled: true,
+    phonePlusOauthOnlyModeEnabled: true,
+    plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+    signupMethod: SIGNUP_METHOD_PHONE,
+    resolvedSignupMethod: SIGNUP_METHOD_PHONE,
+    phoneVerificationEnabled: true,
+    registrationOnlyModeEnabled: false,
+    registrationActivationOnlyModeEnabled: false,
+    accountIdentifierType: 'phone',
+    accountIdentifier: phoneNumber,
+    signupPhoneNumber: phoneNumber,
+    password,
+    customPassword: password,
+    email,
+    registrationEmailState: {
+      current: email,
+      previous: '',
+      source: 'phone_plus_oauth_only',
+      updatedAt: now,
+    },
+    phonePlusOauthOnlyCurrentAccount: {
+      key,
+      recordId,
+      phoneNumber,
+      password,
+      email,
+    },
+  };
+}
+
+async function preparePhonePlusOauthOnlyRunIfNeeded(nodeId, state = {}) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (normalizedNodeId !== 'oauth-login' || !isPhonePlusOauthOnlyState(state)) {
+    return state;
+  }
+
+  const entries = normalizePhonePlusOauthOnlyAccountBookEntries(state?.accountBookEntries || []);
+  const allowedKeys = new Set(entries.map((entry) => entry.key));
+  const usage = normalizePhonePlusOauthOnlyAccountUsage(state?.phonePlusOauthOnlyAccountUsage, allowedKeys);
+  const account = pickPhonePlusOauthOnlyAccount({
+    ...state,
+    accountBookEntries: entries,
+    phonePlusOauthOnlyAccountUsage: usage,
+  });
+  if (!account) {
+    throw new Error('账号簿已无可用 Phone Plus 仅 OAuth 账号。');
+  }
+
+  const now = Date.now();
+  const previousUsage = usage[account.key] || {};
+  const nextUsage = {
+    ...usage,
+    [account.key]: {
+      ...previousUsage,
+      enabled: previousUsage.enabled !== false,
+      usedAt: Math.max(0, Number(previousUsage.usedAt) || 0),
+      lastAttemptAt: now,
+      lastError: '',
+      failureCount: Math.max(0, Math.floor(Number(previousUsage.failureCount) || 0)),
+    },
+  };
+  const runtimePatch = {
+    ...buildPhonePlusOauthOnlyRuntimePatch(account),
+    phonePlusOauthOnlyAccountUsage: nextUsage,
+  };
+
+  await setPersistentSettings({
+    phonePlusOauthOnlyModeEnabled: true,
+    phonePlusModeEnabled: true,
+    plusModeEnabled: false,
+    signupMethod: SIGNUP_METHOD_PHONE,
+    plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+    registrationOnlyModeEnabled: false,
+    registrationActivationOnlyModeEnabled: false,
+    phonePlusOauthOnlyCurrentAccount: runtimePatch.phonePlusOauthOnlyCurrentAccount,
+    phonePlusOauthOnlyAccountUsage: nextUsage,
+  });
+  await setState(runtimePatch);
+  const latestState = await getState();
+  broadcastDataUpdate(runtimePatch);
+  await addLog(`Phone Plus 仅 OAuth：已选择账号簿手机号 ${account.phoneNumber}，准备使用手机号密码登录 OAuth。`, 'info', { nodeId: normalizedNodeId });
+  return {
+    ...latestState,
+    ...runtimePatch,
+  };
+}
+
+async function updatePhonePlusOauthOnlyAccountUsageForNodeResult(nodeId, ok, error = null) {
+  const normalizedNodeId = String(nodeId || '').trim();
+  if (ok && normalizedNodeId !== 'platform-verify') {
+    return;
+  }
+  const state = await getState();
+  if (!isPhonePlusOauthOnlyState(state)) {
+    return;
+  }
+  const entries = normalizePhonePlusOauthOnlyAccountBookEntries(state?.accountBookEntries || []);
+  const current = normalizePhonePlusOauthOnlyCurrentAccount(
+    state?.phonePlusOauthOnlyCurrentAccount,
+    entries
+  );
+  if (!current?.key) {
+    return;
+  }
+  const usage = normalizePhonePlusOauthOnlyAccountUsage(
+    state?.phonePlusOauthOnlyAccountUsage,
+    new Set(entries.map((entry) => entry.key))
+  );
+  const previous = usage[current.key] || {};
+  const now = Date.now();
+  const nextUsage = {
+    ...usage,
+    [current.key]: ok
+      ? {
+          ...previous,
+          enabled: previous.enabled !== false,
+          usedAt: now,
+          lastAttemptAt: Math.max(now, Number(previous.lastAttemptAt) || 0),
+          lastError: '',
+          failureCount: Math.max(0, Math.floor(Number(previous.failureCount) || 0)),
+        }
+      : {
+          ...previous,
+          enabled: previous.enabled !== false,
+          usedAt: Math.max(0, Number(previous.usedAt) || 0),
+          lastAttemptAt: Math.max(now, Number(previous.lastAttemptAt) || 0),
+          lastError: getErrorMessage(error),
+          failureCount: Math.max(0, Math.floor(Number(previous.failureCount) || 0)) + 1,
+        },
+  };
+  await setPersistentSettings({ phonePlusOauthOnlyAccountUsage: nextUsage });
+  await setState({ phonePlusOauthOnlyAccountUsage: nextUsage });
+  broadcastDataUpdate({ phonePlusOauthOnlyAccountUsage: nextUsage });
 }
 
 function normalizePhoneActivationRetryRounds(value, fallback = DEFAULT_PHONE_ACTIVATION_RETRY_ROUNDS) {
@@ -3744,8 +3949,9 @@ function normalizeAutoRunTimerPlan(plan) {
   const autoRunRetryPaypalCallback = Boolean(plan.autoRunRetryPaypalCallback);
   const autoRunPreserveIssueLogsOnRestart = Boolean(plan.autoRunPreserveIssueLogsOnRestart);
   const phoneVerificationCodePrefetchEnabled = Boolean(plan.phoneVerificationCodePrefetchEnabled);
-  const registrationActivationOnlyModeEnabled = Boolean(plan.registrationActivationOnlyModeEnabled);
-  const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(plan.registrationOnlyModeEnabled);
+  const phonePlusOauthOnlyModeEnabled = Boolean(plan.phonePlusOauthOnlyModeEnabled);
+  const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && Boolean(plan.registrationActivationOnlyModeEnabled);
+  const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled && !registrationActivationOnlyModeEnabled && Boolean(plan.registrationOnlyModeEnabled);
   const mode = plan.mode === 'continue' ? 'continue' : 'restart';
   const currentRun = Math.max(0, Math.min(totalRuns, Math.floor(Number(plan.currentRun) || 0)));
   const attemptRun = Math.max(
@@ -3766,6 +3972,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled,
       mode,
@@ -3789,6 +3996,7 @@ function normalizeAutoRunTimerPlan(plan) {
       autoRunRetryPaypalCallback,
       autoRunPreserveIssueLogsOnRestart,
       phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled,
       mode: 'restart',
@@ -3811,6 +4019,7 @@ function normalizeAutoRunTimerPlan(plan) {
     autoRunRetryPaypalCallback,
     autoRunPreserveIssueLogsOnRestart,
     phoneVerificationCodePrefetchEnabled,
+    phonePlusOauthOnlyModeEnabled,
     registrationOnlyModeEnabled,
     registrationActivationOnlyModeEnabled,
     mode: 'restart',
@@ -3845,6 +4054,7 @@ function normalizeAutoRunTimerPlanFromState(state = {}) {
     autoRunSkipFailures: state.scheduledAutoRunPlan?.autoRunSkipFailures ?? state.autoRunSkipFailures,
     autoRunRetryPaypalCallback: state.scheduledAutoRunPlan?.autoRunRetryPaypalCallback ?? state.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: state.scheduledAutoRunPlan?.phoneVerificationCodePrefetchEnabled ?? state.phoneVerificationCodePrefetchEnabled,
+    phonePlusOauthOnlyModeEnabled: state.scheduledAutoRunPlan?.phonePlusOauthOnlyModeEnabled ?? state.phonePlusOauthOnlyModeEnabled,
     registrationOnlyModeEnabled: state.scheduledAutoRunPlan?.registrationOnlyModeEnabled ?? state.registrationOnlyModeEnabled,
     registrationActivationOnlyModeEnabled: state.scheduledAutoRunPlan?.registrationActivationOnlyModeEnabled ?? state.registrationActivationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: state.scheduledAutoRunPlan?.autoRunPreserveIssueLogsOnRestart ?? state.autoRunPreserveIssueLogsOnRestart,
@@ -4516,6 +4726,90 @@ function normalizeSub2ApiReloginCurrentAccount(value = null, entries = []) {
     : '';
   const matched = entries.find((entry) => entry.key === rawKey || entry.key === normalizedFields);
   return matched ? { ...matched } : null;
+}
+
+function normalizePhonePlusOauthOnlyAccountBookEntries(entries = []) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  const normalized = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!isPlainObjectValue(entry)) {
+      continue;
+    }
+    const captureStage = String(entry.captureStage || '').trim().toLowerCase();
+    const recordId = String(entry.recordId || '').trim().toLowerCase();
+    const phoneNumber = String(entry.phoneNumber || entry.phone || entry.number || '').trim();
+    const password = String(entry.password || '').trim();
+    if (captureStage !== 'registration_success' || !recordId || !phoneNumber || !password || seen.has(recordId)) {
+      continue;
+    }
+    seen.add(recordId);
+    normalized.push({
+      key: recordId,
+      recordId,
+      phoneNumber,
+      password,
+      email: String(entry.email || '').trim().toLowerCase(),
+    });
+  }
+  return normalized;
+}
+
+function normalizePhonePlusOauthOnlyAccountUsage(value = {}, allowedKeys = null) {
+  if (!isPlainObjectValue(value)) {
+    return {};
+  }
+  const allowedKeySet = allowedKeys instanceof Set ? allowedKeys : null;
+  return Object.fromEntries(Object.entries(value).map(([rawKey, rawUsage]) => {
+    const key = String(rawKey || '').trim().toLowerCase();
+    if (!key || (allowedKeySet && !allowedKeySet.has(key))) {
+      return null;
+    }
+    const usage = isPlainObjectValue(rawUsage) ? rawUsage : {};
+    return [key, {
+      enabled: usage.enabled !== false,
+      usedAt: Math.max(0, Number(usage.usedAt) || 0),
+      lastAttemptAt: Math.max(0, Number(usage.lastAttemptAt) || 0),
+      lastError: String(usage.lastError || '').trim(),
+      failureCount: Math.max(0, Math.floor(Number(usage.failureCount) || 0)),
+    }];
+  }).filter(Boolean));
+}
+
+function normalizePhonePlusOauthOnlyCurrentAccount(value = null, entries = []) {
+  if (!isPlainObjectValue(value)) {
+    return null;
+  }
+  const rawKey = String(value.key || value.recordId || '').trim().toLowerCase();
+  if (!rawKey) {
+    return null;
+  }
+  const matched = Array.isArray(entries)
+    ? entries.find((entry) => String(entry?.key || '').trim().toLowerCase() === rawKey)
+    : null;
+  if (matched) {
+    return {
+      key: matched.key,
+      recordId: matched.recordId,
+      phoneNumber: matched.phoneNumber,
+      password: matched.password,
+      email: matched.email,
+    };
+  }
+  const phoneNumber = String(value.phoneNumber || value.phone || '').trim();
+  const password = String(value.password || '');
+  if (!phoneNumber || !password) {
+    return null;
+  }
+  return {
+    key: rawKey,
+    recordId: String(value.recordId || rawKey).trim().toLowerCase(),
+    phoneNumber,
+    password,
+    email: String(value.email || '').trim().toLowerCase(),
+  };
 }
 
 function isPlainObjectValue(value) {
@@ -5256,6 +5550,7 @@ function normalizePersistentSettingValue(key, value) {
     case 'phoneVerificationCodePrefetchEnabled':
     case 'registrationOnlyModeEnabled':
     case 'registrationActivationOnlyModeEnabled':
+    case 'phonePlusOauthOnlyModeEnabled':
     case 'oauthFlowTimeoutEnabled':
     case 'gopayHelperLocalSmsHelperEnabled':
     case 'gopayHelperAutoModeEnabled':
@@ -5277,6 +5572,10 @@ function normalizePersistentSettingValue(key, value) {
     case 'plusModeEnabled':
     case 'phonePlusModeEnabled':
       return Boolean(value);
+    case 'phonePlusOauthOnlyAccountUsage':
+      return normalizePhonePlusOauthOnlyAccountUsage(value);
+    case 'phonePlusOauthOnlyCurrentAccount':
+      return normalizePhonePlusOauthOnlyCurrentAccount(value);
     case 'phoneSmsProvider':
       return normalizePhoneSmsProvider(value);
     case 'phoneSmsProviderOrder':
@@ -5948,6 +6247,27 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
       }
     }
   }
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'phonePlusOauthOnlyAccountUsage')
+    || Object.prototype.hasOwnProperty.call(payload, 'phonePlusOauthOnlyCurrentAccount')
+  ) {
+    const entries = Array.isArray(normalizedInput.accountBookEntries)
+      ? normalizePhonePlusOauthOnlyAccountBookEntries(normalizedInput.accountBookEntries)
+      : [];
+    const allowedKeys = entries.length ? new Set(entries.map((entry) => entry.key)) : null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'phonePlusOauthOnlyAccountUsage')) {
+      payload.phonePlusOauthOnlyAccountUsage = normalizePhonePlusOauthOnlyAccountUsage(
+        payload.phonePlusOauthOnlyAccountUsage,
+        allowedKeys
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'phonePlusOauthOnlyCurrentAccount')) {
+      payload.phonePlusOauthOnlyCurrentAccount = normalizePhonePlusOauthOnlyCurrentAccount(
+        payload.phonePlusOauthOnlyCurrentAccount,
+        entries
+      );
+    }
+  }
   const nextSignupConstraintState = {
     ...PERSISTED_SETTING_DEFAULTS,
     ...payload,
@@ -5984,6 +6304,48 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
     }
   };
   applyPhonePlusPersistentConstraints();
+  const applyPhonePlusOauthOnlyPersistentConstraints = () => {
+    if (!Boolean(payload.phonePlusOauthOnlyModeEnabled)) {
+      return;
+    }
+    payload.plusModeEnabled = false;
+    payload.phonePlusModeEnabled = true;
+    payload.phoneVerificationEnabled = true;
+    payload.signupMethod = SIGNUP_METHOD_PHONE;
+    payload.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    payload.registrationOnlyModeEnabled = false;
+    payload.registrationActivationOnlyModeEnabled = false;
+    nextSignupConstraintState.plusModeEnabled = false;
+    nextSignupConstraintState.phonePlusModeEnabled = true;
+    nextSignupConstraintState.phoneVerificationEnabled = true;
+    nextSignupConstraintState.signupMethod = SIGNUP_METHOD_PHONE;
+    nextSignupConstraintState.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    nextSignupConstraintState.registrationOnlyModeEnabled = false;
+    nextSignupConstraintState.registrationActivationOnlyModeEnabled = false;
+    if (isPlainObjectForSettingsSchema(payload.settingsState)) {
+      payload.settingsState = mergeSettingsStatePatch(payload.settingsState, {
+        flows: {
+          openai: {
+            signup: {
+              signupMethod: SIGNUP_METHOD_PHONE,
+              phoneVerificationEnabled: true,
+            },
+            plus: {
+              plusModeEnabled: false,
+              phonePlusModeEnabled: true,
+              phonePlusOauthOnlyModeEnabled: true,
+              plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+            },
+            autoRun: {
+              registrationOnlyModeEnabled: false,
+              registrationActivationOnlyModeEnabled: false,
+            },
+          },
+        },
+      });
+    }
+  };
+  applyPhonePlusOauthOnlyPersistentConstraints();
   const applySub2ApiReloginPersistentConstraints = () => {
     if (!Boolean(payload.sub2apiReloginEnabled)) {
       return;
@@ -6135,6 +6497,7 @@ function buildPersistentSettingsPayload(input = {}, options = {}) {
           : {}),
       }, baseSettingsSchemaPayload));
       applyPhonePlusPersistentConstraints();
+      applyPhonePlusOauthOnlyPersistentConstraints();
       applySub2ApiReloginPersistentConstraints();
       if (Boolean(payload.registrationActivationOnlyModeEnabled)) {
         payload.registrationOnlyModeEnabled = false;
@@ -6267,6 +6630,9 @@ function buildSettingsStatePatchFromFlatUpdates(updates = {}) {
   assignIfUpdated('webRtcLeakProtectionEnabled', ['flows', 'openai', 'webRtcLeakProtection', 'enabled']);
   assignIfUpdated('plusModeEnabled', ['flows', 'openai', 'plus', 'plusModeEnabled']);
   assignIfUpdated('phonePlusModeEnabled', ['flows', 'openai', 'plus', 'phonePlusModeEnabled']);
+  assignIfUpdated('phonePlusOauthOnlyModeEnabled', ['flows', 'openai', 'plus', 'phonePlusOauthOnlyModeEnabled']);
+  assignIfUpdated('phonePlusOauthOnlyAccountUsage', ['flows', 'openai', 'plus', 'phonePlusOauthOnlyAccountUsage']);
+  assignIfUpdated('phonePlusOauthOnlyCurrentAccount', ['flows', 'openai', 'plus', 'phonePlusOauthOnlyCurrentAccount']);
   assignIfUpdated('plusAccountTypePaymentControlEnabled', ['flows', 'openai', 'plus', 'plusAccountTypePaymentControlEnabled']);
   assignIfUpdated('plusPaymentMethod', ['flows', 'openai', 'plus', 'plusPaymentMethod']);
   assignIfUpdated('plusHostedCheckoutIsFinalStep', ['flows', 'openai', 'plus', 'plusHostedCheckoutIsFinalStep']);
@@ -6533,8 +6899,12 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
     : {};
   const normalizedStepExecutionRangeByFlow = normalizeStepExecutionRangeByFlow(prevState?.stepExecutionRangeByFlow || {});
   const preserveIssueLogs = Boolean(prevState?.autoRunPreserveIssueLogsOnRestart);
-  const registrationActivationOnlyModeEnabled = Boolean(prevState?.registrationActivationOnlyModeEnabled);
-  const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(prevState?.registrationOnlyModeEnabled);
+  const phonePlusOauthOnlyModeEnabled = Boolean(prevState?.phonePlusOauthOnlyModeEnabled);
+  const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled
+    && Boolean(prevState?.registrationActivationOnlyModeEnabled);
+  const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled
+    && !registrationActivationOnlyModeEnabled
+    && Boolean(prevState?.registrationOnlyModeEnabled);
   const readyMaxRounds = normalizeSignupVerificationReadyMaxRoundsForReset(
     prevState?.signupVerificationReadyMaxRounds,
     getPersistedDefault('signupVerificationReadyMaxRounds', 5)
@@ -6581,6 +6951,22 @@ function buildAutoRunFreshResetSettingsState(prevState = {}, activeFlowId = DEFA
     flows: {
       openai: {
         integrationTargetId: prevState?.openaiIntegrationTargetId || prevState?.panelMode,
+        signup: phonePlusOauthOnlyModeEnabled
+          ? {
+              signupMethod: SIGNUP_METHOD_PHONE,
+              phoneVerificationEnabled: true,
+            }
+          : undefined,
+        plus: phonePlusOauthOnlyModeEnabled
+          ? {
+              plusModeEnabled: false,
+              phonePlusModeEnabled: true,
+              phonePlusOauthOnlyModeEnabled: true,
+              phonePlusOauthOnlyAccountUsage: prevState?.phonePlusOauthOnlyAccountUsage || {},
+              phonePlusOauthOnlyCurrentAccount: prevState?.phonePlusOauthOnlyCurrentAccount || null,
+              plusAccountAccessStrategy: PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH,
+            }
+          : undefined,
         autoRun: {
           autoRunPreserveIssueLogsOnRestart: preserveIssueLogs,
           phoneVerificationCodePrefetchEnabled: Boolean(prevState?.phoneVerificationCodePrefetchEnabled),
@@ -6679,6 +7065,24 @@ function buildFreshAutoRunKeepState(prevState = {}) {
 
   keepState.activeFlowId = activeFlowId;
   keepState.flowId = activeFlowId;
+  if (Boolean(sourceState.phonePlusOauthOnlyModeEnabled)) {
+    keepState.phonePlusOauthOnlyModeEnabled = true;
+    keepState.phonePlusModeEnabled = true;
+    keepState.plusModeEnabled = false;
+    keepState.signupMethod = SIGNUP_METHOD_PHONE;
+    keepState.resolvedSignupMethod = SIGNUP_METHOD_PHONE;
+    keepState.phoneVerificationEnabled = true;
+    keepState.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+    keepState.registrationOnlyModeEnabled = false;
+    keepState.registrationActivationOnlyModeEnabled = false;
+    keepState.phonePlusOauthOnlyAccountUsage = normalizePhonePlusOauthOnlyAccountUsage(
+      sourceState.phonePlusOauthOnlyAccountUsage
+    );
+    keepState.phonePlusOauthOnlyCurrentAccount = normalizePhonePlusOauthOnlyCurrentAccount(
+      sourceState.phonePlusOauthOnlyCurrentAccount,
+      normalizePhonePlusOauthOnlyAccountBookEntries(sourceState.accountBookEntries || [])
+    );
+  }
   keepState.browserFingerprintProfile = null;
   keepState.browserFingerprintAppliedAt = 0;
   keepState.browserFingerprintExitIp = '';
@@ -13717,6 +14121,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: normalizedPlan.phonePlusOauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: normalizedPlan.registrationActivationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
@@ -13739,6 +14144,7 @@ function getAutoRunTimerResumeOptions(plan) {
         autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: normalizedPlan.phonePlusOauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: normalizedPlan.registrationActivationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
@@ -13762,6 +14168,7 @@ function getAutoRunTimerResumeOptions(plan) {
       autoRunSkipFailures: normalizedPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: normalizedPlan.autoRunRetryPaypalCallback,
       phoneVerificationCodePrefetchEnabled: normalizedPlan.phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled: normalizedPlan.phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled: normalizedPlan.registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled: normalizedPlan.registrationActivationOnlyModeEnabled,
       autoRunPreserveIssueLogsOnRestart: normalizedPlan.autoRunPreserveIssueLogsOnRestart,
@@ -13861,6 +14268,7 @@ async function launchAutoRunTimerPlan(trigger = 'alarm', options = {}) {
         autoRunSkipFailures: plan.autoRunSkipFailures,
         autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled: plan.phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: plan.phonePlusOauthOnlyModeEnabled,
         registrationOnlyModeEnabled: plan.registrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: plan.registrationActivationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
@@ -13916,6 +14324,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     autoRunSkipFailures: options.autoRunSkipFailures,
     autoRunRetryPaypalCallback: options.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: options.phoneVerificationCodePrefetchEnabled,
+    phonePlusOauthOnlyModeEnabled: options.phonePlusOauthOnlyModeEnabled,
     registrationOnlyModeEnabled: options.registrationOnlyModeEnabled,
     registrationActivationOnlyModeEnabled: options.registrationActivationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: options.autoRunPreserveIssueLogsOnRestart,
@@ -13932,6 +14341,7 @@ async function scheduleAutoRun(totalRuns, options = {}) {
     autoRunSkipFailures: timerPlan.autoRunSkipFailures,
     autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
     phoneVerificationCodePrefetchEnabled: timerPlan.phoneVerificationCodePrefetchEnabled,
+    phonePlusOauthOnlyModeEnabled: timerPlan.phonePlusOauthOnlyModeEnabled,
     registrationOnlyModeEnabled: timerPlan.registrationOnlyModeEnabled,
     registrationActivationOnlyModeEnabled: timerPlan.registrationActivationOnlyModeEnabled,
     autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
@@ -14008,6 +14418,7 @@ async function restoreAutoRunTimerIfNeeded() {
       autoRunSkipFailures: plan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
       phoneVerificationCodePrefetchEnabled: plan.phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled: plan.phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled: plan.registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled: plan.registrationActivationOnlyModeEnabled,
       autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
@@ -14031,6 +14442,7 @@ async function restoreAutoRunTimerIfNeeded() {
       autoRunSkipFailures: plan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: plan.autoRunRetryPaypalCallback,
       phoneVerificationCodePrefetchEnabled: plan.phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled: plan.phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled: plan.registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled: plan.registrationActivationOnlyModeEnabled,
       autoRunPreserveIssueLogsOnRestart: plan.autoRunPreserveIssueLogsOnRestart,
@@ -14998,6 +15410,9 @@ async function completeNodeFromBackground(nodeId, payload = {}) {
   if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
     await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, true);
   }
+  if (typeof updatePhonePlusOauthOnlyAccountUsageForNodeResult === 'function') {
+    await updatePhonePlusOauthOnlyAccountUsageForNodeResult(normalizedNodeId, true);
+  }
   await addLog('已完成', 'ok', { nodeId: normalizedNodeId });
 
   if (normalizedNodeId === lastNodeId) {
@@ -15038,6 +15453,9 @@ async function finalizeDeferredNodeExecutionError(nodeId, error) {
   await setNodeStatus(normalizedNodeId, 'failed');
   if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
     await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, false, error);
+  }
+  if (typeof updatePhonePlusOauthOnlyAccountUsageForNodeResult === 'function') {
+    await updatePhonePlusOauthOnlyAccountUsageForNodeResult(normalizedNodeId, false, error);
   }
   await addLog(`失败：${getErrorMessage(error)}`, 'error', { nodeId: normalizedNodeId });
   await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, latestState, getErrorMessage(error));
@@ -15498,6 +15916,7 @@ async function requestStop(options = {}) {
       autoRunSkipFailures: timerPlan.autoRunSkipFailures,
       autoRunRetryPaypalCallback: timerPlan.autoRunRetryPaypalCallback,
       phoneVerificationCodePrefetchEnabled: timerPlan.phoneVerificationCodePrefetchEnabled,
+      phonePlusOauthOnlyModeEnabled: timerPlan.phonePlusOauthOnlyModeEnabled,
       registrationOnlyModeEnabled: timerPlan.registrationOnlyModeEnabled,
       registrationActivationOnlyModeEnabled: timerPlan.registrationActivationOnlyModeEnabled,
       autoRunPreserveIssueLogsOnRestart: timerPlan.autoRunPreserveIssueLogsOnRestart,
@@ -16259,6 +16678,9 @@ async function executeNode(nodeId, options = {}) {
   if (typeof prepareSub2ApiReloginRunIfNeeded === 'function') {
     state = await prepareSub2ApiReloginRunIfNeeded(normalizedNodeId, state);
   }
+  if (typeof preparePhonePlusOauthOnlyRunIfNeeded === 'function') {
+    state = await preparePhonePlusOauthOnlyRunIfNeeded(normalizedNodeId, state);
+  }
   if (typeof assertNodeExecutionAllowedForState === 'function') {
     assertNodeExecutionAllowedForState(normalizedNodeId, state, '执行节点');
   }
@@ -16370,6 +16792,9 @@ async function executeNode(nodeId, options = {}) {
       await setNodeStatus(normalizedNodeId, 'failed');
       if (typeof updateSub2ApiReloginAccountUsageForNodeResult === 'function') {
         await updateSub2ApiReloginAccountUsageForNodeResult(normalizedNodeId, false, err);
+      }
+      if (typeof updatePhonePlusOauthOnlyAccountUsageForNodeResult === 'function') {
+        await updatePhonePlusOauthOnlyAccountUsageForNodeResult(normalizedNodeId, false, err);
       }
       await addLog(`失败：${err.message}`, 'error', { nodeId: normalizedNodeId });
       await appendManualAccountRunRecordIfNeeded(`node:${normalizedNodeId}:failed`, errorState, getErrorMessage(err));
@@ -19139,6 +19564,7 @@ async function resumeAutoRun() {
     autoRunSkipFailures: Boolean(state.autoRunSkipFailures),
     autoRunRetryPaypalCallback: Boolean(state.autoRunRetryPaypalCallback),
     phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
+    phonePlusOauthOnlyModeEnabled: Boolean(state.phonePlusOauthOnlyModeEnabled),
     registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled) && !Boolean(state.registrationActivationOnlyModeEnabled),
     registrationActivationOnlyModeEnabled: Boolean(state.registrationActivationOnlyModeEnabled),
     autoRunPreserveIssueLogsOnRestart: Boolean(state.autoRunPreserveIssueLogsOnRestart),

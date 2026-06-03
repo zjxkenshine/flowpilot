@@ -129,11 +129,19 @@
         vpsPassword: state.vpsPassword,
         customPassword: state.customPassword,
         plusModeEnabled: state.plusModeEnabled,
+        phonePlusModeEnabled: state.phonePlusModeEnabled,
+        phonePlusOauthOnlyModeEnabled: Boolean(state.phonePlusOauthOnlyModeEnabled),
+        phonePlusOauthOnlyAccountUsage: state.phonePlusOauthOnlyAccountUsage || {},
+        phonePlusOauthOnlyCurrentAccount: state.phonePlusOauthOnlyCurrentAccount || null,
+        plusAccountAccessStrategy: state.plusAccountAccessStrategy,
         plusPaymentMethod: state.plusPaymentMethod,
         phoneVerificationEnabled: state.phoneVerificationEnabled,
         phoneVerificationCodePrefetchEnabled: Boolean(state.phoneVerificationCodePrefetchEnabled),
-        registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled) && !Boolean(state.registrationActivationOnlyModeEnabled),
-        registrationActivationOnlyModeEnabled: Boolean(state.registrationActivationOnlyModeEnabled),
+        registrationOnlyModeEnabled: Boolean(state.registrationOnlyModeEnabled)
+          && !Boolean(state.registrationActivationOnlyModeEnabled)
+          && !Boolean(state.phonePlusOauthOnlyModeEnabled),
+        registrationActivationOnlyModeEnabled: Boolean(state.registrationActivationOnlyModeEnabled)
+          && !Boolean(state.phonePlusOauthOnlyModeEnabled),
         phoneSignupReloginAfterBindEmailEnabled: state.phoneSignupReloginAfterBindEmailEnabled,
         paypalEmail: state.paypalEmail,
         paypalPassword: state.paypalPassword,
@@ -341,6 +349,15 @@
       return /no\s+numbers\s+available\s+across|all provider candidates failed to acquire number|no\s+free\s+phones|numbers?\s+not\s+found|no\s+numbers\s+within\s+maxprice|countries\s+are\s+empty|均无可用号码|暂无可用号码|无可用号码|接码号池暂无|\bNO_NUMBERS\b/i.test(text);
     }
 
+    function isPhonePlusOauthOnlyAccountExhaustedFailure(error) {
+      const text = String(
+        typeof getErrorMessage === 'function'
+          ? getErrorMessage(error)
+          : (error?.message || error || '')
+      ).trim();
+      return /账号簿已无可用 Phone Plus 仅 OAuth 账号/.test(text);
+    }
+
     async function logAutoRunFinalSummary(totalRuns, roundSummaries = []) {
       const summaries = buildAutoRunRoundSummaries(totalRuns, roundSummaries);
       const successRounds = summaries.filter((item) => item.status === 'success');
@@ -406,13 +423,15 @@
         autoRunSkipFailures = false,
         autoRunRetryPaypalCallback = false,
         phoneVerificationCodePrefetchEnabled = false,
+        phonePlusOauthOnlyModeEnabled = false,
         registrationOnlyModeEnabled = false,
         registrationActivationOnlyModeEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
-      const activationOnlyModeEnabled = Boolean(registrationActivationOnlyModeEnabled);
-      const normalizedRegistrationOnlyModeEnabled = !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
+      const oauthOnlyModeEnabled = Boolean(phonePlusOauthOnlyModeEnabled);
+      const activationOnlyModeEnabled = !oauthOnlyModeEnabled && Boolean(registrationActivationOnlyModeEnabled);
+      const normalizedRegistrationOnlyModeEnabled = !oauthOnlyModeEnabled && !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
       if (totalRuns <= 1 || targetRun >= totalRuns) {
         return false;
       }
@@ -440,6 +459,7 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: oauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
@@ -450,6 +470,7 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: oauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
@@ -464,13 +485,15 @@
         autoRunSkipFailures = false,
         autoRunRetryPaypalCallback = false,
         phoneVerificationCodePrefetchEnabled = false,
+        phonePlusOauthOnlyModeEnabled = false,
         registrationOnlyModeEnabled = false,
         registrationActivationOnlyModeEnabled = false,
         autoRunPreserveIssueLogsOnRestart = false,
         roundSummaries = [],
       } = options;
-      const activationOnlyModeEnabled = Boolean(registrationActivationOnlyModeEnabled);
-      const normalizedRegistrationOnlyModeEnabled = !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
+      const oauthOnlyModeEnabled = Boolean(phonePlusOauthOnlyModeEnabled);
+      const activationOnlyModeEnabled = !oauthOnlyModeEnabled && Boolean(registrationActivationOnlyModeEnabled);
+      const normalizedRegistrationOnlyModeEnabled = !oauthOnlyModeEnabled && !activationOnlyModeEnabled && Boolean(registrationOnlyModeEnabled);
       const fallbackThreadIntervalMinutes = normalizeAutoRunFallbackThreadIntervalMinutes(
         (await getState()).autoRunFallbackThreadIntervalMinutes
       );
@@ -492,6 +515,7 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: oauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
@@ -502,6 +526,7 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled: oauthOnlyModeEnabled,
         registrationOnlyModeEnabled: normalizedRegistrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled: activationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
@@ -568,8 +593,12 @@
       const autoRunSkipFailures = Boolean(options.autoRunSkipFailures);
       const autoRunRetryPaypalCallback = Boolean(options.autoRunRetryPaypalCallback);
       const phoneVerificationCodePrefetchEnabled = Boolean(options.phoneVerificationCodePrefetchEnabled);
-      const registrationActivationOnlyModeEnabled = Boolean(options.registrationActivationOnlyModeEnabled);
-      const registrationOnlyModeEnabled = !registrationActivationOnlyModeEnabled && Boolean(options.registrationOnlyModeEnabled);
+      const phonePlusOauthOnlyModeEnabled = Boolean(options.phonePlusOauthOnlyModeEnabled);
+      const registrationActivationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled
+        && Boolean(options.registrationActivationOnlyModeEnabled);
+      const registrationOnlyModeEnabled = !phonePlusOauthOnlyModeEnabled
+        && !registrationActivationOnlyModeEnabled
+        && Boolean(options.registrationOnlyModeEnabled);
       const autoRunPreserveIssueLogsOnRestart = Boolean(options.autoRunPreserveIssueLogsOnRestart);
       const initialMode = options.mode === 'continue' ? 'continue' : 'restart';
       const resumeCurrentRun = Number.isInteger(options.resumeCurrentRun) && options.resumeCurrentRun > 0
@@ -608,6 +637,7 @@
         autoRunSkipFailures,
         autoRunRetryPaypalCallback,
         phoneVerificationCodePrefetchEnabled,
+        phonePlusOauthOnlyModeEnabled,
         registrationOnlyModeEnabled,
         registrationActivationOnlyModeEnabled,
         autoRunPreserveIssueLogsOnRestart,
@@ -676,6 +706,7 @@
               autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
               autoRunSessionId: sessionId,
               phoneVerificationCodePrefetchEnabled,
+              phonePlusOauthOnlyModeEnabled,
               registrationOnlyModeEnabled,
               registrationActivationOnlyModeEnabled,
               signupPhoneCodePrefetchEnabled: false,
@@ -700,6 +731,7 @@
               autoRunSkipFailures,
               autoRunRetryPaypalCallback,
               phoneVerificationCodePrefetchEnabled,
+              phonePlusOauthOnlyModeEnabled,
               registrationOnlyModeEnabled,
               registrationActivationOnlyModeEnabled,
               autoRunPreserveIssueLogsOnRestart,
@@ -763,6 +795,7 @@
               attemptRuns: attemptRun,
               continued: useExistingProgress,
               phoneVerificationCodePrefetchEnabled,
+              phonePlusOauthOnlyModeEnabled,
               registrationOnlyModeEnabled,
               registrationActivationOnlyModeEnabled,
             });
@@ -813,8 +846,10 @@
               && isPhoneSmsPlatformRateLimitFailure(err);
             const blockedByPhoneNoSupply = !blockedByPhoneSmsRateLimit
               && isPhoneNumberSupplyExhaustedFailure(err);
+            const blockedByPhonePlusOauthOnlyAccountExhausted = isPhonePlusOauthOnlyAccountExhaustedFailure(err);
             const blockedByAddPhone = !blockedByPhoneSmsRateLimit
               && !blockedByPhoneNoSupply
+              && !blockedByPhonePlusOauthOnlyAccountExhausted
               && typeof isAddPhoneAuthFailure === 'function'
               && isAddPhoneAuthFailure(err);
             const blockedByPlusNonFreeTrial = typeof isPlusCheckoutNonFreeTrialFailure === 'function'
@@ -848,6 +883,7 @@
               && isKiroProxyFailure(err);
             const canRetry = !blockedByAddPhone
               && !blockedByPhoneNoSupply
+              && !blockedByPhonePlusOauthOnlyAccountExhausted
               && !blockedByPlusNonFreeTrial
               && !blockedByGpcTaskEnded
               && !blockedByHostedCheckoutGenericError
@@ -1004,6 +1040,26 @@
               break;
             }
 
+            if (blockedByPhonePlusOauthOnlyAccountExhausted) {
+              roundSummary.status = 'failed';
+              roundSummary.finalFailureReason = reason;
+              await setState({
+                autoRunRoundSummaries: serializeAutoRunRoundSummaries(totalRuns, roundSummaries),
+              });
+              await appendRoundRecordIfNeeded('failed', reason, err);
+              cancelPendingCommands('当前轮因账号簿已无可用 Phone Plus 仅 OAuth 账号已终止。');
+              await broadcastStopToContentScripts();
+              await addLog(`第 ${targetRun}/${totalRuns} 轮账号簿已无可用 Phone Plus 仅 OAuth 账号，自动运行自然结束。`, 'warn');
+              stoppedEarly = true;
+              await broadcastAutoRunStatus('stopped', {
+                currentRun: targetRun,
+                totalRuns,
+                attemptRun,
+                sessionId: 0,
+              });
+              break;
+            }
+
             if (retryableHostedCheckoutGenericError) {
               const retryIndex = attemptRun;
               await addLog(`第 ${targetRun}/${totalRuns} 轮第 ${attemptRun} 次尝试遇到 PayPal Checkout 异常：${reason}`, 'warn');
@@ -1042,6 +1098,7 @@
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
+                  phonePlusOauthOnlyModeEnabled,
                   registrationOnlyModeEnabled,
                   registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
@@ -1109,6 +1166,7 @@
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
+                  phonePlusOauthOnlyModeEnabled,
                   registrationOnlyModeEnabled,
                   registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
@@ -1372,6 +1430,7 @@
                   autoRunSkipFailures,
                   autoRunRetryPaypalCallback,
                   phoneVerificationCodePrefetchEnabled,
+                  phonePlusOauthOnlyModeEnabled,
                   registrationOnlyModeEnabled,
                   registrationActivationOnlyModeEnabled,
                   autoRunPreserveIssueLogsOnRestart,
@@ -1446,6 +1505,7 @@
             autoRunSkipFailures,
             autoRunRetryPaypalCallback,
             phoneVerificationCodePrefetchEnabled,
+            phonePlusOauthOnlyModeEnabled,
             registrationOnlyModeEnabled,
             registrationActivationOnlyModeEnabled,
             autoRunPreserveIssueLogsOnRestart,

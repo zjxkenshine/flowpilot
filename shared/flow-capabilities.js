@@ -74,6 +74,7 @@
     'phoneVerificationEnabled',
     'plusModeEnabled',
     'phonePlusModeEnabled',
+    'phonePlusOauthOnlyModeEnabled',
     'plusHostedCheckoutIsFinalStep',
     'signupMethod',
     'plusAccountAccessStrategy',
@@ -398,7 +399,11 @@
       const rawPhonePlusModeEnabled = activeFlowId === 'openai'
         && !sub2apiReloginEnabled
         && flowState.supportsPlusMode
-        && Boolean(state?.phonePlusModeEnabled);
+        && Boolean(state?.phonePlusModeEnabled || state?.phonePlusOauthOnlyModeEnabled);
+      const rawPhonePlusOauthOnlyModeEnabled = activeFlowId === 'openai'
+        && !sub2apiReloginEnabled
+        && rawPhonePlusModeEnabled
+        && Boolean(state?.phonePlusOauthOnlyModeEnabled);
       const rawPlusModeEnabled = activeFlowId === 'openai'
         && !sub2apiReloginEnabled
         && flowState.supportsPlusMode
@@ -412,6 +417,7 @@
           && Boolean(state?.phoneVerificationEnabled || rawPhonePlusModeEnabled),
         plusModeEnabled: rawPlusModeEnabled,
         phonePlusModeEnabled: rawPhonePlusModeEnabled,
+        phonePlusOauthOnlyModeEnabled: rawPhonePlusOauthOnlyModeEnabled,
         settingsMenuLocked: Boolean(options?.settingsMenuLocked ?? state?.settingsMenuLocked),
       };
       const effectiveSignupMethods = [];
@@ -512,6 +518,7 @@
           plusAccountAccessStrategy: effectivePlusAccountAccessStrategy,
           plusModeEnabled: runtimeLocks.plusModeEnabled,
           phonePlusModeEnabled: runtimeLocks.phonePlusModeEnabled,
+          phonePlusOauthOnlyModeEnabled: runtimeLocks.phonePlusOauthOnlyModeEnabled,
           plusHostedCheckoutIsFinalStep: state?.plusHostedCheckoutIsFinalStep !== false,
           signupMethod: effectiveSignupMethod,
           sub2apiReloginEnabled,
@@ -713,11 +720,24 @@
       }
 
       if (
-        changedKeySet.has('phonePlusModeEnabled')
-        && Boolean(state?.phonePlusModeEnabled)
+        changedKeySet.has('phonePlusOauthOnlyModeEnabled')
+        && Boolean(state?.phonePlusOauthOnlyModeEnabled)
+        && !flowState.supportsPlusMode
+      ) {
+        normalizedUpdates.phonePlusOauthOnlyModeEnabled = false;
+        errors.push({
+          code: 'phone_plus_oauth_only_mode_unsupported',
+          message: '当前 flow 不支持 Phone Plus 仅 OAuth 模式。',
+        });
+      }
+
+      if (
+        (changedKeySet.has('phonePlusModeEnabled') || changedKeySet.has('phonePlusOauthOnlyModeEnabled'))
+        && Boolean(state?.phonePlusModeEnabled || state?.phonePlusOauthOnlyModeEnabled)
         && capabilityState.effectiveSignupMethod !== SIGNUP_METHOD_PHONE
       ) {
         normalizedUpdates.phonePlusModeEnabled = false;
+        normalizedUpdates.phonePlusOauthOnlyModeEnabled = false;
         errors.push(buildPhonePlusValidationError(capabilityState));
       }
 
@@ -754,10 +774,11 @@
         errors.push(buildPhoneSignupValidationError(capabilityState));
       }
 
-      const phonePlusModeWins = Boolean(state?.phonePlusModeEnabled)
+      const phonePlusModeWins = Boolean(state?.phonePlusModeEnabled || state?.phonePlusOauthOnlyModeEnabled)
         && capabilityState.runtimeLocks?.phonePlusModeEnabled
         && (
           changedKeySet.has('phonePlusModeEnabled')
+          || changedKeySet.has('phonePlusOauthOnlyModeEnabled')
           || !changedKeySet.has('plusModeEnabled')
           || !Boolean(state?.plusModeEnabled)
         );
@@ -768,8 +789,15 @@
           normalizedUpdates.phoneVerificationEnabled = true;
           normalizedUpdates.signupMethod = SIGNUP_METHOD_PHONE;
           normalizedUpdates.plusAccountAccessStrategy = PLUS_ACCOUNT_ACCESS_STRATEGY_OAUTH;
+          if (capabilityState.runtimeLocks?.phonePlusOauthOnlyModeEnabled) {
+            normalizedUpdates.phonePlusOauthOnlyModeEnabled = true;
+            normalizedUpdates.phonePlusModeEnabled = true;
+            normalizedUpdates.registrationOnlyModeEnabled = false;
+            normalizedUpdates.registrationActivationOnlyModeEnabled = false;
+          }
         } else {
           normalizedUpdates.phonePlusModeEnabled = false;
+          normalizedUpdates.phonePlusOauthOnlyModeEnabled = false;
         }
       }
 
