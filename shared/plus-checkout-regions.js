@@ -7,10 +7,12 @@
   const REGION_DEFINITIONS = Object.freeze([
     Object.freeze({ code: 'US', country: 'US', currency: 'USD', label: 'US / USD' }),
     Object.freeze({ code: 'JP', country: 'JP', currency: 'JPY', label: 'JP / JPY' }),
-    Object.freeze({ code: 'BR', country: 'BR', currency: 'BRL', label: 'BR / BRL', localPayment: 'Pix' }),
+    Object.freeze({ code: 'BR', country: 'BR', currency: 'BRL', label: 'BR / BRL' }),
     Object.freeze({ code: 'KZ', country: 'KZ', currency: 'KZT', label: 'KZ / KZT' }),
     Object.freeze({ code: 'NP', country: 'NP', currency: 'NPR', label: 'NP / NPR' }),
     Object.freeze({ code: 'IQ', country: 'IQ', currency: 'IQD', label: 'IQ / IQD' }),
+    Object.freeze({ code: 'DE', country: 'DE', currency: 'EUR', label: 'DE / EUR' }),
+    Object.freeze({ code: 'ID', country: 'ID', currency: 'IDR', label: 'ID / IDR' }),
   ]);
 
   const REGION_BY_CODE = Object.freeze(REGION_DEFINITIONS.reduce((map, region) => {

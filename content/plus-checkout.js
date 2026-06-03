@@ -83,6 +83,8 @@ const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = {
   KZ: { country: 'KZ', currency: 'KZT' },
   NP: { country: 'NP', currency: 'NPR' },
   IQ: { country: 'IQ', currency: 'IQD' },
+  DE: { country: 'DE', currency: 'EUR' },
+  ID: { country: 'ID', currency: 'IDR' },
 };
 
 async function performOperationWithDelay(metadata, operation) {

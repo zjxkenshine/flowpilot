@@ -3437,7 +3437,7 @@ const PLUS_CHECKOUT_REGIONAL_BILLING_DETAILS = Object.freeze(
   Object.fromEntries(PLUS_CHECKOUT_SUPPORTED_PROFILE_COUNTRIES.map((code) => {
     const billing = self.MultiPagePlusCheckoutRegions?.getCheckoutBillingDetailsForRegion
       ? self.MultiPagePlusCheckoutRegions.getCheckoutBillingDetailsForRegion(code)
-      : ({ country: code, currency: ({ US: 'USD', JP: 'JPY', BR: 'BRL', KZ: 'KZT', NP: 'NPR', IQ: 'IQD' })[code] || 'USD' });
+      : ({ country: code, currency: ({ US: 'USD', JP: 'JPY', BR: 'BRL', KZ: 'KZT', NP: 'NPR', IQ: 'IQD', DE: 'EUR', ID: 'IDR' })[code] || 'USD' });
     return [code, Object.freeze(billing)];
   }))
 );
