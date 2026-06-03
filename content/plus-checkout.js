@@ -20,7 +20,7 @@ const PLUS_CHECKOUT_CONFIGS = {
       country: 'US',
       currency: 'USD',
     },
-    checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_ie/',
+    checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_llc/',
     paymentLabel: 'PayPal',
   },
   gopay: {
@@ -46,7 +46,7 @@ const PAYMENT_METHOD_CONFIGS = {
     id: PLUS_PAYMENT_METHOD_PAYPAL,
     label: 'PayPal',
     diagnosticLabel: 'PayPal',
-    checkoutMerchantPath: 'openai_ie',
+    checkoutMerchantPath: 'openai_llc',
     billingDetails: {
       country: 'US',
       currency: 'USD',

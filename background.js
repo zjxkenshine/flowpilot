@@ -16894,6 +16894,17 @@ async function executeNodeAndWait(nodeId, delayAfter = 2000) {
         } catch (step5ValidationError) {
           step5ValidationError.skipFailedSignupPhoneReusePreserve = true;
           step5ValidationError.signupProfileSubmitted = true;
+          if (
+            typeof isStep5ProfileReturnedAfterSubmitError === 'function'
+            && isStep5ProfileReturnedAfterSubmitError(step5ValidationError)
+          ) {
+            await addLog(
+              `步骤 5：资料提交后页面返回资料页，将交给自动运行重新执行填写资料节点。原因：${getErrorMessage(step5ValidationError)}`,
+              'warn',
+              { nodeId: normalizedNodeId }
+            );
+            throw step5ValidationError;
+          }
           await setNodeStatus(normalizedNodeId, 'failed');
           await addLog(`失败：${getErrorMessage(step5ValidationError)}`, 'error', { nodeId: normalizedNodeId });
           throw step5ValidationError;
@@ -18590,6 +18601,7 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   let gpcCheckoutRestartCount = 0;
   let plusCheckoutRestartCount = 0;
   let step4RestartCount = 0;
+  let step5ProfileReturnRestartCount = 0;
   const nodeIdleRestartCounts = new Map();
   let currentStartNodeId = String(startNodeId || '').trim();
   let continueCurrentAttempt = continued;
@@ -18865,6 +18877,51 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
     }
     return undefined;
   };
+  const isStep5ProfileReturnRestartFailure = (error) => {
+    if (typeof isStep5ProfileReturnedAfterSubmitError === 'function') {
+      return isStep5ProfileReturnedAfterSubmitError(error);
+    }
+    return /STEP5_PROFILE_RETURNED_AFTER_SUBMIT::|步骤\s*5：资料提交完成信号已收到，但页面仍停留(?:或返回)?资料页/i.test(getErrorMessage(error));
+  };
+  const restartFillProfileAfterProfileReturn = async (nodeId, error) => {
+    const normalizedNodeId = String(nodeId || '').trim();
+    if (normalizedNodeId !== 'fill-profile' || !isStep5ProfileReturnRestartFailure(error)) {
+      return false;
+    }
+
+    const maxProfileReturnRestarts = 3;
+    step5ProfileReturnRestartCount += 1;
+    if (step5ProfileReturnRestartCount > maxProfileReturnRestarts) {
+      await addLog(
+        `节点 fill-profile：资料提交后已连续 ${maxProfileReturnRestarts} 次返回资料页，停止自动重跑。原因：${getErrorMessage(error)}`,
+        'error'
+      );
+      throw error;
+    }
+
+    await addLog(
+      `节点 fill-profile：资料提交后页面返回资料页，准备重新执行步骤 5 填写并提交（第 ${step5ProfileReturnRestartCount}/${maxProfileReturnRestarts} 次恢复）。原因：${getErrorMessage(error)}`,
+      'warn'
+    );
+    await invalidateDownstreamAfterAutoRunNodeRestart('fill-profile', {
+      logLabel: `节点 fill-profile 资料提交后返回资料页，准备重新执行步骤 5（第 ${step5ProfileReturnRestartCount}/${maxProfileReturnRestarts} 次恢复）`,
+    });
+    const latestState = await getState();
+    const nodeStatuses = {
+      ...(latestState.nodeStatuses || {}),
+      'fill-profile': 'pending',
+    };
+    await setState({
+      nodeStatuses,
+      currentNodeId: 'fill-profile',
+    });
+    chrome.runtime?.sendMessage?.({
+      type: 'NODE_STATUS_CHANGED',
+      payload: { nodeId: 'fill-profile', status: 'pending' },
+    })?.catch?.(() => { });
+    setRestartNode('fill-profile');
+    return true;
+  };
   async function resetPaymentProxyAndSwitchIpBeforeCheckoutRetry(state = {}, options = {}) {
     let latestState = state && typeof state === 'object' ? state : {};
     let releasedPaymentProxy = false;
@@ -19115,6 +19172,12 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
             nodeIndex = Math.max(0, getNodeIndex(latestState, currentStartNodeId));
             continue;
           }
+          if (await restartFillProfileAfterProfileReturn(nodeId, err)) {
+            latestState = await getState();
+            nodeIds = getAutoRunWorkflowNodeIds(latestState);
+            nodeIndex = Math.max(0, getNodeIndex(latestState, currentStartNodeId));
+            continue;
+          }
           throw err;
         }
       }
@@ -19310,6 +19373,13 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
       }
 
       if (await restartCurrentNodeAfterIdle(nodeId, err)) {
+        continue;
+      }
+
+      if (await restartFillProfileAfterProfileReturn(nodeId, err)) {
+        loopState = await getState();
+        nodeIds = getAutoRunWorkflowNodeIds(loopState);
+        nodeIndex = Math.max(0, getNodeIndex(loopState, currentStartNodeId));
         continue;
       }
 
@@ -21223,6 +21293,23 @@ function isStep5PhoneSignupCompletionPayload(payload = {}) {
   return signupMethod === 'phone' || accountIdentifierType === 'phone' || Boolean(phoneNumber);
 }
 
+function createStep5ProfileReturnedAfterSubmitError(pageState = {}, currentUrl = '') {
+  const url = pageState?.url || currentUrl || 'unknown';
+  const error = new Error(`STEP5_PROFILE_RETURNED_AFTER_SUBMIT::步骤 5：资料提交完成信号已收到，但页面仍停留或返回资料页，将回到步骤 5 重新填写并提交。URL: ${url}`);
+  error.step5ProfileReturnedAfterSubmit = true;
+  return error;
+}
+
+function isStep5ProfileReturnedAfterSubmitError(error) {
+  const message = getErrorMessage(error);
+  return Boolean(
+    error?.step5ProfileReturnedAfterSubmit
+    || /^STEP5_PROFILE_RETURNED_AFTER_SUBMIT::/i.test(message)
+    || /步骤\s*5：资料提交完成信号已收到，但页面仍停留或返回资料页/i.test(message)
+    || /步骤\s*5：资料提交完成信号已收到，但页面仍停留在资料页/i.test(message)
+  );
+}
+
 async function recoverStep5SubmitRetryPageOnTab(options = {}) {
   const result = await sendToContentScriptResilient(
     'signup-page',
@@ -21380,7 +21467,7 @@ async function validateStep5PostCompletion(tabId, completionPayload = {}) {
     }
 
     if (pageState.profileVisible) {
-      throw new Error(`步骤 5：资料提交完成信号已收到，但页面仍停留在资料页，当前流程将直接报错。URL: ${pageState.url || currentUrl || 'unknown'}`);
+      throw createStep5ProfileReturnedAfterSubmitError(pageState, currentUrl);
     }
 
     if (pageState.unknownAuthPage) {

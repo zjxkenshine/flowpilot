@@ -184,7 +184,7 @@ function createCheckoutContentHarness(options = {}) {
   const elements = [];
   const includeHostedEmailInput = options.includeHostedEmailInput !== false;
   const includeHostedReadOnlyEmail = Boolean(options.includeHostedReadOnlyEmail);
-  const locationHref = options.locationHref || 'https://chatgpt.com/checkout/openai_ie/cs_test';
+  const locationHref = options.locationHref || 'https://chatgpt.com/checkout/openai_llc/cs_test';
   const locationUrl = new URL(locationHref);
   const omitHostedPayPalButton = Boolean(options.omitHostedPayPalButton);
   const currentLocation = {
@@ -956,7 +956,7 @@ test('Plus checkout create forwards selected fixed checkout region billing detai
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_np',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_np',
           country: 'NP',
           currency: 'NPR',
         };
@@ -1045,7 +1045,7 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
           country: 'US',
           currency: 'USD',
         };
@@ -1164,7 +1164,7 @@ test('Phone Plus classic checkout falls back before opening checkout link when c
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
           country: 'US',
           currency: 'USD',
         };
@@ -1225,7 +1225,7 @@ test('Non Phone Plus classic checkout still stops when conversion proxy exit che
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
           country: 'US',
           currency: 'USD',
         };
@@ -1270,7 +1270,7 @@ test('Plus checkout create allows free accounts from matching PlusCheck region',
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
           country: 'US',
           currency: 'USD',
         };
@@ -1504,7 +1504,7 @@ test('Phone Plus classic checkout falls back when conversion proxy apply fails',
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
           country: 'US',
           currency: 'USD',
         };
@@ -3313,7 +3313,7 @@ test('Phone Plus classic checkout falls back at step 6 when checkout amount is n
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test',
           country: 'US',
           currency: 'USD',
         };

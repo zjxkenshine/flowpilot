@@ -204,7 +204,7 @@ test('shared source registry exposes canonical Kiro sources and drivers', () => 
     registry.matchesSourceUrlFamily(
       'plus-checkout',
       'https://pay.openai.com/c/pay/cs_test',
-      'https://chatgpt.com/checkout/openai_ie/cs_test'
+      'https://chatgpt.com/checkout/openai_llc/cs_test'
     ),
     true
   );
@@ -212,7 +212,7 @@ test('shared source registry exposes canonical Kiro sources and drivers', () => 
     registry.matchesSourceUrlFamily(
       'plus-checkout',
       'https://checkout.stripe.com/c/pay/cs_test',
-      'https://chatgpt.com/checkout/openai_ie/cs_test'
+      'https://chatgpt.com/checkout/openai_llc/cs_test'
     ),
     true
   );

@@ -107,7 +107,7 @@ function createPlusCheckoutMessageHarness({ checkoutSessionId = 'cs_test_123', c
   return { send, fetchCalls };
 }
 
-test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_ie merchant path by default', async () => {
+test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_llc merchant path by default', async () => {
   const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_paypal' });
 
   const result = await harness.send({
@@ -117,7 +117,7 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_ie merchant path by
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_paypal');
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_paypal');
   assert.equal(result.country, 'US');
   assert.equal(result.currency, 'USD');
 
@@ -237,7 +237,7 @@ test('CREATE_PLUS_CHECKOUT maps regional checkout country and currency when enab
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_jp');
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_jp');
   assert.equal(result.country, 'JP');
   assert.equal(result.currency, 'JPY');
 

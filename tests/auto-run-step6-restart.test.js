@@ -324,11 +324,17 @@ const events = {
   steps: [],
   logs: [],
   invalidations: [],
+  stateUpdates: [],
   cancellations: [],
   stopBroadcasts: 0,
   proxyRestores: [],
   proxySwitches: [],
   order: [],
+};
+let currentState = {
+  stepStatuses: { 3: 'completed' },
+  mailProvider: '163',
+  ...${JSON.stringify(customState)},
 };
 
 async function addLog(message, level = 'info') {
@@ -340,11 +346,22 @@ async function ensureResolvedSignupMethodForRun() { return 'email'; }
 async function broadcastAutoRunStatus() {}
 async function getState() {
   return {
-    stepStatuses: { 3: 'completed' },
-    mailProvider: '163',
+    ...currentState,
     logs: events.logs,
-    ...${JSON.stringify(customState)},
   };
+}
+async function setState(updates = {}) {
+  currentState = {
+    ...currentState,
+    ...updates,
+    nodeStatuses: updates.nodeStatuses
+      ? { ...(updates.nodeStatuses || {}) }
+      : currentState.nodeStatuses,
+  };
+  events.stateUpdates.push(updates);
+}
+function broadcastDataUpdate(payload = {}) {
+  events.stateUpdates.push({ broadcast: payload });
 }
 const checkoutConversionProxyManager = {
   getStoredSession: async (state = {}) => state.plusCheckoutConversionProxySession || null,
@@ -572,6 +589,29 @@ test('auto-run applies the idle-log restart watchdog to early steps too', async 
   assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [1]);
   assert.equal(events.cancellations.length, 1);
   assert.equal(events.stopBroadcasts, 1);
+});
+
+test('auto-run reruns fill-profile when step 5 post-submit returns to about-you', async () => {
+  const registrationSteps = {
+    5: { key: 'fill-profile' },
+    6: { key: 'wait-registration-success' },
+  };
+  const harness = createHarness({
+    startStep: 5,
+    failureStep: 5,
+    failureBudget: 1,
+    failureMessage: 'STEP5_PROFILE_RETURNED_AFTER_SUBMIT::步骤 5：资料提交完成信号已收到，但页面仍停留或返回资料页，将回到步骤 5 重新填写并提交。URL: https://auth.openai.com/about-you',
+    stepDefinitions: registrationSteps,
+    stepIds: [5, 6],
+    lastStepId: 6,
+  });
+
+  const events = await harness.run();
+
+  assert.deepStrictEqual(events.steps, [5, 5, 6]);
+  assert.deepStrictEqual(events.invalidations.map((entry) => entry.step), [5]);
+  assert.ok(events.logs.some(({ message }) => /重新执行步骤 5 填写并提交/.test(message)));
+  assert.ok(events.stateUpdates.some((updates) => updates.nodeStatuses?.['fill-profile'] === 'pending'));
 });
 
 test('auto-run stops current-step idle restarts after the retry cap', async () => {

@@ -74,8 +74,7 @@
         
         if(data.checkout_session_id) {
             // 核心2：拼接 Plus 的专属支付短链
-            // 如果 openai_ie 报错，可以直接把 /openai_ie 删掉，变成 "https://chatgpt.com/checkout/" + data.checkout_session_id
-            const shortLink = "https://chatgpt.com/checkout/openai_ie/" + data.checkout_session_id;
+            const shortLink = "https://chatgpt.com/checkout/openai_llc/" + data.checkout_session_id;
             
             // 弹窗让你复制这个带有 PayPal 的短链
             prompt("提取成功！这是你的 Plus 支付短链（复制保留）：", shortLink);
@@ -201,9 +200,9 @@
 
 先检查网络连接是否正常。如果多次尝试仍然失败，可能是当前账户不符合 0 元试用条件，请稍后再试。
 
-### `/openai_ie` 部分出现 404 错误怎么办？
+### `/openai_llc` 部分出现 404 错误怎么办？
 
-如果短链中的 `/openai_ie/` 无法访问，手动修改短链，删除 `/openai_ie/` 即可（变为 `https://chatgpt.com/checkout/{checkout_session_id}`），然后再访问。
+如果短链中的 `/openai_llc/` 无法访问，先确认 `checkout_session_id` 是否完整，再重新生成 Plus 支付短链后访问。
 
 ### 支付页面没有显示 PayPal 选项？
 

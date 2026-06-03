@@ -140,6 +140,66 @@ return {
   );
 });
 
+test('step 5 post-completion validation reports profile return as rerunnable', async () => {
+  const api = new Function(`
+const chrome = {
+  tabs: {
+    async get() {
+      return { url: 'https://auth.openai.com/about-you' };
+    },
+  },
+};
+
+async function sendToContentScriptResilient(_source, message) {
+  if (message.type === 'GET_STEP5_SUBMIT_STATE') {
+    return {
+      retryPage: false,
+      retryEnabled: false,
+      maxCheckAttemptsBlocked: false,
+      userAlreadyExistsBlocked: false,
+      successState: '',
+      profileVisible: true,
+      errorText: '',
+      unknownAuthPage: false,
+      url: 'https://auth.openai.com/about-you',
+    };
+  }
+  throw new Error('unexpected message type: ' + message.type);
+}
+
+async function addLog() {}
+async function waitForTabStableComplete() {}
+
+${extractFunction('parseUrlSafely')}
+${extractFunction('isSignupEntryHost')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep5SubmitStateFromContent')}
+${extractFunction('isStep5PhoneSignupCompletionPayload')}
+${extractFunction('createStep5ProfileReturnedAfterSubmitError')}
+${extractFunction('recoverStep5SubmitRetryPageOnTab')}
+${extractFunction('validateStep5PostCompletion')}
+
+return {
+  run() {
+    return validateStep5PostCompletion(99, {
+      step5ProfileSubmitResultMaxRounds: 1,
+      step5ProfileSubmitResultRoundWaitSeconds: 1,
+    });
+  },
+};
+`)();
+
+  await assert.rejects(
+    () => api.run(),
+    (error) => {
+      assert.equal(error.step5ProfileReturnedAfterSubmit, true);
+      assert.match(error.message, /^STEP5_PROFILE_RETURNED_AFTER_SUBMIT::/);
+      assert.match(error.message, /https:\/\/auth\.openai\.com\/about-you/);
+      return true;
+    }
+  );
+});
+
 test('step 5 completion clears failed phone reuse and marks post-validation errors as non-reusable', async () => {
   const api = new Function(`
 const events = {
