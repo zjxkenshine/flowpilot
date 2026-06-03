@@ -12429,6 +12429,10 @@ async function closeTabsByUrlPrefix(prefix, options = {}) {
   return tabRuntime.closeTabsByUrlPrefix(prefix, options);
 }
 
+async function removeTabsSafely(tabIds, options = {}) {
+  return tabRuntime.removeTabsSafely(tabIds, options);
+}
+
 async function pingContentScriptOnTab(tabId) {
   return tabRuntime.pingContentScriptOnTab(tabId);
 }
@@ -20052,6 +20056,7 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   normalizeCloudMailReceiveMailbox,
   queryTabsInAutomationWindow,
   registerTab,
+  removeTabsSafely,
   sendTabMessageUntilStopped,
   setPlusPaymentEmailState,
   setState,

@@ -442,6 +442,131 @@
       }
     }
 
+    function normalizeTabIdList(tabIds) {
+      const rawIds = Array.isArray(tabIds) ? tabIds : [tabIds];
+      const seen = new Set();
+      const normalized = [];
+      for (const rawId of rawIds) {
+        const id = Number(rawId);
+        if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+        normalized.push(id);
+      }
+      return normalized;
+    }
+
+    async function addSafeRemovalLog(message, level = 'info') {
+      if (typeof addLog !== 'function') {
+        return;
+      }
+      await addLog(message, level).catch(() => {});
+    }
+
+    async function createSafeRemovalPlaceholder(options = {}) {
+      if (options.createPlaceholder === false || typeof chrome?.tabs?.create !== 'function') {
+        return null;
+      }
+      let windowId = null;
+      try {
+        windowId = await getAutomationWindowId(options);
+      } catch {
+        windowId = null;
+      }
+      const createProperties = {
+        url: 'about:blank',
+        active: false,
+        ...(windowId !== null ? { windowId } : {}),
+      };
+      try {
+        return await chrome.tabs.create(createProperties);
+      } catch (error) {
+        await addSafeRemovalLog(
+          `Safe tab cleanup could not create an about:blank placeholder; preserving one tab instead. Reason: ${error?.message || String(error || 'unknown')}`,
+          'warn'
+        );
+        return null;
+      }
+    }
+
+    function pickSafeRemovalPreservedTabId(tabs = [], targetIds = []) {
+      const targetSet = new Set(targetIds);
+      const activeTab = tabs.find((tab) => Boolean(tab?.active) && targetSet.has(Number(tab?.id)));
+      if (Number.isInteger(Number(activeTab?.id))) {
+        return Number(activeTab.id);
+      }
+      const firstTarget = tabs.find((tab) => targetSet.has(Number(tab?.id)));
+      return Number.isInteger(Number(firstTarget?.id)) ? Number(firstTarget.id) : 0;
+    }
+
+    async function removeTabsSafely(tabIds, options = {}) {
+      const requestedIds = normalizeTabIdList(tabIds);
+      const result = {
+        requestedIds,
+        removedIds: [],
+        removedCount: 0,
+        preservedIds: [],
+        placeholderTabId: 0,
+        skippedToPreserveWindow: false,
+      };
+      if (!requestedIds.length || typeof chrome?.tabs?.remove !== 'function') {
+        return result;
+      }
+
+      let tabs = Array.isArray(options.tabsSnapshot) ? options.tabsSnapshot : null;
+      if (!tabs && typeof chrome?.tabs?.query === 'function') {
+        tabs = await queryTabsInAutomationWindow({}, options).catch(() => null);
+      }
+      tabs = Array.isArray(tabs) ? tabs : [];
+
+      const requestedSet = new Set(requestedIds);
+      const scopedTabs = tabs.filter((tab) => Number.isInteger(Number(tab?.id)));
+      const scopedTargetIds = scopedTabs
+        .map((tab) => Number(tab.id))
+        .filter((id) => requestedSet.has(id));
+      let idsToRemove = requestedIds.slice();
+
+      if (scopedTabs.length > 0 && scopedTargetIds.length === scopedTabs.length) {
+        const placeholder = await createSafeRemovalPlaceholder(options);
+        const placeholderId = Number(placeholder?.id);
+        if (Number.isInteger(placeholderId) && placeholderId > 0) {
+          result.placeholderTabId = placeholderId;
+          await addSafeRemovalLog(
+            `Safe tab cleanup created about:blank placeholder tab ${placeholderId} before closing ${scopedTargetIds.length} tabs.`,
+            'info'
+          );
+        } else {
+          const preservedId = pickSafeRemovalPreservedTabId(scopedTabs, scopedTargetIds);
+          if (preservedId) {
+            result.preservedIds.push(preservedId);
+            result.skippedToPreserveWindow = true;
+            idsToRemove = idsToRemove.filter((id) => id !== preservedId);
+            await addSafeRemovalLog(
+              `Safe tab cleanup preserved tab ${preservedId} to avoid closing the automation window.`,
+              'warn'
+            );
+          }
+        }
+      }
+
+      if (!idsToRemove.length) {
+        return result;
+      }
+
+      try {
+        await chrome.tabs.remove(idsToRemove);
+        result.removedIds = idsToRemove;
+        result.removedCount = idsToRemove.length;
+      } catch (error) {
+        await addSafeRemovalLog(
+          `Safe tab cleanup failed to close ${idsToRemove.length} tabs. Reason: ${error?.message || String(error || 'unknown')}`,
+          'warn'
+        );
+      }
+      return result;
+    }
+
     function hasBrowserFingerprintProfile(profile = {}) {
       return Boolean(
         profile
@@ -737,7 +862,10 @@
 
       if (!matchedIds.length) return;
 
-      await chrome.tabs.remove(matchedIds).catch(() => { });
+      const removal = await removeTabsSafely(matchedIds, {
+        reason: 'close-conflicting-tabs',
+        tabsSnapshot: tabs,
+      });
 
       let registry = await getTabRegistry();
       const sourceEntry = getSourceMapValue(registry, source);
@@ -746,7 +874,7 @@
         await setState({ tabRegistry: registry });
       }
 
-      await addLog(`已关闭 ${matchedIds.length} 个旧的${getSourceLabel(source)}标签页。`, 'info');
+      await addLog(`已关闭 ${removal.removedCount} 个旧的${getSourceLabel(source)}标签页。`, 'info');
     }
 
     function isLocalhostOAuthCallbackTabMatch(callbackUrl, candidateUrl) {
@@ -775,7 +903,10 @@
 
       if (!matchedIds.length) return 0;
 
-      await chrome.tabs.remove(matchedIds).catch(() => { });
+      const removal = await removeTabsSafely(matchedIds, {
+        reason: 'close-localhost-callback-tabs',
+        tabsSnapshot: tabs,
+      });
 
       let registry = await getTabRegistry();
       const ownerEntry = getSourceMapValue(registry, ownerSource);
@@ -784,8 +915,8 @@
         await setState({ tabRegistry: registry });
       }
 
-      await addLog(`已关闭 ${matchedIds.length} 个匹配当前 OAuth callback 的 localhost 残留标签页。`, 'info');
-      return matchedIds.length;
+      await addLog(`已关闭 ${removal.removedCount} 个匹配当前 OAuth callback 的 localhost 残留标签页。`, 'info');
+      return removal.removedCount;
     }
 
     function buildLocalhostCleanupPrefix(rawUrl) {
@@ -813,9 +944,12 @@
 
       if (!matchedIds.length) return 0;
 
-      await chrome.tabs.remove(matchedIds).catch(() => { });
-      await addLog(`已关闭 ${matchedIds.length} 个匹配 ${prefix} 的 localhost 残留标签页。`, 'info');
-      return matchedIds.length;
+      const removal = await removeTabsSafely(matchedIds, {
+        reason: 'close-tabs-by-url-prefix',
+        tabsSnapshot: tabs,
+      });
+      await addLog(`已关闭 ${removal.removedCount} 个匹配 ${prefix} 的 localhost 残留标签页。`, 'info');
+      return removal.removedCount;
     }
 
     async function pingContentScriptOnTab(tabId) {
@@ -1638,6 +1772,7 @@
       queryTabsInAutomationWindow,
       registerTab,
       rememberSourceLastUrl,
+      removeTabsSafely,
       resolveResponseTimeoutMs,
       reuseOrCreateTab,
       sendTabMessageWithTimeout,

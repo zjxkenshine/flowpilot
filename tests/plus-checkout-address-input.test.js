@@ -990,6 +990,8 @@ test('selectRegionDropdown opens the state dropdown and clicks the matching opti
     'function sleep() { return Promise.resolve(); }',
     extractFunction('isVisibleElement'),
     extractFunction('normalizeText'),
+    extractFunction('normalizeHostedSearchText'),
+    extractFunction('compactHostedSearchText'),
     extractFunction('getActionText'),
     extractFunction('getRegionCandidates'),
     extractFunction('matchesRegionOption'),
@@ -1042,6 +1044,8 @@ test('country and region helpers recognize the dropdown-style localized address 
   const bundle = [
     extractFunction('isVisibleElement'),
     extractFunction('normalizeText'),
+    extractFunction('normalizeHostedSearchText'),
+    extractFunction('compactHostedSearchText'),
     extractFunction('getActionText'),
     extractFunction('getFieldText'),
     extractFunction('getVisibleControls'),
@@ -1269,6 +1273,8 @@ test('Brazil hosted number selector accepts No fields and rejects unrelated numb
   const bundle = [
     extractFunction('isVisibleElement'),
     extractFunction('normalizeText'),
+    extractFunction('normalizeHostedSearchText'),
+    extractFunction('compactHostedSearchText'),
     extractFunction('getActionText'),
     extractFunction('getSearchText'),
     extractFunction('getFieldText'),
@@ -1339,6 +1345,8 @@ test('Brazil document filler only writes explicit CPF/CNPJ or tax document field
   const bundle = [
     extractFunction('isVisibleElement'),
     extractFunction('normalizeText'),
+    extractFunction('normalizeHostedSearchText'),
+    extractFunction('compactHostedSearchText'),
     extractFunction('getActionText'),
     extractFunction('getSearchText'),
     extractFunction('getFieldText'),

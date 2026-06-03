@@ -342,6 +342,7 @@
       normalizeCloudMailReceiveMailbox = null,
       queryTabsInAutomationWindow = null,
       registerTab,
+      removeTabsSafely = null,
       sendTabMessageUntilStopped,
       setPlusPaymentEmailState = null,
       setState,
@@ -589,10 +590,17 @@
         return 0;
       }
       const tabs = await collectPlusCheckoutRetryTabs(state);
+      const tabIds = tabs.map((tab) => tab.id);
+      if (typeof removeTabsSafely === 'function') {
+        const removal = await removeTabsSafely(tabIds, {
+          reason: 'plus-checkout-retry-cleanup',
+        });
+        return removal?.removedCount || 0;
+      }
       let closedCount = 0;
-      for (const tab of tabs) {
+      for (const tabId of tabIds) {
         try {
-          await chrome.tabs.remove(tab.id);
+          await chrome.tabs.remove(tabId);
           closedCount += 1;
         } catch {
           // Tab may already be gone.
@@ -4786,7 +4794,11 @@
           payload,
         };
       } finally {
-        await chrome.tabs.remove(tabId).catch(() => {});
+        if (typeof removeTabsSafely === 'function') {
+          await removeTabsSafely(tabId, { reason: 'hosted-checkout-verification-code-tab' }).catch(() => {});
+        } else {
+          await chrome.tabs.remove(tabId).catch(() => {});
+        }
       }
     }
 
@@ -5314,14 +5326,14 @@
         }
         if (isHostedCheckoutOpenAiAddressErrorState(pageState)) {
           if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS) {
-            throw new Error(`Step 6: hosted checkout address validation failed ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`);
+            throw new Error(`Step 6: hosted checkout address validation failed ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} times: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}${formatHostedOpenAiAddressDiagnostics(pageState)}`);
           }
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
           const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
           currentProfile = mergeHostedProfileAddress(currentProfile, retryAddress);
           await addLog(
-            `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}`,
+            `Step 6: hosted checkout address validation failed; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}). Error: ${pageState.hostedAddressErrorMessage || 'Address cannot be used to calculate tax.'}${formatHostedOpenAiAddressDiagnostics(pageState)}`,
             'warn'
           );
           await persistHostedGuestProfile(currentProfile);
@@ -5340,14 +5352,14 @@
         }
         if (isHostedCheckoutOpenAiAddressEmptyState(pageState)) {
           if (hostedOpenAiAddressRetries >= HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS) {
-            throw new Error(`Step 6: hosted checkout billing address stayed empty after ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} fresh address refills.`);
+            throw new Error(`Step 6: hosted checkout billing address stayed incomplete after ${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS} fresh address refills.${formatHostedOpenAiAddressDiagnostics(pageState)}`);
           }
           hostedOpenAiAddressRetries += 1;
           verificationSubmitted = false;
           const retryAddress = await fetchHostedCheckoutAddress(getHostedProfileCountryCode(currentProfile));
           currentProfile = mergeHostedProfileAddress(currentProfile, retryAddress);
           await addLog(
-            `Step 6: hosted checkout billing address is empty after submit; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}).`,
+            `Step 6: hosted checkout billing address is incomplete after submit; retrying with a fresh address (${hostedOpenAiAddressRetries}/${HOSTED_CHECKOUT_OPENAI_TAX_ADDRESS_RETRY_MAX_ATTEMPTS}).${formatHostedOpenAiAddressDiagnostics(pageState)}`,
             'warn'
           );
           await persistHostedGuestProfile(currentProfile);
@@ -5778,9 +5790,41 @@
         || /customer'?s\s+location\s+isn'?t\s+recognized|set\s+a\s+valid\s+customer\s+address|automatically\s+calculate\s+tax|valid\s+customer\s+address|address\s+(?:is\s+)?(?:invalid|not\s+recognized)|invalid\s+address|\u65e0\u6cd5\u8bc6\u522b.*\u5730\u5740|\u5730\u5740.*\u65e0\u6cd5\u8bc6\u522b|\u6709\u6548.*\u5730\u5740|\u5730\u5740.*\u65e0\u6548/i.test(message);
     }
 
+    function getHostedOpenAiAddressMissingFields(state = {}) {
+      return Array.isArray(state?.hostedBrazilRequiredFieldsMissing)
+        ? state.hostedBrazilRequiredFieldsMissing.map((value) => normalizeString(value)).filter(Boolean)
+        : [];
+    }
+
+    function getHostedOpenAiAddressInvalidFields(state = {}) {
+      return Array.isArray(state?.hostedAddressInvalidFields)
+        ? state.hostedAddressInvalidFields.map((value) => normalizeString(value)).filter(Boolean)
+        : [];
+    }
+
+    function formatHostedOpenAiAddressDiagnostics(state = {}) {
+      const parts = [];
+      const missingFields = getHostedOpenAiAddressMissingFields(state);
+      const invalidFields = getHostedOpenAiAddressInvalidFields(state);
+      if (missingFields.length) {
+        parts.push(`missing=${missingFields.join(',')}`);
+      }
+      if (invalidFields.length) {
+        parts.push(`invalid=${invalidFields.join(',')}`);
+      }
+      const country = normalizeString(state?.hostedCountryValue);
+      if (country) {
+        parts.push(`country=${country}`);
+      }
+      return parts.length ? ` Diagnostics: ${parts.join('; ')}.` : '';
+    }
+
     function isHostedCheckoutOpenAiAddressEmptyState(state = {}) {
       if (!state?.hostedOpenAiPage) {
         return false;
+      }
+      if (getHostedOpenAiAddressMissingFields(state).length > 0) {
+        return true;
       }
       const values = state?.hostedAddressFieldValues;
       if (!values || typeof values !== 'object' || Array.isArray(values)) {
@@ -7920,7 +7964,11 @@
           accessToken = await readAccessTokenFromChatGptSessionTab(tokenTabId);
         } finally {
           if (chrome?.tabs?.remove && Number.isInteger(tokenTabId)) {
-            await chrome.tabs.remove(tokenTabId).catch(() => {});
+            if (typeof removeTabsSafely === 'function') {
+              await removeTabsSafely(tokenTabId, { reason: 'gpc-checkout-token-tab' }).catch(() => {});
+            } else {
+              await chrome.tabs.remove(tokenTabId).catch(() => {});
+            }
           }
         }
       }

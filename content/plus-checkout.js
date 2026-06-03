@@ -354,6 +354,50 @@ function getHostedAddressFieldValues() {
   };
 }
 
+function getHostedCountryValue() {
+  const select = findHostedCountrySelect();
+  return getHostedSelectValueText(select) || select?.value || '';
+}
+
+function isHostedBrazilCountryValue(value = '') {
+  const raw = normalizeText(value);
+  const upper = raw.toUpperCase();
+  return upper === 'BR' || /\b(?:br|bra|brazil|brasil)\b/i.test(raw);
+}
+
+function getHostedBrazilRequiredFieldsMissing(values = getHostedAddressFieldValues()) {
+  const missing = [];
+  if (!normalizeText(values.address1)) missing.push('address1');
+  if (!normalizeText(values.city)) missing.push('city');
+  if (!normalizeText(values.region)) missing.push('region');
+  if (!normalizeText(values.postalCode)) missing.push('postalCode');
+  return missing;
+}
+
+function isHostedInvalidControl(control = null) {
+  if (!control) return false;
+  const className = String(control.className || control.getAttribute?.('class') || '');
+  const parentClassName = String(control.parentElement?.className || control.parentElement?.getAttribute?.('class') || '');
+  return control.getAttribute?.('aria-invalid') === 'true'
+    || /\binvalid\b/i.test(className)
+    || /\binvalid\b/i.test(parentClassName)
+    || control.classList?.contains?.('CheckoutInput--invalid')
+    || control.classList?.contains?.('Select-source--empty')
+    || control.closest?.('.Select--invalid, .FormFieldInput--invalid');
+}
+
+function getHostedAddressInvalidFields() {
+  const controls = [
+    ['address1', document.querySelector('#billingAddressLine1')],
+    ['city', document.querySelector('#billingLocality')],
+    ['region', document.querySelector('#billingAdministrativeArea')],
+    ['postalCode', document.querySelector('#billingPostalCode')],
+  ];
+  return controls
+    .filter(([, control]) => isHostedInvalidControl(control))
+    .map(([name]) => name);
+}
+
 function isHostedBrazilAddress(address = {}) {
   const countryCode = normalizeText(address.countryCode || address.country || '').toUpperCase();
   return countryCode === 'BR' || /\b(?:brazil|brasil)\b/i.test(countryCode);
@@ -428,13 +472,11 @@ async function triggerHostedBrazilCepLookup(postalInput) {
 function getHostedBrazilAddressAutofillState() {
   const values = getHostedAddressFieldValues();
   const numberInput = findHostedBrazilNumberInput();
-  const populated = Boolean(
-    normalizeText(values.address1)
-    || normalizeText(values.city)
-    || normalizeText(values.region)
-  );
+  const missingFields = getHostedBrazilRequiredFieldsMissing(values);
+  const populated = missingFields.length === 0;
   return {
     ...values,
+    missingFields,
     numberInput,
     numberInputFound: Boolean(numberInput),
     populated,
@@ -449,7 +491,7 @@ async function waitForHostedBrazilAddressAfterCep() {
   try {
     const state = await waitUntil(() => {
       const current = getHostedBrazilAddressAutofillState();
-      return current.populated || current.numberInputFound ? current : null;
+      return current.populated ? current : null;
     }, {
       label: 'hosted checkout Brazil CEP address fields',
       intervalMs: 250,
@@ -492,9 +534,27 @@ async function waitForHostedBrazilNumberInputIfNeeded(existingInput = null) {
   }
 }
 
+function getHostedBrazilRegionCandidates(address = {}) {
+  return Array.from(new Set([
+    address.stateCode,
+    address.state,
+    address.region,
+    ...getRegionCandidates(address.stateCode || ''),
+    ...getRegionCandidates(address.state || ''),
+    ...getRegionCandidates(address.region || ''),
+  ].map((value) => normalizeText(value)).filter(Boolean)));
+}
+
+function selectHostedBrazilRegion(address = {}) {
+  return getHostedBrazilRegionCandidates(address).some((candidate) => (
+    selectHostedOptionByText('#billingAdministrativeArea', candidate)
+  ));
+}
+
 function fillHostedBrazilFallbackAddressIfNeeded(address = {}) {
   const values = getHostedAddressFieldValues();
   const streetFallback = address.streetName || address.street || address.address1 || '';
+  const postalCode = normalizeText(address.zip || address.postalCode || address.cep || '');
   if (!normalizeText(values.address1)) {
     fillHostedInput('#billingAddressLine1', streetFallback);
   }
@@ -502,11 +562,25 @@ function fillHostedBrazilFallbackAddressIfNeeded(address = {}) {
     fillHostedInput('#billingLocality', address.city || '');
   }
   if (!normalizeText(values.region)) {
-    selectHostedOptionByText(
-      '#billingAdministrativeArea',
-      address.stateCode || address.state || address.region || ''
-    );
+    selectHostedBrazilRegion(address);
   }
+  if (!normalizeText(values.postalCode)) {
+    fillHostedInput('#billingPostalCode', postalCode);
+  }
+}
+
+async function ensureHostedBrazilAddressReadyBeforeSubmit(address = {}) {
+  const beforeValues = getHostedAddressFieldValues();
+  const missingBefore = getHostedBrazilRequiredFieldsMissing(beforeValues);
+  if (missingBefore.length) {
+    fillHostedBrazilFallbackAddressIfNeeded(address);
+    await sleep(500);
+  }
+  const afterValues = getHostedAddressFieldValues();
+  return {
+    hostedBrazilPreSubmitMissingFields: missingBefore,
+    hostedBrazilPostFallbackMissingFields: getHostedBrazilRequiredFieldsMissing(afterValues),
+  };
 }
 
 async function fillHostedBrazilAddressFromCep(address = {}) {
@@ -723,21 +797,39 @@ async function fillHostedEmailInput(email) {
   };
 }
 
+function normalizeHostedSearchText(value = '') {
+  const normalized = normalizeText(value).toLowerCase();
+  return typeof normalized.normalize === 'function'
+    ? normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    : normalized;
+}
+
+function compactHostedSearchText(value = '') {
+  return normalizeHostedSearchText(value).replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+}
+
 function selectHostedOptionByText(selector, value) {
   const select = document.querySelector(selector);
-  const expected = normalizeText(value).toLowerCase();
+  const expected = normalizeHostedSearchText(value);
   if (!select || !expected) {
     return false;
   }
+  const isRegionSelector = /administrative|state|province|region|area/i.test(String(selector || select.id || select.name || ''));
   const option = Array.from(select.options || []).find((item) => {
-    const optionText = normalizeText(item.textContent || item.label || '').toLowerCase();
-    const optionValue = normalizeText(item.value || '').toLowerCase();
-    return optionText.includes(expected) || optionValue.includes(expected);
+    const optionText = normalizeHostedSearchText(item.textContent || item.label || '');
+    const optionValue = normalizeHostedSearchText(item.value || '');
+    return optionText.includes(expected)
+      || optionValue.includes(expected)
+      || (isRegionSelector && (
+        matchesRegionOption(item.textContent || item.label || '', value)
+        || matchesRegionOption(item.value || '', value)
+      ));
   });
   if (!option) {
     return false;
   }
   select.value = option.value;
+  option.selected = true;
   select.dispatchEvent(new Event('input', { bubbles: true }));
   select.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
@@ -1160,6 +1252,12 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     selectHostedOptionByText('#billingAdministrativeArea', address.state || address.region || '');
   }
   const documentFillResult = fillHostedOpenAiDocumentIfPresent(payload);
+  const hostedBrazilPreSubmitResult = isBrazilAddress
+    ? await ensureHostedBrazilAddressReadyBeforeSubmit(address)
+    : {
+      hostedBrazilPreSubmitMissingFields: [],
+      hostedBrazilPostFallbackMissingFields: [],
+    };
 
   const consent = document.getElementById('termsOfServiceConsentCheckbox');
   if (consent && !consent.checked) {
@@ -1183,6 +1281,7 @@ async function runPayPalHostedOpenAiCheckoutStep(payload = {}) {
     hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
     hostedDocumentInputFound: Boolean(documentFillResult.found),
     hostedDocumentFilled: Boolean(documentFillResult.filled),
+    ...hostedBrazilPreSubmitResult,
     ...hostedBrazilAddressResult,
   };
 }
@@ -2502,16 +2601,22 @@ function getRegionCandidates(value) {
     tas: 'Tasmania',
     vic: 'Victoria',
     wa: 'Western Australia',
+    sp: 'Sao Paulo',
+    saopaulo: 'SP',
+    rj: 'Rio de Janeiro',
+    riodejaneiro: 'RJ',
+    mg: 'Minas Gerais',
+    minasgerais: 'MG',
     tokyo: '東京都',
     osaka: '大阪府',
   };
-  const compact = raw.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+  const compact = compactHostedSearchText(raw);
   const candidates = [raw];
   if (aliases[compact]) {
     candidates.push(aliases[compact]);
   }
   for (const [abbr, name] of Object.entries(aliases)) {
-    const compactName = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+    const compactName = compactHostedSearchText(name);
     if (compact === compactName) {
       candidates.push(abbr.toUpperCase());
     }
@@ -2521,7 +2626,7 @@ function getRegionCandidates(value) {
 
 function getCountryCandidates(value = '') {
   const raw = normalizeText(value);
-  const compact = raw.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+  const compact = compactHostedSearchText(raw);
   const aliases = {
     AR: ['Argentina', '阿根廷'],
     AU: ['Australia', '澳大利亚'],
@@ -2556,21 +2661,21 @@ function getCountryCandidates(value = '') {
   const matched = Object.entries(aliases).find(([code, names]) => {
     if (String(code).toLowerCase() === compact) return true;
     return names.some((name) => {
-      const normalizedName = normalizeText(name).toLowerCase();
-      const compactName = normalizedName.replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
-      return compact === compactName || normalizedName === raw.toLowerCase();
+      const normalizedName = normalizeHostedSearchText(name);
+      const compactName = compactHostedSearchText(name);
+      return compact === compactName || normalizedName === normalizeHostedSearchText(raw);
     });
   });
   return Array.from(new Set([raw, ...direct, ...(matched ? matched[1] : [])].filter(Boolean)));
 }
 
 function matchesCountryOption(text, desiredValue) {
-  const normalizedText = normalizeText(text).toLowerCase();
-  const compactText = normalizedText.replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+  const normalizedText = normalizeHostedSearchText(text);
+  const compactText = compactHostedSearchText(text);
   if (!compactText) return false;
   return getCountryCandidates(desiredValue).some((candidate) => {
-    const normalizedCandidate = normalizeText(candidate).toLowerCase();
-    const compactCandidate = normalizedCandidate.replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+    const normalizedCandidate = normalizeHostedSearchText(candidate);
+    const compactCandidate = compactHostedSearchText(candidate);
     if (!compactCandidate) return false;
     return normalizedText === normalizedCandidate
       || compactText === compactCandidate
@@ -2603,12 +2708,12 @@ function getCountryDropdownValue(control) {
 }
 
 function matchesRegionOption(text, desiredValue) {
-  const normalizedText = normalizeText(text).toLowerCase();
-  const compactText = normalizedText.replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+  const normalizedText = normalizeHostedSearchText(text);
+  const compactText = compactHostedSearchText(text);
   if (!compactText) return false;
   return getRegionCandidates(desiredValue).some((candidate) => {
-    const normalizedCandidate = normalizeText(candidate).toLowerCase();
-    const compactCandidate = normalizedCandidate.replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+    const normalizedCandidate = normalizeHostedSearchText(candidate);
+    const compactCandidate = compactHostedSearchText(candidate);
     if (!compactCandidate) return false;
     return normalizedText === normalizedCandidate
       || compactText === compactCandidate
@@ -3219,6 +3324,8 @@ async function inspectPlusCheckoutState(options = {}) {
   const hostedCardFallback = getHostedOpenAiCardFallbackState();
   const hostedEmailInput = findHostedEditableEmailInput();
   const hostedReadOnlyEmailField = findHostedReadOnlyEmailField();
+  const hostedCountryValue = getHostedCountryValue();
+  const hostedAddressFieldValues = getHostedAddressFieldValues();
   const state = {
     url: location.href,
     readyState: document.readyState,
@@ -3242,8 +3349,13 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedReadOnlyEmailDetected: Boolean(hostedReadOnlyEmailField),
     hostedReadOnlyEmailLabel: getHostedReadOnlyEmailLabel(hostedReadOnlyEmailField),
     hostedReadOnlyEmailSummary: getHostedElementDiagnosticText(hostedReadOnlyEmailField),
+    hostedCountryValue,
     hostedAddressError: hostedAddressError.hasError,
     hostedAddressErrorMessage: hostedAddressError.message,
+    hostedAddressInvalidFields: getHostedAddressInvalidFields(),
+    hostedBrazilRequiredFieldsMissing: isHostedBrazilCountryValue(hostedCountryValue)
+      ? getHostedBrazilRequiredFieldsMissing(hostedAddressFieldValues)
+      : [],
     hostedCardDeclinedError: hostedCardDeclinedError.hasError,
     hostedCardDeclinedErrorMessage: hostedCardDeclinedError.message,
     hostedCardFallback: hostedCardFallback.fallback,
@@ -3253,7 +3365,7 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedCardAccordionSelected: hostedCardFallback.cardAccordionSelected,
     checkoutAmountSummary: getCheckoutAmountSummary(),
     homePlanFallback: inspectChatGptHomePlanFallback(),
-    hostedAddressFieldValues: getHostedAddressFieldValues(),
+    hostedAddressFieldValues,
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',
       city: structuredAddress.city?.value || '',

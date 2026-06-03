@@ -865,6 +865,55 @@ test('tab runtime force-new opens replacement before removing the active stale s
   ]);
 });
 
+test('tab runtime safe removal creates placeholder before closing every automation tab', async () => {
+  const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
+  const globalScope = {};
+  const api = new Function('self', `${source}; return self.MultiPageBackgroundTabRuntime;`)(globalScope);
+  const events = [];
+  let tabs = [
+    { id: 1, active: true, windowId: 100, url: 'https://pay.openai.com/c/pay/cs_old' },
+  ];
+  const runtime = api.createTabRuntime({
+    LOG_PREFIX: '[test]',
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        create: async (payload) => {
+          events.push({ type: 'create', payload });
+          const tab = { id: 2, active: Boolean(payload.active), windowId: payload.windowId, url: payload.url };
+          tabs.push(tab);
+          return tab;
+        },
+        query: async () => tabs,
+        remove: async (ids) => {
+          events.push({ type: 'remove', ids });
+          tabs = tabs.filter((tab) => !ids.includes(tab.id));
+        },
+      },
+    },
+    getSourceLabel: (sourceName) => sourceName || 'unknown',
+    getState: async () => ({
+      automationWindowId: 100,
+      sourceLastUrls: {},
+      tabRegistry: {},
+    }),
+    matchesSourceUrlFamily: () => false,
+    setState: async () => {},
+    throwIfStopped: () => {},
+  });
+
+  const removal = await runtime.removeTabsSafely([1], { reason: 'test' });
+
+  assert.equal(removal.removedCount, 1);
+  assert.equal(removal.placeholderTabId, 2);
+  assert.deepEqual(events.filter((event) => event.type === 'create').map((event) => event.payload), [
+    { url: 'about:blank', active: false, windowId: 100 },
+  ]);
+  assert.deepEqual(tabs, [
+    { id: 2, active: false, windowId: 100, url: 'about:blank' },
+  ]);
+});
+
 test('tab runtime applies browser fingerprint to new automation tabs', async () => {
   const source = fs.readFileSync('background/tab-runtime.js', 'utf8');
   const globalScope = {};

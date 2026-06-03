@@ -206,8 +206,11 @@ return {
   await api.closeConflictingTabsForSource('signup-page', 'https://chatgpt.com/');
 
   snapshot = api.snapshot();
-  assert.deepStrictEqual(snapshot.removedBatches, [[11, 12]]);
+  assert.deepStrictEqual(snapshot.removedBatches, [[12]]);
   assert.strictEqual(snapshot.currentState.tabRegistry['signup-page'], null);
+  assert.deepStrictEqual(snapshot.currentTabs, [
+    { id: 11, url: 'https://chatgpt.com/' },
+  ]);
 
   api.reset({
     tabs: [
@@ -225,8 +228,10 @@ return {
   await api.closeConflictingTabsForSource('signup-page', 'https://chatgpt.com/');
 
   snapshot = api.snapshot();
-  assert.deepStrictEqual(snapshot.removedBatches, [[21, 22]]);
-  assert.deepStrictEqual(snapshot.currentTabs, []);
+  assert.deepStrictEqual(snapshot.removedBatches, [[22]]);
+  assert.deepStrictEqual(snapshot.currentTabs, [
+    { id: 21, active: true, url: 'https://chatgpt.com/' },
+  ]);
 
   console.log('signup page tab cleanup tests passed');
 })().catch((error) => {

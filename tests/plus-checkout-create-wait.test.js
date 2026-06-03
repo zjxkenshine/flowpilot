@@ -179,6 +179,62 @@ test('Plus checkout retry cleanup is skipped for first normal checkout create', 
   assert.equal(events.some((event) => event.type === 'log' && /重试前/.test(event.message)), false);
 });
 
+test('Plus checkout retry cleanup uses safe removal when payment tabs fill the window', async () => {
+  const events = [];
+  let state = {
+    plusCheckoutTabId: 101,
+    plusCheckoutRetryCleanupRequested: true,
+    tabRegistry: {
+      'plus-checkout': { tabId: 101, ready: true },
+      'paypal-flow': { tabId: 102, ready: true },
+    },
+  };
+  const tabs = new Map([
+    [101, { id: 101, active: true, url: 'https://pay.openai.com/c/pay/cs_old' }],
+    [102, { id: 102, active: false, url: 'https://www.paypal.com/checkoutnow?token=EC-old' }],
+  ]);
+  const executor = api.createPlusCheckoutCreateExecutor({
+    addLog: async (message, level = 'info') => events.push({ type: 'log', message, level }),
+    chrome: {
+      tabs: {
+        get: async (tabId) => {
+          if (!tabs.has(tabId)) throw new Error(`missing tab ${tabId}`);
+          return tabs.get(tabId);
+        },
+        remove: async (tabIds) => {
+          events.push({ type: 'raw-remove', tabIds });
+          for (const tabId of Array.isArray(tabIds) ? tabIds : [tabIds]) {
+            tabs.delete(tabId);
+          }
+        },
+      },
+      cookies: {
+        getAllCookieStores: async () => [],
+        getAll: async () => [],
+        remove: async () => null,
+      },
+    },
+    getState: async () => state,
+    getTabId: async (source) => state.tabRegistry[source]?.tabId || null,
+    queryTabsInAutomationWindow: async () => Array.from(tabs.values()),
+    removeTabsSafely: async (tabIds, options) => {
+      events.push({ type: 'safe-remove', tabIds: [...tabIds].sort((a, b) => a - b), options });
+      tabs.delete(102);
+      return { removedCount: 1, removedIds: [102], preservedIds: [101] };
+    },
+    setState: async (updates) => {
+      state = { ...state, ...updates };
+    },
+  });
+
+  const result = await executor.cleanupBeforePlusCheckoutRetryCreate(state);
+
+  assert.equal(result.closedTabs, 1);
+  assert.deepEqual(events.find((event) => event.type === 'safe-remove')?.tabIds, [101, 102]);
+  assert.equal(events.some((event) => event.type === 'raw-remove'), false);
+  assert.deepEqual(Array.from(tabs.keys()), [101]);
+});
+
 function createCheckoutContentHarness(options = {}) {
   const checkoutEvents = [];
   const attrs = new Map();
@@ -341,8 +397,8 @@ function createCheckoutContentHarness(options = {}) {
     },
   });
   const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', value: options.hostedAddressValue || '', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
-  const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', attrs: { name: 'billingLocality', placeholder: 'City' } });
-  const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
+  const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', value: options.hostedCityValue || '', attrs: { name: 'billingLocality', placeholder: 'City' } });
+  const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', value: options.hostedPostalValue || '', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
   const hostedBrazilNumberInput = createElement({
     tagName: 'INPUT',
     id: 'billingStreetNumber',
@@ -385,8 +441,9 @@ function createCheckoutContentHarness(options = {}) {
     options: [
       { value: 'NY', textContent: 'New York', label: 'New York' },
       { value: 'TX', textContent: 'Texas', label: 'Texas' },
+      { value: 'SP', textContent: 'São Paulo', label: 'São Paulo' },
     ],
-    value: '',
+    value: options.hostedStateValue || '',
   };
   const suggestionOption = createElement({ tagName: 'LI', text: 'Unter den Linden 1, Berlin', attrs: { role: 'option', class: 'pac-item' } });
   const subscribeButton = createElement({ tagName: 'BUTTON', text: 'Subscribe', attrs: { type: 'submit', 'aria-label': 'Subscribe', 'data-testid': 'submit-button' } });
@@ -429,6 +486,7 @@ function createCheckoutContentHarness(options = {}) {
     console: { log() {}, warn() {}, error() {}, info() {} },
     location: currentLocation,
     window: {},
+    __PAYPAL_HOSTED_BR_CEP_LOOKUP_TIMEOUT_MS__: options.hostedBrazilCepLookupTimeoutMs,
     CSS: { escape: (value) => String(value) },
     Event: class TestEvent { constructor(type) { this.type = type; } },
     MouseEvent: class TestMouseEvent { constructor(type) { this.type = type; } },
@@ -3886,7 +3944,7 @@ test('PayPal hosted OpenAI checkout retries with a fresh address when address li
   const retryProfileUpdate = profileUpdates.at(-1)?.payload || {};
   assert.equal(retryProfileUpdate.plusHostedCheckoutGuestProfile.address.street, '8 Retry Ave');
   assert.equal(retryProfileUpdate.paypalGeneratedProfile.address1, '8 Retry Ave');
-  assert.equal(events.some((event) => event.type === 'log' && /billing address is empty after submit/i.test(event.message)), true);
+  assert.equal(events.some((event) => event.type === 'log' && /billing address is incomplete after submit/i.test(event.message)), true);
   assert.equal(events.find((event) => event.type === 'complete')?.step, 'paypal-hosted-openai-checkout');
 });
 
@@ -6514,6 +6572,52 @@ test('OpenAI hosted BR checkout triggers CEP lookup before filling random No fie
   assert.ok(Number(noFillEvent.value) >= 1);
   assert.ok(Number(noFillEvent.value) <= 200);
   assert.notEqual(noFillEvent.value, '1307');
+});
+
+test('OpenAI hosted BR checkout fills missing state and postal before submit', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedSubmitVerificationAfterClickCount: 1,
+    hostedAddressValue: 'Rua Haddock Lobo',
+    hostedCityValue: 'Sao Paulo',
+    hostedBrazilCepLookupTimeoutMs: 1,
+    includeHostedBrazilNumberInputInitially: true,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        countryCode: 'BR',
+        street: 'Rua Haddock Lobo',
+        city: 'Sao Paulo',
+        state: 'Sao Paulo',
+        zip: '01414-003',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.hostedBrazilPostFallbackMissingFields.length, 0);
+
+  const stateChangeIndex = checkoutEvents.findIndex((event) => (
+    event.type === 'dispatch'
+    && event.id === 'billingAdministrativeArea'
+    && event.event === 'change'
+    && event.value === 'SP'
+  ));
+  const postalFillIndex = checkoutEvents.findIndex((event) => (
+    event.type === 'fill'
+    && event.id === 'billingPostalCode'
+    && event.value === '01414-003'
+  ));
+  const submitIndex = checkoutEvents.findIndex((event) => event.type === 'click' && event.target === 'subscribe');
+
+  assert.ok(stateChangeIndex > -1);
+  assert.ok(postalFillIndex > -1);
+  assert.ok(submitIndex > stateChangeIndex);
 });
 
 test('OpenAI hosted checkout does not retry submit when verification appears after first click', async () => {

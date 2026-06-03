@@ -182,6 +182,7 @@ return {
   snapshot() {
     return {
       currentState,
+      currentTabs,
       removedBatches,
       logMessages,
     };
@@ -230,6 +231,23 @@ return {
   assert.strictEqual(closedCount, 1);
   assert.deepStrictEqual(snapshot.removedBatches, [[4]]);
   assert.strictEqual(snapshot.logMessages.length, 1);
+
+  api.reset({
+    tabs: [
+      { id: 6, url: authCallbackUrl },
+    ],
+    tabRegistry: {
+      'signup-page': { tabId: 6, ready: true },
+    },
+  });
+
+  const protectedClosedCount = await api.closeLocalhostCallbackTabs(authCallbackUrl);
+  snapshot = api.snapshot();
+  assert.strictEqual(protectedClosedCount, 0);
+  assert.deepStrictEqual(snapshot.removedBatches, []);
+  assert.deepStrictEqual(snapshot.currentTabs, [
+    { id: 6, url: authCallbackUrl },
+  ]);
 
   console.log('step9 localhost cleanup scope tests passed');
 })().catch((error) => {
