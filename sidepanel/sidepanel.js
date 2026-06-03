@@ -4122,7 +4122,7 @@ function normalizePlusCheckoutConversionProxy711RegionValue(value = '') {
   return draft.length === 2 ? draft : '';
 }
 
-function normalizePlusCheckoutRegionCodeValue(value = '', fallback = 'US') {
+function normalizePlusCheckoutRegionCodeValue(value = '', fallback = 'DE') {
   const api = window.MultiPagePlusCheckoutRegions;
   if (api?.normalizeCheckoutRegionCode) {
     return api.normalizeCheckoutRegionCode(value, fallback);
@@ -4132,9 +4132,9 @@ function normalizePlusCheckoutRegionCodeValue(value = '', fallback = 'US') {
     return 'auto';
   }
   const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
-  return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized)
+  return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ', 'DE', 'ID'].includes(normalized)
     ? normalized
-    : (fallback === 'auto' ? 'auto' : 'US');
+    : (fallback === 'auto' ? 'auto' : 'DE');
 }
 
 function normalizePlusCheckoutCloudConversionApiUrlValue(value = '') {
@@ -5763,11 +5763,11 @@ function collectSettingsPayload() {
     });
   const normalizePlusCheckoutRegionCodeInput = typeof normalizePlusCheckoutRegionCodeValue === 'function'
     ? normalizePlusCheckoutRegionCodeValue
-    : ((value = '', fallback = 'US') => {
+    : ((value = '', fallback = 'DE') => {
       const raw = String(value || '').trim();
       if (raw.toLowerCase() === 'auto') return 'auto';
       const normalized = raw.toUpperCase().replace(/[^A-Z]/g, '');
-      return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized) ? normalized : fallback;
+      return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ', 'DE', 'ID'].includes(normalized) ? normalized : fallback;
     });
   const normalizeBrowserFingerprintLevelInput = typeof normalizeBrowserFingerprintLevel === 'function'
     ? normalizeBrowserFingerprintLevel
@@ -6810,14 +6810,14 @@ function collectSettingsPayload() {
     plusCheckoutRegionCode: normalizePlusCheckoutRegionCodeInput(
       typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode
         ? selectPlusCheckoutRegionCode.value
-        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US')),
-      'US'
+        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE')),
+      'DE'
     ),
     plusCheckoutRegionalCheckoutEnabled: normalizePlusCheckoutRegionCodeInput(
       typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode
         ? selectPlusCheckoutRegionCode.value
-        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US')),
-      'US'
+        : (latestState?.plusCheckoutRegionCode ?? (latestState?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE')),
+      'DE'
     ) !== 'US',
     plusCheckoutCloudConversionApiUrl: typeof inputPlusCheckoutCloudConversionApiUrl !== 'undefined' && inputPlusCheckoutCloudConversionApiUrl
       ? normalizePlusCheckoutCloudConversionApiUrlValue(inputPlusCheckoutCloudConversionApiUrl.value)
@@ -14010,8 +14010,8 @@ function applySettingsState(state) {
   }
   if (typeof selectPlusCheckoutRegionCode !== 'undefined' && selectPlusCheckoutRegionCode) {
     selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
-      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
-      'US'
+      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE'),
+      'DE'
     );
   }
   if (typeof syncPlusCheckAllowedRegionsControl === 'function') {
@@ -19924,7 +19924,7 @@ inputPlusAccountTypePaymentControlEnabled?.addEventListener('change', () => {
 });
 
 selectPlusCheckoutRegionCode?.addEventListener('change', () => {
-  const regionCode = normalizePlusCheckoutRegionCodeValue(selectPlusCheckoutRegionCode.value, 'US');
+  const regionCode = normalizePlusCheckoutRegionCodeValue(selectPlusCheckoutRegionCode.value, 'DE');
   selectPlusCheckoutRegionCode.value = regionCode;
   syncLatestState({
     plusCheckoutRegionCode: regionCode,
@@ -23152,8 +23152,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && selectPlusCheckoutRegionCode
       ) {
         selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
-          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
-          'US'
+          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE'),
+          'DE'
         );
       }
       if (message.payload.hostedCheckoutSmsPoolText !== undefined && inputHostedCheckoutSmsPool) {
@@ -23567,8 +23567,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         && selectPlusCheckoutRegionCode
       ) {
         selectPlusCheckoutRegionCode.value = normalizePlusCheckoutRegionCodeValue(
-          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
-          'US'
+          message.payload.plusCheckoutRegionCode ?? (message.payload.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE'),
+          'DE'
         );
       }
       if (

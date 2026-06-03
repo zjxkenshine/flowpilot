@@ -1648,8 +1648,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   plusCheckoutCloudConversionEnabled: false,
   plusCheckoutCloudConversionApiUrl: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_URL,
   plusCheckoutCloudConversionApiKey: BUILTIN_PLUS_CHECKOUT_CLOUD_CONVERSION_API_KEY,
-  plusCheckoutRegionCode: 'US',
-  plusCheckoutRegionalCheckoutEnabled: false,
+  plusCheckoutRegionCode: 'DE',
+  plusCheckoutRegionalCheckoutEnabled: true,
   plusCheckoutConversionProxySource: 'manual',
   plusCheckoutConversionProxyUrl: '',
   plusCheckoutConversionProxy711Region: '',
@@ -3620,10 +3620,10 @@ async function resolvePlusCheckoutRegionalBillingDetails(state = {}, options = {
   const regionApi = self.MultiPagePlusCheckoutRegions || {};
   const selectedRegionCode = regionApi.normalizeCheckoutRegionCode
     ? regionApi.normalizeCheckoutRegionCode(
-      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
-      'US'
+      state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE'),
+      'DE'
     )
-    : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US');
+    : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'DE');
   if (selectedRegionCode === 'US' && !Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
     return null;
   }
@@ -5163,11 +5163,11 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '').trim();
     case 'plusCheckoutRegionCode':
       return self.MultiPagePlusCheckoutRegions?.normalizeCheckoutRegionCode
-        ? self.MultiPagePlusCheckoutRegions.normalizeCheckoutRegionCode(value, 'US')
+        ? self.MultiPagePlusCheckoutRegions.normalizeCheckoutRegionCode(value, 'DE')
         : (() => {
           const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
           if (String(value || '').trim().toLowerCase() === 'auto') return 'auto';
-          return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ'].includes(normalized) ? normalized : 'US';
+          return ['US', 'JP', 'BR', 'KZ', 'NP', 'IQ', 'DE', 'ID'].includes(normalized) ? normalized : 'DE';
         })();
     case 'plusCheckoutRegionalCheckoutEnabled':
       return Boolean(value);

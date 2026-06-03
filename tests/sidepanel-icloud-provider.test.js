@@ -534,6 +534,7 @@ function updateFallbackThreadIntervalInputState() {}
 function updateAccountRunHistorySettingsUI() {}
 function updatePhoneVerificationSettingsUI() {}
 function updatePanelModeUI() {}
+function syncPhonePlusOauthOnlyControls() {}
 function updateMailProviderUI() { calls.push({ target: selectIcloudTargetMailboxType.value, provider: selectIcloudForwardMailProvider.value }); }
 function renderSub2ApiGroupOptions() {}
 function isLuckmailProvider() { return false; }

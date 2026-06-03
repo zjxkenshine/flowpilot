@@ -2,7 +2,7 @@
   root.MultiPagePlusCheckoutRegions = factory();
 })(typeof self !== 'undefined' ? self : globalThis, function createPlusCheckoutRegionsModule() {
   const AUTO_REGION_CODE = 'auto';
-  const DEFAULT_REGION_CODE = 'US';
+  const DEFAULT_REGION_CODE = 'DE';
 
   const REGION_DEFINITIONS = Object.freeze([
     Object.freeze({ code: 'US', country: 'US', currency: 'USD', label: 'US / USD' }),

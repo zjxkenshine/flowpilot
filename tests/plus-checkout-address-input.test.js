@@ -107,7 +107,7 @@ function createPlusCheckoutMessageHarness({ checkoutSessionId = 'cs_test_123', c
   return { send, fetchCalls };
 }
 
-test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_llc merchant path by default', async () => {
+test('CREATE_PLUS_CHECKOUT creates PayPal Europe source checkout and openai_llc long link by default', async () => {
   const harness = createPlusCheckoutMessageHarness({ checkoutSessionId: 'cs_paypal' });
 
   const result = await harness.send({
@@ -117,9 +117,14 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_llc merchant path b
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_paypal');
-  assert.equal(result.country, 'US');
-  assert.equal(result.currency, 'USD');
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_paypal');
+  assert.equal(result.chatgptCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_paypal');
+  assert.equal(result.convertedCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_paypal');
+  assert.equal(result.preferredCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_paypal');
+  assert.equal(result.checkoutSessionId, 'cs_paypal');
+  assert.equal(result.processorEntity, 'openai_llc');
+  assert.equal(result.country, 'DE');
+  assert.equal(result.currency, 'EUR');
 
   const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
   assert.ok(checkoutCall);
@@ -127,7 +132,7 @@ test('CREATE_PLUS_CHECKOUT keeps PayPal on US/USD and openai_llc merchant path b
   assert.equal(checkoutCall.options.headers.Authorization, 'Bearer test-access-token');
   const payload = JSON.parse(checkoutCall.options.body);
   assert.equal(payload.plan_name, 'chatgptplusplan');
-  assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
+  assert.deepEqual(payload.billing_details, { country: 'DE', currency: 'EUR' });
 });
 
 test('CREATE_PLUS_CHECKOUT uses hosted ID/IDR checkout for GoPay with session fallback', async () => {
@@ -189,7 +194,7 @@ test('CREATE_PLUS_CHECKOUT prefers GoPay hosted checkout URL response fields', a
   }
 });
 
-test('CREATE_PLUS_CHECKOUT uses hosted US/USD checkout for PayPal no-card binding', async () => {
+test('CREATE_PLUS_CHECKOUT uses hosted DE/EUR checkout for PayPal no-card binding', async () => {
   const hostedUrl = 'https://pay.openai.com/c/pay/cs_hosted_123';
   const harness = createPlusCheckoutMessageHarness({
     checkoutSessionId: 'cs_hosted',
@@ -210,17 +215,21 @@ test('CREATE_PLUS_CHECKOUT uses hosted US/USD checkout for PayPal no-card bindin
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_hosted');
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_hosted');
+  assert.equal(result.chatgptCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_hosted');
+  assert.equal(result.convertedCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_hosted');
   assert.equal(result.hostedCheckoutUrl, hostedUrl);
   assert.equal(result.preferredCheckoutUrl, hostedUrl);
-  assert.equal(result.country, 'US');
-  assert.equal(result.currency, 'USD');
+  assert.equal(result.checkoutSessionId, 'cs_hosted');
+  assert.equal(result.processorEntity, 'openai_llc');
+  assert.equal(result.country, 'DE');
+  assert.equal(result.currency, 'EUR');
 
   const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
   assert.ok(checkoutCall);
   const payload = JSON.parse(checkoutCall.options.body);
   assert.equal(payload.checkout_ui_mode, 'hosted');
-  assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
+  assert.deepEqual(payload.billing_details, { country: 'DE', currency: 'EUR' });
 });
 
 test('CREATE_PLUS_CHECKOUT maps regional checkout country and currency when enabled', async () => {
@@ -237,7 +246,8 @@ test('CREATE_PLUS_CHECKOUT maps regional checkout country and currency when enab
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_jp');
+  assert.equal(result.checkoutUrl, 'https://chatgpt.com/checkout/openai_ie/cs_jp');
+  assert.equal(result.convertedCheckoutUrl, 'https://chatgpt.com/checkout/openai_llc/cs_jp');
   assert.equal(result.country, 'JP');
   assert.equal(result.currency, 'JPY');
 
@@ -286,14 +296,14 @@ test('CREATE_PLUS_CHECKOUT ignores regional billing override while switch is off
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.country, 'US');
-  assert.equal(result.currency, 'USD');
+  assert.equal(result.country, 'DE');
+  assert.equal(result.currency, 'EUR');
 
   const checkoutCall = harness.fetchCalls.find((call) => call.url === 'https://chatgpt.com/backend-api/payments/checkout');
   assert.ok(checkoutCall);
   const payload = JSON.parse(checkoutCall.options.body);
   assert.equal(payload.checkout_ui_mode, 'hosted');
-  assert.deepEqual(payload.billing_details, { country: 'US', currency: 'USD' });
+  assert.deepEqual(payload.billing_details, { country: 'DE', currency: 'EUR' });
 });
 
 function extractFunction(name) {

@@ -17,10 +17,10 @@ const PLUS_CHECKOUT_PAYLOAD_BASE = {
 const PLUS_CHECKOUT_CONFIGS = {
   paypal: {
     billing_details: {
-      country: 'US',
-      currency: 'USD',
+      country: 'DE',
+      currency: 'EUR',
     },
-    checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_llc/',
+    checkoutUrlPrefix: 'https://chatgpt.com/checkout/openai_ie/',
     paymentLabel: 'PayPal',
   },
   gopay: {
@@ -41,15 +41,16 @@ const HOSTED_SUBMIT_RETRY_CONFIRM_WAIT_MS = 10000;
 const PLUS_PAYMENT_METHOD_PAYPAL = 'paypal';
 const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
 const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
+const DEFAULT_CONVERTED_CHECKOUT_PROCESSOR_ENTITY = 'openai_llc';
 const PAYMENT_METHOD_CONFIGS = {
   [PLUS_PAYMENT_METHOD_PAYPAL]: {
     id: PLUS_PAYMENT_METHOD_PAYPAL,
     label: 'PayPal',
     diagnosticLabel: 'PayPal',
-    checkoutMerchantPath: 'openai_llc',
+    checkoutMerchantPath: 'openai_ie',
     billingDetails: {
-      country: 'US',
-      currency: 'USD',
+      country: 'DE',
+      currency: 'EUR',
     },
     patterns: [/paypal/i],
   },
@@ -57,10 +58,10 @@ const PAYMENT_METHOD_CONFIGS = {
     id: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
     label: 'PayPal 无卡直绑',
     diagnosticLabel: 'PayPal hosted',
-    checkoutMerchantPath: 'openai_llc',
+    checkoutMerchantPath: 'openai_ie',
     billingDetails: {
-      country: 'US',
-      currency: 'USD',
+      country: 'DE',
+      currency: 'EUR',
     },
     patterns: [/paypal/i],
   },
@@ -1976,6 +1977,15 @@ function buildPlusCheckoutUrl(checkoutSessionId, paymentMethod = PLUS_PAYMENT_ME
   return `https://chatgpt.com/checkout/${config.checkoutMerchantPath}/${sessionId}`;
 }
 
+function buildConvertedChatGptCheckoutUrl(checkoutSessionId, processorEntity = DEFAULT_CONVERTED_CHECKOUT_PROCESSOR_ENTITY) {
+  const sessionId = String(checkoutSessionId || '').trim();
+  const entity = String(processorEntity || '').trim() || DEFAULT_CONVERTED_CHECKOUT_PROCESSOR_ENTITY;
+  if (!sessionId) {
+    throw new Error('Missing checkout_session_id.');
+  }
+  return `https://chatgpt.com/checkout/${entity}/${sessionId}`;
+}
+
 function normalizeCheckoutResponseUrl(value = '') {
   const url = String(value || '').trim();
   return /^https?:\/\//i.test(url) ? url : '';
@@ -2055,18 +2065,26 @@ async function createPlusCheckoutSession(options = {}) {
     throw new Error(`创建 Plus Checkout 失败：${detail}`);
   }
 
+  const processorEntity = DEFAULT_CONVERTED_CHECKOUT_PROCESSOR_ENTITY;
   const checkoutUrl = checkoutSessionId
     ? buildPlusCheckoutUrl(checkoutSessionId, paymentMethod)
     : hostedCheckoutUrl;
+  const chatgptCheckoutUrl = checkoutSessionId
+    ? buildConvertedChatGptCheckoutUrl(checkoutSessionId, processorEntity)
+    : '';
   const shouldPreferHostedCheckoutUrl = paymentMethod === PLUS_PAYMENT_METHOD_GOPAY
     || useHostedCheckoutFinalStep;
   const preferredCheckoutUrl = shouldPreferHostedCheckoutUrl
-    ? (hostedCheckoutUrl || checkoutUrl)
-    : checkoutUrl;
+    ? (hostedCheckoutUrl || chatgptCheckoutUrl || checkoutUrl)
+    : (chatgptCheckoutUrl || checkoutUrl);
 
   return {
     checkoutUrl,
+    chatgptCheckoutUrl,
+    checkoutSessionId,
+    processorEntity,
     hostedCheckoutUrl,
+    convertedCheckoutUrl: chatgptCheckoutUrl,
     preferredCheckoutUrl,
     country: checkoutPayload.billing_details.country,
     currency: checkoutPayload.billing_details.currency,

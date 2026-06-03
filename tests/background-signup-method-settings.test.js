@@ -187,6 +187,7 @@ return {
     activeFlowId: 'openai',
     plusModeEnabled: true,
     phonePlusModeEnabled: false,
+    phonePlusOauthOnlyModeEnabled: false,
     plusPaymentMethod: 'gopay',
     plusAccountAccessStrategy: 'oauth',
     registrationActivationOnlyModeEnabled: false,

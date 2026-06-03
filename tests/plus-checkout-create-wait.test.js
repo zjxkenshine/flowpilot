@@ -147,9 +147,11 @@ test('Plus checkout retry cleanup is skipped for first normal checkout create', 
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -733,9 +735,11 @@ test('Plus checkout create waits 20 seconds after opening checkout page by defau
       events.push({ type: 'tab-message', tabId, source, message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -779,9 +783,9 @@ test('Plus checkout create waits 20 seconds after opening checkout page by defau
     {
       paymentMethod: 'paypal',
       hostedCheckoutFinalStep: false,
-      checkoutRegionCode: 'US',
-      regionalCheckoutEnabled: false,
-      billingDetails: { country: 'US', currency: 'USD' },
+      checkoutRegionCode: 'DE',
+      regionalCheckoutEnabled: true,
+      billingDetails: { country: 'DE', currency: 'EUR' },
     }
   );
   assert.equal(
@@ -816,9 +820,11 @@ test('Plus checkout create uses configured checkout open stable wait seconds', a
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://checkout.stripe.com/c/pay/session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -922,7 +928,7 @@ test('GoPay plus checkout create forwards gopay payment method to the checkout c
   assert.deepStrictEqual(events[0]?.payload, {
     paymentMethod: 'gopay',
     hostedCheckoutFinalStep: false,
-    checkoutRegionCode: 'US',
+    checkoutRegionCode: 'DE',
     regionalCheckoutEnabled: false,
     billingDetails: { country: 'ID', currency: 'IDR' },
   });
@@ -1045,9 +1051,11 @@ test('Classic PayPal checkout create applies conversion proxy before opening che
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -1164,9 +1172,11 @@ test('Phone Plus classic checkout falls back before opening checkout link when c
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       throw new Error(`unexpected message type ${message.type}`);
@@ -1225,9 +1235,11 @@ test('Non Phone Plus classic checkout still stops when conversion proxy exit che
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       throw new Error(`unexpected message type ${message.type}`);
@@ -1270,9 +1282,11 @@ test('Plus checkout create allows free accounts from matching PlusCheck region',
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -1369,9 +1383,11 @@ test('Plus checkout create continues for non-free registration when account type
       events.push({ type: 'tab-message', source, message });
       return {
         ok: true,
-        checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_account_type_disabled',
-        country: 'US',
-        currency: 'USD',
+        checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test_account_type_disabled',
+        convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test_account_type_disabled',
+        preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test_account_type_disabled',
+        country: 'DE',
+        currency: 'EUR',
         checkoutSource: 'test',
       };
     },
@@ -1504,9 +1520,11 @@ test('Phone Plus classic checkout falls back when conversion proxy apply fails',
     sendTabMessageUntilStopped: async (_tabId, _source, message) => {
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/test-session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/test-session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       throw new Error(`unexpected message type ${message.type}`);
@@ -1605,9 +1623,10 @@ test('PayPal hosted checkout create applies conversion proxy before hosted payme
         return {
           preferredCheckoutUrl: 'https://pay.openai.com/c/pay/session',
           hostedCheckoutUrl: 'https://pay.openai.com/c/pay/session',
-          checkoutUrl: 'https://pay.openai.com/c/pay/session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP') {
@@ -1720,9 +1739,10 @@ test('Phone Plus hosted checkout falls back when conversion proxy exit check fai
         return {
           preferredCheckoutUrl: 'https://pay.openai.com/c/pay/session',
           hostedCheckoutUrl: 'https://pay.openai.com/c/pay/session',
-          checkoutUrl: 'https://pay.openai.com/c/pay/session',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/session',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/session',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -3204,11 +3224,12 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
       events.push({ type: 'tab-message', tabId, source, message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_hosted',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_hosted',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_hosted',
           preferredCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
           hostedCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
-          country: 'US',
-          currency: 'USD',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -3248,9 +3269,9 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
     {
       paymentMethod: 'paypal-hosted',
       hostedCheckoutFinalStep: true,
-      checkoutRegionCode: 'US',
-      regionalCheckoutEnabled: false,
-      billingDetails: { country: 'US', currency: 'USD' },
+      checkoutRegionCode: 'DE',
+      regionalCheckoutEnabled: true,
+      billingDetails: { country: 'DE', currency: 'EUR' },
     }
   );
   assert.equal(
@@ -3259,8 +3280,8 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
   );
   const statePayload = events.filter((event) => event.type === 'set-state').at(-1)?.payload || {};
   assert.equal(statePayload.plusCheckoutSource, 'paypal-hosted');
-  assert.equal(statePayload.plusCheckoutCountry, 'US');
-  assert.equal(statePayload.plusCheckoutCurrency, 'USD');
+  assert.equal(statePayload.plusCheckoutCountry, 'DE');
+  assert.equal(statePayload.plusCheckoutCurrency, 'EUR');
   assert.equal(statePayload.plusReturnUrl, '');
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.type === 'FILL_PLUS_BILLING_AND_SUBMIT'), false);
   assert.equal(events.some((event) => event.type === 'tab-message' && event.message.type === 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP'), true);
@@ -3272,8 +3293,8 @@ test('PayPal no-card binding create opens and submits hosted OpenAI checkout bef
     type: 'complete',
     step: 'plus-checkout-create',
     payload: {
-      plusCheckoutCountry: 'US',
-      plusCheckoutCurrency: 'USD',
+      plusCheckoutCountry: 'DE',
+      plusCheckoutCurrency: 'EUR',
       plusCheckoutSource: 'paypal-hosted',
       plusCheckoutUrl: 'https://www.paypal.com/pay?token=BA-hosted',
       plusReturnUrl: '',
@@ -3313,9 +3334,11 @@ test('Phone Plus classic checkout falls back at step 6 when checkout amount is n
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test',
-          country: 'US',
-          currency: 'USD',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_test',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test',
+          preferredCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_test',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {
@@ -3389,11 +3412,12 @@ test('Phone Plus hosted checkout falls back at step 6 before submitting OpenAI h
       events.push({ type: 'tab-message', message });
       if (message.type === 'CREATE_PLUS_CHECKOUT') {
         return {
-          checkoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_hosted',
+          checkoutUrl: 'https://chatgpt.com/checkout/openai_ie/cs_hosted',
+          convertedCheckoutUrl: 'https://chatgpt.com/checkout/openai_llc/cs_hosted',
           preferredCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
           hostedCheckoutUrl: 'https://pay.openai.com/c/pay/cs_hosted',
-          country: 'US',
-          currency: 'USD',
+          country: 'DE',
+          currency: 'EUR',
         };
       }
       if (message.type === 'PLUS_CHECKOUT_GET_STATE') {

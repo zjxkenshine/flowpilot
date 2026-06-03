@@ -14,6 +14,9 @@
   const PLUS_PAYMENT_METHOD_PAYPAL_HOSTED = 'paypal-hosted';
   const PLUS_PAYMENT_METHOD_GOPAY = 'gopay';
   const PLUS_PAYMENT_METHOD_GPC_HELPER = 'gpc-helper';
+  const DEFAULT_PAYPAL_CHECKOUT_REGION_CODE = 'DE';
+  const DEFAULT_PAYPAL_CHECKOUT_COUNTRY = 'DE';
+  const DEFAULT_PAYPAL_CHECKOUT_CURRENCY = 'EUR';
   const DEFAULT_GPC_HELPER_API_URL = 'https://gpc.qlhazycoder.top';
   const GPC_HELPER_PHONE_MODE_AUTO = 'auto';
   const GPC_HELPER_PHONE_MODE_MANUAL = 'manual';
@@ -2119,8 +2122,8 @@
       return normalizePlusPaymentMethod(paymentMethod) === PLUS_PAYMENT_METHOD_GOPAY
         ? { country: 'ID', currency: 'IDR' }
         : {
-          country: String(options?.country || 'US').trim().toUpperCase() || 'US',
-          currency: String(options?.currency || 'USD').trim().toUpperCase() || 'USD',
+          country: String(options?.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY).trim().toUpperCase() || DEFAULT_PAYPAL_CHECKOUT_COUNTRY,
+          currency: String(options?.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY).trim().toUpperCase() || DEFAULT_PAYPAL_CHECKOUT_CURRENCY,
         };
     }
 
@@ -2132,10 +2135,10 @@
       const regionApi = self.MultiPagePlusCheckoutRegions || {};
       const selectedRegionCode = regionApi.normalizeCheckoutRegionCode
         ? regionApi.normalizeCheckoutRegionCode(
-          state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
-          'US'
+          state?.plusCheckoutRegionCode ?? (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : DEFAULT_PAYPAL_CHECKOUT_REGION_CODE),
+          DEFAULT_PAYPAL_CHECKOUT_REGION_CODE
         )
-        : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US');
+        : (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : DEFAULT_PAYPAL_CHECKOUT_REGION_CODE);
       if (selectedRegionCode === 'US' && !Boolean(state?.plusCheckoutRegionalCheckoutEnabled)) {
         return getCheckoutBillingDetailsForPaymentMethod(normalizedPaymentMethod);
       }
@@ -2219,8 +2222,8 @@
       await setState({
         plusCheckoutTabId: Number(tabId) || null,
         plusCheckoutUrl: '',
-        plusCheckoutCountry: result.country || 'US',
-        plusCheckoutCurrency: result.currency || 'USD',
+        plusCheckoutCountry: result.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY,
+        plusCheckoutCurrency: result.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY,
         plusReturnUrl: '',
         plusCheckoutSource: 'cloud-checkout-already-paid',
         plusCheckoutAlreadyPaid: true,
@@ -2234,8 +2237,8 @@
         'ok'
       );
       await completeNodeFromBackground('plus-checkout-create', {
-        plusCheckoutCountry: result.country || 'US',
-        plusCheckoutCurrency: result.currency || 'USD',
+        plusCheckoutCountry: result.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY,
+        plusCheckoutCurrency: result.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY,
         plusCheckoutSource: 'cloud-checkout-already-paid',
         plusCheckoutAlreadyPaid: true,
       });
@@ -6518,18 +6521,18 @@
       await setState({
         plusCheckoutTabId: tabId,
         plusCheckoutUrl: completedUrl,
-        plusCheckoutCountry: result.country || 'US',
-        plusCheckoutCurrency: result.currency || 'USD',
+        plusCheckoutCountry: result.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY,
+        plusCheckoutCurrency: result.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY,
         plusCheckoutSource: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
         plusReturnUrl: isAlreadySuccessful ? completedUrl : '',
         plusHostedCheckoutCompleted: isAlreadySuccessful,
       });
 
-      await addLog(`步骤 6：PayPal 无卡直绑已提交 OpenAI Checkout（${result.country || 'US'} ${result.currency || 'USD'}），准备进入 PayPal 邮箱页。`, 'info');
+      await addLog(`步骤 6：PayPal 无卡直绑已提交 OpenAI Checkout（${result.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY} ${result.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY}），准备进入 PayPal 邮箱页。`, 'info');
 
       await completeNodeFromBackground('plus-checkout-create', {
-        plusCheckoutCountry: result.country || 'US',
-        plusCheckoutCurrency: result.currency || 'USD',
+        plusCheckoutCountry: result.country || DEFAULT_PAYPAL_CHECKOUT_COUNTRY,
+        plusCheckoutCurrency: result.currency || DEFAULT_PAYPAL_CHECKOUT_CURRENCY,
         plusCheckoutSource: PLUS_PAYMENT_METHOD_PAYPAL_HOSTED,
         plusCheckoutUrl: completedUrl,
         plusReturnUrl: isAlreadySuccessful ? completedUrl : '',
@@ -8051,7 +8054,7 @@
           payload: {
             paymentMethod,
             hostedCheckoutFinalStep: useHostedCheckoutFinalStep,
-            checkoutRegionCode: state?.plusCheckoutRegionCode || (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : 'US'),
+            checkoutRegionCode: state?.plusCheckoutRegionCode || (state?.plusCheckoutRegionalCheckoutEnabled ? 'auto' : DEFAULT_PAYPAL_CHECKOUT_REGION_CODE),
             regionalCheckoutEnabled: paymentMethod !== PLUS_PAYMENT_METHOD_GOPAY
               && (checkoutBillingDetails.country !== 'US' || checkoutBillingDetails.currency !== 'USD'),
             billingDetails: checkoutBillingDetails,
