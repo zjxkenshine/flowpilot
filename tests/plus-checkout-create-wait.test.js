@@ -351,6 +351,7 @@ function createCheckoutContentHarness(options = {}) {
             elements,
             checkoutEvents,
             hostedAddressInput,
+            hostedNeighborhoodInput,
             hostedBrazilNumberInput,
             hostedCityInput,
             hostedStateSelect,
@@ -396,14 +397,47 @@ function createCheckoutContentHarness(options = {}) {
       'aria-label': 'Email address',
     },
   });
-  const hostedAddressInput = createElement({ tagName: 'INPUT', id: 'billingAddressLine1', type: 'text', value: options.hostedAddressValue || '', attrs: { name: 'billingAddressLine1', placeholder: 'Address line 1' } });
-  const hostedCityInput = createElement({ tagName: 'INPUT', id: 'billingLocality', type: 'text', value: options.hostedCityValue || '', attrs: { name: 'billingLocality', placeholder: 'City' } });
+  const usePayPalBrazilBillingFields = Boolean(options.usePayPalBrazilBillingFields);
+  const hostedAddressInput = createElement({
+    tagName: 'INPUT',
+    id: usePayPalBrazilBillingFields ? 'billingStreetName' : 'billingAddressLine1',
+    type: 'text',
+    value: options.hostedAddressValue || '',
+    attrs: {
+      name: usePayPalBrazilBillingFields ? 'billingStreetName' : 'billingAddressLine1',
+      placeholder: usePayPalBrazilBillingFields ? 'Endereco' : 'Address line 1',
+    },
+  });
+  const hostedNeighborhoodInput = createElement({
+    tagName: 'INPUT',
+    id: usePayPalBrazilBillingFields ? 'billingLine2' : 'billingDependentLocality',
+    type: 'text',
+    value: options.hostedNeighborhoodValue || '',
+    attrs: {
+      name: usePayPalBrazilBillingFields ? 'billingLine2' : 'billingDependentLocality',
+      autocomplete: 'billing address-level3',
+      placeholder: usePayPalBrazilBillingFields ? 'Distrito/Bairro (opcional)' : 'Neighborhood',
+    },
+  });
+  const hostedCityInput = createElement({
+    tagName: 'INPUT',
+    id: usePayPalBrazilBillingFields ? 'billingCity' : 'billingLocality',
+    type: 'text',
+    value: options.hostedCityValue || '',
+    attrs: {
+      name: usePayPalBrazilBillingFields ? 'billingCity' : 'billingLocality',
+      placeholder: usePayPalBrazilBillingFields ? 'Cidade' : 'City',
+    },
+  });
   const hostedPostalInput = createElement({ tagName: 'INPUT', id: 'billingPostalCode', type: 'text', value: options.hostedPostalValue || '', attrs: { name: 'billingPostalCode', placeholder: 'Postal code' } });
   const hostedBrazilNumberInput = createElement({
     tagName: 'INPUT',
-    id: 'billingStreetNumber',
+    id: usePayPalBrazilBillingFields ? 'billingHouseNumber' : 'billingStreetNumber',
     type: 'text',
-    attrs: { name: 'streetNumber', placeholder: 'No' },
+    attrs: {
+      name: usePayPalBrazilBillingFields ? 'billingHouseNumber' : 'streetNumber',
+      placeholder: usePayPalBrazilBillingFields ? 'No' : 'No',
+    },
   });
   const hostedCountrySelect = {
     ...createElement({ tagName: 'SELECT', id: 'billingCountry', attrs: { name: 'billingCountry' } }),
@@ -412,7 +446,7 @@ function createCheckoutContentHarness(options = {}) {
       { value: 'US', textContent: 'United States', label: 'United States' },
       { value: 'BR', textContent: 'Brazil', label: 'Brazil' },
     ],
-    value: 'DE',
+    value: options.hostedCountryValue || 'DE',
   };
   const termsCheckbox = createElement({ tagName: 'INPUT', id: 'termsOfServiceConsentCheckbox', type: 'checkbox', attrs: { type: 'checkbox' } });
   const hostedCardNumberInput = createElement({ tagName: 'INPUT', id: 'cardNumber', type: 'text', attrs: { name: 'cardNumber', placeholder: 'Card number' } });
@@ -437,11 +471,13 @@ function createCheckoutContentHarness(options = {}) {
   const cityInput = createElement({ tagName: 'INPUT', id: 'city', type: 'text', attrs: { name: 'locality', placeholder: 'City' } });
   const postalInput = createElement({ tagName: 'INPUT', id: 'postal', type: 'text', attrs: { name: 'postalCode', placeholder: 'Postal code' } });
   const hostedStateSelect = {
-    ...createElement({ tagName: 'SELECT', id: 'billingAdministrativeArea' }),
+    ...createElement({ tagName: 'SELECT', id: usePayPalBrazilBillingFields ? 'billingState' : 'billingAdministrativeArea' }),
     options: [
       { value: 'NY', textContent: 'New York', label: 'New York' },
       { value: 'TX', textContent: 'Texas', label: 'Texas' },
-      { value: 'SP', textContent: 'São Paulo', label: 'São Paulo' },
+      { value: 'SP', textContent: 'Sao Paulo', label: 'Sao Paulo' },
+      { value: 'RJ', textContent: 'Rio de Janeiro', label: 'Rio de Janeiro' },
+      { value: 'MG', textContent: 'Minas Gerais', label: 'Minas Gerais' },
     ],
     value: options.hostedStateValue || '',
   };
@@ -452,6 +488,7 @@ function createCheckoutContentHarness(options = {}) {
     paymentButton,
     hostedCountrySelect,
     hostedAddressInput,
+    hostedNeighborhoodInput,
     hostedCityInput,
     hostedPostalInput,
     termsCheckbox,
@@ -516,14 +553,24 @@ function createCheckoutContentHarness(options = {}) {
         if (text === '#email' || text === 'input[type="email"]' || text === 'input[name="email"]') {
           return includeHostedEmailInput ? hostedEmailInput : null;
         }
-        if (text === '#billingAddressLine1') return hostedAddressInput;
-        if (text === 'input[name="billingAddressLine1"]') return hostedAddressInput;
+        if (text === '#billingStreetName' || text === '#billingAddressLine1') return hostedAddressInput.id === text.slice(1) ? hostedAddressInput : null;
+        if (text === 'input[name="billingStreetName"]') return hostedAddressInput.getAttribute('name') === 'billingStreetName' ? hostedAddressInput : null;
+        if (text === 'input[name="billingAddressLine1"]') return hostedAddressInput.getAttribute('name') === 'billingAddressLine1' ? hostedAddressInput : null;
         if (text === 'input[autocomplete="billing address-line1"]') return null;
         if (text === 'input[autocomplete="address-line1"]') return null;
-        if (text === '#billingLocality') return hostedCityInput;
+        if (text === '#billingLine2' || text === '#billingDependentLocality') return hostedNeighborhoodInput.id === text.slice(1) ? hostedNeighborhoodInput : null;
+        if (text === 'input[name="billingLine2"]') return hostedNeighborhoodInput.getAttribute('name') === 'billingLine2' ? hostedNeighborhoodInput : null;
+        if (text === 'input[name="billingDependentLocality"]') return hostedNeighborhoodInput.getAttribute('name') === 'billingDependentLocality' ? hostedNeighborhoodInput : null;
+        if (text === 'input[autocomplete="billing address-level3"]') return hostedNeighborhoodInput;
+        if (text === 'input[autocomplete="address-level3"]') return hostedNeighborhoodInput;
+        if (text === '#billingCity' || text === '#billingLocality') return hostedCityInput.id === text.slice(1) ? hostedCityInput : null;
+        if (text === 'input[name="billingCity"]') return hostedCityInput.getAttribute('name') === 'billingCity' ? hostedCityInput : null;
+        if (text === 'input[name="billingLocality"]') return hostedCityInput.getAttribute('name') === 'billingLocality' ? hostedCityInput : null;
         if (text === '#billingPostalCode') return hostedPostalInput;
         if (text === '#billingCountry') return hostedCountrySelect;
-        if (text === '#billingAdministrativeArea') return hostedStateSelect;
+        if (text === '#billingState' || text === '#billingAdministrativeArea') return hostedStateSelect.id === text.slice(1) ? hostedStateSelect : null;
+        if (text === 'select[name="billingState"]') return hostedStateSelect.id === 'billingState' ? hostedStateSelect : null;
+        if (text === 'select[name="billingAdministrativeArea"]') return hostedStateSelect.id === 'billingAdministrativeArea' ? hostedStateSelect : null;
         if (text === '#termsOfServiceConsentCheckbox') return termsCheckbox;
         if (text === 'button[data-testid="submit-button"]') return hostedSubmitHidden ? null : subscribeButton;
         return null;
@@ -6531,6 +6578,7 @@ test('OpenAI hosted BR checkout triggers CEP lookup before filling random No fie
         countryCode: 'BR',
         street: 'Rua Haddock Lobo 1307',
         streetName: 'Rua Haddock Lobo',
+        neighborhood: 'Jardins',
         city: 'Sao Paulo',
         state: 'SP',
         stateCode: 'SP',
@@ -6546,9 +6594,7 @@ test('OpenAI hosted BR checkout triggers CEP lookup before filling random No fie
   assert.equal(result.hostedBrazilAddressAutofillTimedOut, false);
   assert.equal(result.hostedBrazilNumberInputFound, true);
   assert.equal(result.hostedBrazilNumberFilled, true);
-  assert.match(result.hostedBrazilNumberValue, /^\d+$/);
-  assert.ok(Number(result.hostedBrazilNumberValue) >= 1);
-  assert.ok(Number(result.hostedBrazilNumberValue) <= 200);
+  assert.equal(result.hostedBrazilNumberValue, '1307');
 
   const postalFillIndex = checkoutEvents.findIndex((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '01414-003');
   const postalFocusIndex = checkoutEvents.findIndex((event) => event.type === 'focus' && event.id === 'billingPostalCode');
@@ -6568,10 +6614,7 @@ test('OpenAI hosted BR checkout triggers CEP lookup before filling random No fie
   assert.ok(noFillIndex > autofillIndex);
   assert.ok(submitIndex > noFillIndex);
   assert.equal(addressFallbackFillIndex, -1);
-  assert.match(noFillEvent.value, /^\d+$/);
-  assert.ok(Number(noFillEvent.value) >= 1);
-  assert.ok(Number(noFillEvent.value) <= 200);
-  assert.notEqual(noFillEvent.value, '1307');
+  assert.equal(noFillEvent.value, '1307');
 });
 
 test('OpenAI hosted BR checkout fills missing state and postal before submit', async () => {
@@ -6592,6 +6635,7 @@ test('OpenAI hosted BR checkout fills missing state and postal before submit', a
       address: {
         countryCode: 'BR',
         street: 'Rua Haddock Lobo',
+        neighborhood: 'Jardins',
         city: 'Sao Paulo',
         state: 'Sao Paulo',
         zip: '01414-003',
@@ -6618,6 +6662,151 @@ test('OpenAI hosted BR checkout fills missing state and postal before submit', a
   assert.ok(stateChangeIndex > -1);
   assert.ok(postalFillIndex > -1);
   assert.ok(submitIndex > stateChangeIndex);
+});
+
+test('OpenAI hosted BR checkout fills Rio neighborhood and RJ state before submit', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedSubmitVerificationAfterClickCount: 1,
+    hostedBrazilCepLookupTimeoutMs: 1,
+    includeHostedBrazilNumberInputInitially: true,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        countryCode: 'BR',
+        street: 'Avenida Atlantica 1702',
+        streetName: 'Avenida Atlantica',
+        neighborhood: 'Copacabana',
+        city: 'Rio de Janeiro',
+        state: 'Rio de Janeiro',
+        stateCode: 'RJ',
+        zip: '22021-001',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.hostedBrazilPostFallbackMissingFields.length, 0);
+
+  const neighborhoodFillIndex = checkoutEvents.findIndex((event) => (
+    event.type === 'fill'
+    && event.id === 'billingDependentLocality'
+    && event.value === 'Copacabana'
+  ));
+  const stateChangeIndex = checkoutEvents.findIndex((event) => (
+    event.type === 'dispatch'
+    && event.id === 'billingAdministrativeArea'
+    && event.event === 'change'
+    && event.value === 'RJ'
+  ));
+  const submitIndex = checkoutEvents.findIndex((event) => event.type === 'click' && event.target === 'subscribe');
+
+  assert.ok(neighborhoodFillIndex > -1);
+  assert.ok(stateChangeIndex > -1);
+  assert.ok(submitIndex > neighborhoodFillIndex);
+  assert.ok(submitIndex > stateChangeIndex);
+});
+
+test('OpenAI hosted BR checkout fills PayPal billing address fields after CEP timeout', async () => {
+  const { checkoutEvents, send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedSubmitVerificationAfterClickCount: 1,
+    hostedBrazilCepLookupTimeoutMs: 1,
+    includeHostedBrazilNumberInputInitially: true,
+    usePayPalBrazilBillingFields: true,
+  });
+
+  const result = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        countryCode: 'BR',
+        street: 'Avenida Afonso Pena, 1537',
+        streetName: 'Avenida Afonso Pena, 1537',
+        neighborhood: 'Centro',
+        city: 'Belo Horizonte',
+        state: 'Minas Gerais',
+        stateCode: 'MG',
+        zip: '30130-004',
+        number: '11',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.hostedBrazilAddressAutofillTimedOut, true);
+  assert.equal(result.hostedBrazilPostFallbackMissingFields.length, 0);
+  assert.equal(result.hostedBrazilNumberInputFound, true);
+  assert.equal(result.hostedBrazilNumberFilled, true);
+  assert.equal(result.hostedBrazilNumberValue, '11');
+
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingPostalCode' && event.value === '30130-004'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingStreetName' && event.value === 'Avenida Afonso Pena, 1537'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingHouseNumber' && event.value === '11'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingLine2' && event.value === 'Centro'), true);
+  assert.equal(checkoutEvents.some((event) => event.type === 'fill' && event.id === 'billingCity' && event.value === 'Belo Horizonte'), true);
+  assert.equal(checkoutEvents.some((event) => (
+    event.type === 'dispatch'
+    && event.id === 'billingState'
+    && event.event === 'change'
+    && event.value === 'MG'
+  )), true);
+});
+
+test('OpenAI hosted BR state inspection reports missing neighborhood until filled', async () => {
+  const { send } = createCheckoutContentHarness({
+    locationHref: 'https://pay.openai.com/c/pay/cs_test',
+    hostedCountryValue: 'BR',
+    hostedSubmitVerificationAfterClickCount: 1,
+    hostedAddressValue: 'Avenida Atlantica',
+    hostedCityValue: 'Rio de Janeiro',
+    hostedStateValue: 'RJ',
+    hostedPostalValue: '22021-001',
+  });
+
+  const missingResult = await send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(missingResult.ok, true);
+  assert.deepEqual(Array.from(missingResult.hostedBrazilRequiredFieldsMissing), ['neighborhood']);
+
+  const filledResult = await send({
+    type: 'RUN_PAYPAL_HOSTED_OPENAI_CHECKOUT_STEP',
+    source: 'test',
+    payload: {
+      email: 'payment@example.com',
+      address: {
+        countryCode: 'BR',
+        street: 'Avenida Atlantica',
+        neighborhood: 'Copacabana',
+        city: 'Rio de Janeiro',
+        stateCode: 'RJ',
+        zip: '22021-001',
+      },
+      skipSubmit: true,
+    },
+  });
+  assert.equal(filledResult.ok, true);
+
+  const completeResult = await send({
+    type: 'PLUS_CHECKOUT_GET_STATE',
+    source: 'test',
+    payload: {},
+  });
+
+  assert.equal(completeResult.ok, true);
+  assert.deepEqual(Array.from(completeResult.hostedBrazilRequiredFieldsMissing), []);
+  assert.equal(completeResult.hostedAddressFieldValues.neighborhood, 'Copacabana');
 });
 
 test('OpenAI hosted checkout does not retry submit when verification appears after first click', async () => {

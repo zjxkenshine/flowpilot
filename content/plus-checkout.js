@@ -245,6 +245,25 @@ function fillHostedInput(selector, value) {
   return true;
 }
 
+function findHostedControl(selectors = []) {
+  for (const selector of selectors) {
+    const control = document.querySelector(selector);
+    if (control) {
+      return control;
+    }
+  }
+  return null;
+}
+
+function fillHostedControl(selectors = [], value) {
+  const control = findHostedControl(selectors);
+  if (!control) {
+    return false;
+  }
+  fillInput(control, String(value || ''));
+  return true;
+}
+
 function getHostedOpenAiDocumentValue(payload = {}) {
   const source = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const address = source.address && typeof source.address === 'object' && !Array.isArray(source.address)
@@ -345,10 +364,28 @@ function fillHostedOpenAiDocumentIfPresent(payload = {}) {
 }
 
 function getHostedAddressFieldValues() {
-  const regionSelect = document.querySelector('#billingAdministrativeArea');
+  const address1Input = findHostedControl([
+    '#billingStreetName',
+    '#billingAddressLine1',
+    'input[name="billingStreetName"]',
+    'input[name="billingAddressLine1"]',
+  ]);
+  const cityInput = findHostedControl([
+    '#billingCity',
+    '#billingLocality',
+    'input[name="billingCity"]',
+    'input[name="billingLocality"]',
+  ]);
+  const regionSelect = findHostedControl([
+    '#billingState',
+    '#billingAdministrativeArea',
+    'select[name="billingState"]',
+    'select[name="billingAdministrativeArea"]',
+  ]);
   return {
-    address1: document.querySelector('#billingAddressLine1')?.value || '',
-    city: document.querySelector('#billingLocality')?.value || '',
+    address1: address1Input?.value || '',
+    neighborhood: getHostedBrazilNeighborhoodInput()?.value || '',
+    city: cityInput?.value || '',
     region: getHostedSelectValueText(regionSelect) || regionSelect?.value || '',
     postalCode: document.querySelector('#billingPostalCode')?.value || '',
   };
@@ -368,6 +405,7 @@ function isHostedBrazilCountryValue(value = '') {
 function getHostedBrazilRequiredFieldsMissing(values = getHostedAddressFieldValues()) {
   const missing = [];
   if (!normalizeText(values.address1)) missing.push('address1');
+  if (!normalizeText(values.neighborhood)) missing.push('neighborhood');
   if (!normalizeText(values.city)) missing.push('city');
   if (!normalizeText(values.region)) missing.push('region');
   if (!normalizeText(values.postalCode)) missing.push('postalCode');
@@ -388,9 +426,10 @@ function isHostedInvalidControl(control = null) {
 
 function getHostedAddressInvalidFields() {
   const controls = [
-    ['address1', document.querySelector('#billingAddressLine1')],
-    ['city', document.querySelector('#billingLocality')],
-    ['region', document.querySelector('#billingAdministrativeArea')],
+    ['address1', findHostedControl(['#billingStreetName', '#billingAddressLine1'])],
+    ['neighborhood', getHostedBrazilNeighborhoodInput()],
+    ['city', findHostedControl(['#billingCity', '#billingLocality'])],
+    ['region', findHostedControl(['#billingState', '#billingAdministrativeArea'])],
     ['postalCode', document.querySelector('#billingPostalCode')],
   ];
   return controls
@@ -401,6 +440,21 @@ function getHostedAddressInvalidFields() {
 function isHostedBrazilAddress(address = {}) {
   const countryCode = normalizeText(address.countryCode || address.country || '').toUpperCase();
   return countryCode === 'BR' || /\b(?:brazil|brasil)\b/i.test(countryCode);
+}
+
+function getHostedBrazilNeighborhoodInput() {
+  const direct = document.querySelector('#billingLine2')
+    || document.querySelector('#billingDependentLocality')
+    || document.querySelector('input[name="billingLine2"]')
+    || document.querySelector('input[name="billingDependentLocality"]')
+    || document.querySelector('input[autocomplete="billing address-level3"]')
+    || document.querySelector('input[autocomplete="address-level3"]');
+  if (direct && isVisibleElement(direct) && isEnabledControl(direct)) {
+    return direct;
+  }
+  return getVisibleTextInputs().find((input) => (
+    /neighbou?rhood|bairro|district|dependent\s*locality|address[-_\s]*level[-_\s]*3/i.test(getCombinedSearchText(input))
+  )) || null;
 }
 
 function getHostedPostalCodeInput() {
@@ -436,11 +490,31 @@ function isHostedBrazilNumberInputCandidate(input = null) {
 }
 
 function findHostedBrazilNumberInput() {
+  const direct = findHostedControl([
+    '#billingHouseNumber',
+    '#billingStreetNumber',
+    'input[name="billingHouseNumber"]',
+    'input[name="streetNumber"]',
+  ]);
+  if (direct && isHostedBrazilNumberInputCandidate(direct)) {
+    return direct;
+  }
   return getVisibleTextInputs().find(isHostedBrazilNumberInputCandidate) || null;
 }
 
 function getRandomHostedBrazilAddressNumber() {
   return String(Math.floor(Math.random() * 200) + 1);
+}
+
+function getHostedBrazilAddressNumber(address = {}) {
+  return normalizeText(
+    address.number
+    || address.houseNumber
+    || address.streetNumber
+    || address.streetNo
+    || address.no
+    || ''
+  );
 }
 
 async function triggerHostedBrazilCepLookup(postalInput) {
@@ -473,10 +547,12 @@ function getHostedBrazilAddressAutofillState() {
   const values = getHostedAddressFieldValues();
   const numberInput = findHostedBrazilNumberInput();
   const missingFields = getHostedBrazilRequiredFieldsMissing(values);
-  const populated = missingFields.length === 0;
+  const cepMissingFields = missingFields.filter((field) => field !== 'neighborhood');
+  const populated = cepMissingFields.length === 0;
   return {
     ...values,
     missingFields,
+    cepMissingFields,
     numberInput,
     numberInputFound: Boolean(numberInput),
     populated,
@@ -537,9 +613,11 @@ async function waitForHostedBrazilNumberInputIfNeeded(existingInput = null) {
 function getHostedBrazilRegionCandidates(address = {}) {
   return Array.from(new Set([
     address.stateCode,
+    address.uf,
     address.state,
     address.region,
     ...getRegionCandidates(address.stateCode || ''),
+    ...getRegionCandidates(address.uf || ''),
     ...getRegionCandidates(address.state || ''),
     ...getRegionCandidates(address.region || ''),
   ].map((value) => normalizeText(value)).filter(Boolean)));
@@ -547,19 +625,37 @@ function getHostedBrazilRegionCandidates(address = {}) {
 
 function selectHostedBrazilRegion(address = {}) {
   return getHostedBrazilRegionCandidates(address).some((candidate) => (
-    selectHostedOptionByText('#billingAdministrativeArea', candidate)
+    selectHostedOptionByText('#billingState', candidate)
+    || selectHostedOptionByText('#billingAdministrativeArea', candidate)
   ));
 }
 
 function fillHostedBrazilFallbackAddressIfNeeded(address = {}) {
   const values = getHostedAddressFieldValues();
   const streetFallback = address.streetName || address.street || address.address1 || '';
+  const neighborhood = normalizeText(address.neighborhood || address.bairro || address.district || '');
   const postalCode = normalizeText(address.zip || address.postalCode || address.cep || '');
   if (!normalizeText(values.address1)) {
-    fillHostedInput('#billingAddressLine1', streetFallback);
+    fillHostedControl([
+      '#billingStreetName',
+      '#billingAddressLine1',
+      'input[name="billingStreetName"]',
+      'input[name="billingAddressLine1"]',
+    ], streetFallback);
+  }
+  if (!normalizeText(values.neighborhood) && neighborhood) {
+    const neighborhoodInput = getHostedBrazilNeighborhoodInput();
+    if (neighborhoodInput) {
+      fillInput(neighborhoodInput, neighborhood);
+    }
   }
   if (!normalizeText(values.city)) {
-    fillHostedInput('#billingLocality', address.city || '');
+    fillHostedControl([
+      '#billingCity',
+      '#billingLocality',
+      'input[name="billingCity"]',
+      'input[name="billingLocality"]',
+    ], address.city || '');
   }
   if (!normalizeText(values.region)) {
     selectHostedBrazilRegion(address);
@@ -612,7 +708,7 @@ async function fillHostedBrazilAddressFromCep(address = {}) {
   );
   result.hostedBrazilNumberInputFound = Boolean(numberInput);
   if (numberInput) {
-    const numberValue = getRandomHostedBrazilAddressNumber();
+    const numberValue = getHostedBrazilAddressNumber(address) || getRandomHostedBrazilAddressNumber();
     fillInput(numberInput, numberValue);
     result.hostedBrazilNumberFilled = true;
     result.hostedBrazilNumberValue = numberValue;
@@ -3368,6 +3464,7 @@ async function inspectPlusCheckoutState(options = {}) {
     hostedAddressFieldValues,
     addressFieldValues: {
       address1: structuredAddress.address1?.value || '',
+      neighborhood: hostedAddressFieldValues.neighborhood || '',
       city: structuredAddress.city?.value || '',
       region: getRegionDropdownValue(findRegionDropdown()) || structuredAddress.region?.value || '',
       postalCode: structuredAddress.postalCode?.value || '',

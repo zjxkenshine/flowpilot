@@ -1282,9 +1282,16 @@ test('Brazil hosted number selector accepts No fields and rejects unrelated numb
     extractFunction('getVisibleControls'),
     extractFunction('isEnabledControl'),
     extractFunction('getVisibleTextInputs'),
+    extractFunction('findHostedControl'),
     extractFunction('isHostedBrazilNumberInputCandidate'),
     extractFunction('findHostedBrazilNumberInput'),
   ].join('\n');
+  const houseNumberInput = createInput({
+    id: 'billingHouseNumber',
+    name: 'billingHouseNumber',
+    placeholder: 'Nº',
+    containerText: 'Endereco Nº',
+  });
   const noInput = createInput({
     id: 'billingStreetNumber',
     name: 'streetNumber',
@@ -1315,8 +1322,9 @@ test('Brazil hosted number selector accepts No fields and rejects unrelated numb
     placeholder: 'CPF number',
     containerText: 'CPF document number',
   });
-  const inputs = [cardNumberInput, phoneInput, cpfInput, noInput, numeroInput];
+  const inputs = [cardNumberInput, phoneInput, cpfInput, houseNumberInput, noInput, numeroInput];
   const documentMock = {
+    querySelector: (selector) => inputs.find((input) => `#${input.id}` === selector || `input[name="${input.name}"]` === selector) || null,
     querySelectorAll: (selector) => {
       if (String(selector || '').includes('label[for=')) return [];
       return inputs;
@@ -1338,7 +1346,7 @@ return { isHostedBrazilNumberInputCandidate, findHostedBrazilNumberInput };
   assert.equal(api.isHostedBrazilNumberInputCandidate(cardNumberInput), false);
   assert.equal(api.isHostedBrazilNumberInputCandidate(phoneInput), false);
   assert.equal(api.isHostedBrazilNumberInputCandidate(cpfInput), false);
-  assert.equal(api.findHostedBrazilNumberInput(), noInput);
+  assert.equal(api.findHostedBrazilNumberInput(), houseNumberInput);
 });
 
 test('Brazil document filler only writes explicit CPF/CNPJ or tax document fields', () => {
